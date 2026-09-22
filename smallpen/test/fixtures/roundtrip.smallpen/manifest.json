@@ -1,0 +1,22 @@
+{
+  "defaultScreenId": "scr_roundtrip",
+  "entries": {
+    "assets": [
+      "assets/assets.json"
+    ],
+    "components": [],
+    "contexts": [],
+    "requirements": [],
+    "scenarios": [],
+    "screens": [
+      "screens/roundtrip.json"
+    ],
+    "tokens": [
+      "tokens/tokens.json"
+    ]
+  },
+  "formatVersion": 1,
+  "name": "SmallPen Round Trip",
+  "packageId": "pkg_roundtrip",
+  "role": "foundation"
+}

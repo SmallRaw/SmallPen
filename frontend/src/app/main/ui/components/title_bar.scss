@@ -17,6 +17,11 @@
 
   --arrow-icon-color: var(--icon-foreground);
   --title-color: var(--title-foreground-color);
+
+  :global([data-smallpen-compact]) & {
+    height: deprecated.$s-24;
+    min-height: deprecated.$s-24;
+  }
 }
 
 .title,
@@ -30,6 +35,10 @@
   height: 100%;
   min-height: deprecated.$s-32;
   overflow: hidden;
+
+  :global([data-smallpen-compact]) & {
+    min-height: deprecated.$s-24;
+  }
 }
 
 .title {

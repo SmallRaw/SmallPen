@@ -527,7 +527,13 @@
    (fn [event]
      (dom/prevent-default event)
      (let [point (gpt/point (.-clientX event) (.-clientY event))
-           viewport-coord (uwvv/point->viewport point)]
+           viewport-coord (uwvv/point->viewport point)
+           asset-id       (some-> (dnd/get-data event "text/asset-id")
+                                  uuid/parse*)
+           asset-name     (dnd/get-data event "text/asset-name")
+           asset-type     (dnd/get-data event "text/asset-type")
+           asset-width    (js/parseFloat (dnd/get-data event "text/asset-width"))
+           asset-height   (js/parseFloat (dnd/get-data event "text/asset-height"))]
        (cond
          (dnd/has-type? event "penpot/shape")
          (let [shape   (dnd/get-data event "penpot/shape")
@@ -546,6 +552,17 @@
                meta? (kbd/meta? event)]
            (st/emit! (mse/->MouseEvent :up ctrl? shift? alt? meta?))
            (mf/set-ref-val! comp-inst-ref false))
+
+         (and (dnd/has-type? event "text/asset-id")
+              asset-id
+              (js/Number.isFinite asset-width)
+              (js/Number.isFinite asset-height))
+         (st/emit! (dwm/image-uploaded {:height asset-height
+                                        :id asset-id
+                                        :mtype asset-type
+                                        :name asset-name
+                                        :width asset-width}
+                                       viewport-coord))
 
          ;; Will trigger when the user drags an image from a browser
          ;; to the viewport (firefox and chrome do it a bit different

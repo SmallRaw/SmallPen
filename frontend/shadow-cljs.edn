@@ -43,7 +43,8 @@
      :depends-on #{:shared}}
 
     :main-dashboard
-    {:entries [app.main.ui.dashboard]
+    {:entries [app.main.smallpen.home
+               app.main.ui.dashboard]
      :depends-on #{:shared}}
 
     :main-settings

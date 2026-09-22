@@ -65,6 +65,99 @@
   padding-block-start: var(--sp-l);
 }
 
+.smallpen-libraries-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-xxxl);
+  max-height: $sz-400;
+  padding-block-start: var(--sp-l);
+}
+
+.smallpen-library-section {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  align-content: start;
+  gap: var(--sp-s);
+  min-width: 0;
+}
+
+.smallpen-library-source {
+  @include t.use-typography("body-small");
+  @include text-ellipsis;
+
+  color: var(--library-content-foreground-color);
+  max-width: px2rem(236);
+  margin-block: var(--sp-xxs);
+}
+
+.smallpen-library-form {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-m);
+}
+
+.smallpen-source-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: var(--sp-xxs);
+  border-radius: $br-8;
+  background: var(--color-background-secondary);
+}
+
+.smallpen-source-option {
+  @include t.use-typography("body-small");
+
+  min-height: $sz-32;
+  padding-inline: var(--sp-m);
+  color: var(--color-foreground-secondary);
+  border: 0;
+  border-radius: $br-6;
+  background: transparent;
+  cursor: pointer;
+}
+
+.smallpen-source-selected {
+  color: var(--color-foreground-primary);
+  background: var(--color-background-quaternary);
+}
+
+.smallpen-source-label {
+  @include t.use-typography("body-small");
+
+  display: grid;
+  gap: var(--sp-xs);
+  color: var(--color-foreground-secondary);
+}
+
+.smallpen-source-input {
+  @include t.use-typography("body-medium");
+
+  width: 100%;
+  height: $sz-40;
+  padding-inline: var(--sp-m);
+  color: var(--color-foreground-primary);
+  border: $b-1 solid var(--color-background-quaternary);
+  border-radius: $br-8;
+  background: var(--color-background-primary);
+
+  &:focus {
+    outline: $b-2 solid var(--color-accent-primary);
+    outline-offset: -$b-1;
+  }
+}
+
+.smallpen-source-help,
+.smallpen-library-error {
+  @include t.use-typography("body-small");
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}
+
+.smallpen-library-error {
+  color: var(--color-foreground-error);
+}
+
 .lib-section,
 .update-section,
 .shared-section {

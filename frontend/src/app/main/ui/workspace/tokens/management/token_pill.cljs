@@ -284,7 +284,7 @@
          (mf/deps can-edit on-context-menu token)
          (fn [e]
            (dom/stop-propagation e)
-           (when can-edit
+           (when (and can-edit on-context-menu)
              (on-context-menu e token))))
 
         on-click

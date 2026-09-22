@@ -10,6 +10,7 @@
    [app.main.data.dashboard.shortcuts :as sc]
    [app.main.refs :as refs]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.modal :refer [modal-container*]]
@@ -33,11 +34,16 @@
   [:header {:class (stl/css :dashboard-header)
             :data-testid "dashboard-header"}
    [:div {:class (stl/css :dashboard-title)}
-    [:h1 {:data-testid "account-title"} (tr "dashboard.your-account-title")]]])
+    [:h1 {:data-testid "account-title"}
+     (if (smallpen/enabled?)
+       (tr "labels.settings")
+       (tr "dashboard.your-account-title"))]]])
 
 (mf/defc settings*
   [{:keys [route type error-report-id error-href]}]
-  (let [section (get-in route [:data :name])
+  (let [section (if (smallpen/enabled?)
+                  :settings-options
+                  (get-in route [:data :name]))
         profile (mf/deref refs/profile)]
 
     (hooks/use-shortcuts ::dashboard sc/shortcuts :dashboard)

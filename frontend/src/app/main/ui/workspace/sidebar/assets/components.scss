@@ -158,6 +158,10 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--sp-xs);
+
+  :global([data-smallpen-compact]) & {
+    gap: var(--sp-xxs);
+  }
 }
 
 .component-group-grid {
@@ -166,12 +170,20 @@
   max-width: 100%;
   gap: var(--sp-xs);
   margin-inline: var(--sp-s);
+
+  :global([data-smallpen-compact]) & {
+    gap: var(--sp-xxs);
+  }
 }
 
 .component-group-list {
   display: flex;
   flex-direction: column;
   gap: var(--sp-xs);
+
+  :global([data-smallpen-compact]) & {
+    gap: var(--sp-xxs);
+  }
 }
 
 .component-group-placeholder {

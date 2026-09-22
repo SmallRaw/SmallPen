@@ -16,6 +16,7 @@
    [app.main.data.workspace.history :as dwh]
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.context :as ctx]
@@ -198,8 +199,9 @@
         (dom/select-text! (mf/ref-val input-ref))))
 
     [:div {:class (stl/css :workspace-header-right)}
-     [:div {:class (stl/css :users-section)}
-      [:> active-sessions*]]
+     (when (smallpen/capability-enabled? :presence)
+       [:div {:class (stl/css :users-section)}
+        [:> active-sessions*]])
 
      [:& progress-widget]
 
@@ -214,19 +216,20 @@
         :on-zoom-fit on-zoom-fit
         :on-zoom-selected on-zoom-selected}]]
 
-     [:div {:class (stl/css :comments-section)}
-      [:button {:title (tr "workspace.toolbar.comments" (get-tt :add-comment))
-                :aria-label (tr "workspace.toolbar.comments" (get-tt :add-comment))
-                :class (stl/css-case :comments-btn true
-                                     :selected (= selected-drawtool :comments))
-                :on-click toggle-comments
-                :data-tool "comments"
-                :style {:position "relative"}}
-       deprecated-icon/comments
-       (when ^boolean has-unread-comments?
-         [:div {:class (stl/css :unread)}])]]
+     (when (smallpen/capability-enabled? :comments)
+       [:div {:class (stl/css :comments-section)}
+        [:button {:title (tr "workspace.toolbar.comments" (get-tt :add-comment))
+                  :aria-label (tr "workspace.toolbar.comments" (get-tt :add-comment))
+                  :class (stl/css-case :comments-btn true
+                                       :selected (= selected-drawtool :comments))
+                  :on-click toggle-comments
+                  :data-tool "comments"
+                  :style {:position "relative"}}
+         deprecated-icon/comments
+         (when ^boolean has-unread-comments?
+           [:div {:class (stl/css :unread)}])]])
 
-     (when-not ^boolean read-only?
+     (when (not read-only?)
        [:div {:class (stl/css :history-section)}
         [:button
          {:title (tr "workspace.sidebar.history")
@@ -246,4 +249,3 @@
           :title (tr "workspace.header.viewer" (get-tt :open-viewer))
           :on-click nav-to-viewer}
       deprecated-icon/play]]))
-

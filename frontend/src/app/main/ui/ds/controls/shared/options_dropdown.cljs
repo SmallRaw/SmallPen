@@ -32,9 +32,11 @@
   [:map
    [:id {:optional true} :string]
    [:resolved-value {:optional true}
-    [:maybe [:or :int :string :float]]]
+    [:maybe [:or :int :string :float :map]]]
    [:name {:optional true} :string]
-   [:value {:optional true} :keyword]
+   [:token-type {:optional true} :keyword]
+   [:value {:optional true}
+    [:maybe [:or :keyword :int :string :float :map]]]
    [:icon {:optional true} schema:icon-list]
    [:label {:optional true} :string]
    [:title {:optional true} :string]

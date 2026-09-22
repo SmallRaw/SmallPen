@@ -10,7 +10,7 @@
 @use "ds/_utils.scss" as *;
 
 .colorpicker-tooltip {
-  --colorpicker-width: #{$sz-284};
+  --colorpicker-width: min(#{$sz-384}, calc(100vw - (2 * var(--sp-m))));
 
   position: absolute;
   display: flex;

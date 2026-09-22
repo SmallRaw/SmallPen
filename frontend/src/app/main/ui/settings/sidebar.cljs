@@ -13,6 +13,7 @@
    [app.main.data.modal :as modal]
    [app.main.data.team :as dtm]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.dashboard.sidebar :refer [profile-section*]]
    [app.main.ui.icons :as deprecated-icon]
@@ -62,7 +63,8 @@
 
 (mf/defc sidebar-content*
   [{:keys [profile section]}]
-  (let [profile?       (= section :settings-profile)
+  (let [local?         (smallpen/enabled?)
+        profile?       (= section :settings-profile)
         password?      (= section :settings-password)
         options?       (= section :settings-options)
         feedback?      (= section :settings-feedback)
@@ -76,34 +78,39 @@
         go-dashboard
         (mf/use-fn
          (mf/deps team-id)
-         #(st/emit! (dcm/go-to-dashboard-recent :team-id team-id)))]
+         #(if local?
+            (st/emit! (rt/nav :smallpen-home))
+            (st/emit! (dcm/go-to-dashboard-recent :team-id team-id))))]
 
     [:div {:class (stl/css :sidebar-content)}
      [:div {:class (stl/css :sidebar-content-section)}
       [:button {:class (stl/css :back-to-dashboard)
                 :on-click go-dashboard}
        arrow-icon
-       [:span {:class (stl/css :back-text)} (tr "labels.dashboard")]]]
+       [:span {:class (stl/css :back-text)}
+        (if local? "SmallPen" (tr "labels.dashboard"))]]]
 
      [:hr {:class (stl/css :sidebar-separator)}]
 
      [:nav {:class (stl/css :sidebar-content-section)
             :aria-label (tr "labels.settings")}
       [:ul {:class (stl/css :sidebar-nav-settings)}
-       [:li {:class (stl/css-case :current profile?
-                                  :settings-item true)
-             :on-click go-settings-profile}
-        [:span {:class (stl/css :element-title)} (tr "labels.profile")]]
+       (when-not local?
+         [:*
+          [:li {:class (stl/css-case :current profile?
+                                     :settings-item true)
+                :on-click go-settings-profile}
+           [:span {:class (stl/css :element-title)} (tr "labels.profile")]]
 
-       [:li {:class (stl/css-case :current password?
-                                  :settings-item true)
-             :on-click go-settings-password}
-        [:span {:class (stl/css :element-title)} (tr "labels.password")]]
+          [:li {:class (stl/css-case :current password?
+                                     :settings-item true)
+                :on-click go-settings-password}
+           [:span {:class (stl/css :element-title)} (tr "labels.password")]]
 
-       [:li {:class (stl/css-case :current notifications?
-                                  :settings-item true)
-             :on-click go-settings-notifications}
-        [:span {:class (stl/css :element-title)} (tr "labels.notifications")]]
+          [:li {:class (stl/css-case :current notifications?
+                                     :settings-item true)
+                :on-click go-settings-notifications}
+           [:span {:class (stl/css :element-title)} (tr "labels.notifications")]]])
 
        (when (contains? cf/flags :custom-shortcuts)
          [:li {:class (stl/css-case :current shortcuts?
@@ -117,16 +124,18 @@
              :data-testid "settings-profile"}
         [:span {:class (stl/css :element-title)} (tr "labels.settings")]]
 
-       (when (or (contains? cf/flags :subscriptions)
-                 (contains? cf/flags :admin-console))
+       (when (and (not local?)
+                  (or (contains? cf/flags :subscriptions)
+                      (contains? cf/flags :admin-console)))
          [:li {:class (stl/css-case :current subscription?
                                     :settings-item true)
                :on-click go-settings-subscription
                :data-testid "settings-subscription"}
           [:span {:class (stl/css :element-title)} (tr "subscription.labels")]])
 
-       (when (or (contains? cf/flags :access-tokens)
-                 (contains? cf/flags :mcp))
+       (when (and (not local?)
+                  (or (contains? cf/flags :access-tokens)
+                      (contains? cf/flags :mcp)))
          [:li {:class (stl/css-case :current integrations?
                                     :settings-item true)
                :on-click go-settings-integrations
@@ -152,4 +161,5 @@
   [:aside {:class (stl/css :dashboard-sidebar :settings)}
    [:> sidebar-content* {:profile profile
                          :section section}]
-   [:> profile-section* {:profile profile}]])
+   (when-not (smallpen/enabled?)
+     [:> profile-section* {:profile profile}])])

@@ -47,6 +47,7 @@
                           :key (weak-key option)
                           :id id
                           :name name
+                          :token-type (get option :token-type)
                           :resolved (get option :resolved-value)
                           :value (get option :value)
                           :ref ref

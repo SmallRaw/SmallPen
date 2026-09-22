@@ -1,0 +1,22 @@
+{
+  "entries": {
+    "assets": [],
+    "components": [
+      "components/shared.json"
+    ],
+    "contexts": [],
+    "requirements": [],
+    "scenarios": [],
+    "screens": [
+      "screens/shared.json"
+    ],
+    "tokens": [
+      "tokens/dsp-shared.json"
+    ]
+  },
+  "formatVersion": 1,
+  "name": "DSP Shared Library",
+  "packageId": "pkg_dsp_shared",
+  "role": "foundation",
+  "defaultScreenId": "scr_shared"
+}

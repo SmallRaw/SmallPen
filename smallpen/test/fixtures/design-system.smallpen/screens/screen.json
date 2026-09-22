@@ -1,0 +1,135 @@
+{
+  "basePresentationId": "pres_desktop",
+  "counterparts": [],
+  "id": "scr_design_system",
+  "name": "Design System Fixture",
+  "presentations": [
+    {
+      "id": "pres_desktop",
+      "interactions": [],
+      "name": "Desktop",
+      "nodes": {
+        "node_canvas": {
+          "children": [
+            "node_swatch_primary",
+            "node_swatch_radius",
+            "node_card_instance_idle",
+            "node_card_instance_pressed",
+            "node_card_hardcoded"
+          ],
+          "fills": [
+            {
+              "color": "#f4f4f5",
+              "type": "solid"
+            }
+          ],
+          "height": 400,
+          "id": "node_canvas",
+          "name": "Fixture Canvas",
+          "type": "FRAME",
+          "width": 400,
+          "x": 0,
+          "y": 0
+        },
+        "node_swatch_primary": {
+          "children": [],
+          "fills": [
+            {
+              "color": "#6750a4",
+              "type": "solid"
+            }
+          ],
+          "height": 80,
+          "id": "node_swatch_primary",
+          "name": "Primary Swatch",
+          "opacity": 1,
+          "type": "RECTANGLE",
+          "visible": true,
+          "width": 120,
+          "x": 40,
+          "y": 40
+        },
+        "node_swatch_radius": {
+          "children": [],
+          "fills": [
+            {
+              "color": "#0ea5e9",
+              "type": "solid"
+            }
+          ],
+          "height": 80,
+          "id": "node_swatch_radius",
+          "name": "Radius Swatch",
+          "opacity": 1,
+          "type": "RECTANGLE",
+          "visible": true,
+          "width": 120,
+          "x": 40,
+          "y": 160
+        },
+        "node_card_instance_idle": {
+          "children": [],
+          "height": 120,
+          "instance": {
+            "component": {
+              "assetId": "cmp_card_set",
+              "packageId": "pkg_design_system"
+            },
+            "variant": {
+              "axis_state": "idle"
+            }
+          },
+          "name": "Card instance / idle",
+          "type": "INSTANCE",
+          "width": 200,
+          "x": 200,
+          "y": 40,
+          "id": "node_card_instance_idle"
+        },
+        "node_card_instance_pressed": {
+          "children": [],
+          "height": 120,
+          "instance": {
+            "component": {
+              "assetId": "cmp_card_set",
+              "packageId": "pkg_design_system"
+            },
+            "variant": {
+              "axis_state": "pressed"
+            }
+          },
+          "name": "Card instance / pressed",
+          "type": "INSTANCE",
+          "width": 200,
+          "x": 200,
+          "y": 200,
+          "id": "node_card_instance_pressed"
+        },
+        "node_card_hardcoded": {
+          "children": [],
+          "cornerRadius": 12,
+          "fills": [
+            {
+              "color": "#94a3b8",
+              "type": "solid"
+            }
+          ],
+          "height": 120,
+          "id": "node_card_hardcoded",
+          "name": "Hardcoded Radius Control",
+          "type": "RECTANGLE",
+          "width": 200,
+          "x": 200,
+          "y": 330
+        }
+      },
+      "rootId": "node_canvas",
+      "platform": "desktop",
+      "viewport": {
+        "height": 400,
+        "width": 400
+      }
+    }
+  ],
+  "rootId": "node_canvas"
+}

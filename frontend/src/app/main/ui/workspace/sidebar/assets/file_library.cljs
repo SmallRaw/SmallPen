@@ -7,11 +7,14 @@
 (ns app.main.ui.workspace.sidebar.assets.file-library
   (:require-macros [app.main.style :as stl])
   (:require
+   [app.main.smallpen.token-state :as spts]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.variant :as cfv]
    [app.common.types.component :as ctc]
    [app.common.types.components-list :as ctkl]
+   [app.common.types.tokens-lib :as ctob]
+   [app.main.data.style-dictionary :as sd]
    [app.main.data.event :as ev]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.libraries :as dwl]
@@ -27,6 +30,9 @@
    [app.main.ui.workspace.sidebar.assets.colors :refer [colors-section*]]
    [app.main.ui.workspace.sidebar.assets.common :as cmm]
    [app.main.ui.workspace.sidebar.assets.components :refer [components-section*]]
+   [app.main.ui.workspace.sidebar.assets.media :refer [media-section*]]
+   [app.main.ui.workspace.sidebar.assets.tokens :refer [tokens-section*]]
+   [app.main.ui.workspace.sidebar.assets.tokens-data :as tokens-data]
    [app.main.ui.workspace.sidebar.assets.typographies :refer [typographies-section*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
@@ -160,7 +166,9 @@
 
 (mf/defc file-library-content*
   {::mf/private true}
-  [{:keys [file is-local is-loaded open-status-ref on-clear-selection filters colors typographies components count-variants]}]
+  [{:keys [file is-local is-loaded open-status-ref on-clear-selection filters
+           colors media typographies components token-groups show-library-tokens?
+           smallpen-mode count-variants]}]
   (let [open-status       (mf/deref open-status-ref)
 
         file-id           (:id file)
@@ -171,6 +179,8 @@
         reverse-sort?     (= :desc (:ordering filters))
         listing-thumbs?   (= :thumbs (:list-style filters))
 
+        token-count       (reduce + 0 (map (comp count :tokens) token-groups))
+
         selected          (use-selected file-id)
 
         show-components?
@@ -180,15 +190,29 @@
                  (not has-filters-term?)))
 
         show-colors?
-        (and (or (= filters-section "all")
+        (and (not smallpen-mode)
+             (or (= filters-section "all")
                  (= filters-section "colors"))
-             (or (> (count colors) 0)
+             (or (pos? (count colors))
                  (not has-filters-term?)))
+
+        show-media?
+        (and smallpen-mode
+             (or (= filters-section "all")
+                 (= filters-section "graphics"))
+             (pos? (count media)))
 
         show-typography?
         (and (or (= filters-section "all")
                  (= filters-section "typographies"))
              (or (pos? (count typographies))
+                 (and (not smallpen-mode)
+                      (not has-filters-term?))))
+
+        show-tokens?
+        (and show-library-tokens?
+             (= filters-section "all")
+             (or (pos? token-count)
                  (not has-filters-term?)))
 
         force-open-components?
@@ -199,6 +223,9 @@
 
         force-open-typographies?
         (when ^boolean has-filters-term? (> 60 (count typographies)))
+
+        force-open-tokens?
+        (when ^boolean has-filters-term? (> 60 token-count))
 
         on-asset-click
         (mf/use-fn
@@ -295,6 +322,13 @@
             :on-assets-delete on-assets-delete
             :on-clear-selection on-clear-selection}])
 
+        (when ^boolean show-media?
+          [:> media-section*
+           {:file-id file-id
+            :media media
+            :is-open (or ^boolean (when has-filters-term? true)
+                         ^boolean (get open-status :graphics false))}])
+
         (when ^boolean show-typography?
           [:> typographies-section*
            {:file file
@@ -311,9 +345,18 @@
             :on-assets-delete on-assets-delete
             :on-clear-selection on-clear-selection}])
 
+        (when ^boolean show-tokens?
+          [:> tokens-section*
+           {:file-id file-id
+            :token-groups token-groups
+            :is-open (or ^boolean force-open-tokens?
+                         ^boolean (get open-status :tokens true))}])
+
         (when (and (not ^boolean show-components?)
                    (not ^boolean show-colors?)
-                   (not ^boolean show-typography?))
+                   (not ^boolean show-media?)
+                   (not ^boolean show-typography?)
+                   (not ^boolean show-tokens?))
           [:div  {:class (stl/css :asset-title)}
            [:span {:class (stl/css :no-found-icon-wrapper)}
             [:> icon* {:icon-id i/search
@@ -323,7 +366,8 @@
             (tr "workspace.assets.not-found")]])])]))
 
 (mf/defc file-library*
-  [{:keys [file is-local is-default-open filters is-tokens-source]}]
+  [{:keys [file is-local is-default-open filters is-tokens-source
+           show-library-tokens? smallpen-mode]}]
   (let [file-id      (:id file)
         file-name    (:name file)
         page-id      (dm/get-in file [:data :pages 0])
@@ -331,7 +375,27 @@
         library      (use-library-ref file-id)
 
         colors       (:colors library)
+        media        (:media library)
         typographies (:typographies library)
+        tokens-lib   (:tokens-lib library)
+
+        active-tokens
+        (mf/with-memo [tokens-lib show-library-tokens?]
+          (if (and show-library-tokens? tokens-lib)
+            (spts/get-tokens-in-active-sets tokens-lib)
+            {}))
+
+        resolved-tokens
+        (sd/use-resolved-tokens* active-tokens)
+
+        token-groups
+        (mf/with-memo [active-tokens resolved-tokens filters]
+          (tokens-data/library-token-groups active-tokens
+                                            resolved-tokens
+                                            filters))
+
+        token-count
+        (reduce + 0 (map (comp count :tokens) token-groups))
 
         filters-term (:term filters)
         is-loaded    (some? library)
@@ -346,6 +410,11 @@
           (as-> (into [] (ctkl/components-seq library)) $
             (cmm/apply-filters $ filters)
             (remove #(cfv/is-secondary-variant? % library) $)))
+
+        filtered-media
+        (mf/with-memo [filters media]
+          (-> (vals media)
+              (cmm/apply-filters filters)))
 
         filtered-typographies
         (mf/with-memo [filters typographies]
@@ -364,7 +433,9 @@
         (and (not (str/blank? filters-term))
              (or (> 60 (count filtered-colors))
                  (> 60 (count filtered-components))
-                 (> 60 (count filtered-typographies))))
+                 (> 60 (count filtered-media))
+                 (> 60 (count filtered-typographies))
+                 (> 60 token-count)))
 
         open?
         (if (false? (:library open-status))
@@ -409,8 +480,12 @@
          :is-loaded is-loaded
          :filters filters
          :colors filtered-colors
+         :media filtered-media
          :components filtered-components
          :typographies filtered-typographies
+         :token-groups token-groups
+         :show-library-tokens? show-library-tokens?
+         :smallpen-mode smallpen-mode
          :on-clear-selection unselect-all
          :open-status-ref open-status-ref
          :count-variants count-variants}])]))

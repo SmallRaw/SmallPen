@@ -1,0 +1,39 @@
+{
+  "basePresentationId": "pres_shared",
+  "counterparts": [],
+  "id": "scr_shared",
+  "name": "Shared Library",
+  "presentations": [
+    {
+      "id": "pres_shared",
+      "interactions": [],
+      "name": "Desktop",
+      "platform": "desktop",
+      "rootId": "node_shared_button",
+      "viewport": {
+        "height": 200,
+        "width": 200
+      },
+      "nodes": {
+        "node_shared_button": {
+          "children": [],
+          "componentId": "cmp_shared_button",
+          "cornerRadius": 8,
+          "fills": [
+            {
+              "color": "#4338ca",
+              "type": "solid"
+            }
+          ],
+          "height": 48,
+          "id": "node_shared_button",
+          "name": "Shared Button",
+          "type": "COMPONENT",
+          "width": 160,
+          "x": 20,
+          "y": 20
+        }
+      }
+    }
+  ]
+}

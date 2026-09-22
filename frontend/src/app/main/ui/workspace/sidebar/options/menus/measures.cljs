@@ -22,6 +22,7 @@
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.components.numeric-input :as deprecated-input]
@@ -208,6 +209,9 @@
   (let [token-numeric-inputs
         (features/use-feature "tokens/numeric-input")
 
+        page (mf/deref refs/workspace-page)
+        ds-page? (dsep/design-system-page? page)
+
         all-types
         (mf/with-memo [type shapes]
           ;; We only need this when multiple type is used
@@ -215,10 +219,11 @@
             (into #{} xf:map-type shapes)))
 
         options
-        (mf/with-memo [type all-types]
-          (if (= type :multiple)
-            (into #{} xf:mapcat-type-to-options all-types)
-            (type->options type)))
+        (mf/with-memo [type all-types ds-page?]
+          (cond-> (if (= type :multiple)
+                    (into #{} xf:mapcat-type-to-options all-types)
+                    (type->options type))
+            ds-page? (disj :position :presets)))
 
         frames
         (mf/with-memo [shapes]
@@ -373,9 +378,12 @@
                            (d/read-string))
                  height (-> (dom/get-current-target event)
                             (dom/get-data "height")
-                            (d/read-string))]
-             (st/emit! (udw/update-dimensions ids :width width)
-                       (udw/update-dimensions ids :height height))
+                            (d/read-string))
+                 undo-id (js/Symbol)]
+             (st/emit! (dwu/start-undo-transaction undo-id)
+                       (udw/update-dimensions ids :width width)
+                       (udw/update-dimensions ids :height height)
+                       (dwu/commit-undo-transaction undo-id))
              (reset! preset-state* false)
              (reset! preset-search-term* ""))))
 

@@ -301,9 +301,7 @@
 
 (defn- asset-id->uri
   [asset-id]
-  (-> cf/public-uri
-      (u/join "assets/by-id/" asset-id)
-      (str)))
+  (cf/resolve-font-asset asset-id))
 
 (defn generate-custom-font-variant-css
   [family variant]

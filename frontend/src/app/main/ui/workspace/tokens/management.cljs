@@ -26,7 +26,7 @@
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
 
-(defn- get-sorted-token-groups
+(defn get-sorted-token-groups
   "Separate token-types into groups of `empty` or `filled` depending if
   tokens exist for that type. Sort each group alphabetically (by their type)."
   [tokens-by-type]

@@ -1,0 +1,54 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS SUBSIDIARY SL
+
+@use "ds/_borders.scss" as *;
+@use "ds/_sizes.scss" as *;
+
+.quick-token-panel {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 0;
+  block-size: 100%;
+  background: var(--color-background-primary);
+}
+
+.combination-section {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-m);
+  border-block-end: $b-1 solid var(--color-background-quaternary);
+}
+
+.combination-button {
+  justify-content: center;
+  inline-size: 100%;
+}
+
+.quick-token-scroll {
+  flex: 1;
+  min-block-size: 0;
+  overflow-y: auto;
+}
+
+.quick-token-group {
+  padding-block-start: var(--sp-xs);
+}
+
+.quick-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-xs);
+  padding: 0 var(--sp-m) var(--sp-s);
+}
+
+.quick-token-empty {
+  min-block-size: $sz-160;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}

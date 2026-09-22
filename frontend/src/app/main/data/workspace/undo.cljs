@@ -195,8 +195,10 @@
 (declare check-open-transactions)
 
 (defn start-undo-transaction
-  "Start a transaction, so that changes in it are added together into a single undo entry."
-  [id & {:keys [timeout] :or {timeout discard-transaction-time-millis}}]
+  "Start a transaction, so that changes in it are added together into a single undo entry.
+   An explicit undo group lets the completed transaction join an adjacent user action."
+  [id & {:keys [timeout undo-group]
+         :or {timeout discard-transaction-time-millis}}]
   (ptk/reify ::start-undo-transaction
     ptk/UpdateEvent
     (update [_ state]
@@ -205,7 +207,10 @@
       (update state :workspace-undo
               (fn [undo-state]
                 (-> undo-state
-                    (update :transaction #(d/nilv % empty-tx))
+                    (update :transaction
+                            #(d/nilv % (cond-> empty-tx
+                                         (some? undo-group)
+                                         (assoc :undo-group undo-group))))
                     (update :transactions-pending assoc id (ct/now))))))
 
     ptk/WatchEvent

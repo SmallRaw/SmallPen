@@ -94,6 +94,12 @@
    [frontend-tests.render-wasm.text-paste-test]
    [frontend-tests.render-wasm.webgl-test]
    [frontend-tests.router-test]
+   [frontend-tests.smallpen.dse-test]
+   [frontend-tests.smallpen.panorama-probe-test]
+   [frontend-tests.smallpen.ds-real-refs-test]
+   [frontend-tests.smallpen.home-test]
+   [frontend-tests.smallpen.projection-test]
+   [frontend-tests.smallpen.session-test]
    [frontend-tests.svg-fills-test]
    [frontend-tests.svg-filters-test]
    [frontend-tests.text-editor-paste-guard-test]
@@ -110,6 +116,10 @@
    [frontend-tests.tokens.workspace-tokens-remap-test]
    [frontend-tests.ui.check-updates-test]
    [frontend-tests.ui.color-token-position-test]
+   [frontend-tests.tokens.library-assets-data-test]
+   [frontend-tests.tokens.matrix-data-test]
+   [frontend-tests.tokens.quick-panel-data-test]
+   [frontend-tests.ui.colorpicker-reference-input-test]
    [frontend-tests.ui.colorpicker-token-set-order-test]
    [frontend-tests.ui.comment-input-ime-test]
    [frontend-tests.ui.comments-clustering-test]
@@ -134,6 +144,7 @@
    [frontend-tests.ui.stroke-menu-test]
    [frontend-tests.ui.text-attrs-multiple-test]
    [frontend-tests.ui.workspace-libraries-test]
+   [frontend-tests.ui.workspace-history-test]
    [frontend-tests.util-clipboard-test]
    [frontend-tests.util-object-test]
    [frontend-tests.util-queue-test]
@@ -248,6 +259,12 @@
    'frontend-tests.render-wasm.text-paste-test
    'frontend-tests.render-wasm.webgl-test
    'frontend-tests.router-test
+   'frontend-tests.smallpen.dse-test
+   'frontend-tests.smallpen.panorama-probe-test
+   'frontend-tests.smallpen.ds-real-refs-test
+   'frontend-tests.smallpen.home-test
+   'frontend-tests.smallpen.projection-test
+   'frontend-tests.smallpen.session-test
    'frontend-tests.svg-fills-test
    'frontend-tests.svg-filters-test
    'frontend-tests.tokens.copy-paste-props-test
@@ -257,6 +274,9 @@
    'frontend-tests.tokens.logic.token-data-test
    'frontend-tests.tokens.logic.token-remapping-test
    'frontend-tests.tokens.referenced-token-value-test
+   'frontend-tests.tokens.library-assets-data-test
+   'frontend-tests.tokens.matrix-data-test
+   'frontend-tests.tokens.quick-panel-data-test
    'frontend-tests.tokens.style-dictionary-test
    'frontend-tests.tokens.token-errors-test
    'frontend-tests.tokens.logic.tokens-status-test
@@ -265,6 +285,7 @@
    'frontend-tests.ui.color-token-position-test
    'frontend-tests.ui.colorpicker-token-set-order-test
    'frontend-tests.ui.comment-input-ime-test
+   'frontend-tests.ui.colorpicker-reference-input-test
    'frontend-tests.ui.comments-clustering-test
    'frontend-tests.ui.comments-position-modifier-test
    'frontend-tests.ui.drawarea-test
@@ -289,6 +310,7 @@
    'frontend-tests.ui.stroke-menu-test
    'frontend-tests.ui.text-attrs-multiple-test
    'frontend-tests.ui.workspace-libraries-test
+   'frontend-tests.ui.workspace-history-test
    'frontend-tests.util-clipboard-test
    'frontend-tests.util-object-test
    'frontend-tests.util-queue-test

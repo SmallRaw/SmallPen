@@ -35,6 +35,7 @@
    [app.main.ui.workspace.sidebar.history :refer [history-toolbox*]]
    [app.main.ui.workspace.tokens.export]
    [app.main.ui.workspace.tokens.export.modal]
+   [app.main.smallpen.token-import]
    [app.main.ui.workspace.tokens.import]
    [app.main.ui.workspace.tokens.import.modal]
    [app.main.ui.workspace.tokens.management.forms.modals]

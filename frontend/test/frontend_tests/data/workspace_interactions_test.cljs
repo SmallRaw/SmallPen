@@ -117,3 +117,26 @@
        (fn [new-state]
          (t/is (empty? (page-flows new-state))
                "non flow-origin interactions do not create a flow"))))))
+
+(t/deftest smallpen-navigation-creates-a-persisted-flow
+  (t/async
+    done
+    (let [file        (assoc (make-file) :backend :smallpen)
+          board1-id   (:id (cths/get-shape file :board1))
+          board2-id   (:id (cths/get-shape file :board2))
+          page-id     (cthf/current-page-id file)
+          interaction (navigate-interaction board1-id board2-id)
+          store       (ths/setup-store file)
+          events      [(dwi/add-interaction page-id board1-id interaction)]]
+      (ths/run-store
+       store done events
+       (fn [new-state]
+         (let [shape (get-in new-state
+                             [:files (:current-file-id new-state)
+                              :data :pages-index page-id :objects board1-id])]
+           (t/is (= board2-id
+                    (get-in shape [:interactions 0 :destination])))
+           (let [flows (vals (page-flows new-state))]
+             (t/is (= 1 (count flows))
+                   "SmallPen keeps the Flow preview entry")
+             (t/is (= board1-id (:starting-frame (first flows)))))))))))

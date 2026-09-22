@@ -140,12 +140,21 @@
            (let [target      (dom/get-related-target event)
                  select-node (mf/ref-val select-ref)]
              (when-not (dom/is-child? select-node target)
-               (reset! focused-id* nil)
-               (reset! is-open* false)))))
+               (if (some? target)
+                 (do
+                   (reset! focused-id* nil)
+                   (reset! is-open* false))
+                 (timers/raf
+                  (fn []
+                    (when (and (some? select-node)
+                               (.-isConnected select-node)
+                               (not (dom/is-child? select-node (dom/get-active))))
+                      (reset! focused-id* nil)
+                      (reset! is-open* false)))))))))
 
         on-button-key-down
         (mf/use-fn
-         (mf/deps focused-id disabled)
+         (mf/deps focused-id selected-id is-open disabled on-change)
          (fn [event]
            (dom/stop-propagation event)
            (when-not disabled
@@ -165,12 +174,17 @@
 
                  (or (kbd/space? event)
                      (kbd/enter? event))
-                 (when (deref is-open*)
+                 (do
                    (dom/prevent-default event)
-                   (handle-selection focused-id* selected-id* is-open*)
-                   (when (and (fn? on-change)
-                              (some? focused-id))
-                     (on-change focused-id)))
+                   (if (deref is-open*)
+                     (do
+                       (handle-selection focused-id* selected-id* is-open*)
+                       (when (and (fn? on-change)
+                                  (some? focused-id))
+                         (on-change focused-id)))
+                     (do
+                       (reset! focused-id* selected-id)
+                       (reset! is-open* true))))
 
                  (kbd/esc? event)
                  (do (reset! is-open* false)

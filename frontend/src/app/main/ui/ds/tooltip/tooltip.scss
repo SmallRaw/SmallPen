@@ -13,6 +13,7 @@ $arrow-side: 12px;
 
 .tooltip {
   position: fixed;
+  pointer-events: none;
   max-inline-size: $sz-352;
   background-color: transparent;
   overflow: hidden;

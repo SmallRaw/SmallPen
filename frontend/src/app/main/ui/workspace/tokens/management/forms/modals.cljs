@@ -75,7 +75,9 @@
 
 (mf/defc token-update-create-modal
   {::mf/wrap-props false}
-  [{:keys [x y position token token-type action selected-token-set-id initial-errors] :as _args}]
+  [{:keys [x y position token token-type action selected-token-set-id initial-errors
+           on-create-token value-only? value-context]
+    :rest props}]
   (let [wrapper-style (use-viewport-position-style x y position token-type)
         modal-size-large* (mf/use-state (or (= token-type :typography)
                                             (= token-type :color)
@@ -97,13 +99,18 @@
                        :icon i/close
                        :variant "action"
                        :aria-label (tr "labels.close")}]
-     [:> form-container* {:is-create (not (ctob/token? token))
-                          :token token
-                          :action action
-                          :selected-token-set-id selected-token-set-id
-                          :token-type token-type
-                          :initial-errors initial-errors
-                          :on-display-colorpicker update-modal-size}]]))
+     [:> form-container* (mf/spread-props
+                          props
+                          {:is-create (not (ctob/token? token))
+                           :token token
+                           :action action
+                           :selected-token-set-id selected-token-set-id
+                           :token-type token-type
+                           :initial-errors initial-errors
+                           :on-create-token on-create-token
+                           :value-only? value-only?
+                           :value-context value-context
+                           :on-display-colorpicker update-modal-size})]]))
 
 ;; Modals ----------------------------------------------------------------------
 

@@ -1,0 +1,17 @@
+{
+  "entries": {
+    "assets": [],
+    "components": [],
+    "contexts": [],
+    "requirements": [],
+    "scenarios": [],
+    "screens": [],
+    "tokens": [
+      "tokens/tokens.json"
+    ]
+  },
+  "formatVersion": 1,
+  "name": "duplicate-id",
+  "packageId": "pkg_duplicate_id",
+  "role": "foundation"
+}

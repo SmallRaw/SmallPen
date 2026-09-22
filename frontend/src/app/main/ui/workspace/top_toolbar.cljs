@@ -20,6 +20,8 @@
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.store :as st]
    [app.main.ui.components.file-uploader :as file-uploader]
    [app.main.ui.components.mcp-menu :refer [mcp-menu*]]
@@ -72,6 +74,7 @@
     :curve   (tr "workspace.toolbar.curve"   (sc/get-tooltip :draw-curve))
     :plugins (tr "workspace.toolbar.plugins" (sc/get-tooltip :plugins))
     :debug   "Debugging tool"
+    :tokens  "Tokens"
     (name tool)))
 
 (defn- active-group-tool
@@ -301,8 +304,11 @@
         rulers-enabled        (mf/deref refs/rulers?)
         toolbar-hidden        (mf/deref toolbar-hidden-ref)
         mcp                   (mf/deref refs/mcp)
+        page                  (mf/deref refs/workspace-page)
+        ds-page?              (dsep/design-system-page? page)
 
-        plugins-enabled? (features/active-feature? @st/state "plugins/runtime")
+        plugins-enabled? (and (smallpen/capability-enabled? :plugins)
+                              (features/active-feature? @st/state "plugins/runtime"))
         read-only?       (mf/use-ctx ctx/workspace-read-only?)
 
         mcp-conn-status  (get mcp :connection-status)
@@ -310,11 +316,14 @@
         mcp-enabled?     (get mcp :enabled)
 
         mcp-connected?   (= "connected" mcp-conn-status)
-        mcp-show?        (and (contains? cf/flags :mcp)
+        mcp-show?        (and (smallpen/capability-enabled? :mcp)
+                              (contains? cf/flags :mcp)
                               mcp-enabled?
                               mcp-valid-token?)
 
-        separator?       (or plugins-enabled? *assert* mcp-show?)
+        tokens-panel?    (smallpen/enabled?)
+
+        separator?       (or plugins-enabled? *assert* tokens-panel? mcp-show?)
 
         on-display-plugins-manager
         (mf/use-fn
@@ -331,7 +340,20 @@
              (when is-sidebar-closed
                (st/emit! (dw/toggle-layout-flag :collapse-left-sidebar)))
              (st/emit! (dw/remove-layout-flag :shortcuts)
+                       (dw/remove-layout-flag :tokens-panel)
                        (-> (dw/toggle-layout-flag :debug-panel)
+                           (vary-meta assoc ::ev/origin "workspace-left-toolbar"))))))
+
+        on-toggle-tokens-panel
+        (mf/use-fn
+         (mf/deps layout)
+         (fn []
+           (let [is-sidebar-closed (contains? layout :collapse-left-sidebar)]
+             (when is-sidebar-closed
+               (st/emit! (dw/toggle-layout-flag :collapse-left-sidebar)))
+             (st/emit! (dw/remove-layout-flag :shortcuts)
+                       (dw/remove-layout-flag :debug-panel)
+                       (-> (dw/toggle-layout-flag :tokens-panel)
                            (vary-meta assoc ::ev/origin "workspace-left-toolbar"))))))
 
         on-interrupt
@@ -375,36 +397,38 @@
                            :icon i/move
                            :on-click on-interrupt}]]
 
-        [:li {:class (stl/css :toolbar-option)}
-         [:> icon-button* {:variant "ghost"
-                           :tooltip-placement "bottom"
-                           :aria-pressed (= selected-drawing-tool :frame)
-                           :aria-label (tool-label :frame)
-                           :icon i/board
-                           :on-click on-select-tool
-                           :data-tool "frame"}]]
+        (when-not ds-page?
+          [:> mf/Fragment #js {}
+           [:li {:class (stl/css :toolbar-option)}
+            [:> icon-button* {:variant "ghost"
+                              :tooltip-placement "bottom"
+                              :aria-pressed (= selected-drawing-tool :frame)
+                              :aria-label (tool-label :frame)
+                              :icon i/board
+                              :on-click on-select-tool
+                              :data-tool "frame"}]]
 
-        [:> group-tool* {:key :shapes
-                         :group (get grouped-tools :shapes)
-                         :drawtool selected-drawing-tool
-                         :on-select-tool on-select-tool}]
+           [:> group-tool* {:key :shapes
+                            :group (get grouped-tools :shapes)
+                            :drawtool selected-drawing-tool
+                            :on-select-tool on-select-tool}]
 
-        [:li {:class (stl/css :toolbar-option)}
-         [:> icon-button* {:variant "ghost"
-                           :tooltip-placement "bottom"
-                           :aria-pressed (= selected-drawing-tool :text)
-                           :aria-label (tool-label :text)
-                           :icon i/text
-                           :on-click on-select-tool
-                           :data-tool "text"}]]
+           [:li {:class (stl/css :toolbar-option)}
+            [:> icon-button* {:variant "ghost"
+                              :tooltip-placement "bottom"
+                              :aria-pressed (= selected-drawing-tool :text)
+                              :aria-label (tool-label :text)
+                              :icon i/text
+                              :on-click on-select-tool
+                              :data-tool "text"}]]
 
-        [:li {:class (stl/css :toolbar-option)}
-         [:> image-upload-tool*]]
+           [:li {:class (stl/css :toolbar-option)}
+            [:> image-upload-tool*]]
 
-        [:> group-tool* {:key :free-draw
-                         :group (get grouped-tools :free-draw)
-                         :drawtool selected-drawing-tool
-                         :on-select-tool on-select-tool}]
+           [:> group-tool* {:key :free-draw
+                            :group (get grouped-tools :free-draw)
+                            :drawtool selected-drawing-tool
+                            :on-select-tool on-select-tool}]])
 
         (when separator?
           [:div {:class (stl/css :toolbar-separator)}])
@@ -426,6 +450,16 @@
                              :aria-label (tool-label :debug)
                              :icon i/bug
                              :on-click on-toggle-debug-panel}]])
+
+        (when tokens-panel?
+          [:li {:class (stl/css :toolbar-option)}
+           [:> icon-button* {:variant "ghost"
+                             :tooltip-placement "bottom"
+                             :aria-pressed (contains? layout :tokens-panel)
+                             :aria-label (tool-label :tokens)
+                             :data-testid "smallpen-tokens-toolbar-button"
+                             :icon i/tokens
+                             :on-click on-toggle-tokens-panel}]])
 
         (when mcp-show?
           [:li {:class (stl/css :toolbar-option)}
