@@ -1,0 +1,14 @@
+{
+  "name": "@smallpen/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "bin": {
+    "smallpen-web": "./bin/smallpen-web.mjs"
+  },
+  "files": [
+    "bin",
+    "src"
+  ]
+}

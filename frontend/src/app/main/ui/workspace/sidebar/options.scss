@@ -5,6 +5,30 @@
 // Copyright (c) KALEIDOS SUBSIDIARY SL
 
 @use "ds/_sizes.scss" as *;
+@use "ds/typography.scss" as t;
+
+.ds-editing-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+  padding-block: var(--sp-m);
+  color: var(--color-foreground-primary);
+}
+
+.ds-editing-title {
+  @include t.use-typography("title-small");
+
+  margin: 0;
+  color: var(--color-foreground-primary);
+}
+
+.ds-editing-description {
+  @include t.use-typography("body-medium");
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+  overflow-wrap: anywhere;
+}
 
 .tool-window {
   position: relative;

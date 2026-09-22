@@ -1,0 +1,23 @@
+{
+  "name": "@smallpen/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "smallpen-desktop": "./bin/smallpen-desktop.mjs",
+    "smallpen-desktop-host": "./bin/desktop-host.mjs"
+  },
+  "files": [
+    "bin",
+    "native",
+    "scripts",
+    "src"
+  ],
+  "scripts": {
+    "build:macos": "node scripts/build-macos.mjs"
+  },
+  "dependencies": {
+    "@smallpen/background": "0.1.0",
+    "@smallpen/web": "0.1.0"
+  }
+}

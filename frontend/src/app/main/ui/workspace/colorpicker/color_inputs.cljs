@@ -11,7 +11,13 @@
    [app.common.math :as mth]
    [app.common.types.color :as cc]
    [app.main.ui.ds.controls.input :refer [input*]]
+   [app.main.ui.ds.controls.shared.options-dropdown :refer [options-dropdown*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.hooks :as hooks]
+   [app.main.ui.workspace.colorpicker.color-inputs-data :as input-data]
+   [app.main.ui.workspace.tokens.management.forms.controls.floating-dropdown :refer [use-floating-dropdown]]
+   [app.main.ui.workspace.tokens.management.forms.controls.token-parsing :as token-parsing]
+   [app.main.ui.workspace.tokens.management.forms.controls.utils :as controls-utils]
    [app.util.dom :as dom]
    [app.util.keyboard :as kbd]
    [rumext.v2 :as mf]))
@@ -30,7 +36,253 @@
   [val]
   (* (/ val 255) 100))
 
-(mf/defc color-inputs* [{:keys [type color disable-opacity mode on-mode-change on-change]}]
+(mf/defc reference-hex-input*
+  {::mf/private true}
+  [{:keys [hex reference-name reference-tokens on-change-color
+           on-change-reference on-clear-reference]}]
+  (let [input-ref        (mf/use-ref nil)
+        input-wrapper-ref (mf/use-ref nil)
+        wrapper-ref      (mf/use-ref nil)
+        dropdown-ref     (mf/use-ref nil)
+        listbox-id       (mf/use-id)
+        container        (hooks/use-portal-container)
+        reference-tokens (vec (or reference-tokens []))
+        editing?*        (mf/use-state false)
+        editing?         (deref editing?*)
+        draft*           (mf/use-state #(input-data/display-value hex reference-name))
+        draft            (deref draft*)
+        open?*           (mf/use-state false)
+        open?            (deref open?*)
+        filter-term*     (mf/use-state "")
+        filter-term      (deref filter-term*)
+        focused-index*   (mf/use-state nil)
+        dropdown-options (mf/with-memo [reference-tokens filter-term]
+                           @(controls-utils/get-token-dropdown-options
+                             {:color reference-tokens}
+                             (str "{" filter-term)))
+        focusable-options (vec (controls-utils/focusable-options dropdown-options))
+        focused-id       (some->> @focused-index*
+                                  (get focusable-options)
+                                  :id)
+        selected-id      (some->> reference-tokens
+                                  (some #(when (= reference-name (:name %)) %))
+                                  :id
+                                  str)
+
+        close-options
+        (mf/use-fn
+         (fn []
+           (reset! open?* false)
+           (reset! filter-term* "")
+           (reset! focused-index* nil)))
+
+        restore-display
+        (mf/use-fn
+         (mf/deps hex reference-name)
+         (fn []
+           (reset! draft* (input-data/display-value hex reference-name))))
+
+        select-reference
+        (mf/use-fn
+         (mf/deps reference-name on-change-reference)
+         (fn [token]
+           (when token
+             (let [token (or (some #(when (= (:name token) (:name %)) %)
+                                   reference-tokens)
+                             token)
+                   value (input-data/reference-value (:name token))]
+               (reset! draft* value)
+               (close-options)
+               (when (not= reference-name (:name token))
+                 (on-change-reference token))
+               (js/requestAnimationFrame
+                (fn []
+                  (when-let [node (mf/ref-val input-ref)]
+                    (dom/focus! node)
+                    (let [cursor (count value)]
+                      (dom/set-selection-range! node cursor cursor)))))))))
+
+        commit-value
+        (mf/use-fn
+         (mf/deps draft reference-tokens on-change-color on-clear-reference)
+         (fn []
+           (if-let [token (input-data/find-reference-token reference-tokens draft)]
+             (select-reference token)
+             (let [value (cond
+                           (cc/color-string? draft) (cc/parse draft)
+                           (cc/valid-hex-color? (parse-hex draft)) (parse-hex draft))]
+               (if value
+                 (do
+                   (on-clear-reference)
+                   (on-change-color value))
+                 (restore-display))))))
+
+        on-focus
+        (mf/use-fn
+         (mf/deps hex reference-name)
+         (fn [_]
+           (reset! editing?* true)
+           (reset! draft* (or (input-data/reference-value reference-name) hex))
+           (js/requestAnimationFrame
+            (fn []
+              (when-let [node (mf/ref-val input-ref)]
+                (dom/select-text! node))))))
+
+        on-blur
+        (mf/use-fn
+         (mf/deps open?)
+         (fn [_]
+           (when-not open?
+             (commit-value)
+             (reset! editing?* false))))
+
+        update-reference-options
+        (mf/use-fn
+         (fn [value node]
+           (if-let [active-reference (token-parsing/active-token value node)]
+             (do
+               (reset! open?* true)
+               (reset! filter-term* (:partial active-reference))
+               (reset! focused-index* nil))
+             (close-options))))
+
+        on-change
+        (mf/use-fn
+         (mf/deps on-change-color on-clear-reference)
+         (fn [event]
+           (let [node  (dom/get-current-target event)
+                 value (dom/get-target-val event)
+                 color (parse-hex value)]
+             (reset! draft* value)
+             (update-reference-options value node)
+             (when (cc/valid-hex-color? color)
+               (on-clear-reference)
+               (on-change-color color)))))
+
+        on-option-click
+        (mf/use-fn
+         (mf/deps reference-tokens)
+         (fn [event]
+           (let [id    (dom/get-data (dom/get-current-target event) "id")
+                 token (some #(when (= id (str (:id %))) %) reference-tokens)]
+             (select-reference token))))
+
+        on-key-down
+        (mf/use-fn
+         (mf/deps open? focusable-options)
+         (fn [event]
+           (let [key          (.-key event)
+                 option-count (count focusable-options)]
+             (cond
+               (and open? (= key "ArrowDown") (pos? option-count))
+               (do
+                 (dom/prevent-default event)
+                 (swap! focused-index* #(mod (inc (or % -1)) option-count)))
+
+               (and open? (= key "ArrowUp") (pos? option-count))
+               (do
+                 (dom/prevent-default event)
+                 (swap! focused-index* #(mod (dec (or % 0)) option-count)))
+
+               (and open?
+                    (or (= key "Enter") (= key "Tab"))
+                    (pos? option-count))
+               (do
+                 (dom/prevent-default event)
+                 (dom/stop-propagation event)
+                 (select-reference
+                  (nth focusable-options (or @focused-index* 0))))
+
+               (= key "Enter")
+               (do
+                 (dom/prevent-default event)
+                 (commit-value)
+                 (close-options)
+                 (reset! editing?* false)
+                 (dom/blur! (dom/get-current-target event)))
+
+               (= key "Escape")
+               (do
+                 (dom/prevent-default event)
+                 (dom/stop-propagation event)
+                 (close-options)
+                 (restore-display)
+                 (reset! editing?* false)
+                 (dom/blur! (dom/get-current-target event)))
+
+               (= key "Tab")
+               (do
+                 (commit-value)
+                 (close-options)
+                 (reset! editing?* false))
+
+               :else nil))))
+
+        {:keys [style ready?]}
+        (use-floating-dropdown open? input-wrapper-ref wrapper-ref dropdown-ref)]
+
+    (mf/with-effect [hex reference-name editing?]
+      (when-not editing?
+        (reset! draft* (input-data/display-value hex reference-name))))
+
+    (mf/with-effect [open?]
+      (when open?
+        (let [handler
+              (fn [event]
+                (let [wrapper-node  (mf/ref-val wrapper-ref)
+                      dropdown-node (mf/ref-val dropdown-ref)
+                      target        (dom/get-target event)]
+                  (when (and wrapper-node
+                             (not (dom/child? target wrapper-node))
+                             (or (nil? dropdown-node)
+                                 (not (dom/child? target dropdown-node))))
+                    (commit-value)
+                    (close-options)
+                    (reset! editing?* false))))]
+          (.addEventListener js/document "mousedown" handler)
+          #(.removeEventListener js/document "mousedown" handler))))
+
+    [:div {:class (stl/css :hex-input :reference-hex-input)
+           :ref wrapper-ref}
+     [:> input* {:id "hex-value"
+                 :ref input-ref
+                 :input-wrapper-ref input-wrapper-ref
+                 :type "text"
+                 :text-icon "HEX"
+                 :property "Hex"
+                 :aria-label "Hexadecimal color value or token reference"
+                 :aria-autocomplete "list"
+                 :aria-controls listbox-id
+                 :aria-expanded open?
+                 :aria-activedescendant focused-id
+                 :max-length 256
+                 :value draft
+                 :on-focus on-focus
+                 :on-change on-change
+                 :on-blur on-blur
+                 :on-key-down on-key-down}]
+     (when open?
+       (mf/portal
+        (mf/html
+         [:> options-dropdown* {:on-click on-option-click
+                                :class (stl/css :reference-dropdown)
+                                :style {:visibility (if ready? "visible" "hidden")
+                                        :left (when-let [left (:left style)]
+                                                (str "clamp(var(--sp-m), " left
+                                                     ", calc(100vw - var(--reference-dropdown-width) - var(--sp-m)))"))
+                                        :top (or (:top style) "unset")
+                                        :bottom (or (:bottom style) "unset")}
+                                :id listbox-id
+                                :options dropdown-options
+                                :focused focused-id
+                                :selected selected-id
+                                :align :right
+                                :wrapper-ref dropdown-ref}])
+        container))]))
+
+(mf/defc color-inputs*
+  [{:keys [type color disable-opacity mode on-mode-change on-change
+           reference-name reference-tokens on-change-reference on-clear-reference]}]
   (let [{red :r green :g blue :b
          hue :h saturation :s value :v
          hex :hex alpha :alpha} color
@@ -47,8 +299,7 @@
           (cc/rgb->hsl [red green blue])
           [0 0 0])
 
-        refs {:hex   (mf/use-ref nil)
-              :r     (mf/use-ref nil)
+        refs {:r     (mf/use-ref nil)
               :g     (mf/use-ref nil)
               :b     (mf/use-ref nil)
               :h     (mf/use-ref nil)
@@ -65,25 +316,6 @@
             (on-change {:hex hex
                         :h h :s s :v v
                         :r r :g g :b b})))
-        on-change-hex
-        (fn [e]
-          (let [val (-> e dom/get-target-val parse-hex)]
-            (when (cc/valid-hex-color? val)
-              (setup-hex-color val))))
-
-        on-blur-hex
-        (fn [e]
-          (let [val (-> e dom/get-target-val)
-                ;; FIXME: looks redundant, cc/parse already handles
-                ;; hex colors; also it performs the parse-hex twice
-                ;; that is completly unnecessary
-                val (cond
-                      (cc/color-string? val) (cc/parse val)
-                      (cc/valid-hex-color? (parse-hex val)) (parse-hex val))]
-
-            (when (some? val)
-              (setup-hex-color val))))
-
         apply-property-change
         (fn [property val]
           (let [val (case property
@@ -306,17 +538,12 @@
                      :on-change (on-change-property :v 100)
                      :on-key-down (on-key-down-property :v 100)}]])]
      [:div {:class (stl/css :hex-alpha-wrapper)}
-      [:> input* {:id "hex-value"
-                  :class (stl/css :hex-input)
-                  :ref (:hex refs)
-                  :type "text"
-                  :text-icon "HEX"
-                  :property "Hex"
-                  :aria-label "Hexadecimal color value"
-                  :max 7
-                  :default-value hex
-                  :on-change on-change-hex
-                  :on-blur on-blur-hex}]
+      [:> reference-hex-input* {:hex hex
+                                :reference-name reference-name
+                                :reference-tokens reference-tokens
+                                :on-change-color setup-hex-color
+                                :on-change-reference on-change-reference
+                                :on-clear-reference on-clear-reference}]
 
       (when (not disable-opacity)
         [:> input* {:id "alpha-value"

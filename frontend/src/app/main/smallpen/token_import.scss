@@ -1,0 +1,181 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+.modal-overlay {
+  @extend %modal-overlay-base;
+}
+
+.modal-dialog {
+  @extend %modal-container-base;
+
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  // The base placeholder caps modals at 512px; a diff table needs the room.
+  width: min(960px, 92vw);
+  max-width: min(960px, 92vw);
+  max-height: 88vh;
+}
+
+.close-btn {
+  position: absolute;
+  inset-block-start: var(--sp-s);
+  inset-inline-end: var(--sp-s);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-m);
+  min-block-size: 0;
+  padding: var(--sp-l);
+}
+
+.hidden-input {
+  display: none;
+}
+
+.pick {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-m);
+}
+
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+  min-block-size: 0;
+}
+
+.file-name {
+  color: var(--color-foreground-primary);
+}
+
+.summary {
+  color: var(--color-foreground-secondary);
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--sp-s);
+}
+
+.table-wrap {
+  border: 1px solid var(--color-background-quaternary);
+  border-radius: var(--sp-xs);
+  max-block-size: 48vh;
+  overflow: auto;
+}
+
+.table {
+  border-collapse: collapse;
+  font-size: 12px;
+  inline-size: 100%;
+
+  th,
+  td {
+    border-block-end: 1px solid var(--color-background-quaternary);
+    padding: var(--sp-xs) var(--sp-s);
+    text-align: start;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  th {
+    background: var(--color-background-secondary);
+    color: var(--color-foreground-secondary);
+    font-weight: 500;
+    inset-block-start: 0;
+    position: sticky;
+  }
+}
+
+.cell-check {
+  inline-size: 32px;
+}
+
+.cell-muted {
+  color: var(--color-foreground-secondary);
+}
+
+.badge {
+  font-weight: 600;
+  margin-inline-end: var(--sp-xs);
+}
+
+.row.added .badge {
+  color: var(--color-accent-success, #3fbf7f);
+}
+
+.row.changed .badge {
+  color: var(--color-accent-warning, #f0b429);
+}
+
+.row.removed .badge {
+  color: var(--color-accent-error, #e55a5a);
+}
+
+.row.removed .code {
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+
+.code {
+  font-family: var(--font-family-mono, monospace);
+  user-select: text;
+}
+
+.value-stack {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.value {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--sp-xs);
+}
+
+.description {
+  color: var(--color-foreground-secondary);
+  font-size: 11px;
+  white-space: normal;
+}
+
+.fields {
+  color: var(--color-foreground-secondary);
+  font-size: 11px;
+  margin-inline-start: var(--sp-xs);
+}
+
+.swatch {
+  block-size: 14px;
+  border: 1px solid rgb(0 0 0 / 25%);
+  border-radius: 3px;
+  flex: none;
+  inline-size: 14px;
+}
+
+.warnings {
+  color: var(--color-foreground-secondary);
+  font-size: 12px;
+  margin: 0;
+  padding-inline-start: var(--sp-l);
+}
+
+.error {
+  color: var(--color-accent-error, #e55a5a);
+}
+
+.footer {
+  display: flex;
+  gap: var(--sp-s);
+  justify-content: flex-end;
+  margin-block-start: var(--sp-s);
+}

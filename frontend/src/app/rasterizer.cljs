@@ -253,20 +253,28 @@
 
        (constantly nil)))))
 
+(defn- bitmap-resize-options
+  [width height quality]
+  (cond-> #js {:resizeWidth width
+               :resizeQuality quality}
+    (some? height) (obj/set! "resizeHeight" height)))
+
 (defn- render-image-bitmap
   "Renders a thumbnail using it's SVG and returns an ImageBitmap of the image."
   [payload]
   (let [data   (unchecked-get payload "data")
         styles (unchecked-get payload "styles")
         width  (d/nilv (unchecked-get payload "width") 300)
+        height (unchecked-get payload "height")
         quality (d/nilv (unchecked-get payload "quality") "medium")]
     (->> (svg-prepare data styles width)
          (rx/map #(wapi/create-blob % "image/svg+xml"))
          (rx/map wapi/create-uri)
          (rx/mapcat (fn [uri]
                       (->> (create-image uri)
-                           (rx/mapcat #(wapi/create-image-bitmap-with-workaround % #js {:resizeWidth width
-                                                                                        :resizeQuality quality}))
+                           (rx/mapcat #(wapi/create-image-bitmap-with-workaround
+                                        %
+                                        (bitmap-resize-options width height quality)))
                            (rx/tap #(wapi/revoke-uri uri))))))))
 
 (defn- render-blob

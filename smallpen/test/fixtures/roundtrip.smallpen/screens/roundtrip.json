@@ -1,0 +1,58 @@
+{
+  "basePresentationId": "pres_desktop",
+  "counterparts": [],
+  "id": "scr_roundtrip",
+  "name": "Round Trip",
+  "presentations": [
+    {
+      "id": "pres_desktop",
+      "interactions": [],
+      "name": "Desktop",
+      "nodes": {
+        "node_canvas": {
+          "children": [
+            "node_rectangle"
+          ],
+          "fills": [
+            {
+              "color": "#f4f4f5",
+              "type": "solid"
+            }
+          ],
+          "height": 600,
+          "id": "node_canvas",
+          "name": "Canvas",
+          "type": "FRAME",
+          "width": 800,
+          "x": 0,
+          "y": 0
+        },
+        "node_rectangle": {
+          "children": [],
+          "fills": [
+            {
+              "color": "#7c3aed",
+              "type": "solid"
+            }
+          ],
+          "height": 120,
+          "id": "node_rectangle",
+          "name": "Editable Rectangle",
+          "opacity": 1,
+          "strokes": [],
+          "type": "RECTANGLE",
+          "visible": true,
+          "width": 240,
+          "x": 80,
+          "y": 96
+        }
+      },
+      "platform": "desktop",
+      "rootId": "node_canvas",
+      "viewport": {
+        "height": 600,
+        "width": 800
+      }
+    }
+  ]
+}

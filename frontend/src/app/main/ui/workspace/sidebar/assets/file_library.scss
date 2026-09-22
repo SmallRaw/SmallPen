@@ -16,6 +16,10 @@
   grid-auto-rows: max-content;
   gap: var(--sp-xs);
   block-size: 100%;
+
+  :global([data-smallpen-compact]) & {
+    gap: var(--sp-xxs);
+  }
 }
 
 .loading {
@@ -106,6 +110,10 @@
   display: grid;
   grid-auto-rows: max-content;
   gap: var(--sp-xs);
+
+  :global([data-smallpen-compact]) & {
+    gap: var(--sp-xxs);
+  }
 }
 
 .asset-title {

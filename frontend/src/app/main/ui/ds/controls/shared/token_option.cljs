@@ -10,8 +10,10 @@
   (:require
    [app.common.data :as d]
    [app.common.data.macros :as dm]
+   [app.main.data.tinycolor :as tinycolor]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.ds.tooltip.tooltip :refer [tooltip*]]
+   [app.main.ui.ds.utilities.swatch :refer [swatch*]]
    [app.util.i18n :as i18n :refer [tr]]
    [cuerdas.core :as str]
    [rumext.v2 :as mf]))
@@ -19,10 +21,11 @@
 (def ^:private schema:token-option
   [:map
    [:id {:optiona true} :string]
-   [:ref some?]
+   [:ref {:optional true} [:maybe some?]]
    [:resolved {:optional true} [:maybe [:or :int :string :float :map]]]
    [:value {:optional true} [:maybe [:or :int :string :float :map]]]
    [:name {:optional true} :string]
+   [:token-type {:optional true} :keyword]
    [:on-click {:optional true} fn?]
    [:selected {:optional true} :boolean]
    [:focused {:optional true} :boolean]])
@@ -55,10 +58,14 @@
 
 (mf/defc token-option*
   {::mf/schema schema:token-option}
-  [{:keys [id name on-click selected ref focused resolved value] :rest props}]
+  [{:keys [id name token-type on-click selected ref focused resolved value] :rest props}]
   (let [internal-id (mf/use-id)
         id          (d/nilv id internal-id)
         element-ref (mf/use-ref nil)
+        color-value (when (= token-type :color)
+                      (when-let [color (tinycolor/valid-color resolved)]
+                        {:color (tinycolor/->hex-string color)
+                         :opacity (tinycolor/alpha color)}))
         tooltip-content (if (map? resolved)
                           (mf/html
                            [:> resolved-value-tooltip*
@@ -68,6 +75,7 @@
     [:li {:value id
           :class (stl/css-case :token-option true
                                :option-with-pill true
+                               :option-with-swatch (some? color-value)
                                :option-selected-token selected
                                :option-current focused)
           :aria-selected selected
@@ -86,6 +94,11 @@
          :class (stl/css :option-check)
          :aria-hidden (when name true)}]
        [:span {:class (stl/css :icon-placeholder)}])
+     (when color-value
+       [:> swatch* {:background color-value
+                    :size "small"
+                    :show-tooltip false
+                    :data-testid "token-option-color-swatch"}])
      [:> tooltip* {:content tooltip-content
                    :trigger-ref element-ref
                    :id (dm/str id "-name")

@@ -258,6 +258,18 @@
   [id]
   (dm/str (u/join public-uri "assets/by-id/" (str id))))
 
+(defonce ^:private font-asset-resolver (atom nil))
+
+(defn set-font-asset-resolver!
+  "Install a local backend resolver for custom Font file URLs, or clear it with nil."
+  [resolver]
+  (reset! font-asset-resolver resolver))
+
+(defn resolve-font-asset
+  [id]
+  (or (some-> @font-asset-resolver (apply [id]))
+      (resolve-media id)))
+
 ;; Current share-id for asset URL building. The share-link viewer sets
 ;; this in `app.main.data.viewer/initialize` so every caller of
 ;; `resolve-file-media` (inspector, code panel, image previews,
@@ -275,11 +287,19 @@
   [share-id]
   (set! current-share-id share-id))
 
+(defonce ^:private file-media-resolver (atom nil))
+
+(defn set-file-media-resolver!
+  "Install a local backend resolver for file Media URLs, or clear it with nil."
+  [resolver]
+  (reset! file-media-resolver resolver))
+
 (defn resolve-file-media
   ([media]
    (resolve-file-media media false))
   ([{:keys [id data-uri] :as media} thumbnail?]
    (or data-uri
+       (some-> @file-media-resolver (apply [media thumbnail?]))
        (dm/str
         (cond-> (u/join public-uri "assets/by-file-media-id/")
           (true? thumbnail?) (u/join (dm/str id "/thumbnail"))

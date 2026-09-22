@@ -55,10 +55,18 @@
 
 .title-spacing {
   padding-block-start: deprecated.$s-4;
+
+  :global([data-smallpen-compact]) & {
+    padding-block-start: 0;
+  }
 }
 
 .asset-section.opened {
   margin-bottom: deprecated.$s-12;
+
+  :global([data-smallpen-compact]) & {
+    margin-bottom: deprecated.$s-2;
+  }
 }
 
 .drag-counter {

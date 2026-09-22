@@ -207,7 +207,8 @@
               (l/inf :status "END" :hint "propagate-tokens" :elapsed elapsed)))))))
 
 (defn propagate-workspace-tokens
-  []
+  ([] (propagate-workspace-tokens nil))
+  ([undo-group]
   (ptk/reify ::propagate-workspace-tokens
     ptk/WatchEvent
     (watch [_ state _]
@@ -222,7 +223,7 @@
                   (fn [sd-tokens]
                     (let [undo-id (js/Symbol)]
                       (rx/concat
-                       (rx/of (dwu/start-undo-transaction undo-id :timeout false))
+                       (rx/of (dwu/start-undo-transaction undo-id :timeout false :undo-group undo-group))
 
                        ;; FIXME: now the tokens propagations is done by accumulating the update-shapes
                        ;; into a single commit-changes. This is not really the best way, the token application
@@ -235,3 +236,4 @@
                                         (rx/throw %))))
                        (rx/of (dwsh/update-shapes-buffer-stop))
                        (rx/of (dwu/commit-undo-transaction undo-id)))))))))))))
+)

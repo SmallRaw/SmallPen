@@ -1,0 +1,142 @@
+{
+  "componentSets": [
+    {
+      "axes": [
+        {
+          "domain": [
+            "idle",
+            "pressed"
+          ],
+          "id": "axis_state",
+          "name": "State",
+          "role": "state"
+        }
+      ],
+      "id": "cmp_card_set",
+      "name": "Card",
+      "variants": [
+        {
+          "id": "var_card_idle",
+          "nodes": {
+            "node_card_idle_root": {
+              "children": [
+                "node_card_idle_label"
+              ],
+              "componentId": "cmp_card_set",
+              "cornerRadius": 8,
+              "fills": [
+                {
+                  "color": "#ffffff",
+                  "type": "solid"
+                }
+              ],
+              "height": 120,
+              "id": "node_card_idle_root",
+              "name": "Card / idle",
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md_base",
+                  "packageId": "pkg_design_system"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 200,
+              "x": 0,
+              "y": 0
+            },
+            "node_card_idle_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#1b1b1f",
+                  "type": "solid"
+                }
+              ],
+              "height": 20,
+              "id": "node_card_idle_label",
+              "name": "Label",
+              "text": "Card",
+              "textStyle": {
+                "fontFamily": "Inter",
+                "fontId": "gfont-inter",
+                "fontVariantId": "400",
+                "fontSize": 14,
+                "fontWeight": 400,
+                "lineHeight": 1.2
+              },
+              "type": "TEXT",
+              "width": 80,
+              "x": 12,
+              "y": 8
+            }
+          },
+          "rootId": "node_card_idle_root",
+          "selection": {
+            "axis_state": "idle"
+          }
+        },
+        {
+          "id": "var_card_pressed",
+          "nodes": {
+            "node_card_pressed_root": {
+              "children": [
+                "node_card_pressed_label"
+              ],
+              "componentId": "cmp_card_set",
+              "cornerRadius": 8,
+              "fills": [
+                {
+                  "color": "#e7e0ec",
+                  "type": "solid"
+                }
+              ],
+              "height": 120,
+              "id": "node_card_pressed_root",
+              "name": "Card / pressed",
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md_base",
+                  "packageId": "pkg_design_system"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 200,
+              "x": 0,
+              "y": 0
+            },
+            "node_card_pressed_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#1b1b1f",
+                  "type": "solid"
+                }
+              ],
+              "height": 20,
+              "id": "node_card_pressed_label",
+              "name": "Label",
+              "text": "Card",
+              "textStyle": {
+                "fontFamily": "Inter",
+                "fontId": "gfont-inter",
+                "fontVariantId": "400",
+                "fontSize": 14,
+                "fontWeight": 400,
+                "lineHeight": 1.2
+              },
+              "type": "TEXT",
+              "width": 80,
+              "x": 12,
+              "y": 8
+            }
+          },
+          "rootId": "node_card_pressed_root",
+          "selection": {
+            "axis_state": "pressed"
+          }
+        }
+      ],
+      "visibility": "public"
+    }
+  ]
+}

@@ -480,6 +480,14 @@
          (swap! active-requests disj request-id)
          (rx/dispose! subscription))))))
 
+(defn- persistence-allowed?
+  "Allow already queued edits during SmallPen's temporary reconciliation freeze.
+  New edits remain gated at commit creation, including historical previews."
+  [state]
+  (boolean
+   (or (dm/get-in state [:permissions :can-edit])
+       (dm/get-in state [:workspace-global :persist-pending-while-read-only?]))))
+
 (defn- attempt-state
   "Classifies what should happen with a queued commit before sending it.
   The attempt stamp and the send decision both read this, so a commit is
@@ -491,7 +499,7 @@
       (nil? commit)                                        :missing-commit
       (::acknowledged commit)                              :acknowledged
       (contains? @active-requests (::request-id commit))   :in-flight
-      (not (dm/get-in state [:permissions :can-edit]))     :permission-denied
+      (not (persistence-allowed? state))                  :permission-denied
       :else                                                :ready)))
 
 (defn- send-queued-commit

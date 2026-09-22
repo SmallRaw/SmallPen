@@ -1,0 +1,8 @@
+{
+  "id": "cmp_shared_button",
+  "mainNodeId": "node_shared_button",
+  "name": "Shared Button",
+  "path": "Controls",
+  "presentationId": "pres_shared",
+  "screenId": "scr_shared"
+}

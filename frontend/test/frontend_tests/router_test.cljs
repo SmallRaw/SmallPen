@@ -7,6 +7,7 @@
 (ns frontend-tests.router-test
   (:require
    [app.main.router :as rt]
+   [app.util.globals :as globals]
    [cljs.test :as t :include-macros true]))
 
 (def ^:private test-routes
@@ -19,6 +20,14 @@
   (t/is (= "?screen=auth-register&foo=1"
            (rt/resolve test-routes :auth-register {:screen "auth-login"
                                                    :foo "1"}))))
+
+(t/deftest resolve-preserves-local-package-connection
+  (with-redefs [globals/location #js {:search "?screen=workspace&file-id=old&smallpen-backend=http%3A%2F%2F127.0.0.1%3A43130&smallpen-package=session-2"}]
+    (let [token (rt/resolve test-routes :workspace {:file-id "new"})
+          params (get-in (rt/match test-routes token) [:params :query])]
+      (t/is (= "new" (:file-id params)))
+      (t/is (= "session-2" (:smallpen-package params)))
+      (t/is (= "http://127.0.0.1:43130" (:smallpen-backend params))))))
 
 (t/deftest resolve-builds-screen-token
   (t/is (= "?screen=dashboard-recent&team-id=team-1"

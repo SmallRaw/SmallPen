@@ -1,0 +1,13 @@
+{
+  "name": "@smallpen/penpot-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@smallpen/core": "0.1.0"
+  }
+}

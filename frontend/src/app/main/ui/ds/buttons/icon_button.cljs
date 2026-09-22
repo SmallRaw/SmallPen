@@ -23,6 +23,7 @@
    [:icon
     [:and :string [:fn #(contains? icon-list %)]]]
    [:aria-label :string]
+   [:on-click {:optional true} fn?]
    [:has-tooltip {:optional true} [:maybe :boolean]]
    [:tooltip-placement {:optional true}
     [:maybe [:enum "top" "bottom" "left" "right" "top-right" "bottom-right" "bottom-left" "top-left"]]]
@@ -37,6 +38,7 @@
    [:icon-size {:optional true} [:maybe [:enum "s" "m" "l"]]]
    [:icon
     [:and :string [:fn #(contains? icon-list %)]]]
+   [:on-click {:optional true} fn?]
    ;; Indicates that the button has a flyout menu, and should display an indicator
    [:flyout-indicator {:optional true} [:maybe :boolean]]])
 

@@ -13,7 +13,9 @@
    [app.common.test-helpers.shapes :as cths]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
+   [app.main.rasterizer :as main-rasterizer]
    [app.main.render :as render]
+   [app.rasterizer :as rasterizer]
    [cljs.test :as t :include-macros true]))
 
 (defn- make-objects
@@ -76,3 +78,15 @@
       (t/is (some? result))
       (t/is (<= (:width result) render/max-export-dimension))
       (t/is (<= (:height result) render/max-export-dimension)))))
+
+(t/deftest rasterizer-preserves-explicit-thumbnail-dimensions
+  (let [payload (#'main-rasterizer/render-payload
+                 {:data "<svg/>"
+                  :height 768
+                  :styles ""
+                  :width 1024})
+        options (#'rasterizer/bitmap-resize-options 1024 768 "medium")]
+    (t/is (= 1024 (unchecked-get payload "width")))
+    (t/is (= 768 (unchecked-get payload "height")))
+    (t/is (= 1024 (unchecked-get options "resizeWidth")))
+    (t/is (= 768 (unchecked-get options "resizeHeight")))))

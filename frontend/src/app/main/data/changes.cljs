@@ -16,7 +16,9 @@
    [app.common.uuid :as uuid]
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
+   [app.main.data.notifications :as ntf]
    [app.main.features :as features]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.worker :as mw]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.shape :as wasm.shape]
@@ -243,14 +245,16 @@
             uchg        (vec undo-changes)
             rchg        (vec redo-changes)
             features    (get state :features)
-            permissions (get state :permissions)]
+            permissions (get state :permissions)
+            blocked     (dsep/commit-block-reason (get-in state [:files file-id]) rchg)]
 
         ;; Historical previews must not create edits to the live file. Check
         ;; this when creating commits so previously queued edits can still save.
         ;; Refusals answer with an empty stream (never nil) so callers can
         ;; uniformly subscribe and observe termination.
         (if (and (:can-edit permissions)
-                 (not (dm/get-in state [:workspace-global :preview-id])))
+                 (not (dm/get-in state [:workspace-global :preview-id]))
+                 (not blocked))
           (do
             (log/trace :hint "commit-changes" :redo-changes redo-changes)
             (let [selected (dm/get-in state [:workspace-local :selected])]
@@ -269,4 +273,6 @@
                          (assoc :translation? translation?)
                          (assoc :skip-component-sync? skip-component-sync?)
                          (commit)))))
-          (rx/empty))))))
+          (if (and blocked save-undo?)
+            (rx/of (ntf/warn (dsep/blocked-message blocked)))
+            (rx/empty)))))))
