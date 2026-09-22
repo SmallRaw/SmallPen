@@ -10,11 +10,17 @@
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.repo :as rp]
+   [app.main.router :as rt]
    [app.main.store :as st]
    [app.main.ui.routes :as routes]
    [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [frontend-tests.helpers.mock :as mock]))
+
+(t/deftest smallpen-local-home-has-an-independent-route
+  (t/is (= :smallpen-home
+           (get-in (rt/match (rt/create routes/routes) "/smallpen")
+                   [:data :name]))))
 
 (defn- workspace-match
   [team-id]

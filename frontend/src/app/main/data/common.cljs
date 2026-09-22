@@ -23,6 +23,7 @@
    [app.main.store :as st]
    [app.util.dom :as-alias dom]
    [app.util.i18n :refer [tr]]
+   [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
@@ -492,9 +493,76 @@
       (let [team-id (:current-team-id state)]
         (rx/of (rt/nav :dashboard-settings {:team-id team-id}))))))
 
+(def ^:private workspace-viewports-key ::workspace-viewports)
+
+(defn valid-workspace-viewport?
+  [{:keys [zoom vbox]}]
+  (and (number? zoom)
+       (pos? zoom)
+       (number? (:width vbox))
+       (pos? (:width vbox))
+       (number? (:height vbox))
+       (pos? (:height vbox))))
+
+(defn- generated-design-system-page?
+  [state file-id page-id]
+  (let [smallpen-data (get-in (dsh/lookup-file-data state file-id)
+                              [:pages-index page-id :plugin-data :smallpen])]
+    (true? (or (get smallpen-data "design-system-page")
+               (get smallpen-data :design-system-page)))))
+
+(defn persist-current-workspace-viewport!
+  [state]
+  (let [file-id (:current-file-id state)
+        page-id (:current-page-id state)
+        local   (:workspace-local state)]
+    (when (and file-id
+               page-id
+               (generated-design-system-page? state file-id page-id)
+               (valid-workspace-viewport? local))
+      (binding [storage/*sync* true]
+        (swap! storage/session assoc-in
+               [workspace-viewports-key [file-id page-id]]
+               (select-keys local [:zoom :zoom-inverse :vbox]))))))
+
+(defn- persisted-workspace-viewport
+  [file-id page-id]
+  (let [local (get-in storage/session
+                      [workspace-viewports-key [file-id page-id]])]
+    (when (valid-workspace-viewport? local) local)))
+
+(defn initial-workspace-board-id
+  "Return the one-shot board target only when this page has no usable cached
+  viewport. Page initialization restores cached workspace-local state, so a
+  reopened generated page must not be fitted again over the user's pan/zoom."
+  [state file-id page-id board-id design-system?]
+  (if-not design-system?
+    board-id
+    (let [local (or (get-in state [:workspace-cache [file-id page-id]])
+                    (persisted-workspace-viewport file-id page-id))]
+      (when-not (valid-workspace-viewport? local)
+        board-id))))
+
 (defn go-to-workspace
-  [& {:keys [team-id file-id page-id layout] :as options}]
+  [& {:keys [team-id file-id page-id layout board-id design-system?] :as options}]
   (ptk/reify ::go-to-workspace
+    ptk/UpdateEvent
+    (update [_ state]
+      (persist-current-workspace-viewport! state)
+      (let [file-id (or file-id (:current-file-id state))
+            page-id (or page-id (:current-page-id state)
+                        (-> (dsh/lookup-file-data state file-id)
+                            (get :pages)
+                            (first)))
+            local   (when design-system?
+                      (persisted-workspace-viewport file-id page-id))]
+        (if (and design-system?
+                 local
+                 (not (valid-workspace-viewport?
+                       (get-in state [:workspace-cache [file-id page-id]]))))
+          (assoc-in state [:workspace-cache [file-id page-id]] local)
+          state)))
+
     ptk/WatchEvent
     (watch [_ state _]
       (let [team-id (or team-id (:current-team-id state))
@@ -503,11 +571,16 @@
                         (-> (dsh/lookup-file-data state file-id)
                             (get :pages)
                             (first)))
+            board-id (initial-workspace-board-id state file-id page-id board-id
+                                                 design-system?)
 
             params  (-> (rt/get-params state)
                         (assoc :team-id team-id)
                         (assoc :file-id file-id)
                         (assoc :page-id page-id)
+                        ;; DSE-R13: optional frame id so the workspace
+                        ;; zooms to it right after the viewport initializes.
+                        (assoc :board-id board-id)
                         (update :layout  #(or layout %))
                         (d/without-nils))]
         (rx/of (rt/nav :workspace params options))))))
@@ -531,6 +604,9 @@
                                 (reduced (:id obj)))))
                           nil
                           selected))
+            index    (if (or (some? frame-id) (some? index))
+                       index
+                       0)
             params  {:file-id file-id
                      :page-id page-id
                      :section section

@@ -77,6 +77,12 @@
    [frontend-tests.render-wasm.text-editor-apply-styles-test]
    [frontend-tests.render-wasm.text-editor-caret-color-test]
    [frontend-tests.router-test]
+   [frontend-tests.smallpen.dse-test]
+   [frontend-tests.smallpen.panorama-probe-test]
+   [frontend-tests.smallpen.ds-real-refs-test]
+   [frontend-tests.smallpen.home-test]
+   [frontend-tests.smallpen.projection-test]
+   [frontend-tests.smallpen.session-test]
    [frontend-tests.svg-fills-test]
    [frontend-tests.text-editor-paste-guard-test]
    [frontend-tests.tokens.copy-paste-props-test]
@@ -89,6 +95,10 @@
    [frontend-tests.tokens.token-errors-test]
    [frontend-tests.tokens.workspace-tokens-remap-test]
    [frontend-tests.ui.check-updates-test]
+   [frontend-tests.tokens.library-assets-data-test]
+   [frontend-tests.tokens.matrix-data-test]
+   [frontend-tests.tokens.quick-panel-data-test]
+   [frontend-tests.ui.colorpicker-reference-input-test]
    [frontend-tests.ui.colorpicker-token-set-order-test]
    [frontend-tests.ui.comments-clustering-test]
    [frontend-tests.ui.comments-position-modifier-test]
@@ -100,6 +110,7 @@
    [frontend-tests.ui.routes-test]
    [frontend-tests.ui.settings-password-schema-test]
    [frontend-tests.ui.settings-shortcuts-test]
+   [frontend-tests.ui.workspace-history-test]
    [frontend-tests.util-clipboard-test]
    [frontend-tests.util-object-test]
    [frontend-tests.util-range-tree-test]
@@ -195,18 +206,28 @@
    'frontend-tests.render-wasm.text-editor-apply-styles-test
    'frontend-tests.render-wasm.text-editor-caret-color-test
    'frontend-tests.router-test
+   'frontend-tests.smallpen.dse-test
+   'frontend-tests.smallpen.panorama-probe-test
+   'frontend-tests.smallpen.ds-real-refs-test
+   'frontend-tests.smallpen.home-test
+   'frontend-tests.smallpen.projection-test
+   'frontend-tests.smallpen.session-test
    'frontend-tests.svg-fills-test
    'frontend-tests.tokens.copy-paste-props-test
    'frontend-tests.tokens.import-export-test
    'frontend-tests.tokens.logic.token-actions-test
    'frontend-tests.tokens.logic.token-data-test
    'frontend-tests.tokens.logic.token-remapping-test
+   'frontend-tests.tokens.library-assets-data-test
+   'frontend-tests.tokens.matrix-data-test
+   'frontend-tests.tokens.quick-panel-data-test
    'frontend-tests.tokens.style-dictionary-test
    'frontend-tests.tokens.token-errors-test
    'frontend-tests.tokens.logic.tokens-status-test
    'frontend-tests.tokens.workspace-tokens-remap-test
    'frontend-tests.ui.check-updates-test
    'frontend-tests.ui.colorpicker-token-set-order-test
+   'frontend-tests.ui.colorpicker-reference-input-test
    'frontend-tests.ui.comments-clustering-test
    'frontend-tests.ui.comments-position-modifier-test
    'frontend-tests.ui.ds-controls-numeric-input-test
@@ -219,6 +240,7 @@
    'frontend-tests.text-editor-paste-guard-test
    'frontend-tests.ui.settings-password-schema-test
    'frontend-tests.ui.settings-shortcuts-test
+   'frontend-tests.ui.workspace-history-test
    'frontend-tests.util-clipboard-test
    'frontend-tests.util-object-test
    'frontend-tests.util-range-tree-test

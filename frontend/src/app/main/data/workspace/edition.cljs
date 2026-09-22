@@ -10,6 +10,7 @@
    [app.main.data.workspace.path.common :as dwpc]
    [app.main.data.workspace.path.state :as path.state]
    [app.main.features :as features]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.render-wasm.api :as wasm.api]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -30,7 +31,9 @@
     (update [_ state]
       (let [objects (dsh/lookup-page-objects state)]
         ;; Can only edit objects that exist
-        (if (contains? objects id)
+        (if (and (contains? objects id)
+                 (or (not (dsep/current-page-locked? state))
+                     (dsep/source-shape? (get objects id))))
           (-> state
               (update :workspace-local assoc :edition id)
               (dissoc :workspace-grid-edition))

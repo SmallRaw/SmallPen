@@ -16,7 +16,9 @@
    [app.common.uuid :as uuid]
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
+   [app.main.data.notifications :as ntf]
    [app.main.features :as features]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.worker :as mw]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.shape :as wasm.shape]
@@ -243,14 +245,19 @@
             uchg        (vec undo-changes)
             rchg        (vec redo-changes)
             features    (get state :features)
-            permissions (get state :permissions)]
+            permissions (get state :permissions)
+            blocked     (dsep/commit-block-reason (get-in state [:files file-id]) rchg)]
 
-        ;; Historical previews must not create edits to the live file. Check
-        ;; this when creating commits so previously queued edits can still save.
-        (when (and (:can-edit permissions)
-                   (not (dm/get-in state [:workspace-global :preview-id])))
-          (log/trace :hint "commit-changes" :redo-changes redo-changes)
+        ;; Prevent commit changes by a viewer team member (it really should never happen)
+        (cond
+          (or (not (:can-edit permissions))
+              (dm/get-in state [:workspace-global :preview-id])) nil
+          blocked (if save-undo?
+                    (rx/of (ntf/warn (dsep/blocked-message blocked)))
+                    (rx/empty))
+          :else
           (let [selected (dm/get-in state [:workspace-local :selected])]
+            (log/trace :hint "commit-changes" :redo-changes redo-changes)
             (rx/of (-> params
                        (assoc :undo-group undo-group)
                        (assoc :features features)

@@ -49,6 +49,7 @@
    [app.main.errors]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.repo :as rp]
    [app.main.router :as rt]
    [app.main.store :as st]
@@ -317,11 +318,13 @@
   ([{:keys [replace?]}]
    (ptk/reify ::paste-from-clipboard
      ptk/WatchEvent
-     (watch [_ _ _]
-       (->> (clipboard/from-navigator default-options)
-            (rx/mapcat (create-paste-from-blob false (boolean replace?)))
-            (rx/take 1)
-            (rx/catch on-clipboard-permission-error))))))
+     (watch [_ state _]
+       (if (dsep/current-page-locked? state)
+         (rx/of (ntf/warn (dsep/blocked-message :structure)))
+         (->> (clipboard/from-navigator default-options)
+              (rx/mapcat (create-paste-from-blob false (boolean replace?)))
+              (rx/take 1)
+              (rx/catch on-clipboard-permission-error)))))))
 
 (defn paste-from-event
   "Perform a `paste` operation from user emmited event."
@@ -335,8 +338,14 @@
 
         ;; Some paste events can be fired while we're editing a text
         ;; we forbid that scenario so the default behaviour is executed
-        (if is-editing?
+        (cond
+          is-editing?
           (rx/empty)
+
+          (dsep/current-page-locked? state)
+          (rx/of (ntf/warn (dsep/blocked-message :structure)))
+
+          :else
           (->> (clipboard/from-synthetic-clipboard-event event default-options)
                (rx/mapcat (create-paste-from-blob in-viewport? false))))))))
 

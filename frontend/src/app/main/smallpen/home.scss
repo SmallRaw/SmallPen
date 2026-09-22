@@ -1,0 +1,132 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+@use "ds/_borders.scss" as *;
+@use "ds/_sizes.scss" as *;
+@use "ds/_utils.scss" as *;
+
+.home {
+  background-color: var(--color-background-primary);
+  color: var(--color-foreground-primary);
+  min-block-size: 100vh;
+  overflow-y: auto;
+  padding: var(--sp-xxl);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-xl);
+  max-inline-size: px2rem(1200);
+  margin: 0 auto var(--sp-xxxl);
+}
+
+.subtitle {
+  color: var(--color-foreground-secondary);
+  margin-block-start: var(--sp-xs);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
+}
+
+.content {
+  max-inline-size: px2rem(1200);
+  margin: 0 auto;
+}
+
+.package-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(px2rem(320), 1fr));
+  gap: var(--sp-l);
+  margin-block-start: var(--sp-l);
+}
+
+.package-card {
+  display: grid;
+  grid-template-columns: $sz-40 minmax(0, 1fr);
+  gap: var(--sp-m);
+  background-color: var(--color-background-secondary);
+  border: $b-1 solid var(--panel-border-color);
+  border-radius: $br-8;
+  padding: var(--sp-l);
+
+  &.active {
+    border-color: var(--color-accent-primary);
+  }
+
+  &.repair {
+    border-color: var(--color-accent-error);
+  }
+
+  > button {
+    grid-column: 1 / -1;
+  }
+}
+
+.package-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: $sz-40;
+  block-size: $sz-40;
+  color: var(--color-accent-primary);
+}
+
+.package-copy {
+  min-inline-size: 0;
+}
+
+.package-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-s);
+}
+
+.status {
+  color: var(--color-accent-primary);
+  white-space: nowrap;
+}
+
+.path {
+  display: block;
+  color: var(--color-foreground-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-block-start: var(--sp-xs);
+}
+
+.metadata {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-m);
+  color: var(--color-foreground-secondary);
+  margin-block-start: var(--sp-m);
+}
+
+.error {
+  display: block;
+  color: var(--color-foreground-error);
+  margin-block-start: var(--sp-l);
+}
+
+@media (width <= 720px) {
+  .home {
+    padding: var(--sp-l);
+  }
+
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .header-actions {
+    inline-size: 100%;
+  }
+}

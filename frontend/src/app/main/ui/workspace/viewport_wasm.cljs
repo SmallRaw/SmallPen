@@ -21,6 +21,7 @@
    [app.main.data.workspace.variants :as dwv]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.flex-controls :as mfc]
@@ -298,7 +299,8 @@
         path-bar-shape    bar-shape
         draw-area-shape   drawing-shape
 
-        create-comment?   (= :comments drawing-tool)
+        create-comment?   (and (smallpen/capability-enabled? :comments)
+                               (= :comments drawing-tool))
 
         text-editing?     (cfh/text-shape? editing-shape)
         grid-editing?     (and edition (ctl/grid-layout? base-objects edition))
@@ -335,9 +337,11 @@
         on-frame-select   (actions/on-frame-select selected read-only?)
 
         disable-events?          (contains? layout :comments)
-        comments-mode?           (= drawing-tool :comments)
-        show-comments?           (or comments-mode?
-                                     (contains? layout :display-comments))
+        comments-mode?           (and (smallpen/capability-enabled? :comments)
+                                      (= drawing-tool :comments))
+        show-comments?           (and (smallpen/capability-enabled? :comments)
+                                      (or comments-mode?
+                                          (contains? layout :display-comments)))
         show-cursor-tooltip?     tooltip
         show-draw-area?          drawing-obj
         show-gradient-handlers?  (= (count selected) 1)
@@ -362,7 +366,9 @@
         hover-grid?              (and has-grid? (not page-transition?))
 
         show-grid-editor?        (and editing-shape (ctl/grid-layout? editing-shape) (not page-transition?))
-        show-presence?           (and page-id (not page-transition?))
+        show-presence?           (and (smallpen/capability-enabled? :presence)
+                                      page-id
+                                      (not page-transition?))
         show-prototypes?         (and (= options-mode :prototype) (not page-transition?))
         show-selection-handlers? (and (seq selected) (not show-text-editor?) (not page-transition?))
         show-snap-distance?      (and (contains? layout :dynamic-alignment)

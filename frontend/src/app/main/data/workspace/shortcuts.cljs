@@ -30,6 +30,7 @@
    [app.main.data.workspace.variants :as dwv]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.hooks.resize :as r]
    [app.util.dom :as dom]))
@@ -380,14 +381,17 @@
                           :command "c"
                           :section [:workspace]
                           :subsections [:tools]
-                          :fn #(st/emit! (dwd/select-for-drawing :comments))}
+                          :fn #(when (smallpen/capability-enabled? :comments)
+                                 (st/emit! (dwd/select-for-drawing :comments)))}
 
    :toggle-comments-visibility
    {:tooltip (ds/meta-shift "C")
     :command (ds/c-mod "shift+c")
     :section [:workspace]
     :subsections [:main-menu]
-    :fn #(st/emit! (dwcm/toggle-comments-visibility {:origin "workspace-shortcuts"}))}
+    :fn #(when (smallpen/capability-enabled? :comments)
+           (st/emit! (dwcm/toggle-comments-visibility
+                      {:origin "workspace-shortcuts"})))}
 
    :insert-image         {:tooltip (ds/shift "K")
                           :command "shift+k"
@@ -572,8 +576,9 @@
                           :command (ds/ca-mod "h")
                           :subsections [:panels]
                           :section [:workspace]
-                          :fn #(emit-when-no-readonly
-                                (dw/toggle-layout-flag :document-history))}
+                          :fn #(when-not (smallpen/enabled?)
+                                 (emit-when-no-readonly
+                                  (dw/toggle-layout-flag :document-history)))}
 
    :toggle-colorpalette  {:tooltip (ds/alt "P")
                           :command (ds/a-mod "p")

@@ -30,6 +30,10 @@
   border-radius: $br-8;
   background-color: var(--color-background-tertiary);
   inline-size: var(--options-width);
+
+  :global([data-smallpen-compact]) & {
+    margin-block-end: var(--sp-xxs);
+  }
 }
 
 .dragging {

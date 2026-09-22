@@ -19,7 +19,12 @@ case "${1:-}" in
         ;;
 esac
 
-EMSDK_QUIET=1 . /opt/emsdk/emsdk_env.sh
+_EMSDK_ROOT=${EMSDK:-/opt/emsdk}
+if [ ! -f "$_EMSDK_ROOT/emsdk_env.sh" ]; then
+    echo "Emscripten SDK is unavailable: $_EMSDK_ROOT/emsdk_env.sh" >&2
+    exit 1
+fi
+EMSDK_QUIET=1 . "$_EMSDK_ROOT/emsdk_env.sh"
 
 pushd $_SCRIPT_DIR;
 

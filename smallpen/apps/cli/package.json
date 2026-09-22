@@ -1,0 +1,16 @@
+{
+  "name": "@smallpen/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "smallpen": "./bin/smallpen-check.cjs"
+  },
+  "files": [
+    "bin"
+  ],
+  "dependencies": {
+    "@smallpen/core": "0.1.0",
+    "@smallpen/local-package": "0.1.0"
+  }
+}

@@ -39,6 +39,7 @@
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.snap :as snap]
    [app.main.store :as st]
    [app.main.streams :as ms]
@@ -748,7 +749,8 @@
                (d/toggle-selection id shift?))]
 
          ;; Take the first mouse position and start a move or a duplicate
-         (when (or (d/not-empty? selected) (some? id))
+         (when (and (not (dsep/current-page-locked? state))
+                    (or (d/not-empty? selected) (some? id)))
            (->> ms/mouse-position
                 (rx/map #(gpt/to-vec initial %))
                 (rx/map #(gpt/length %))
@@ -1124,7 +1126,8 @@
 
       ptk/UpdateEvent
       (update [_ state]
-        (if (nil? (get state ::current-move-selected))
+        (if (and (not (dsep/current-page-locked? state))
+                 (nil? (get state ::current-move-selected)))
           (-> state
               (assoc-in [:workspace-local :transform] :move)
               (assoc ::current-move-selected same-event))
@@ -1132,7 +1135,8 @@
 
       ptk/WatchEvent
       (watch [_ state stream]
-        (if (= same-event (get state ::current-move-selected))
+        (if (and (not (dsep/current-page-locked? state))
+                 (= same-event (get state ::current-move-selected)))
           (let [selected (dsh/lookup-selected state {:omit-blocked? true})
                 nudge (get-in state [:profile :props :nudge] {:big 10 :small 1})
                 move-events (->> stream
@@ -1210,10 +1214,13 @@
       (let [objects (dsh/lookup-page-objects state)
             selected (dsh/lookup-selected state {:omit-blocked? true})
             selected-shapes (->> selected (map (d/getf objects)))]
-        (if (every? #(and (ctl/any-layout-immediate-child? objects %)
+        (cond
+          (dsep/current-page-locked? state) (rx/empty)
+          (every? #(and (ctl/any-layout-immediate-child? objects %)
                           (not (ctl/position-absolute? %)))
                     selected-shapes)
           (rx/of (reorder-selected-layout-child direction))
+          :else
           (rx/of (nudge-selected-shapes direction shift?)))))))
 
 (defn- calculate-delta

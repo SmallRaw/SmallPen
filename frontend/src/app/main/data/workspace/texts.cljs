@@ -973,12 +973,16 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [position-data (::update-position-data state)]
+        ;; Position data is renderer bookkeeping (SVG text layout), never
+        ;; user history: saving it as undoable changes would truncate the
+        ;; redo tail whenever texts re-measure (SmallPen generated pages
+        ;; re-project after structural source changes).
         (rx/of (dwsh/update-shapes
                 (keys position-data)
                 (fn [shape]
                   (-> shape
                       (assoc :position-data (get position-data (:id shape)))))
-                {:stack-undo? true :reg-objects? false}))))))
+                {:save-undo? false :reg-objects? false}))))))
 
 (defn update-position-data
   [id position-data]

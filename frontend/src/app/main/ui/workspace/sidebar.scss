@@ -115,6 +115,10 @@
   z-index: var(--z-index-panels);
 }
 
+.smallpen-token-matrix {
+  z-index: var(--z-index-set);
+}
+
 .left-sidebar-header {
   grid-area: header;
 }

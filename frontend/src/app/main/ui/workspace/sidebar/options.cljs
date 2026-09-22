@@ -21,6 +21,8 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
+   [app.main.smallpen.token-inspector :as dseti]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
    [app.main.ui.inspect.right-sidebar :as hrs]
    [app.main.ui.workspace.sidebar.debug-shape-info :refer [debug-shape-info*]]
@@ -106,6 +108,9 @@
   (let [sp-panel (mf/deref refs/specialized-panel)
         drawing  (mf/deref refs/workspace-drawing)
         edition  (mf/deref refs/selected-edition)
+        page     (mf/deref refs/workspace-page)
+        ds-page? (dsep/design-system-page? page)
+        decoration? (and ds-page? (some #(not (dsep/source-shape? %)) shapes))
 
         edit-path
         (mf/deref refs/workspace-edit-path)
@@ -173,22 +178,41 @@
         (count selected)]
 
     [:div {:class (stl/css :element-options :design-options)}
-     [:> align-options* {:shapes shapes
-                         :objects objects
-                         :path-edit? path-editing?
-                         :node-count path-node-count}]
-     (when-not path-editing?
-       [:> bool-options* {:total-selected total-selected
-                          :shapes shapes
-                          :shapes-with-children shapes-with-children}])
+     (when-not ds-page?
+       [:> mf/Fragment #js {}
+        [:> align-options* {:shapes shapes
+                            :objects objects
+                            :path-edit? path-editing?
+                            :node-count path-node-count}]
+        (when-not path-editing?
+          [:> bool-options* {:total-selected total-selected
+                             :shapes shapes
+                             :shapes-with-children shapes-with-children}])])
+
+     (when ds-page?
+       [:section {:role "note" :class (stl/css :ds-editing-note)}
+        [:h3 {:class (stl/css :ds-editing-title)} "Design System"]
+        [:p {:class (stl/css :ds-editing-description)}
+         (if (or decoration? (zero? total-selected))
+           "选择 Token 或组件内容来编辑属性。背景、标题和排列由系统生成，不可修改。"
+           "属性修改会写回对应来源。新增、删除和布局调整，请到源页面操作。")]])
+
+     ;; DSE-R18/R24/R26: the Token Cell inspector rides at the top of the
+     ;; design panel whenever the selection contains a generated-page Token
+     ;; specimen — source identity details plus a validated write path for
+     ;; every canonical type.
+     [:> dseti/token-section* {:shapes shapes
+                               :file-id file-id
+                               :page-id page-id}]
+     [:> dseti/component-source-section* {:shapes shapes}]
 
      (cond
-       ;; Show path-specific options during node editing.
+       (and ds-page? (or decoration? (zero? total-selected)))
+       nil
+
        path-editing?
        [:> path/path-edition-options*
-        {:shape (get objects edition)
-         :file-id file-id
-         :page-id page-id}]
+        {:shape (get objects edition) :file-id file-id :page-id page-id}]
 
        (and edit-grid? (d/not-empty? selected-cells))
        [:> grid-cell/options*

@@ -8,6 +8,7 @@
 @use "ds/_borders.scss" as *;
 @use "ds/spacing.scss" as *;
 @use "ds/_sizes.scss" as *;
+@use "ds/mixins.scss" as *;
 @use "ds/typography.scss" as t;
 @use "ds/_utils.scss" as *;
 
@@ -67,4 +68,19 @@
 
 .hex-input {
   grid-column: span 2;
+}
+
+.reference-hex-input {
+  min-width: 0;
+}
+
+.reference-dropdown {
+  --reference-dropdown-width: #{$sz-352};
+
+  position: fixed;
+  inline-size: min(var(--reference-dropdown-width), calc(100vw - (2 * var(--sp-m))));
+  max-block-size: $sz-400;
+  overflow-y: auto;
+
+  @include custom-scrollbar;
 }

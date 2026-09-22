@@ -90,7 +90,18 @@
         variant-properties    (-> (ctkl/get-component data component-id)
                                   (get :variant-properties))
 
-        icon-shape            (usi/get-shape-icon item)]
+        icon-shape            (usi/get-shape-icon item)
+
+        ;; DSE-009: mark SmallPen system-page content so the tree explains
+        ;; which rows map to real source objects and which are decoration.
+        ;; The projection writes a flat `design-system-kind` marker so the
+        ;; tree needs no JSON parsing.
+        ds-mode               (get-in item [:plugin-data :smallpen "design-system"])
+        ds-ref-kind           (get-in item [:plugin-data :smallpen "design-system-kind"])
+        ds-testid             (cond
+                                (= ds-ref-kind "token-cell") "dse-token-specimen"
+                                (= ds-mode "source") "dse-source"
+                                (= ds-mode "decoration") "dse-decoration")]
 
     [:*
      [:div {:id id
@@ -175,7 +186,25 @@
                         :variant-error variant-error
                         :component-id component-id
                         :is-hidden hidden?
-                        :on-tab-press on-tab-press}]]
+                        :on-tab-press on-tab-press}]
+       ;; DSE-009: mark SmallPen system-page content so the tree explains
+       ;; which rows map to real source objects and which are decoration.
+       (when ds-testid
+         [:span {:style {:background "#e5e7eb"
+                         :border-radius "999px"
+                         :color "#374151"
+                         :flex "none"
+                         :font-size "9px"
+                         :font-weight "600"
+                         :line-height "1"
+                         :margin-left "4px"
+                         :padding "3px 5px"
+                         :white-space "nowrap"}
+                 :data-testid ds-testid}
+          (cond
+            (= ds-testid "dse-token-specimen") "Token"
+            (= ds-testid "dse-source") "源"
+            :else "装饰")])]
       (when (not ^boolean is-read-only)
         [:div {:class (stl/css-case
                        :element-actions true

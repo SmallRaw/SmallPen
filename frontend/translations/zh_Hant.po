@@ -4038,6 +4038,10 @@ msgstr "列表視圖"
 msgid "workspace.assets.local-library"
 msgstr "本地圖庫"
 
+#: src/app/main/ui/workspace/sidebar/assets/tokens.cljs
+msgid "workspace.assets.tokens"
+msgstr "權杖"
+
 #: src/app/main/ui/workspace/color_palette.cljs:204, src/app/main/ui/workspace/sidebar/assets/file_library.cljs:305
 msgid "workspace.assets.not-found"
 msgstr "未找到資源"
@@ -4501,6 +4505,35 @@ msgstr "圖庫更新"
 #: src/app/main/ui/workspace/libraries.cljs:421
 msgid "workspace.libraries.loading"
 msgstr "載入中…"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.add-source"
+msgstr "新增資源庫來源"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.foundation"
+msgstr "基礎庫"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.local-help"
+msgstr "建議使用專案附近的相對路徑。仍可連接專案目錄外的檔案，但移動檔案後可能失效。"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.local-path"
+msgstr "本機路徑"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.remote-help"
+msgstr "URL 會始終作為資源庫來源；SmallPen 會保留經過驗證的本機快照，用於加速載入和離線使用。"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.remote-url"
+msgstr "遠端 URL"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.tokens"
+msgid_plural "workspace.libraries.smallpen.tokens"
+msgstr[0] "%s 個令牌"
 
 #: src/app/main/ui/workspace/libraries.cljs:387
 #, unused
@@ -6407,6 +6440,15 @@ msgstr "圖形"
 msgid "workspace.undo.entry.multiple.color"
 msgstr "顏色資源"
 
+msgid "workspace.undo.entry.multiple.token"
+msgstr "權杖"
+
+msgid "workspace.undo.entry.multiple.token-set"
+msgstr "權杖集"
+
+msgid "workspace.undo.entry.multiple.token-theme"
+msgstr "權杖主題"
+
 #: src/app/main/ui/workspace/sidebar/history.cljs:114
 msgid "workspace.undo.entry.multiple.component"
 msgstr "元件"
@@ -6466,6 +6508,15 @@ msgstr "圓圈"
 #: src/app/main/ui/workspace/sidebar/history.cljs:127
 msgid "workspace.undo.entry.single.color"
 msgstr "顏色素材"
+
+msgid "workspace.undo.entry.single.token"
+msgstr "權杖"
+
+msgid "workspace.undo.entry.single.token-set"
+msgstr "權杖集"
+
+msgid "workspace.undo.entry.single.token-theme"
+msgstr "權杖主題"
 
 #: src/app/main/ui/workspace/sidebar/history.cljs:128
 msgid "workspace.undo.entry.single.component"
@@ -6624,3 +6675,259 @@ msgstr "自動儲存的版本將保留 %s 天。"
 #, unused
 msgid "workspace.viewport.click-to-close-path"
 msgstr "點擊以關閉路徑"
+msgid "smallpen.home.empty-subtitle"
+msgstr "新增一個 .smallpen Package，或開啟現有檔案。"
+
+msgid "smallpen.home.empty-title"
+msgstr "沒有最近使用的 Package"
+
+msgid "smallpen.home.new-package"
+msgstr "新增 Package…"
+
+msgid "smallpen.home.new-prompt"
+msgstr "輸入新 .smallpen Package 的建立位置"
+
+msgid "smallpen.home.open"
+msgstr "已開啟"
+
+msgid "smallpen.home.open-package"
+msgstr "開啟 Package…"
+
+msgid "smallpen.home.open-prompt"
+msgstr "輸入本機 .smallpen Package 路徑"
+
+msgid "smallpen.home.recent"
+msgstr "最近使用的 Package"
+
+msgid "smallpen.home.repair"
+msgstr "需要修復"
+
+msgid "smallpen.home.subtitle"
+msgstr "本機工作區"
+msgid "smallpen.home.navigation"
+msgstr "首頁"
+
+msgid "smallpen.tokens.import.title"
+msgstr "匯入 Token"
+
+msgid "smallpen.tokens.import.hint"
+msgstr "支援 Penpot / Tokens Studio 匯出的 DTCG 檔案。寫入前會逐列列出每一處變更和具體值。"
+
+msgid "smallpen.tokens.import.choose-file"
+msgstr "選擇 Token JSON 檔案…"
+
+msgid "smallpen.tokens.import.summary"
+msgstr "%s 新增 · %s 修改 · %s 刪除 · %s 略過"
+
+msgid "smallpen.tokens.import.added"
+msgstr "新增"
+
+msgid "smallpen.tokens.import.changed"
+msgstr "修改"
+
+msgid "smallpen.tokens.import.removed"
+msgstr "刪除"
+
+msgid "smallpen.tokens.import.skipped"
+msgstr "已略過（不會匯入）"
+
+msgid "smallpen.tokens.import.name"
+msgstr "Token"
+
+msgid "smallpen.tokens.import.set"
+msgstr "Token 集"
+
+msgid "smallpen.tokens.import.current"
+msgstr "目前值"
+
+msgid "smallpen.tokens.import.incoming"
+msgstr "匯入值"
+
+msgid "smallpen.tokens.import.select-all"
+msgstr "全選"
+
+msgid "smallpen.tokens.import.select-none"
+msgstr "全不選"
+
+msgid "smallpen.tokens.import.apply"
+msgstr "匯入所選"
+
+msgid "smallpen.tokens.import.applying"
+msgstr "匯入中…"
+
+msgid "smallpen.tokens.import.nothing"
+msgstr "沒有需要匯入的變更：檔案與目前 Token 庫一致。"
+
+msgid "smallpen.tokens.import.sets-themes"
+msgstr "Token 集與主題依檔案同步：%s"
+
+msgid "smallpen.tokens.import.read-error"
+msgstr "無法讀取或解析該檔案。"
+
+msgid "smallpen.tokens.import.done"
+msgstr "匯入完成，正在重新載入工作區…"
+
+msgid "smallpen.tokens.import.field-value"
+msgstr "值"
+
+msgid "smallpen.tokens.import.field-description"
+msgstr "描述"
+
+msgid "smallpen.tokens.import.field-type"
+msgstr "類型"
+
+msgid "workspace.tokens.matrix.axes"
+msgstr "設計模式"
+
+msgid "workspace.tokens.matrix.current-combination"
+msgstr "目前主題組合"
+
+msgid "workspace.tokens.matrix.current-domain"
+msgstr "選擇 %s 目前使用的選項"
+
+msgid "workspace.tokens.matrix.disabled"
+msgstr "未啟用"
+
+msgid "workspace.tokens.matrix.activate-variant"
+msgstr "啟用 %s"
+
+msgid "workspace.tokens.matrix.name"
+msgstr "名稱"
+
+msgid "workspace.tokens.matrix.add-axis"
+msgstr "新增模式"
+
+msgid "workspace.tokens.matrix.add-variant"
+msgstr "新增細分項"
+
+msgid "workspace.tokens.matrix.add-variable"
+msgstr "新增變數"
+
+msgid "workspace.tokens.matrix.reference-options"
+msgstr "引用令牌"
+
+msgid "workspace.tokens.matrix.no-reference-results"
+msgstr "沒有符合的令牌引用"
+
+msgid "workspace.tokens.matrix.reference-unset"
+msgstr "%s 中未設定"
+
+msgid "workspace.tokens.matrix.reference-missing"
+msgstr "令牌 %s 不存在"
+
+msgid "workspace.tokens.matrix.unset"
+msgstr "未設定"
+
+msgid "workspace.tokens.matrix.set-value"
+msgstr "設定 %s（%s）"
+
+msgid "workspace.tokens.matrix.empty"
+msgstr "新增模式或變數，開始定義設計權杖。"
+
+msgid "workspace.tokens.matrix.global-contract"
+msgstr "依權杖類型設定 Key 規則"
+
+msgid "workspace.tokens.matrix.type-contract"
+msgstr "%s Key 規則"
+
+msgid "workspace.tokens.matrix.token-contract"
+msgstr "%s 的 Key 規則"
+
+msgid "workspace.tokens.matrix.variant-menu"
+msgstr "開啟 %s 細分項選單"
+
+msgid "workspace.tokens.matrix.token-menu"
+msgstr "開啟 %s 權杖選單"
+
+msgid "workspace.tokens.matrix.rename-axis"
+msgstr "重新命名模式"
+
+msgid "workspace.tokens.matrix.rename-variant"
+msgstr "重新命名細分項"
+
+msgid "workspace.tokens.matrix.rename-token"
+msgstr "重新命名權杖"
+
+msgid "workspace.tokens.matrix.rename-token-menu"
+msgstr "重新命名 %s"
+
+msgid "workspace.tokens.matrix.rename-empty"
+msgstr "名稱不能為空。"
+
+msgid "workspace.tokens.matrix.rename-separator"
+msgstr "名稱不能包含 /，它用於分隔權杖集層級。"
+
+msgid "workspace.tokens.matrix.rename-conflict"
+msgstr "這個名稱已被使用。"
+
+msgid "workspace.tokens.matrix.delete-axis"
+msgstr "刪除模式"
+
+msgid "workspace.tokens.matrix.delete-axis-message"
+msgstr "刪除 %s 及其全部細分項？對應的權杖集與配對主題也會刪除。"
+
+msgid "workspace.tokens.matrix.delete-variant"
+msgstr "刪除細分項"
+
+msgid "workspace.tokens.matrix.delete-variant-message"
+msgstr "刪除 %s 細分項？對應的權杖集與配對主題也會刪除。"
+
+msgid "workspace.tokens.matrix.override-warning"
+msgstr "由 %s 定義。%s 在權杖集順序中較後，因此使用它。"
+
+msgid "workspace.tokens.matrix.contract"
+msgstr "權杖 Key 規則"
+
+msgid "workspace.tokens.matrix.contract.global"
+msgstr "全域規則"
+
+msgid "workspace.tokens.matrix.contract.type"
+msgstr "%s 規則"
+
+msgid "workspace.tokens.matrix.contract.token"
+msgstr "%s 單項覆寫"
+
+msgid "workspace.tokens.matrix.contract-description"
+msgstr "先設定全域預設值，也可依每種權杖類型個別覆寫。「開放」表示不限制名稱。"
+
+msgid "workspace.tokens.matrix.contract.type-table"
+msgstr "依權杖類型設定規則"
+
+msgid "workspace.tokens.matrix.contract.type-column"
+msgstr "權杖類型"
+
+msgid "workspace.tokens.matrix.contract-mode"
+msgstr "處理方式"
+
+msgid "workspace.tokens.matrix.contract.open"
+msgstr "開放"
+
+msgid "workspace.tokens.matrix.contract.inherit"
+msgstr "跟隨全域"
+
+msgid "workspace.tokens.matrix.contract.warn"
+msgstr "警告"
+
+msgid "workspace.tokens.matrix.contract.enforce"
+msgstr "強制"
+
+msgid "workspace.tokens.matrix.contract-prefix"
+msgstr "必要前綴"
+
+msgid "workspace.tokens.matrix.contract-separator"
+msgstr "分隔符號"
+
+msgid "workspace.tokens.matrix.separator.hyphen"
+msgstr "連字號（-）"
+
+msgid "workspace.tokens.matrix.separator.dot"
+msgstr "點號（.）"
+
+msgid "workspace.tokens.matrix.separator.underscore"
+msgstr "底線（_）"
+
+msgid "workspace.tokens.matrix.contract-preview"
+msgstr "預覽"
+
+msgid "workspace.tokens.matrix.contract-draft-note"
+msgstr "本次評審草稿只保存在面板本地，暫不變更 Package 格式。"

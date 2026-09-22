@@ -278,6 +278,7 @@
                   on-change
                   on-close
                   on-open
+                  on-detach-token
                   tokens
                   index
                   applied-token)
@@ -300,6 +301,7 @@
                         ;; on-change second parameter means if the source is the color-picker
                         :on-change #(on-change % index)
                         :on-token-change on-token-change
+                        :on-token-detach on-detach-token
                         :on-close (fn [value opacity id file-id]
                                     (when on-close
                                       (on-close value opacity id file-id)))

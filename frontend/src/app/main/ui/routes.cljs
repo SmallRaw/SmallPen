@@ -16,6 +16,7 @@
    [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.util.storage :as storage]
    [beicon.v2.core :as rx]
@@ -62,7 +63,9 @@
           :dashboard-libraries
           :dashboard-files
           :dashboard-deleted
-          :workspace}
+          :workspace
+          :smallpen-home
+          :smallpen-design-system}
         (concat
          (when (contains? cf/flags :admin-console)
            [:nitrate-entry])
@@ -99,6 +102,10 @@
     ["/shortcuts"     :settings-shortcuts]]
 
    ["/frame-preview" :frame-preview]
+
+   ["/smallpen" :smallpen-home]
+
+   ["/design-system" :smallpen-design-system]
 
    ["/view" :viewer]
 
@@ -138,7 +145,6 @@
       {:name   (get-in match [:data :name])
        :params (merge (:path-params match)
                       (u/query-string->map (:query uri)))})))
-
 
 (defn- store-session-params
   [{:keys [template plugin]}]
@@ -253,9 +259,20 @@
         query-params (u/query-string->map token-query)
         empty-token? (str/blank? token-query)
         match        (rt/match router token)]
-    (if (some? match)
+    (cond
+      (and (smallpen/enabled?)
+           (or (nil? (rt/get-query-param query-params :screen))
+               (some-> (get-in match [:data :name]) name (str/starts-with? "dashboard"))))
+      (st/emit! (rt/nav :smallpen-home))
+
+      (and (contains? #{:smallpen-home :smallpen-design-system} (get-in match [:data :name]))
+           (not (smallpen/enabled?)))
+      (st/emit! (rt/assign-exception {:type :not-found}))
+
+      (some? match)
       (handle-sso-error-and-navigate match send-event-info? (rt/get-current-href))
 
+      :else
       ;; We just recheck with an additional profile request; this
       ;; avoids some race conditions that causes unexpected redirects
       ;; on invitations workflows (and probably other cases).

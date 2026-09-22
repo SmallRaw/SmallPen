@@ -431,4 +431,3 @@
                     #(ctsi/set-overlay-position % overlay-pos))]
 
         (rx/of (dwsh/update-shapes [(:id shape)] #(merge % {:interactions new-interactions})))))))
-

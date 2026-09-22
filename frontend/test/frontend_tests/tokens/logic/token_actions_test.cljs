@@ -6,6 +6,8 @@
 
 (ns frontend-tests.tokens.logic.token-actions-test
   (:require
+   [app.common.files.tokens :as cfo]
+   [app.main.smallpen.token-state :as spts]
    [app.common.test-helpers.compositions :as ctho]
    [app.common.test-helpers.files :as cthf]
    [app.common.test-helpers.ids-map :as cthi]
@@ -14,16 +16,24 @@
    [app.common.types.text :as txt]
    [app.common.types.tokens-lib :as ctob]
    [app.common.types.tokens-status :as ctos]
+   [app.main.data.changes :as dch]
    [app.main.data.workspace.tokens.application :as dwta]
    [app.main.data.workspace.tokens.library-edit :as dwtl]
+   [app.main.data.workspace.tokens.propagation :as dwtp]
+   [app.main.data.workspace.undo :as dwu]
    [app.main.data.workspace.wasm-text :as dwwt]
+   [beicon.v2.core :as rx]
    [cljs.test :as t :include-macros true]
    [cuerdas.core :as str]
    [frontend-tests.helpers.pages :as thp]
    [frontend-tests.helpers.state :as ths]
    [frontend-tests.helpers.wasm :as thw]
    [frontend-tests.tokens.helpers.state :as tohs]
-   [frontend-tests.tokens.helpers.tokens :as toht]))
+   [frontend-tests.tokens.helpers.tokens :as toht]
+   [potok.v2.core :as ptk]))
+
+(defn- current-tokens-library [file]
+  (spts/file-library (:data file)))
 
 (t/use-fixtures :each
   {:before (fn []
@@ -79,6 +89,315 @@
 (defn setup-file-with-empty-lib []
   (-> (setup-file)
       (assoc-in [:data :tokens-lib] (ctob/make-tokens-lib))))
+
+(defn- watch-undo-stack
+  []
+  (ptk/reify ::watch-undo-stack
+    ptk/WatchEvent
+    (watch [_ _ stream]
+      (let [stopper-s (->> stream (rx/filter (ptk/type? ::watch-undo-stack)))]
+        (->> stream
+             (rx/filter dch/commit?)
+             (rx/map deref)
+             (rx/mapcat
+              (fn [{:keys [save-undo? undo-changes redo-changes undo-group
+                           tags stack-undo? selected-before]}]
+                (if (and save-undo? (seq undo-changes))
+                  (rx/of (dwu/append-undo
+                          {:undo-changes undo-changes
+                           :redo-changes redo-changes
+                           :undo-group undo-group
+                           :tags tags
+                           :selected-before selected-before}
+                          stack-undo?))
+                  (rx/empty))))
+             (rx/take-until stopper-s))))))
+
+(defn- setup-file-with-matrix-row-legacy
+  []
+  (let [light-set-id (cthi/new-id! :matrix-light-set)
+        dark-set-id (cthi/new-id! :matrix-dark-set)
+        light-token (ctob/make-token
+                     {:id (cthi/new-id! :matrix-light-token)
+                      :name "color.primary"
+                      :type :color
+                      :value "#ffffff"
+                      :description "Primary"})
+        dark-token (ctob/make-token
+                    {:id (cthi/new-id! :matrix-dark-token)
+                     :name "color.primary"
+                     :type :color
+                     :value "#000000"
+                     :description "Primary"})
+        light-alias (ctob/make-token
+                     {:id (cthi/new-id! :matrix-light-alias)
+                      :name "color.alias"
+                      :type :color
+                      :value "{color.primary}"})
+        dark-alias (ctob/make-token
+                    {:id (cthi/new-id! :matrix-dark-alias)
+                     :name "color.alias"
+                     :type :color
+                     :value "{color.primary}"})
+        tokens-lib (-> (ctob/make-tokens-lib)
+                       (ctob/add-set (ctob/make-token-set
+                                      :id light-set-id
+                                      :name "Mode/Light"))
+                       (ctob/add-set (ctob/make-token-set
+                                      :id dark-set-id
+                                      :name "Mode/Dark"))
+                       (ctob/add-token light-set-id light-token)
+                       (ctob/add-token light-set-id light-alias)
+                       (ctob/add-token dark-set-id dark-token)
+                       (ctob/add-token dark-set-id dark-alias))]
+    (-> (setup-file)
+        (ctho/add-rect :matrix-rect
+                       {:applied-tokens {:fill "color.primary"}})
+        (assoc-in [:data :tokens-lib] tokens-lib))))
+
+(defn- matrix-row-definitions
+  [file token-name]
+  (let [tokens-lib (get-in file [:data :tokens-lib])]
+    (mapv (fn [set-label]
+            (let [set-id (cthi/id set-label)]
+              {:set-id set-id
+               :token (get (ctob/get-tokens tokens-lib set-id) token-name)}))
+          [:matrix-light-set :matrix-dark-set])))
+
+(defn- activate-light-matrix-theme-legacy
+  [file]
+  (let [light-theme (ctob/make-token-theme
+                     :name "Light"
+                     :group "Mode"
+                     :sets #{"Mode/Light"})
+        dark-theme (ctob/make-token-theme
+                    :name "Dark"
+                    :group "Mode"
+                    :sets #{"Mode/Dark"})]
+    (update-in file [:data :tokens-lib]
+               #(-> %
+                    (ctob/add-theme light-theme)
+                    (ctob/add-theme dark-theme)
+                    (spts/activate-theme (ctob/get-id light-theme))))))
+
+(defn- activate-light-matrix-theme [file]
+  (let [file (activate-light-matrix-theme-legacy file)]
+    (assoc-in file [:data :tokens-status]
+              (cfo/make-tokens-status-from-lib (get-in file [:data :tokens-lib])))))
+
+(defn setup-file-with-matrix-row
+  []
+  (let [file (setup-file-with-matrix-row-legacy)]
+    (assoc-in file [:data :tokens-status]
+              (cfo/make-tokens-status-from-lib (get-in file [:data :tokens-lib])))))
+
+(t/deftest test-undo-transaction-keeps-explicit-group
+  (t/testing "an undo transaction can join the user action that initiated it"
+    (let [store (ptk/store {:state {}})
+          transaction-id (js/Symbol)
+          undo-group (random-uuid)]
+      (ptk/emit! store
+                 (dwu/start-undo-transaction
+                  transaction-id
+                  :timeout false
+                  :undo-group undo-group))
+      (t/is (= undo-group
+               (get-in @store [:workspace-undo :transaction :undo-group]))))))
+
+(t/deftest test-update-token-matrix-row-is-one-undo-entry
+  (t/testing "renaming a matrix row updates every set and reference atomically"
+    (t/async
+      done
+      (let [file (setup-file-with-matrix-row)
+            store (ths/setup-store file)
+            definitions (matrix-row-definitions file "color.primary")]
+        (ptk/emit! store (watch-undo-stack))
+        (tohs/run-store-async
+         store done
+         [(dwtl/update-token-matrix-row
+           definitions
+           {:name "color.brand"
+            :description "Brand color"})]
+         (fn [new-state]
+           (let [file' (ths/get-file-from-state new-state)
+                 tokens-lib (get-in file' [:data :tokens-lib])
+                 shape (cths/get-shape file' :matrix-rect)]
+             (doseq [set-label [:matrix-light-set :matrix-dark-set]
+                     :let [set-id (cthi/id set-label)
+                           tokens (ctob/get-tokens tokens-lib set-id)]]
+               (t/is (nil? (get tokens "color.primary")))
+               (t/is (= "Brand color"
+                        (:description (get tokens "color.brand"))))
+               (t/is (= "{color.brand}"
+                        (:value (get tokens "color.alias")))))
+             (t/is (= "color.brand" (get-in shape [:applied-tokens :fill])))
+             (t/is (= 1 (count (get-in new-state [:workspace-undo :items])))))))))))
+
+(t/deftest test-delete-token-matrix-row-is-one-undo-entry
+  (t/testing "deleting a matrix row removes every set definition atomically"
+    (t/async
+      done
+      (let [file (setup-file-with-matrix-row)
+            store (ths/setup-store file)
+            definitions (matrix-row-definitions file "color.primary")]
+        (ptk/emit! store (watch-undo-stack))
+        (tohs/run-store-async
+         store done
+         [(dwtl/delete-token-matrix-row definitions)]
+         (fn [new-state]
+           (let [tokens-lib (get-in (ths/get-file-from-state new-state)
+                                    [:data :tokens-lib])]
+             (doseq [set-label [:matrix-light-set :matrix-dark-set]
+                     :let [set-id (cthi/id set-label)]]
+               (t/is (nil? (get (ctob/get-tokens tokens-lib set-id)
+                                "color.primary"))))
+             (t/is (= 1 (count (get-in new-state [:workspace-undo :items])))))))))))
+
+(t/deftest test-token-matrix-row-undo-and-redo-are-complete
+  (t/testing "one undo and redo restore the complete matrix row and its references"
+    (t/async
+      done
+      (let [file (setup-file-with-matrix-row)
+            store (ths/setup-store file)
+            definitions (matrix-row-definitions file "color.primary")
+            update-event (dwtl/update-token-matrix-row
+                          definitions
+                          {:name "color.brand"
+                           :description "Brand color"})
+            token-present?
+            (fn [state token-name]
+              (let [tokens-lib (current-tokens-library (ths/get-file-from-state state))]
+                (every? (fn [set-label]
+                          (let [set-id (cthi/id set-label)]
+                            (some? (get (ctob/get-tokens tokens-lib set-id)
+                                        token-name))))
+                        [:matrix-light-set :matrix-dark-set])))]
+        (ptk/emit! store (watch-undo-stack))
+        (tohs/run-store-async
+         store (fn []) [update-event]
+         (fn [updated-state]
+           (t/is (token-present? updated-state "color.brand"))
+           (tohs/run-store-async
+            store (fn []) [dwu/undo]
+            (fn [undone-state]
+              (t/is (token-present? undone-state "color.primary"))
+              (t/is (not (token-present? undone-state "color.brand")))
+              (t/is (= "color.primary"
+                       (get-in (cths/get-shape
+                                (ths/get-file-from-state undone-state)
+                                :matrix-rect)
+                               [:applied-tokens :fill])))
+              (tohs/run-store-async
+               store done [dwu/redo]
+               (fn [redone-state]
+                 (t/is (token-present? redone-state "color.brand"))
+                 (t/is (not (token-present? redone-state "color.primary")))
+                 (t/is (= "color.brand"
+                          (get-in (cths/get-shape
+                                   (ths/get-file-from-state redone-state)
+                                   :matrix-rect)
+                                  [:applied-tokens :fill])))))))))))))
+
+(t/deftest test-token-value-propagation-undoes-with-the-edit
+  (t/testing "one undo restores both a token value and its propagated shape value"
+    (t/async
+      done
+      (let [file (activate-light-matrix-theme
+                  (setup-file-with-matrix-row))
+            file (assoc-in file
+                           [:data :pages-index (cthf/current-page-id file)
+                            :objects (cthi/id :matrix-rect) :fills]
+                           [{:fill-color "#ffffff"
+                             :fill-opacity 1}])
+            store (ths/setup-store file)
+            light-token (-> (matrix-row-definitions file "color.primary")
+                            first
+                            :token)
+            undo-group (random-uuid)
+            token-value
+            (fn [state]
+              (let [tokens-lib (get-in (ths/get-file-from-state state)
+                                       [:data :tokens-lib])]
+                (:value (ctob/get-token tokens-lib
+                                        (cthi/id :matrix-light-set)
+                                        (:id light-token)))))
+            shape-fill
+            (fn [state]
+              (get-in (cths/get-shape (ths/get-file-from-state state)
+                                      :matrix-rect)
+                      [:fills 0 :fill-color]))]
+        (ptk/emit! store (watch-undo-stack))
+        (tohs/run-store-async
+         store (fn [])
+         [(dwtl/update-token
+           (cthi/id :matrix-light-set)
+           (:id light-token)
+           {:value "#ff0000"}
+           :undo-group undo-group)
+          (dwtp/propagate-workspace-tokens undo-group)]
+         (fn [updated-state]
+           (t/is (= "#ff0000" (token-value updated-state)))
+           (t/is (= "#ff0000" (shape-fill updated-state)))
+           (t/is (= 2 (count (get-in updated-state
+                                     [:workspace-undo :items]))))
+           (t/is (every? #(= undo-group (:undo-group %))
+                         (get-in updated-state [:workspace-undo :items])))
+           (tohs/run-store-async
+            store (fn []) [dwu/undo]
+            (fn [undone-state]
+              (t/is (= "#ffffff" (token-value undone-state)))
+              (t/is (= "#ffffff" (shape-fill undone-state)))
+              (tohs/run-store-async
+               store done [dwu/redo]
+               (fn [redone-state]
+                 (t/is (= "#ff0000" (token-value redone-state)))
+                 (t/is (= "#ff0000" (shape-fill redone-state)))))))))))))
+
+(t/deftest test-matrix-theme-switch-undoes-with-propagation
+  (t/testing "one undo restores the active matrix Theme and concrete shape value"
+    (t/async
+      done
+      (let [file (activate-light-matrix-theme
+                  (setup-file-with-matrix-row))
+            file (assoc-in file
+                           [:data :pages-index (cthf/current-page-id file)
+                            :objects (cthi/id :matrix-rect) :fills]
+                           [{:fill-color "#ffffff"
+                             :fill-opacity 1}])
+            store (ths/setup-store file)
+            theme-active?
+            (fn [state theme-name]
+              (let [tokens-lib (get-in (ths/get-file-from-state state)
+                                       [:data :tokens-lib])
+                    theme (ctob/get-theme-by-name tokens-lib "Mode" theme-name)]
+                (spts/theme-active? tokens-lib (ctob/get-id theme))))
+            shape-fill
+            (fn [state]
+              (get-in (cths/get-shape (ths/get-file-from-state state)
+                                      :matrix-rect)
+                      [:fills 0 :fill-color]))]
+        (ptk/emit! store (watch-undo-stack))
+        (tohs/run-store-async
+         store (fn [])
+         [(dwtl/activate-token-matrix-variant
+           "Mode"
+           (cthi/id :matrix-dark-set))]
+         (fn [dark-state]
+           (t/is (theme-active? dark-state "Dark"))
+           (t/is (not (theme-active? dark-state "Light")))
+           (t/is (= "#000000" (shape-fill dark-state)))
+           (tohs/run-store-async
+            store (fn []) [dwu/undo]
+            (fn [light-state]
+              (t/is (theme-active? light-state "Light"))
+              (t/is (not (theme-active? light-state "Dark")))
+              (t/is (= "#ffffff" (shape-fill light-state)))
+              (tohs/run-store-async
+               store done [dwu/redo]
+               (fn [redone-state]
+                 (t/is (theme-active? redone-state "Dark"))
+                 (t/is (not (theme-active? redone-state "Light")))
+                 (t/is (= "#000000" (shape-fill redone-state)))))))))))))
 
 (t/deftest test-create-token-set-inactive-by-default
   (t/testing "a newly created set is not active unless explicitly enabled"

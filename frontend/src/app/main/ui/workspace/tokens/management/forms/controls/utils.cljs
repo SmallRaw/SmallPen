@@ -2,16 +2,22 @@
   (:require
    [app.common.data.macros :as dm]
    [app.common.types.token :as cto]
+   [app.main.data.tokenscript :as tokenscript]
    [app.util.i18n :refer [tr]]
    [cuerdas.core :as str]))
 
 (defn- token->dropdown-option
   [token]
-  {:id (str (get token :id))
-   :type :token
-   :value (get token :value)
-   :resolved-value (get token :resolved-value)
-   :name (get token :name)})
+  (let [resolved-value (get token :resolved-value)
+        resolved-value (if (tokenscript/tokenscript-symbol? resolved-value)
+                         (tokenscript/tokenscript-symbols->penpot-unit resolved-value)
+                         resolved-value)]
+    {:id (str (get token :id))
+     :type :token
+     :token-type (get token :type)
+     :value (get token :value)
+     :resolved-value resolved-value
+     :name (get token :name)}))
 
 (defn- generate-dropdown-options
   [tokens no-sets]

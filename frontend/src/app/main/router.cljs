@@ -40,7 +40,12 @@
      ;; The target screen always wins: callers often forward the
      ;; current query params (which carry the previous screen).
      (str "?" (u/map->query-string
-               (into {:screen (name id)} (dissoc params :screen)))))))
+               (into (merge {:screen (name id)}
+                            (select-keys
+                             (u/query-string->map
+                              (or (some-> globals/location .-search (str/replace #"^\?" "")) ""))
+                             [:smallpen-backend :smallpen-package]))
+                     (dissoc params :screen)))))))
 
 (defn resolve-uri
   "Build the absolute URL string for a route under `cf/public-uri`."
@@ -120,9 +125,13 @@
 
     ptk/EffectEvent
     (effect [_ state _]
-      (let [router  (:router state)
-            history (:history state)
-            path    (resolve router id params)]
+      (let [router           (:router state)
+            history          (:history state)
+            smallpen-runtime (unchecked-get js/globalThis "smallpenRuntime")
+            params           (cond-> params
+                               (and smallpen-runtime (= id :workspace))
+                               (dissoc :team-id))
+            path             (resolve router id params)]
 
         (if ^boolean new-window
           (let [name   (or (::window-name options) "_blank")
@@ -203,7 +212,6 @@
 (defn get-current-href
   []
   (.-href globals/location))
-
 
 ;; --- History API
 

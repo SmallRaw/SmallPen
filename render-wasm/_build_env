@@ -121,7 +121,10 @@ function copy_artifacts {
         cp $SRC/render_wasm.wasm.map $DEST/$BUILD_NAME.wasm.map;
     fi
 
-    sed -i "s/render_wasm.wasm/$BUILD_NAME.wasm?version=$VERSION_TAG/g" $DEST/$BUILD_NAME.js;
+    ARTIFACT_PATH="$DEST/$BUILD_NAME.js";
+    ARTIFACT_TMP="$ARTIFACT_PATH.tmp";
+    sed "s/render_wasm.wasm/$BUILD_NAME.wasm?version=$VERSION_TAG/g" "$ARTIFACT_PATH" > "$ARTIFACT_TMP";
+    mv "$ARTIFACT_TMP" "$ARTIFACT_PATH";
 
     # The worker bundle is a browser concern; the exporter imports the ESM
     # module directly under Node.

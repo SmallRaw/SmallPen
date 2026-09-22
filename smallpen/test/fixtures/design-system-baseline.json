@@ -1,0 +1,40 @@
+{
+  "revision": "93d940de88e1c92d2e757d1e445663d1d4b0ab0d60bbcfd01c16684d6e25c935",
+  "status": "valid",
+  "packageId": "pkg_design_system",
+  "activeCombination": [
+    "radius/md",
+    "color/Light",
+    "spacing/md",
+    "typography/md",
+    "alias/demo"
+  ],
+  "supportedTokenTypes": [
+    "boolean",
+    "border-radius",
+    "color",
+    "dimensions",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "letter-spacing",
+    "number",
+    "opacity",
+    "other",
+    "rotation",
+    "shadow",
+    "sizing",
+    "spacing",
+    "string",
+    "stroke-width",
+    "text-case",
+    "text-decoration",
+    "typography"
+  ],
+  "negativeControls": {
+    "unknown-type": "unsupported_token_type",
+    "duplicate-id": "duplicate_token_id",
+    "missing-alias": "missing_token_alias",
+    "alias-cycle": "token_alias_cycle"
+  }
+}

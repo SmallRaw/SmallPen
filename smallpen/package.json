@@ -1,0 +1,17 @@
+{
+  "name": "@smallpen/workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build:cli": "node scripts/build-cli.mjs",
+    "pack:check": "npm pack --workspaces --dry-run --ignore-scripts",
+    "test": "node --test",
+    "test:desktop": "node e2e/desktop-smoke.mjs",
+    "test:e2e": "node e2e/package-workspace.mjs"
+  }
+}

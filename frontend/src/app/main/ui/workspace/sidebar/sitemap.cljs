@@ -135,13 +135,22 @@
              (st/emit! (dw/start-rename-page-item id)))))
 
         on-blur
+        ;; `name` participates in deps so the callback compares the CURRENT
+        ;; display name; a stale closure would resend an old composed name
+        ;; after the first rename (RV-002-B).
         (mf/use-fn
-         (mf/deps id is-separator?)
+         (mf/deps id is-separator? name)
          (fn [event]
            (let [new-name (str/trim (dom/get-target-val event))]
-             (if (str/empty? new-name)
+             (cond
+               ;; 恢复普通 Penpot 契约：分隔符空输入删除，普通页面空输入不改名。
+               (str/empty? new-name)
                (when is-separator?
                  (st/emit! (dw/delete-page id)))
+
+               ;; A blur without an edit must not write back the composed
+               ;; display name (SmallPen shows "Screen · Presentation").
+               (not= new-name name)
                (st/emit! (dw/rename-page id new-name))))
            (st/emit! (dw/stop-rename-page-item))))
 
@@ -236,6 +245,21 @@
                       :title name
                       :data-testid "page-name"}
                name]
+              ;; DSE-008: the generated Design System page is a distinct
+              ;; system page, not an ordinary document page.
+              (when (some-> page :plugin-data :smallpen (get "design-system-page"))
+                [:span {:style {:background "var(--color-acid-green, #a8e10c)"
+                                :border-radius "999px"
+                                :color "#111827"
+                                :flex "none"
+                                :font-size "9px"
+                                :font-weight "600"
+                                :letter-spacing "0.04em"
+                                :line-height "1"
+                                :margin-left "4px"
+                                :padding "3px 6px"}
+                        :data-testid "dse-page-badge"}
+                 "DS"])
               [:div {:class (stl/css :page-item-actions)}
                (when (and is-deletable (not read-only?))
                  [:> icon-button* {:variant "action"

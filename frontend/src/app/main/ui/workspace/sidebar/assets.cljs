@@ -14,6 +14,8 @@
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.assets :as dwa]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.dse :as dse]
    [app.main.store :as st]
    [app.main.ui.components.context-menu-a11y :refer [context-menu*]]
    [app.main.ui.components.search-bar :refer [search-bar*]]
@@ -33,6 +35,7 @@
    ::mf/private true}
   [{:keys [filters]}]
   (let [file-id   (mf/use-ctx ctx/current-file-id)
+        smallpen? (smallpen/enabled?)
         files     (mf/deref refs/files)
         current-file-data
         (mf/deref refs/workspace-data)
@@ -55,6 +58,8 @@
         :is-local false
         :is-tokens-source (= (:id file) tokens-source)
         :is-default-open false
+        :smallpen-mode smallpen?
+        :show-library-tokens? smallpen?
         :filters filters}])))
 
 (def ^:private ref:local-library
@@ -65,7 +70,8 @@
 (mf/defc assets-local-library*
   {::mf/private true}
   [{:keys [filters]}]
-  (let [file (mf/deref ref:local-library)
+  (let [smallpen-mode (smallpen/enabled?)
+        file (mf/deref ref:local-library)
 
         is-tokens-source
         (mf/with-memo [file]
@@ -75,6 +81,7 @@
       :is-local true
       :is-default-open true
       :is-tokens-source is-tokens-source
+      :smallpen-mode smallpen-mode
       :filters filters}]))
 
 (defn- toggle-values
@@ -90,7 +97,8 @@
 (mf/defc assets-toolbox*
   {::mf/wrap [mf/memo]}
   [{:keys [size file-id]}]
-  (let [read-only?     (mf/use-ctx ctx/workspace-read-only?)
+  (let [smallpen-mode  (smallpen/enabled?)
+        read-only?     (mf/use-ctx ctx/workspace-read-only?)
         filters*       (mf/use-state
                         (fn []
                           (-> (or (get @session-filters* file-id)
@@ -167,26 +175,35 @@
         ;; updating the internal state, which triggers another re-render, creating
         ;; an infinite loop: render -> new options -> effect -> state update -> render...
         options
-        (mf/with-memo [on-section-filter-change]
-          [{:name    (tr "workspace.assets.box-filter-all")
-            :id      "all"
-            :handler on-section-filter-change}
-           {:name    (tr "workspace.assets.components")
-            :id      "components"
-            :handler on-section-filter-change}
-           {:name    (tr "workspace.assets.colors")
-            :id      "colors"
-            :handler on-section-filter-change}
-           {:name    (tr "workspace.assets.typography")
-            :id      "typographies"
-            :handler on-section-filter-change}])]
+        (mf/with-memo [on-section-filter-change smallpen-mode]
+          (cond-> [{:name    (tr "workspace.assets.box-filter-all")
+                    :id      "all"
+                    :handler on-section-filter-change}
+                   {:name    (tr "workspace.assets.components")
+                    :id      "components"
+                    :handler on-section-filter-change}]
+            smallpen-mode
+            (conj {:name    (tr "workspace.assets.graphics")
+                   :id      "graphics"
+                   :handler on-section-filter-change}
+                  {:name    (tr "workspace.assets.typography")
+                   :id      "typographies"
+                   :handler on-section-filter-change})
+            (not smallpen-mode)
+            (conj {:name    (tr "workspace.assets.colors")
+                   :id      "colors"
+                   :handler on-section-filter-change}
+                  {:name    (tr "workspace.assets.typography")
+                   :id      "typographies"
+                   :handler on-section-filter-change})))]
 
     (mf/with-effect [file-id term section]
       (swap! session-filters* assoc file-id {:term term :section section}))
 
-    [:article  {:class (stl/css :assets-bar)}
+    [:article  {:class (stl/css :assets-bar)
+                :data-smallpen-compact (when smallpen-mode "true")}
      [:div {:class (stl/css :assets-header)}
-      (when-not ^boolean read-only?
+      (when (not ^boolean read-only?)
         (if (and (= num-libs 1) (empty? components) (not shared?))
           [:button {:class (stl/css :add-library-button)
                     :on-click show-libraries-dialog
@@ -226,6 +243,10 @@
                          :aria-label (tr "workspace.assets.sort")
                          :on-click toggle-ordering
                          :icon (if reverse-sort? "asc-sort" "desc-sort")}]]]
+
+     ;; DSE-011-A: drag-free "add component to a real source container"
+     ;; affordance, available while the generated Design System page is open.
+     [:> dse/insert-panel* {}]
 
      [:& (mf/provider cmm/assets-filters) {:value filters}
       [:& (mf/provider cmm/assets-toggle-ordering) {:value toggle-ordering}

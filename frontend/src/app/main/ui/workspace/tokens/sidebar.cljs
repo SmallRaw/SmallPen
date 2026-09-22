@@ -12,6 +12,7 @@
    [app.config :as cf]
    [app.main.data.modal :as modal]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*
                                                  dropdown-menu-item*]]
    [app.main.ui.components.title-bar :refer [title-bar*]]
@@ -22,6 +23,7 @@
    [app.main.ui.hooks :as h]
    [app.main.ui.hooks.resize :refer [use-resize-hook]]
    [app.main.ui.workspace.tokens.management :refer [tokens-section*]]
+   [app.main.ui.workspace.tokens.quick-panel :refer [quick-token-panel*]]
    [app.main.ui.workspace.tokens.sets :as tsets]
    [app.main.ui.workspace.tokens.sets.context-menu :refer [token-set-context-menu*]]
    [app.main.ui.workspace.tokens.sets.lists :as tsetslist]
@@ -116,7 +118,11 @@
         on-modal-show
         (mf/use-fn
          (fn []
-           (modal/show! :tokens/import {})))
+           ;; SmallPen reviews an import as a diff and applies only the chosen
+           ;; rows; Penpot's own modal replaces the whole library.
+           (if (smallpen/enabled?)
+             (modal/show! :smallpen/import-tokens {})
+             (modal/show! :tokens/import {}))))
 
         open-settings-modal
         (mf/use-fn
@@ -169,16 +175,18 @@
                (cfo/editable-tokens? current-file-data)))]
 
     [:> (mf/provider ctx/can-edit-tokens?) {:value can-edit-tokens?}
-     [:div {:class (stl/css :sidebar-wrapper)}
-      [:> token-management-section*
-       {:resize-height size-pages-opened
-        :current-file-data current-file-data}]
-      [:article {:class (stl/css :tokens-section-wrapper)
-                 :data-testid "tokens-sidebar"}
-       [:div {:class (stl/css :resize-area-horiz)
-              :on-pointer-down on-pointer-down-pages
-              :on-lost-pointer-capture on-lost-pointer-capture-pages
-              :on-pointer-move on-pointer-move-pages}
-        [:div {:class (stl/css :resize-handle-horiz)}]]
-       [:> tokens-section* props]]
-      [:> import-export-button*]]]))
+     (if (smallpen/enabled?)
+       [:> quick-token-panel* props]
+       [:div {:class (stl/css :sidebar-wrapper)}
+        [:> token-management-section*
+         {:resize-height size-pages-opened
+          :current-file-data current-file-data}]
+        [:article {:class (stl/css :tokens-section-wrapper)
+                   :data-testid "tokens-sidebar"}
+         [:div {:class (stl/css :resize-area-horiz)
+                :on-pointer-down on-pointer-down-pages
+                :on-lost-pointer-capture on-lost-pointer-capture-pages
+                :on-pointer-move on-pointer-move-pages}
+          [:div {:class (stl/css :resize-handle-horiz)}]]
+         [:> tokens-section* props]]
+        [:> import-export-button*]])]))

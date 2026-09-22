@@ -1,0 +1,45 @@
+{
+  "activeSetIds": [
+    "tset_shared_color_light"
+  ],
+  "activeThemeIds": [
+    "theme_shared_color_light"
+  ],
+  "id": "tlib_dsp_shared",
+  "sets": [
+    {
+      "description": "Shared library colors (same-named rows exercise qualified owners)",
+      "id": "tset_shared_color_light",
+      "name": "color/light",
+      "tokens": [
+        {
+          "description": "same-named row in the read-only shared library",
+          "id": "tok_shared_color_light_surface",
+          "name": "surface",
+          "type": "color",
+          "value": "#eef2ff"
+        },
+        {
+          "id": "tok_shared_color_light_primary",
+          "name": "primary",
+          "type": "color",
+          "value": "#4338ca",
+          "description": ""
+        }
+      ]
+    }
+  ],
+  "themes": [
+    {
+      "description": "",
+      "externalId": "",
+      "group": "color",
+      "id": "theme_shared_color_light",
+      "isSource": false,
+      "name": "Light",
+      "setIds": [
+        "tset_shared_color_light"
+      ]
+    }
+  ]
+}

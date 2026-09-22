@@ -19,6 +19,7 @@
    [app.main.errors]
    [app.main.features :as feat]
    [app.main.rasterizer :as thr]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui :as ui]
    [app.main.ui.alert]
@@ -96,7 +97,8 @@
        (->> stream
             (rx/filter dp/profile-fetched?)
             (rx/map deref)
-            (rx/filter dp/is-authenticated?)
+            (rx/filter #(and (dp/is-authenticated? %)
+                             (not (smallpen/enabled?))))
             (rx/take 1)
             (rx/map #(ws/initialize)))
 
@@ -129,10 +131,13 @@
       (mw/init!)
       (i18n/init)
       (cur/init-styles)
+      (smallpen/init!)
 
       (init-ui)
-      (st/emit! (plugins/initialize)
-                (initialize)))))
+      (if (smallpen/capability-enabled? :plugins)
+        (st/emit! (plugins/initialize)
+                  (initialize))
+        (st/emit! (initialize))))))
 
 (defn ^:export reinit
   ([]

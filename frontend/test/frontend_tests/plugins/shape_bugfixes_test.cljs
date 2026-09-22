@@ -239,7 +239,7 @@
     (with-redefs [u/not-valid (mock/stub (fn [pid prop msg] (swap! errors conj [pid prop msg])))
                   r/check-permission (constantly false)
                   st/emit!    mock/noop]
-      (let [inter (shape/interaction-proxy plugin-id file-id page-id shape-id 0)]
+      (let [inter (shape/interaction-proxy plugin-id file-id page-id shape-id {:event-type :click :action-type :navigate} 0)]
         (set! (.-trigger inter) "click")
         (t/is (= 1 (count @errors)))
         (t/is (= [plugin-id :trigger "Plugin doesn't have 'content:write' permission"]
@@ -254,7 +254,7 @@
     (with-redefs [u/not-valid (mock/stub (fn [pid prop msg] (swap! errors conj [pid prop msg])))
                   r/check-permission (constantly false)
                   st/emit!    mock/noop]
-      (let [inter (shape/interaction-proxy plugin-id file-id page-id shape-id 0)]
+      (let [inter (shape/interaction-proxy plugin-id file-id page-id shape-id {:event-type :click :action-type :navigate} 0)]
         (set! (.-delay inter) 100)
         (t/is (= 1 (count @errors)))
         (t/is (= [plugin-id :delay "Plugin doesn't have 'content:write' permission"]
@@ -270,7 +270,7 @@
                   u/not-valid (mock/stub (fn [pid prop msg] (swap! errors conj [pid prop msg])))
                   r/check-permission (constantly false)
                   st/emit!    mock/noop]
-      (let [inter (shape/interaction-proxy plugin-id file-id page-id shape-id 0)]
+      (let [inter (shape/interaction-proxy plugin-id file-id page-id shape-id {:event-type :click :action-type :navigate} 0)]
         (set! (.-action inter) #js {:type "open-url" :url "https://example.com"})
         (t/is (= 1 (count @errors)))
         (t/is (= [plugin-id :action "Plugin doesn't have 'content:write' permission"]
@@ -285,7 +285,7 @@
     (with-redefs [u/not-valid (mock/stub (fn [pid prop msg] (swap! errors conj [pid prop msg])))
                   r/check-permission (constantly false)
                   st/emit!    mock/noop]
-      (let [inter (shape/interaction-proxy plugin-id file-id page-id shape-id 0)]
+      (let [inter (shape/interaction-proxy plugin-id file-id page-id shape-id {:event-type :click :action-type :navigate} 0)]
         (.remove inter)
         (t/is (= 1 (count @errors)))
         (t/is (= [plugin-id :remove "Plugin doesn't have 'content:write' permission"]
@@ -317,7 +317,7 @@
                   r/check-permission (constantly false)
                   st/emit!    mock/noop]
       (let [proxy (shape/shape-proxy plugin-id file-id page-id shape-id)
-            inter (shape/interaction-proxy plugin-id file-id page-id shape-id 0)]
+            inter (shape/interaction-proxy plugin-id file-id page-id shape-id {:event-type :click :action-type :navigate} 0)]
         (.removeInteraction proxy inter)
         (t/is (= 1 (count @errors)))
         (t/is (= [plugin-id :removeInteraction "Plugin doesn't have 'content:write' permission"]

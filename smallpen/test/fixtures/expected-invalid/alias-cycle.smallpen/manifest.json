@@ -1,0 +1,17 @@
+{
+  "entries": {
+    "assets": [],
+    "components": [],
+    "contexts": [],
+    "requirements": [],
+    "scenarios": [],
+    "screens": [],
+    "tokens": [
+      "tokens/tokens.json"
+    ]
+  },
+  "formatVersion": 1,
+  "name": "alias-cycle",
+  "packageId": "pkg_alias_cycle",
+  "role": "foundation"
+}

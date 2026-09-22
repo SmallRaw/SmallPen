@@ -6095,6 +6095,10 @@ msgstr "列表视图"
 msgid "workspace.assets.local-library"
 msgstr "本地库"
 
+#: src/app/main/ui/workspace/sidebar/assets/tokens.cljs
+msgid "workspace.assets.tokens"
+msgstr "令牌"
+
 #: src/app/main/ui/workspace/sidebar/assets.cljs:186
 msgid "workspace.assets.manage-library"
 msgstr "管理库"
@@ -6726,6 +6730,35 @@ msgstr "共享库更新"
 #: src/app/main/ui/workspace/libraries.cljs:421
 msgid "workspace.libraries.loading"
 msgstr "加载中…"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.add-source"
+msgstr "添加资源库来源"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.foundation"
+msgstr "基础库"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.local-help"
+msgstr "建议使用项目附近的相对路径。仍可连接项目目录外的文件，但移动文件后可能失效。"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.local-path"
+msgstr "本地路径"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.remote-help"
+msgstr "URL 会始终作为资源库来源；SmallPen 会保留经过校验的本地快照，用于加速加载和离线使用。"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.remote-url"
+msgstr "远端 URL"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.tokens"
+msgid_plural "workspace.libraries.smallpen.tokens"
+msgstr[0] "%s 个令牌"
 
 #: src/app/main/ui/workspace/libraries.cljs:387
 #, unused
@@ -9437,6 +9470,15 @@ msgstr "圆"
 msgid "workspace.undo.entry.multiple.color"
 msgstr "颜色素材"
 
+msgid "workspace.undo.entry.multiple.token"
+msgstr "令牌"
+
+msgid "workspace.undo.entry.multiple.token-set"
+msgstr "令牌集"
+
+msgid "workspace.undo.entry.multiple.token-theme"
+msgstr "令牌主题"
+
 #: src/app/main/ui/workspace/sidebar/history.cljs:114
 msgid "workspace.undo.entry.multiple.component"
 msgstr "组件"
@@ -9496,6 +9538,15 @@ msgstr "圆"
 #: src/app/main/ui/workspace/sidebar/history.cljs:127
 msgid "workspace.undo.entry.single.color"
 msgstr "颜色素材"
+
+msgid "workspace.undo.entry.single.token"
+msgstr "令牌"
+
+msgid "workspace.undo.entry.single.token-set"
+msgstr "令牌集"
+
+msgid "workspace.undo.entry.single.token-theme"
+msgstr "令牌主题"
 
 #: src/app/main/ui/workspace/sidebar/history.cljs:128
 msgid "workspace.undo.entry.single.component"
@@ -9678,3 +9729,261 @@ msgstr "自动保存的版本将保留 %s 天。"
 #, unused
 msgid "workspace.viewport.click-to-close-path"
 msgstr "单击以闭合路径"
+
+msgid "smallpen.home.empty-subtitle"
+msgstr "新建一个 .smallpen Package，或打开已有文件。"
+
+msgid "smallpen.home.empty-title"
+msgstr "没有最近使用的 Package"
+
+msgid "smallpen.home.new-package"
+msgstr "新建 Package…"
+
+msgid "smallpen.home.new-prompt"
+msgstr "输入新 .smallpen Package 的创建位置"
+
+msgid "smallpen.home.open"
+msgstr "已打开"
+
+msgid "smallpen.home.open-package"
+msgstr "打开 Package…"
+
+msgid "smallpen.home.open-prompt"
+msgstr "输入本地 .smallpen Package 路径"
+
+msgid "smallpen.home.recent"
+msgstr "最近使用的 Package"
+
+msgid "smallpen.home.repair"
+msgstr "需要修复"
+
+msgid "smallpen.home.subtitle"
+msgstr "本地工作区"
+
+msgid "smallpen.home.navigation"
+msgstr "首页"
+
+msgid "smallpen.tokens.import.title"
+msgstr "导入 Token"
+
+msgid "smallpen.tokens.import.hint"
+msgstr "支持 Penpot / Tokens Studio 导出的 DTCG 文件。写入前会逐行列出每一处改动和具体值。"
+
+msgid "smallpen.tokens.import.choose-file"
+msgstr "选择 Token JSON 文件…"
+
+msgid "smallpen.tokens.import.summary"
+msgstr "%s 新增 · %s 修改 · %s 删除 · %s 跳过"
+
+msgid "smallpen.tokens.import.added"
+msgstr "新增"
+
+msgid "smallpen.tokens.import.changed"
+msgstr "修改"
+
+msgid "smallpen.tokens.import.removed"
+msgstr "删除"
+
+msgid "smallpen.tokens.import.skipped"
+msgstr "已跳过（不会导入）"
+
+msgid "smallpen.tokens.import.name"
+msgstr "Token"
+
+msgid "smallpen.tokens.import.set"
+msgstr "Token 集"
+
+msgid "smallpen.tokens.import.current"
+msgstr "当前值"
+
+msgid "smallpen.tokens.import.incoming"
+msgstr "导入值"
+
+msgid "smallpen.tokens.import.select-all"
+msgstr "全选"
+
+msgid "smallpen.tokens.import.select-none"
+msgstr "全不选"
+
+msgid "smallpen.tokens.import.apply"
+msgstr "导入所选"
+
+msgid "smallpen.tokens.import.applying"
+msgstr "导入中…"
+
+msgid "smallpen.tokens.import.nothing"
+msgstr "没有需要导入的改动：文件与当前 Token 库一致。"
+
+msgid "smallpen.tokens.import.sets-themes"
+msgstr "Token 集与主题按文件同步：%s"
+
+msgid "smallpen.tokens.import.read-error"
+msgstr "无法读取或解析该文件。"
+
+msgid "smallpen.tokens.import.done"
+msgstr "导入完成，正在重新加载工作区…"
+
+msgid "smallpen.tokens.import.field-value"
+msgstr "值"
+
+msgid "smallpen.tokens.import.field-description"
+msgstr "描述"
+
+msgid "smallpen.tokens.import.field-type"
+msgstr "类型"
+
+msgid "workspace.tokens.matrix.axes"
+msgstr "设计模式"
+
+msgid "workspace.tokens.matrix.current-combination"
+msgstr "当前主题组合"
+
+msgid "workspace.tokens.matrix.current-domain"
+msgstr "选择 %s 当前使用的选项"
+
+msgid "workspace.tokens.matrix.disabled"
+msgstr "未启用"
+
+msgid "workspace.tokens.matrix.activate-variant"
+msgstr "启用 %s"
+
+msgid "workspace.tokens.matrix.name"
+msgstr "名称"
+
+msgid "workspace.tokens.matrix.add-axis"
+msgstr "添加模式"
+
+msgid "workspace.tokens.matrix.add-variant"
+msgstr "添加细分项"
+
+msgid "workspace.tokens.matrix.add-variable"
+msgstr "添加变量"
+
+msgid "workspace.tokens.matrix.reference-options"
+msgstr "引用令牌"
+
+msgid "workspace.tokens.matrix.no-reference-results"
+msgstr "没有匹配的令牌引用"
+
+msgid "workspace.tokens.matrix.reference-unset"
+msgstr "%s 中未设置"
+
+msgid "workspace.tokens.matrix.reference-missing"
+msgstr "令牌 %s 不存在"
+
+msgid "workspace.tokens.matrix.unset"
+msgstr "未设置"
+
+msgid "workspace.tokens.matrix.set-value"
+msgstr "设置 %s（%s）"
+
+msgid "workspace.tokens.matrix.empty"
+msgstr "添加模式或变量，开始定义设计令牌。"
+
+msgid "workspace.tokens.matrix.global-contract"
+msgstr "按令牌类型设置 Key 规则"
+
+msgid "workspace.tokens.matrix.type-contract"
+msgstr "%s Key 规则"
+
+msgid "workspace.tokens.matrix.token-contract"
+msgstr "%s 的 Key 规则"
+
+msgid "workspace.tokens.matrix.variant-menu"
+msgstr "打开 %s 细分项菜单"
+
+msgid "workspace.tokens.matrix.token-menu"
+msgstr "打开 %s 令牌菜单"
+
+msgid "workspace.tokens.matrix.rename-axis"
+msgstr "重命名模式"
+
+msgid "workspace.tokens.matrix.rename-variant"
+msgstr "重命名细分项"
+
+msgid "workspace.tokens.matrix.rename-token"
+msgstr "重命名令牌"
+
+msgid "workspace.tokens.matrix.rename-token-menu"
+msgstr "重命名 %s"
+
+msgid "workspace.tokens.matrix.rename-empty"
+msgstr "名称不能为空。"
+
+msgid "workspace.tokens.matrix.rename-separator"
+msgstr "名称不能包含 /，它用于分隔令牌集层级。"
+
+msgid "workspace.tokens.matrix.rename-conflict"
+msgstr "这个名称已被使用。"
+
+msgid "workspace.tokens.matrix.delete-axis"
+msgstr "删除模式"
+
+msgid "workspace.tokens.matrix.delete-axis-message"
+msgstr "删除 %s 及其全部细分项？对应的令牌集和配对主题也会删除。"
+
+msgid "workspace.tokens.matrix.delete-variant"
+msgstr "删除细分项"
+
+msgid "workspace.tokens.matrix.delete-variant-message"
+msgstr "删除 %s 细分项？对应的令牌集和配对主题也会删除。"
+
+msgid "workspace.tokens.matrix.override-warning"
+msgstr "由 %s 定义。%s 在令牌集顺序中更靠后，因此使用它。"
+
+msgid "workspace.tokens.matrix.contract"
+msgstr "令牌 Key 规则"
+
+msgid "workspace.tokens.matrix.contract.global"
+msgstr "全局规则"
+
+msgid "workspace.tokens.matrix.contract.type"
+msgstr "%s 规则"
+
+msgid "workspace.tokens.matrix.contract.token"
+msgstr "%s 单项覆盖"
+
+msgid "workspace.tokens.matrix.contract-description"
+msgstr "先设置全局默认值，也可按每种令牌类型单独覆盖。“开放”表示不限制名称。"
+
+msgid "workspace.tokens.matrix.contract.type-table"
+msgstr "按令牌类型设置规则"
+
+msgid "workspace.tokens.matrix.contract.type-column"
+msgstr "令牌类型"
+
+msgid "workspace.tokens.matrix.contract-mode"
+msgstr "处理方式"
+
+msgid "workspace.tokens.matrix.contract.open"
+msgstr "开放"
+
+msgid "workspace.tokens.matrix.contract.inherit"
+msgstr "跟随全局"
+
+msgid "workspace.tokens.matrix.contract.warn"
+msgstr "警告"
+
+msgid "workspace.tokens.matrix.contract.enforce"
+msgstr "强制"
+
+msgid "workspace.tokens.matrix.contract-prefix"
+msgstr "必需前缀"
+
+msgid "workspace.tokens.matrix.contract-separator"
+msgstr "分隔符"
+
+msgid "workspace.tokens.matrix.separator.hyphen"
+msgstr "连字符（-）"
+
+msgid "workspace.tokens.matrix.separator.dot"
+msgstr "点号（.）"
+
+msgid "workspace.tokens.matrix.separator.underscore"
+msgstr "下划线（_）"
+
+msgid "workspace.tokens.matrix.contract-preview"
+msgstr "预览"
+
+msgid "workspace.tokens.matrix.contract-draft-note"
+msgstr "本次评审草稿只保存在面板本地，暂不改变 Package 格式。"

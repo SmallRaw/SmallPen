@@ -28,6 +28,7 @@
    [app.main.data.workspace.tokens.library-edit :as dwtl]
    [app.main.refs :as refs]
    [app.main.render :refer [component-svg]]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.components.color-bullet :as cb]
    [app.main.ui.components.link-button :as lb]
@@ -327,7 +328,6 @@
            {:id "wireframing-kit", :name "Wireframe library"}
            {:id "whiteboarding-kit", :name "Whiteboarding Kit"}])
 
-
         change-search-term
         (mf/use-fn
          (fn [event]
@@ -369,7 +369,6 @@
              (st/emit! (modal/show
                         :tokens/import-from-library {:file-id file-id
                                                      :library-id library-id})))))
-
 
         on-delete-accept
         (mf/use-fn
@@ -534,7 +533,6 @@
         search-term*   (mf/use-state "")
         search-term    (deref search-term*)
 
-
         selected       (h/use-shared-state mdc/colorpalette-selected-broadcast-key :recent)
         dependencies   (mf/with-memo [shared-libraries]
                          (into {} (map (juxt :id :library-file-ids) (vals shared-libraries))))
@@ -563,7 +561,6 @@
                  (map #(assoc % :linked? (contains? linked-libraries (:id %))))
                  (sort-by (comp str/lower :name)))))
 
-
         importing*
         (mf/use-state nil)
 
@@ -572,7 +569,6 @@
           [{:id "penpot-design-system", :name "Design system example"}
            {:id "wireframing-kit", :name "Wireframe library"}
            {:id "whiteboarding-kit", :name "Whiteboarding Kit"}])
-
 
         change-search-term
         (mf/use-fn
@@ -892,7 +888,6 @@
                     :on-click go-to-shared}
            "Add a shared library"]])]]]))
 
-
 (defn- extract-assets
   [file-data library summary?]
   (let [exceeded (volatile! {:components false
@@ -1080,6 +1075,157 @@
                  :class (stl/css :libraries-updates-see-all)
                  :value (str "(" (tr "workspace.libraries.update.see-all-changes") ")")}])])]])]]))
 
+(mf/defc smallpen-libraries-tab*
+  {::mf/private true}
+  []
+  (let [result*      (mf/use-state nil)
+        result       (deref result*)
+        source-type* (mf/use-state "url")
+        source-type  (deref source-type*)
+        source*      (mf/use-state "")
+        source       (deref source*)
+        busy*        (mf/use-state nil)
+        busy         (deref busy*)
+        error*       (mf/use-state nil)
+        error        (deref error*)
+
+        load-libraries
+        (mf/use-fn
+         (fn []
+           (-> (smallpen/libraries)
+               (.then #(reset! result* %))
+               (.catch #(reset! error* (ex-message %))))))
+
+        run-action
+        (mf/use-fn
+         (mf/deps load-libraries)
+         (fn [action promise]
+           (reset! busy* action)
+           (reset! error* nil)
+           (-> promise
+               (.then (fn [_]
+                        (reset! busy* nil)
+                        (load-libraries)))
+               (.catch (fn [cause]
+                         (reset! busy* nil)
+                         (reset! error* (ex-message cause)))))))
+
+        change-source
+        (mf/use-fn
+         (fn [event]
+           (reset! source* (dom/get-value (dom/get-target event)))))
+
+        add-library
+        (mf/use-fn
+         (mf/deps source source-type run-action)
+         (fn [_]
+           (let [descriptor (if (= source-type "url")
+                              {:type "url" :url source}
+                              {:type "local" :path source})]
+             (run-action :link (smallpen/link-library! descriptor)))))]
+
+    (mf/with-effect []
+      (load-libraries)
+      js/undefined)
+
+    [:div {:class (stl/css :smallpen-libraries-content)}
+     [:section {:class (stl/css :smallpen-library-section)}
+      [:> title-bar* {:collapsable false
+                      :title (tr "workspace.libraries.in-this-file")
+                      :class (stl/css :title-spacing-lib)}]
+      (if (nil? result)
+        [:div {:class (stl/css :section-list-empty)}
+         (tr "workspace.libraries.loading")]
+        [:div {:class (stl/css :section-list)}
+         (for [{:keys [name packageId source summary]} (:libraries result)]
+           (let [foundation? (= "foundation" (:type source))
+                 remote?     (= "url" (:type source))
+                 source-text (case (:type source)
+                               "foundation" (str (tr "workspace.libraries.smallpen.foundation")
+                                                 " · " (:path source))
+                               "url" (:url source)
+                               "local" (:path source)
+                               "")]
+             [:div {:class (stl/css :section-list-item)
+                    :key packageId
+                    :data-testid "smallpen-library-item"}
+              [:div {:class (stl/css :item-content)}
+               [:div {:class (stl/css :item-name)} name]
+               [:div {:class (stl/css :smallpen-library-source)
+                      :title source-text}
+                source-text]
+               [:ul {:class (stl/css :item-contents)}
+                [:> library-description* {:summary summary}]
+                (when (pos? (:tokens summary))
+                  [:li {:class (stl/css :element-count)}
+                   (tr "workspace.libraries.smallpen.tokens"
+                       (c (:tokens summary)))])]]
+              [:div {:class (stl/css :library-actions)}
+               (when remote?
+                 [:> icon-button*
+                  {:type "button"
+                   :aria-label (tr "labels.refresh")
+                   :icon i/reload
+                   :variant "secondary"
+                   :disabled (some? busy)
+                   :on-click #(run-action packageId
+                                          (smallpen/refresh-library!
+                                           packageId))}])
+               (when-not foundation?
+                 [:> icon-button*
+                  {:type "button"
+                   :aria-label (tr "workspace.libraries.unlink-library-btn")
+                   :icon i/detach
+                   :variant "secondary"
+                   :disabled (some? busy)
+                   :on-click #(run-action packageId
+                                          (smallpen/unlink-library!
+                                           packageId))}])]]))])]
+
+     [:section {:class (stl/css :smallpen-library-section)}
+      [:> title-bar* {:collapsable false
+                      :title (tr "workspace.libraries.smallpen.add-source")
+                      :class (stl/css :title-spacing-lib)}]
+      [:div {:class (stl/css :smallpen-library-form)}
+       [:div {:class (stl/css :smallpen-source-switch)}
+        [:button {:type "button"
+                  :class (stl/css-case :smallpen-source-option true
+                                       :smallpen-source-selected
+                                       (= source-type "url"))
+                  :on-click #(do (reset! source-type* "url")
+                                 (reset! source* ""))}
+         (tr "workspace.libraries.smallpen.remote-url")]
+        [:button {:type "button"
+                  :class (stl/css-case :smallpen-source-option true
+                                       :smallpen-source-selected
+                                       (= source-type "local"))
+                  :on-click #(do (reset! source-type* "local")
+                                 (reset! source* ""))}
+         (tr "workspace.libraries.smallpen.local-path")]]
+       [:label {:class (stl/css :smallpen-source-label)}
+        (if (= source-type "url")
+          (tr "workspace.libraries.smallpen.remote-url")
+          (tr "workspace.libraries.smallpen.local-path"))
+        [:input {:class (stl/css :smallpen-source-input)
+                 :value source
+                 :placeholder (if (= source-type "url")
+                                "https://design.example/library/"
+                                "../libraries/design-system.smallpen")
+                 :on-change change-source}]]
+       [:p {:class (stl/css :smallpen-source-help)}
+        (if (= source-type "url")
+          (tr "workspace.libraries.smallpen.remote-help")
+          (tr "workspace.libraries.smallpen.local-help"))]
+       (when (seq error)
+         [:p {:class (stl/css :smallpen-library-error)} error])
+       [:> button* {:variant "primary"
+                    :type "button"
+                    :disabled (or (str/blank? source) (some? busy))
+                    :on-click add-library}
+        (if (= busy :link)
+          (tr "labels.adding")
+          (tr "workspace.libraries.add"))]]]]))
+
 (mf/defc libraries-dialog
   {::mf/register modal/components
    ::mf/register-as :libraries-dialog}
@@ -1138,7 +1284,8 @@
               :id "updates"}]))]
 
     (mf/with-effect []
-      (st/emit! (dtm/fetch-shared-files)))
+      (when-not (smallpen/enabled?)
+        (st/emit! (dtm/fetch-shared-files))))
 
     [:div {:class (stl/css :modal-overlay)
            :on-click close-dialog-outside
@@ -1152,31 +1299,33 @@
       [:div {:class (stl/css :modal-title)}
        (tr "workspace.libraries.libraries")]
 
-      [:> tab-switcher* {:tabs tabs
-                         :selected selected-tab
-                         :on-change on-change-tab}
-       (case selected-tab
-         "file"
-         (when token-lib-sync?
-           [:> file-tab* {:is-shared shared?
-                          :on-change-tab on-change-tab
-                          :linked-libraries linked-libraries
-                          :shared-libraries shared-libraries}])
-         "libraries"
-         (if token-lib-sync?
-           [:> libraries-tab*
-            {:linked-libraries linked-libraries
-             :shared-libraries shared-libraries}]
-           [:> libraries-tab-legacy*
-            {:is-shared shared?
-             :linked-libraries linked-libraries
-             :shared-libraries shared-libraries}])
+      (if (smallpen/enabled?)
+        [:> smallpen-libraries-tab*]
+        [:> tab-switcher* {:tabs tabs
+                           :selected selected-tab
+                           :on-change on-change-tab}
+         (case selected-tab
+           "file"
+           (when token-lib-sync?
+             [:> file-tab* {:is-shared shared?
+                            :on-change-tab on-change-tab
+                            :linked-libraries linked-libraries
+                            :shared-libraries shared-libraries}])
+           "libraries"
+           (if token-lib-sync?
+             [:> libraries-tab*
+              {:linked-libraries linked-libraries
+               :shared-libraries shared-libraries}]
+             [:> libraries-tab-legacy*
+              {:is-shared shared?
+               :linked-libraries linked-libraries
+               :shared-libraries shared-libraries}])
 
-         "updates"
-         [:> updates-tab*
-          {:file-id file-id
-           :is-legacy (not token-lib-sync?)
-           :libraries linked-libraries}])]]]))
+           "updates"
+           [:> updates-tab*
+            {:file-id file-id
+             :is-legacy (not token-lib-sync?)
+             :libraries linked-libraries}])])]]))
 
 (mf/defc v2-info-dialog
   {::mf/register modal/components

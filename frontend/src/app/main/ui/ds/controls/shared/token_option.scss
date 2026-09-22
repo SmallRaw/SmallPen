@@ -42,6 +42,10 @@
   grid-template-columns: auto 1fr auto;
 }
 
+.option-with-swatch {
+  grid-template-columns: auto auto 1fr auto;
+}
+
 .option-text {
   white-space: nowrap;
   overflow: hidden;

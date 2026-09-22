@@ -9,13 +9,17 @@
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.nitrate :as dnt]
+   [app.main.data.common :as dcm]
+   [app.main.errors :as errors]
    [app.main.data.team :as dtm]
    [app.main.refs :as refs]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.debug.icons-preview :refer [icons-preview*]]
    [app.main.ui.debug.playground :refer [playground*]]
+   [app.main.ui.ds.product.loader :refer [loader*]]
    [app.main.ui.error-boundary :refer [error-boundary*]]
    [app.main.ui.exports.files]
    [app.main.ui.frame-preview :as frame-preview]
@@ -26,6 +30,7 @@
    [app.main.ui.releases :refer [release-notes-modal]]
    [app.main.ui.static :as static]
    [app.util.dom :as dom]
+   [app.util.i18n :refer [tr]]
    [app.util.modules :as mod]
    [app.util.theme :as theme]
    [rumext.v2 :as mf]))
@@ -45,8 +50,43 @@
 (def settings-page*
   (mf/lazy #(mod/load 'app.main.ui.settings/settings-page*)))
 
+(def smallpen-home-page*
+  (mf/lazy #(mod/load 'app.main.smallpen.home/smallpen-home-page*)))
+
+
+
 (def workspace-page*
   (mf/lazy #(mod/load 'app.main.ui.workspace/workspace-page*)))
+
+(mf/defc design-system-redirect*
+  {::mf/props :obj
+   ::mf/private true}
+  ;; DSE-008: the system page entry resolves the generated Design System
+  ;; page id from the Package snapshot, then opens the ordinary workspace
+  ;; editor on it. Refresh/deep links restore the same page via :page-id.
+  [{:keys [file-id]}]
+  (mf/with-effect []
+    (-> (smallpen/workspace-snapshot)
+        (.then
+         (fn [snapshot]
+           (let [runtime  (js->clj snapshot :keywordize-keys true)
+                 ;; js->clj keywordize keeps the original camelCase of the
+                 ;; JSON keys; no kebab-case conversion happens here.
+                 page-id  (get-in runtime [:runtime :designSystemPage])
+                 file-id  (or file-id (get-in runtime [:runtime :file]))
+                 ;; DSE-R13: hand the board's runtime id to the workspace so
+                 ;; the initial viewport zooms to the full board.
+                 board-id (get-in runtime [:runtime :designSystem :board])]
+             (st/emit! (dcm/go-to-workspace
+                        :team-id smallpen/local-team-id
+                        :file-id (some-> file-id uuid/parse*)
+                        :page-id (some-> page-id uuid/parse*)
+                        :board-id board-id
+                        :design-system? true)))))
+        (.catch errors/on-error)))
+  [:> loader*
+   {:title (tr "labels.loading")
+    :overlay true}])
 
 (mf/defc team-container*
   {::mf/props :obj
@@ -58,16 +98,17 @@
       (fn []
         (st/emit! (dtm/finalize-team team-id)))))
 
-  (if-not (uuid? team-id)
-    nil
-    (let [{:keys [permissions] :as team} (mf/deref refs/team)]
-      (when (= team-id (:id team))
-        [:> (mf/provider ctx/current-team-id) {:value team-id}
-         [:> (mf/provider ctx/permissions) {:value permissions}
-          [:> (mf/provider ctx/can-edit?) {:value (:can-edit permissions)}
-           ;; The `:key` is mandatory here because we want to reinitialize
-           ;; all dom tree instead of simple rerender.
-           [:* {:key (str team-id)} children]]]]))))
+  ;; Keep hook order stable while the route transitions from an incomplete
+  ;; query (no team-id yet) to the initialized workspace team.
+  (let [{:keys [permissions] :as team} (mf/deref refs/team)]
+    (when (and (uuid? team-id)
+               (= team-id (:id team)))
+      [:> (mf/provider ctx/current-team-id) {:value team-id}
+       [:> (mf/provider ctx/permissions) {:value permissions}
+        [:> (mf/provider ctx/can-edit?) {:value (:can-edit permissions)}
+         ;; The `:key` is mandatory here because we want to reinitialize
+         ;; all dom tree instead of simple rerender.
+         [:* {:key (str team-id)} children]]]])))
 
 (mf/defc page*
   {::mf/props :obj
@@ -115,6 +156,19 @@
 
        :nitrate-entry
        [:> nitrate-entry/nitrate-entry-page* {:profile profile}]
+
+       :smallpen-home
+       (when (smallpen/enabled?)
+         [:? [:> smallpen-home-page*]])
+
+       :smallpen-design-system
+       (when (smallpen/enabled?)
+         ;; DSE-008: the system page entry lands in the ordinary workspace
+         ;; editor on the generated Design System page. The standalone SVG
+         ;; shell (smallpen-canvas/canvas-page*) is no longer a product
+         ;; surface and no longer depends on window.renderCanvas here.
+         [:? [:> design-system-redirect*
+              {:file-id (get-in params [:query :file-id])}]])
 
        (:settings-profile
         :settings-password
@@ -186,7 +240,8 @@
 
        :workspace
        (let [params     (get params :query)
-             team-id    (some-> params :team-id uuid/parse*)
+             team-id    (or (some-> params :team-id uuid/parse*)
+                            (when (smallpen/enabled?) smallpen/local-team-id))
              file-id    (some-> params :file-id uuid/parse*)
              page-id    (some-> params :page-id uuid/parse*)
              layout     (some-> params :layout keyword)]
@@ -233,6 +288,11 @@
   (let [route   (mf/deref refs/route)
         edata   (mf/deref refs/exception)
         profile (mf/deref refs/profile)]
+
+    (mf/with-effect []
+      (let [persist-viewport #(dcm/persist-current-workspace-viewport! @st/state)]
+        (.addEventListener js/window "pagehide" persist-viewport)
+        #(.removeEventListener js/window "pagehide" persist-viewport)))
 
     ;; initialize themes
     (theme/use-initialize profile)

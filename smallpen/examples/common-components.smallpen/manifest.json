@@ -1,0 +1,24 @@
+{
+  "entries": {
+    "assets": [],
+    "components": [
+      "components/components.json",
+      "components/common-components.json"
+    ],
+    "contexts": [],
+    "requirements": [],
+    "scenarios": [],
+    "screens": [
+      "screens/screen.json",
+      "screens/common-components.json"
+    ],
+    "tokens": [
+      "tokens/tokens.json"
+    ]
+  },
+  "formatVersion": 1,
+  "name": "Design System Fixture",
+  "packageId": "pkg_design_system",
+  "role": "foundation",
+  "defaultScreenId": "scr_design_system"
+}

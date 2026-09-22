@@ -77,6 +77,7 @@
    [app.main.refs :as refs]
    [app.main.repo :as rp]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.plugins.register :as preg]
    [app.render-wasm :as wasm]
    [app.render-wasm.api :as wasm.api]
@@ -262,7 +263,8 @@
       (rx/merge
        (rx/of (dp/check-open-plugin)
               (fdf/fix-deleted-fonts-for-local-library file-id))
-       (if (contains? cf/flags :mcp)
+       (if (and (contains? cf/flags :mcp)
+                (smallpen/capability-enabled? :mcp))
          ;; We wait the plugin runtime to be ready before launch the
          ;; mcp initialization
          (->> (rx/from (preg/wait-for-runtime))

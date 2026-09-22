@@ -53,39 +53,58 @@
 
 (defn parse-change
   "Given a single change parses the information into an uniform map"
-  [change]
-  (let [r (fn [type id]
-            {:type type
-             :operation (extract-operation change)
-             :detail (:operations change)
-             :id (cond
-                   (and (coll? id) (= 1 (count id))) (first id)
-                   (coll? id) :multiple
-                   :else id)})]
-    (case (:type change)
-      :set-option (r :page (:page-id change))
-      (:add-obj
-       :mod-obj
-       :del-obj) (r :shape (:id change))
-      :reg-objects nil
-      :mov-objects (r :shape (:shapes change))
-      (:add-page
-       :mod-page :del-page
-       :mov-page) (r :page (:id change))
-      (:add-color
-       :mod-color) (r :color (get-in change [:color :id]))
-      :del-color (r :color (:id change))
-      :add-recent-color nil
-      (:add-media
-       :mod-media) (r :media (get-in change [:object :id]))
-      :del-media (r :media (:id change))
-      (:add-component
-       :mod-component
-       :del-component) (r :component (:id change))
-      (:add-typography
-       :mod-typography) (r :typography (get-in change [:typography :id]))
-      :del-typography (r :typography (:id change))
-      nil)))
+  ([change]
+   (parse-change change nil))
+  ([change undo-change]
+   (let [r (fn [type id]
+             {:type type
+              :operation (extract-operation change)
+              :detail (:operations change)
+              :id (cond
+                    (and (coll? id) (= 1 (count id))) (first id)
+                    (coll? id) :multiple
+                    :else id)})
+         set-operation
+         (fn []
+           (cond
+             (nil? (:attrs change)) :delete
+             (nil? (:attrs undo-change)) :new
+             :else :modify))]
+     (case (:type change)
+       :set-option (r :page (:page-id change))
+       (:add-obj
+        :mod-obj
+        :del-obj) (r :shape (:id change))
+       :reg-objects nil
+       :mov-objects (r :shape (:shapes change))
+       (:add-page
+        :mod-page :del-page
+        :mov-page) (r :page (:id change))
+       (:add-color
+        :mod-color) (r :color (get-in change [:color :id]))
+       :del-color (r :color (:id change))
+       :add-recent-color nil
+       (:add-media
+        :mod-media) (r :media (get-in change [:object :id]))
+       :del-media (r :media (:id change))
+       (:add-component
+        :mod-component
+        :del-component) (r :component (:id change))
+       (:add-typography
+        :mod-typography) (r :typography (get-in change [:typography :id]))
+       :del-typography (r :typography (:id change))
+       :set-token (assoc (r :token (:token-id change))
+                         :operation (set-operation))
+       :set-token-set (assoc (r :token-set (:id change))
+                             :operation (set-operation))
+       :set-token-theme (assoc (r :token-theme (:id change))
+                               :operation (set-operation))
+       (:set-active-token-themes :set-tokens-status) (assoc (r :token-theme :multiple)
+                                       :operation :modify)
+       :rename-token-set-group (assoc (r :token-set
+                                         (last (:set-group-path change)))
+                                      :operation :modify)
+       nil))))
 
 (defn resolve-shape-types
   "Retrieve the type to be shown to the user"
@@ -122,6 +141,9 @@
     ;;   (tr "workspace.undo.entry.multiple.rect")
     ;;   (tr "workspace.undo.entry.multiple.shape")
     ;;   (tr "workspace.undo.entry.multiple.text")
+    ;;   (tr "workspace.undo.entry.multiple.token")
+    ;;   (tr "workspace.undo.entry.multiple.token-set")
+    ;;   (tr "workspace.undo.entry.multiple.token-theme")
     ;;   (tr "workspace.undo.entry.multiple.typography")
     ;;   (tr "workspace.undo.entry.single.circle")
     ;;   (tr "workspace.undo.entry.single.color")
@@ -137,6 +159,9 @@
     ;;   (tr "workspace.undo.entry.single.rect")
     ;;   (tr "workspace.undo.entry.single.shape")
     ;;   (tr "workspace.undo.entry.single.text")
+    ;;   (tr "workspace.undo.entry.single.token")
+    ;;   (tr "workspace.undo.entry.single.token-set")
+    ;;   (tr "workspace.undo.entry.single.token-theme")
     ;;   (tr "workspace.undo.entry.single.typography")
     (tr (str/format "workspace.undo.entry.%s.%s" arity attribute))))
 
@@ -164,14 +189,40 @@
     :component deprecated-icon/component
     :media deprecated-icon/img
     :image deprecated-icon/img
+    :token deprecated-icon/tokens
+    :token-set deprecated-icon/folder
+    :token-theme deprecated-icon/tokens
     deprecated-icon/svg))
 
 (defn is-shape? [type]
   (contains? #{:shape :rect :circle :text :path :frame :group} type))
 
-(defn parse-entry [{:keys [redo-changes]}]
-  (->> redo-changes
-       (map parse-change)))
+(defn parse-entry [{:keys [redo-changes undo-changes]}]
+  (map parse-change redo-changes (reverse undo-changes)))
+
+(defn group-undo-entries
+  "Coalesces adjacent undo entries that belong to one user action.
+  The undo stack intentionally keeps propagation commits separate, but
+  history should present the shared undo group as a single selectable row."
+  [entries]
+  (reduce-kv
+   (fn [groups index entry]
+     (let [entry (assoc entry
+                        ::start-index index
+                        ::end-index index)
+           previous (peek groups)]
+       (if (and previous
+                (some? (:undo-group entry))
+                (= (:undo-group previous) (:undo-group entry)))
+         (conj (pop groups)
+               (-> previous
+                   (update :redo-changes into (:redo-changes entry))
+                   (update :undo-changes #(into (:undo-changes entry) %))
+                   (assoc ::end-index index
+                          :selected-after (:selected-after entry))))
+         (conj groups entry))))
+   []
+   (vec entries)))
 
 (defn- short-id
   "Build a short git-like label for an undo entry. Derives it from the
@@ -204,6 +255,32 @@
         types (group-by first (keys entries))
         operations (group-by second (keys entries))
 
+        token-action-entry
+        (when (and (seq types)
+                   (some #{:token :token-set :token-theme} (keys types))
+                   (every? #(or (contains? #{:token :token-set :token-theme} %)
+                                (is-shape? %))
+                           (keys types)))
+          (let [preferred-type (cond
+                                 (contains? types :token) :token
+                                 (contains? types :token-set) :token-set
+                                 :else :token-theme)
+                preferred-keys (filter #(= preferred-type (first %))
+                                       (keys entries))
+                preferred-operation
+                (cond
+                  (some #(= :new (second %)) preferred-keys) :new
+                  (some #(= :delete (second %)) preferred-keys) :delete
+                  (some #(= :modify (second %)) preferred-keys) :modify
+                  :else :multiple)
+                preferred-keys (filter #(= preferred-operation (second %))
+                                       preferred-keys)]
+            {:type preferred-type
+             :operation preferred-operation
+             :id (if (= 1 (count preferred-keys))
+                   (-> preferred-keys first last)
+                   :multiple)}))
+
         ;; The cases for the selection of the representative entry are a bit
         ;; convoluted. Best to read the comments to clarify.
         ;; At this stage we have cleaned the entries but we can have a batch
@@ -214,6 +291,11 @@
           ;; If we only have one operation over one shape we return the last change
           (single? entries)
           (-> entries (get (first (keys entries))) (last))
+
+          ;; Token edits can also update paired Themes and concrete shape
+          ;; values. Present those implementation details as one Token action.
+          token-action-entry
+          token-action-entry
 
           ;; If we're creating an object it will have priority
           (single? (:new operations))
@@ -232,7 +314,10 @@
           ;; types (i.e: delete various shapes). If that happens we return
           ;; the operation with `:multiple` id
           (single? operations)
-          {:type (if (every? is-shape? (keys types)) :shape :multiple)
+          {:type (cond
+                   (single? types) (first (keys types))
+                   (every? is-shape? (keys types)) :shape
+                   :else :multiple)
            :id :multiple
            :operation (first (keys operations))}
 
@@ -262,7 +347,10 @@
                        (map :id))
           candidates)]
 
-    (assoc selected-entry :detail detail)))
+    (assoc selected-entry
+           :detail (when-not (contains? #{:token :token-set :token-theme}
+                                        (:type selected-entry))
+                     detail))))
 
 (defn parse-entries [entries objects]
   ;; Propagate per-entry metadata (timestamp, undo-group, author) onto
@@ -274,7 +362,9 @@
               (select-entry)
               (assoc :timestamp  (:timestamp  raw-entry)
                      :undo-group (:undo-group raw-entry)
-                     :by         (:by         raw-entry))))
+                     :by         (:by         raw-entry)
+                     ::start-index (::start-index raw-entry)
+                     ::end-index   (::end-index raw-entry))))
         entries))
 
 (mf/defc history-entry-details* [{:keys [entry]}]
@@ -370,19 +460,20 @@
   []
   (let [objects (mf/deref refs/workspace-page-objects)
         {:keys [items index]} (mf/deref workspace-undo)
-        entries (parse-entries items objects)]
+        entries (-> items
+                    (group-undo-entries)
+                    (parse-entries objects))]
     [:div {:class (stl/css :history-toolbox)}
      (if (empty? entries)
        [:div {:class (stl/css :history-entry-empty)}
         [:> empty-state* {:icon i/history
                           :text (tr "workspace.undo.empty")}]]
        [:ul {:class (stl/css :history-entries)}
-        (for [[idx-entry entry] (->> entries (map-indexed vector) reverse)] #_[i (range 0 10)]
-             [:> history-entry* {:key (str "entry-" idx-entry)
-                                 :entry entry
-                                 :idx-entry idx-entry
-                                 :is-current (= idx-entry index)
-                                 :is-disabled (> idx-entry index)}])])]))
-
-
-
+        (for [entry (reverse entries)
+              :let [start-index (::start-index entry)
+                    end-index (::end-index entry)]]
+          [:> history-entry* {:key (str "entry-" end-index)
+                              :entry entry
+                              :idx-entry end-index
+                              :is-current (<= start-index index end-index)
+                              :is-disabled (> start-index index)}])])]))
