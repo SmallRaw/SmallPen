@@ -47,10 +47,13 @@ async function main() {
     return;
   }
   const parent = await mkdtemp(join(tmpdir(), "smallpen-desktop-e2e-"));
-  const app = join(parent, "SmallPen.app");
+  const existing = process.argv[2];
+  const app = existing ?? join(parent, "SmallPen.app");
   try {
-    const built = await run(process.execPath, [buildScript, "--output", app]);
-    assert.equal(built.code, 0, built.stderr || built.stdout);
+    if (!existing) {
+      const built = await run(process.execPath, [buildScript, "--output", app]);
+      assert.equal(built.code, 0, built.stderr || built.stdout);
+    }
     const executable = join(app, "Contents", "MacOS", "SmallPen");
     const runtime = join(app, "Contents", "Resources", "runtime", "node");
     const penpotIndex = join(

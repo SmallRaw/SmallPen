@@ -40,6 +40,13 @@ test("the CLI release is self-contained apart from its documented Node runtime",
   );
   assert.match(await readFile(join(output, "README.txt"), "utf8"), /Node\.js 24/);
 
+  // Encoding loads sibling helpers and a transitive WASM feature detector.
+  // A --help check alone does not exercise these lazy runtime dependencies.
+  const codec = join(output, "app", "node_modules", "@jsquash", "webp", "encode.js");
+  const imported = await run(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(codec)})`]);
+  assert.equal(imported.code, 0, imported.stderr || imported.stdout);
+  await access(join(output, "app", "node_modules", "@smallpen", "local-package", "assets", "fonts"));
+
   const cli = join(output, "app", "apps", "cli", "bin", "smallpen.mjs");
   const validated = await run(process.execPath, [cli, "validate", fixture, "--json"]);
   assert.equal(validated.code, 0, validated.stderr || validated.stdout);

@@ -1,0 +1,17 @@
+{
+  "name": "smallpen",
+  "version": "0.1.0",
+  "description": "SmallPen command-line interface",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "smallpen": "./bin/smallpen.cjs"
+  },
+  "files": [
+    "bin"
+  ],
+  "dependencies": {
+    "@smallpen/cli": "0.1.0"
+  }
+}
