@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
+import { existsSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -32,12 +33,30 @@ const registry = "https://registry.npmjs.org";
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 const save = (path, value) =>
   writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
-const run = (command, args, cwd = root) =>
-  execFileSync(command, args, {
+function commandLine(command, args) {
+  if (command !== "npm") return [command, args];
+  const npm = [
+    process.env.npm_execpath,
+    join(dirname(process.execPath), "node_modules/npm/bin/npm-cli.js"),
+    resolve(
+      dirname(process.execPath),
+      "../lib/node_modules/npm/bin/npm-cli.js",
+    ),
+  ].find((path) => path && existsSync(path));
+  if (!npm)
+    throw new Error(
+      "Cannot locate npm-cli.js beside Node; install Node with npm",
+    );
+  return [process.execPath, [npm, ...args]];
+}
+const run = (command, args, cwd = root) => {
+  const [executable, argv] = commandLine(command, args);
+  return execFileSync(executable, argv, {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
   });
+};
 
 export function validateRelease(version, channel) {
   assert.ok(
@@ -98,15 +117,6 @@ async function prepare(version, channel) {
   }
   lock.version = version;
   await save(join(root, "package-lock.json"), lock);
-  const plist = join(root, "apps/desktop/native/macos/Info.plist");
-  const content = await readFile(plist, "utf8");
-  await writeFile(
-    plist,
-    content.replace(
-      /(<key>CFBundleShortVersionString<\/key>\s*<string>)[^<]+/,
-      `$1${version.split("-")[0]}`,
-    ),
-  );
 }
 
 async function pack(dir, version, channel, commit) {
@@ -261,35 +271,60 @@ async function smoke(dir, commit) {
       server.listen(0, "127.0.0.1", resolveListen);
     });
     address = `http://127.0.0.1:${server.address().port}`;
-    await promisify(execFile)(
-      "npm",
-      [
-        "install",
-        "--global",
-        "--prefix",
-        temp,
-        "--cache",
-        join(temp, "cache"),
-        "--ignore-scripts",
-        "--no-audit",
-        "--no-fund",
-        "--registry",
-        address,
-        `smallpen@${manifest.version}`,
-      ],
-      { cwd: temp, timeout: 120_000 },
+    const [npmExecutable, npmArgs] = commandLine("npm", [
+      "install",
+      "--global",
+      "--prefix",
+      temp,
+      "--cache",
+      join(temp, "cache"),
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--registry",
+      address,
+      `smallpen@${manifest.version}`,
+    ]);
+    await promisify(execFile)(npmExecutable, npmArgs, {
+      cwd: temp,
+      timeout: 120_000,
+    });
+    const windows = process.platform === "win32";
+    const cli = join(
+      temp,
+      windows ? "node_modules" : "lib/node_modules",
+      "smallpen/bin/smallpen.cjs",
     );
-    const cli = join(temp, "bin", "smallpen");
-    assert.ok(
-      (await realpath(cli)).endsWith("/smallpen/bin/smallpen.cjs"),
-      "The short package must own the smallpen command",
+    if (windows)
+      assert.match(
+        await readFile(join(temp, "smallpen.cmd"), "utf8"),
+        /node_modules[\\/]smallpen[\\/]bin[\\/]smallpen.cjs/,
+      );
+    else
+      assert.equal(
+        await realpath(join(temp, "bin/smallpen")),
+        await realpath(cli),
+      );
+    await save(join(temp, "package.json"), {
+      private: true,
+      scripts: {
+        verify: windows ? ".\\smallpen.cmd --help" : "./bin/smallpen --help",
+      },
+    });
+    run("npm", ["run", "verify"], temp);
+    assert.equal(
+      run(process.execPath, [cli, "version"], temp).trim(),
+      manifest.version,
     );
-    run(cli, ["--help"], temp);
-    assert.equal(run(cli, ["version"], temp).trim(), manifest.version);
     const validated = JSON.parse(
       run(
-        cli,
-        ["validate", join(root, "test/fixtures/roundtrip.smallpen"), "--json"],
+        process.execPath,
+        [
+          cli,
+          "validate",
+          join(root, "test/fixtures/roundtrip.smallpen"),
+          "--json",
+        ],
         temp,
       ),
     );

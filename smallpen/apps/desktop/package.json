@@ -9,12 +9,13 @@
   },
   "files": [
     "bin",
-    "native",
     "scripts",
     "src"
   ],
   "scripts": {
-    "build:macos": "node scripts/build-macos.mjs"
+    "build": "node scripts/build-electron.mjs",
+    "build:macos": "node scripts/build-electron.mjs",
+    "build:windows": "node scripts/build-electron.mjs"
   },
   "dependencies": {
     "@smallpen/background": "0.1.0",
