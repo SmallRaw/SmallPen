@@ -1,20 +1,14 @@
 #!/usr/bin/env node
 
 import { startDesktopHost } from "../src/host.mjs";
+import { parseHostArguments } from "../src/arguments.mjs";
 
 function print(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
 async function main(args) {
-  const packagePath = args.find((value) => !value.startsWith("--"));
-  const frontendRootIndex = args.indexOf("--frontend-root");
-  const frontendRoot = frontendRootIndex === -1
-    ? undefined
-    : args[frontendRootIndex + 1];
-  if (frontendRootIndex !== -1 && !frontendRoot) {
-    throw new Error("--frontend-root requires a path");
-  }
+  const { packagePath, frontendRoot, parentStdio } = parseHostArguments(args);
   const host = await startDesktopHost({
     applicationStatePath:
       process.env.SMALLPEN_APPLICATION_STATE_PATH || undefined,
@@ -39,6 +33,11 @@ async function main(args) {
   };
   process.once("SIGINT", close);
   process.once("SIGTERM", close);
+  if (parentStdio) {
+    process.stdin.once("end", close);
+    process.stdin.once("error", close);
+    process.stdin.resume();
+  }
 }
 
 main(process.argv.slice(2)).catch((error) => {
