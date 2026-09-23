@@ -521,7 +521,7 @@
       (when (and (= :color (-> cell cell-token :type))
                  (valid-color? display-value))
         [:span {:class (stl/css :color-swatch)
-                :style {:background-color display-value}}])
+                :style #js {:backgroundColor display-value}}])
       [:input {:ref input-ref
                :class (stl/css :inline-value-input)
                :value display-value
@@ -668,7 +668,7 @@
                   :on-click #(on-open-color % cell displayed-value value
                                             resolved-reference-options)}
          [:span {:class (stl/css :color-swatch)
-                 :style {:background-color (:color color-data)}}]
+                 :style #js {:backgroundColor (:color color-data)}}]
          (if reference?
            [:*
             [:span {:class (stl/css :color-value-hex)}
@@ -776,6 +776,7 @@
 
         expanded* (mf/use-state initial-expanded)
         expanded? (deref expanded*)
+        panel-ref (mf/use-ref nil)
         axis-menu* (mf/use-state nil)
         axis-menu-position* (mf/use-state nil)
         variant-menu* (mf/use-state nil)
@@ -996,7 +997,7 @@
 
         start-inline-edit
         (mf/use-fn
-         (mf/deps active-axis can-edit? selected-token-set-id inline-edit*)
+         (mf/deps active-axis can-edit? inline-edit*)
          (fn [event {:keys [set-id] :as cell}]
            (let [token (cell-token cell)
                  defined? (some? (:token cell))]
@@ -1011,11 +1012,11 @@
                                      (select-keys token [:name :type :value :description]))]
                    (reset! inline-edit* nil)
                    (st/emit!
-                    (when (not= selected-token-set-id set-id)
-                      (dwtl/set-selected-token-set-id set-id))
-                    (modal/show key {:x (.-clientX event)
-                                     :y (.-clientY event)
-                                     :position :right
+                    (modal/show key {:position :center
+                                     :owner-bounds (let [rect (.getBoundingClientRect (mf/ref-val panel-ref))]
+                                                     {:top (.-top rect) :left (.-left rect)
+                                                      :right (- js/window.innerWidth (.-right rect))
+                                                      :bottom (- js/window.innerHeight (.-bottom rect))})
                                      :fields fields
                                      :action (if defined? "edit" "create")
                                      :selected-token-set-id set-id
@@ -1224,7 +1225,7 @@
         add-token
         (mf/use-fn
          (mf/deps selected-token-set-id tokens-lib variants)
-         (fn [event type]
+         (fn [_event type]
            (let [variant-set-ids (->> variants
                                       (keep :write-set-id)
                                       distinct
@@ -1236,10 +1237,12 @@
                  {:keys [key fields]} modal]
              (reset! add-menu* nil)
              (st/emit!
-              (when set-id (dwtl/set-selected-token-set-id set-id))
-              (modal/show key {:x (.-clientX event)
-                               :y (.-clientY event)
-                               :position :right
+              (modal/show key {:position :center
+                               :owner-bounds (let [rect (.getBoundingClientRect (mf/ref-val panel-ref))]
+                                               {:top (.-top rect) :left (.-left rect)
+                                                :right (- js/window.innerWidth (.-right rect))
+                                                :bottom (- js/window.innerHeight (.-bottom rect))})
+                               :selected-token-set-id set-id
                                :fields fields
                                :title title
                                :action "create"
@@ -1277,7 +1280,8 @@
           (st/emit! (dwtl/assign-token-context-menu nil)
                     (modal/hide)))))
 
-    [:section {:class (stl/css-case :matrix-panel true
+    [:section {:ref panel-ref
+               :class (stl/css-case :matrix-panel true
                                     :matrix-panel-expanded expanded?)
                :data-testid "smallpen-token-matrix"
                :data-expanded (str expanded?)
@@ -1311,14 +1315,14 @@
                      :style #js {:left (str (:left @axis-menu-position*) "px")
                                  :top (str (:top @axis-menu-position*) "px")}}
                [:> dropdown-menu* {:show true
-                                  :id (str "token-axis-menu-" id)
-                                  :class (stl/css :matrix-menu :axis-menu)
-                                  :on-close #(reset! axis-menu* nil)}
+                                   :id (str "token-axis-menu-" id)
+                                   :class (stl/css :matrix-menu :axis-menu)
+                                   :on-close #(reset! axis-menu* nil)}
                 [:> dropdown-menu-item* {:class (stl/css :matrix-menu-item)
-                                        :on-click #(open-rename % :axis axis)}
+                                         :on-click #(open-rename % :axis axis)}
                  (tr "labels.rename")]
                 [:> dropdown-menu-item* {:class (stl/css :matrix-menu-item :danger-menu-item)
-                                        :on-click #(confirm-delete-axis axis)}
+                                         :on-click #(confirm-delete-axis axis)}
                  (tr "labels.delete")]]])
              popup-container))])
        (when can-edit?

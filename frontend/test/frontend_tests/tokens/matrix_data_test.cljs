@@ -9,7 +9,23 @@
    [app.main.smallpen.token-state :as spts]
    [app.common.types.tokens-lib :as ctob]
    [app.main.ui.workspace.tokens.matrix-data :as matrix-data]
+   [app.main.ui.workspace.tokens.management.forms.modals :as token-modals]
    [cljs.test :as t]))
+
+(t/deftest centered-token-dialog-has-no-anchor-dependent-offsets
+  (doseq [[x y] [[nil nil] [5 20] [1500 800]]
+          token-type [:color :typography :number]
+          rulers? [true false]]
+    (t/is (= {} (#'token-modals/calculate-position
+                 {:height 900} :center x y token-type rulers?)))))
+
+(t/deftest anchored-token-dialog-uses-valid-height-calculations
+  (t/is (= "calc(100vh - 1rem)"
+           (:maxHeight (#'token-modals/calculate-position
+                        {:height 900} :right 100 850 :color false))))
+  (t/is (= "calc(100vh - 30px)"
+           (:maxHeight (#'token-modals/calculate-position
+                        {:height 900} :right 100 100 :color false)))))
 
 (defn- token
   [name type value]

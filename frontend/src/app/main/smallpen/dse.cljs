@@ -8,6 +8,7 @@
   ;; EXPLICIT writable destination (a real screen page + container) and run
   ;; through the ordinary component machinery (generate + commit-changes +
   ;; one undo transaction) — no bespoke write path.
+  (:require-macros [app.main.style :as stl])
   (:require
    [app.common.data :as d]
    [app.common.files.changes-builder :as pcb]
@@ -15,6 +16,7 @@
    [app.common.geom.point :as gpt]
    [app.common.logic.libraries :as cll]
    [app.common.types.file :as ctf]
+   [app.common.types.components-list :as ctkl]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
@@ -24,6 +26,7 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
+   [app.main.ui.ds.buttons.button :refer [button*]]
    [beicon.v2.core :as rx]
    [clojure.string :as str]
    [potok.v2.core :as ptk]
@@ -86,21 +89,21 @@
   actionable reason instead of a failing fake entry."
   [file page]
   (let [containers (writable-containers file)
-        components (vals (get-in file [:data :components]))
+        components (ctkl/components-seq (:data file))
         can-edit?  (not (false? (get-in file [:permissions :can-edit])))]
     (if-not (design-system-page? page)
       {:can-create? false
        :can-insert? false
        :reason nil
        :visible? false}
-      (cond-> {:reason nil :visible? true}
+      (cond-> {:reason nil :visible? true :has-components? (boolean (seq components))}
         (not can-edit?)
         (assoc :reason :read-only :can-create? false :can-insert? false)
 
         can-edit?
         (assoc :reason (when-not (seq containers) :no-container)
-               :can-create? (seq containers)
-               :can-insert? (and (seq containers) (seq components)))))))
+               :can-create? (boolean (seq containers))
+               :can-insert? (boolean (and (seq containers) (seq components))))))))
 
 (defn- find-container
   "Resolve the destination page + frame from the current file data. Generated
@@ -225,20 +228,21 @@
   (let [file       (mf/deref refs/file)
         page-id    (mf/use-ctx ctx/current-page-id)
         page       (get-in file [:data :pages-index page-id])
-        {:keys [visible? reason can-create? can-insert?]}
+        {:keys [visible? reason can-create? can-insert? has-components?]}
         (insert-panel-state file page)
         containers (->> (writable-containers file)
                         (sort-by :label)
                         (vec))
-        components (->> (get-in file [:data :components])
-                        (vals)
+        components (->> (ctkl/components-seq (:data file))
                         (sort-by (fn [component]
                                    (str/lower-case (or (some-> component :name str) ""))))
                         (vec))
-        ;; Uncontrolled selects: the click handler reads the current DOM
-        ;; values, so choosing an option never re-renders the sidebar.
         target-ref    (mf/use-ref nil)
         component-ref (mf/use-ref nil)
+        target-id*    (mf/use-state "")
+        component-id* (mf/use-state "")
+        target-valid? (some #(= (str (:container-id %)) @target-id*) containers)
+        component-valid? (some #(= (str (:id %)) @component-id*) components)
 
         on-insert
         (mf/use-fn
@@ -267,71 +271,71 @@
                           {:container-id (:container-id target)
                            :page-id (:page-id target)}))))))]
 
-    [:div {:style (cond-> {:border-bottom "1px solid var(--color-neutral-200, #e5e7eb)"
-                           :color "var(--color-neutral-700, #374151)"
-                           :font-size "12px"
-                           :padding "10px 12px"}
-                    (not visible?)
-                    (assoc :display "none"))
-             :data-testid "dse-insert-panel"}
-     [:div {:style {:font-weight "600" :margin-bottom "6px"}}
-      "Design System · 添加到源"]
-     (case reason
-       :read-only
-       [:div {:data-testid "dse-insert-reason"}
-        "当前包为只读，无法写入源页面"]
+    (when visible?
+      [:details {:class (stl/css :insert-panel)
+                 :data-testid "dse-insert-panel"}
+       [:summary {:class (stl/css :insert-summary)} "添加组件…"]
+       [:div {:class (stl/css :insert-fields)}
+        [:p {:class (stl/css :insert-hint)}
+         "添加到源页面，Design System 展示会自动更新。"]
+        (case reason
+          :read-only
+          [:div {:data-testid "dse-insert-reason"}
+           "当前包为只读，无法写入源页面"]
 
-       :no-container
-       [:div {:data-testid "dse-insert-reason"}
-        "没有可写源容器：先在普通页面创建一个 Frame"]
+          :no-container
+          [:div {:data-testid "dse-insert-reason"}
+           "没有可写源容器：先在普通页面创建一个 Frame"]
 
-       nil
-       [:> mf/Fragment #js {}
-        [:label {:style {:display "block" :margin-bottom "4px"}}
-         "写入源容器"]
-        [:select {:data-testid "dse-insert-target"
-                  :ref target-ref
-                  :default-value ""
-                  :style {:margin-bottom "6px" :width "100%"}}
-         [:option {:value ""} "选择可写源容器…"]
-         (for [container containers]
-           ^{:key (str (:container-id container))}
-           [:option {:value (str (:container-id container))}
-            (:label container)])]
+          nil
+          [:> mf/Fragment #js {}
+           [:label {:class (stl/css :insert-label)}
+            "源页面 / 容器"
+            [:select {:data-testid "dse-insert-target"
+                      :class (stl/css :insert-select)
+                      :ref target-ref
+                      :on-change #(reset! target-id* (.. % -target -value))
+                      :default-value ""}
+             [:option {:value ""} "选择可写源容器…"]
+             (for [container containers]
+               ^{:key (str (:container-id container))}
+               [:option {:value (str (:container-id container))}
+                (:label container)])]]
 
         ;; Creating the FIRST component needs no existing component, so the
         ;; create entry is available on an empty package (DSE-R05); only the
         ;; insert-an-instance section is gated by available components.
-        (when-not can-insert?
-          [:div {:data-testid "dse-insert-no-components"
-                 :style {:color "var(--color-neutral-500, #6b7280)"
-                         :margin-bottom "6px"}}
-           "包内还没有组件：新建第一个组件"])
+           (when-not has-components?
+             [:div {:data-testid "dse-insert-no-components"
+                    :class (stl/css :insert-hint)}
+              "暂无可用组件，可以在源页面新建。"])
 
-        (when can-insert?
-          [:> mf/Fragment #js {}
-           [:label {:style {:display "block" :margin-bottom "4px"}}
-            "插入已有组件"]
-           [:select {:data-testid "dse-insert-component"
-                     :ref component-ref
-                     :default-value ""
-                     :style {:margin-bottom "6px" :width "100%"}}
-            [:option {:value ""} "选择组件变体…"]
-            (for [component components]
-              ^{:key (str (:id component))}
-              [:option {:value (str (:id component))}
-               (or (some-> component :name str) "Unnamed")])]])
+           (when can-insert?
+             [:> mf/Fragment #js {}
+              [:label {:class (stl/css :insert-label)}
+               "已有组件"
+               [:select {:data-testid "dse-insert-component"
+                         :class (stl/css :insert-select)
+                         :ref component-ref
+                         :on-change #(reset! component-id* (.. % -target -value))
+                         :default-value ""}
+                [:option {:value ""} "选择组件变体…"]
+                (for [component components]
+                  ^{:key (str (:id component))}
+                  [:option {:value (str (:id component))}
+                   (str (when (seq (:path component)) (str (:path component) " / "))
+                        (or (some-> component :name str) "Unnamed"))])]]])
 
-        [:div {:style {:display "flex" :gap "8px"}}
-         (when can-insert?
-           [:button {:data-testid "dse-insert-button"
-                     :on-click on-insert
-                     :style {:cursor "pointer"
-                             :padding "4px 10px"}}
-            "插入实例"])
-         (when can-create?
-           [:button {:data-testid "dse-create-button"
-                     :on-click on-create
-                     :style {:cursor "pointer"
-                             :padding "4px 10px"}}
-            "新建组件"])]])]))
+           [:div {:class (stl/css :insert-actions)}
+            (when can-insert?
+              [:> button* {:data-testid "dse-insert-button"
+                           :variant "secondary"
+                           :disabled (not (and target-valid? component-valid?))
+                           :on-click on-insert}
+               "插入实例"])
+            (when can-create?
+              [:> button* {:data-testid "dse-create-button"
+                           :variant "secondary"
+                           :disabled (not target-valid?)
+                           :on-click on-create}
+               "新建组件"])]])]])))

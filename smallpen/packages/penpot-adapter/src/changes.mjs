@@ -1871,6 +1871,22 @@ function validateRegisteredObjects(snapshot, change) {
     fail("invalid_penpot_change", "Penpot reg-objects requires shapes");
   }
   if (change["page-id"] !== undefined && change["page-id"] !== null) {
+    if (
+      snapshot.runtime.componentsPage &&
+      String(change["page-id"]) === String(snapshot.runtime.componentsPage)
+    ) {
+      // Projected variant masters have no canonical screen page. Bounds
+      // registration is renderer bookkeeping, not a source-page mutation.
+      for (const id of change.shapes) {
+        if (
+          String(id) !== "00000000-0000-0000-0000-000000000000" &&
+          !snapshot.runtime.reverseComponentNodes?.[String(id)]
+        ) {
+          fail("unknown_runtime_node", `Unknown projected component node: ${id}`);
+        }
+      }
+      return;
+    }
     pageDescriptorById(snapshot, change["page-id"]);
     return;
   }
@@ -4294,6 +4310,18 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
       operations.push(compilePrototypeFlow(snapshot, change));
     } else if (type === "mod-obj") {
       if (change.operations?.length > 0) {
+        if (
+          snapshot.runtime.componentsPage &&
+          String(change.pageId ?? change["page-id"]) === String(snapshot.runtime.componentsPage) &&
+          change.operations.every((item) =>
+            isRecord(item) && normalizeType(item.type) === "set" &&
+            normalizeType(item.attr) === "position-data")
+        ) {
+          // Expanded nested instances have projected-only text IDs. Their
+          // browser measurements are not edits to a canonical source node.
+          acceptedNoOp = true;
+          continue;
+        }
         const targetId = String(change.id);
         const componentRef = reverseComponentNodes[targetId];
         const designRef = reverseDesignSystem[targetId];
