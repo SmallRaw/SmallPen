@@ -42,8 +42,7 @@
                    {:id frame-id
                     :name "Sheet"
                     :shapes []
-                    :type :frame}}))}
-    }
+                    :type :frame}}))}}
     :components components}
    :permissions {:can-edit can-edit}})
 
@@ -83,7 +82,7 @@
     (t/is (= 1 (count (emitted-commits file [opacity]))))
     (doseq [type [:add-obj :del-obj :mov-objects :reorder-children :mod-page :del-page]]
       (t/is (= :structure (policy/commit-block-reason
-                          file [{:type type :id frame-id :page-id page-id}]))))
+                           file [{:type type :id frame-id :page-id page-id}]))))
     (t/is (= :structure (policy/commit-block-reason file [(modify :layout :flex)])))
     (t/is (= :position (policy/commit-block-reason file [(modify :x 100)])))
     (t/is (nil? (policy/commit-block-reason
@@ -106,8 +105,8 @@
     (t/is (= :decoration (policy/commit-block-reason file [change])))
     (t/is (empty? (emitted-commits file [change])))
     (t/is (nil? (policy/commit-block-reason
-              file [(assoc change :operations [{:type :set :attr :position-data :val []}])
-                    {:type :reg-objects :page-id page-id :shapes [frame-id]}])))
+                 file [(assoc change :operations [{:type :set :attr :position-data :val []}])
+                       {:type :reg-objects :page-id page-id :shapes [frame-id]}])))
     (t/is (nil? (policy/commit-block-reason (file-with {}) [change])))))
 
 (t/deftest ds-blocks-drawing-and-decoration-text-editing-at-entry
@@ -162,6 +161,17 @@
     (t/is (not (:can-create? state)))
     (t/is (not (:can-insert? state)))))
 
+(t/deftest insert-panel-distinguishes-components-from-insertion-permission
+  (let [file (file-with {:components {component-id {:id component-id :name "Button"}}
+                         :frames? false})
+        page {:plugin-data {:smallpen generated-page-plugin-data}}]
+    (t/is (:has-components? (dse/insert-panel-state file page)))
+    (t/is (not (:can-insert? (dse/insert-panel-state file page))))
+    (t/is (false? (:has-components?
+                   (dse/insert-panel-state
+                    (assoc-in file [:data :components component-id :deleted] true)
+                    page))))))
+
 (t/deftest insert-panel-state-explains-missing-containers
   (let [file  (file-with {:frames? false})
         state (dse/insert-panel-state file {:plugin-data {:smallpen generated-page-plugin-data}})]
@@ -204,7 +214,7 @@
     (t/is (= board-id
              (dcm/initial-workspace-board-id
               {:workspace-cache {[file-id page-id]
-                                  {:zoom 0 :vbox {:width 0 :height 0}}}}
+                                 {:zoom 0 :vbox {:width 0 :height 0}}}}
               file-id page-id board-id true))
           "an invalid cached viewport falls back to the initial fit")))
 

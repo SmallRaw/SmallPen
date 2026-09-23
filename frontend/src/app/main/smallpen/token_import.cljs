@@ -74,7 +74,7 @@
    [:span {:class (stl/css :value)}
     (when (hex-color? type value)
       [:span {:class (stl/css :swatch)
-              :style {:background value}}])
+              :style #js {:background value}}])
     [:code {:class (stl/css :code)} (value-text value)]]
    (when-not (str/blank? description)
      [:span {:class (stl/css :description)} description])])

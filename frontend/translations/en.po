@@ -7797,11 +7797,15 @@ msgstr "Foundation"
 
 #: src/app/main/ui/workspace/libraries.cljs
 msgid "workspace.libraries.smallpen.local-help"
-msgstr "Relative paths are easiest to move with the project. Paths outside the project directory are supported, but may break when files move."
+msgstr "Browse uploads a copy of a self-contained library folder beside this project (up to 50 MB / 2000 files). Then click Add to link it. You can also enter a local path manually."
 
 #: src/app/main/ui/workspace/libraries.cljs
 msgid "workspace.libraries.smallpen.local-path"
 msgstr "Local path"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.browse"
+msgstr "Browse…"
 
 #: src/app/main/ui/workspace/libraries.cljs
 msgid "workspace.libraries.smallpen.remote-help"

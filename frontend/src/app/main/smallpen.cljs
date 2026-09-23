@@ -366,13 +366,11 @@
   []
   (workspace))
 
-
 (defn- update-revision!
   [{:keys [revision]}]
   (when revision
     (swap! workspace-state assoc :revision revision)
     (reset! workspace-promise nil)))
-
 
 (defn- snapshot-result
   [f]
@@ -505,6 +503,16 @@
   [source]
   (-> (post-json "/v1/libraries/link" {:source source})
       (.then reconcile-library-files!)))
+
+(defn import-local-library!
+  [files]
+  (let [form (js/FormData.)]
+    (doseq [file files
+            :when (not-any? #(str/starts-with? % ".")
+                            (str/split (.-webkitRelativePath file) #"/"))]
+      (.append form (.-webkitRelativePath file) file (.-name file)))
+    (request "/v1/libraries/import-local"
+             #js {:method "POST" :body form})))
 
 (defn unlink-library!
   [package-id]
@@ -655,8 +663,18 @@
 (def ^:private token-operation-types
   #{"set-token-value" "set-active-token-themes" "replace-token-library"})
 
+(defn save-acknowledgement
+  "Translate a confirmed Package save into Penpot's numeric acknowledgement.
+  The content hash remains the canonical revision for local concurrency."
+  [response revn]
+  (when-not (and (string? (:revision response))
+                 (seq (:revision response)))
+    (throw (ex-info "Local save response has no package revision"
+                    {:type :persistence :code :invalid-save-response})))
+  (assoc response :revn (inc (or revn 0))))
+
 (defn- commit-workspace
-  [{:keys [changes commit-id]}]
+  [{:keys [changes commit-id revn]}]
   (if (seq changes)
     (let [{:keys [file-id revision]} @workspace-state
           structural? (boolean
@@ -668,6 +686,7 @@
                        :changes changes
                        :commitId (str commit-id)})
            (rx/from)
+           (rx/map #(save-acknowledgement % revn))
            ;; 切换文件后到达的旧响应不能污染新文件的修订状态。
            (rx/tap (fn [response]
                      (when (= file-id (:file-id @workspace-state))
@@ -686,7 +705,8 @@
                                             (distinct))))
                          (st/async-emit! (reproject-generated-page
                                           {:recenter? false}))))))))
-    (rx/of {:revision (:revision @workspace-state)})))
+    (rx/of {:revision (:revision @workspace-state)
+            :revn (or revn 0)})))
 
 (defn- upload-media
   [{:keys [content name]}]

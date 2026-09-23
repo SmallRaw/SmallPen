@@ -13,6 +13,15 @@
    [frontend-tests.smallpen.projection-test :as fixture]
    [potok.v2.core :as ptk]))
 
+(t/deftest local-save-acknowledgement-satisfies-native-persistence
+  (let [response {:revision "package-content-hash" :operationTypes ["set-token-value"]}
+        result (smallpen/save-acknowledgement response 7)]
+    (t/is (= 8 (:revn result)))
+    (t/is (= response (dissoc result :revn))))
+  (t/is (= 1 (:revn (smallpen/save-acknowledgement {:revision "first-save"} nil))))
+  (doseq [response [{} {:revision nil} {:revision ""}]]
+    (t/is (thrown? js/Error (smallpen/save-acknowledgement response 7)))))
+
 (t/deftest local-session-satisfies-the-penpot-workspace-shell
   (let [profile (session/profile fixture/snapshot)
         team    (session/team fixture/snapshot)

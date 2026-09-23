@@ -1088,6 +1088,7 @@
         busy         (deref busy*)
         error*       (mf/use-state nil)
         error        (deref error*)
+        directory-input-ref (mf/use-ref nil)
 
         load-libraries
         (mf/use-fn
@@ -1114,6 +1115,28 @@
         (mf/use-fn
          (fn [event]
            (reset! source* (dom/get-value (dom/get-target event)))))
+
+        browse-library
+        (mf/use-fn
+         (fn [_]
+           (.click (mf/ref-val directory-input-ref))))
+
+        upload-library
+        (mf/use-fn
+         (fn [event]
+           (let [input (dom/get-target event)
+                 files (vec (array-seq (js/Array.from (.-files input))))]
+             (set! (.-value input) "")
+             (when (seq files)
+               (reset! busy* :browse)
+               (reset! error* nil)
+               (-> (smallpen/import-local-library! files)
+                   (.then (fn [{:keys [path]}]
+                            (when path (reset! source* path))
+                            (reset! busy* nil)))
+                   (.catch (fn [cause]
+                             (reset! busy* nil)
+                             (reset! error* (ex-message cause)))))))))
 
         add-library
         (mf/use-fn
@@ -1189,6 +1212,7 @@
       [:div {:class (stl/css :smallpen-library-form)}
        [:div {:class (stl/css :smallpen-source-switch)}
         [:button {:type "button"
+                  :disabled (some? busy)
                   :class (stl/css-case :smallpen-source-option true
                                        :smallpen-source-selected
                                        (= source-type "url"))
@@ -1196,6 +1220,7 @@
                                  (reset! source* ""))}
          (tr "workspace.libraries.smallpen.remote-url")]
         [:button {:type "button"
+                  :disabled (some? busy)
                   :class (stl/css-case :smallpen-source-option true
                                        :smallpen-source-selected
                                        (= source-type "local"))
@@ -1207,11 +1232,26 @@
           (tr "workspace.libraries.smallpen.remote-url")
           (tr "workspace.libraries.smallpen.local-path"))
         [:input {:class (stl/css :smallpen-source-input)
+                 :disabled (some? busy)
                  :value source
                  :placeholder (if (= source-type "url")
                                 "https://design.example/library/"
                                 "../libraries/design-system.smallpen")
                  :on-change change-source}]]
+       (when (= source-type "local")
+         [:> button* {:variant "secondary"
+                      :type "button"
+                      :disabled (some? busy)
+                      :on-click browse-library}
+          (if (= busy :browse)
+            (tr "labels.uploading")
+            (tr "workspace.libraries.smallpen.browse"))])
+       [:input {:type "file"
+                :ref directory-input-ref
+                :hidden true
+                :webkitdirectory "true"
+                :multiple true
+                :on-change upload-library}]
        [:p {:class (stl/css :smallpen-source-help)}
         (if (= source-type "url")
           (tr "workspace.libraries.smallpen.remote-help")

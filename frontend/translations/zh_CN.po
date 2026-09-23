@@ -6741,11 +6741,15 @@ msgstr "基础库"
 
 #: src/app/main/ui/workspace/libraries.cljs
 msgid "workspace.libraries.smallpen.local-help"
-msgstr "建议使用项目附近的相对路径。仍可连接项目目录外的文件，但移动文件后可能失效。"
+msgstr "浏览会将无外部依赖的素材库目录上传一份到当前项目旁边（最多 50 MB、2000 个文件），再点“添加”关联。也可以手动输入本地路径。"
 
 #: src/app/main/ui/workspace/libraries.cljs
 msgid "workspace.libraries.smallpen.local-path"
 msgstr "本地路径"
+
+#: src/app/main/ui/workspace/libraries.cljs
+msgid "workspace.libraries.smallpen.browse"
+msgstr "浏览…"
 
 #: src/app/main/ui/workspace/libraries.cljs
 msgid "workspace.libraries.smallpen.remote-help"

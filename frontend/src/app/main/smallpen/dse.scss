@@ -1,0 +1,51 @@
+@use "ds/typography.scss" as t;
+
+.insert-panel {
+  @include t.use-typography("body-small");
+  color: var(--color-foreground-primary);
+  padding: var(--sp-s) var(--sp-m);
+  border-block-end: 1px solid var(--color-background-quaternary);
+  min-inline-size: 0;
+}
+
+.insert-summary {
+  cursor: pointer;
+  padding-block: var(--sp-s);
+  color: var(--color-foreground-secondary);
+}
+
+.insert-fields,
+.insert-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-s);
+  min-inline-size: 0;
+}
+
+.insert-hint {
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}
+
+.insert-select {
+  @include t.use-typography("body-small");
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: var(--sp-s);
+  color: var(--color-foreground-primary);
+  background: var(--color-background-tertiary);
+  border: 1px solid var(--color-background-quaternary);
+  border-radius: var(--sp-xs);
+}
+
+.insert-summary:focus-visible,
+.insert-select:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+.insert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-s);
+}

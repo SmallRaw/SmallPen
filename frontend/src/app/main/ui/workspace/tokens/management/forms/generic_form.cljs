@@ -106,8 +106,12 @@
         tokens-tree (mf/deref refs/workspace-all-tokens-map)
 
         ;; A map name -> token, tokens only in actual set.
+        tokens-lib
+        (mf/deref refs/tokens-lib)
+
         tokens-in-selected-set
-        (mf/deref refs/workspace-all-tokens-in-selected-set)
+        (or (when selected-token-set-id
+              (ctob/get-tokens tokens-lib selected-token-set-id)) {})
 
         ;; Make actual set tokens take precedence over tokens in other sets.
         tokens
@@ -205,12 +209,12 @@
 
         on-remap-token
         (mf/use-fn
-         (mf/deps token token-type)
+         (mf/deps token token-type selected-token-set-id)
          (fn [valid-token new-name old-name description]
            (let [undo-group (uuid/next)]
              (st/emit!
               (dwtl/toggle-nested-token-path token-type new-name)
-              (dwtl/update-token nil
+              (dwtl/update-token selected-token-set-id
                                  (:id token)
                                  {:name new-name
                                   :value (:value valid-token)
@@ -222,12 +226,12 @@
 
         on-rename-token
         (mf/use-fn
-         (mf/deps token token-type)
+         (mf/deps token token-type selected-token-set-id)
          (fn [valid-token name description]
            (let [undo-group (uuid/next)]
              (st/emit!
               (dwtl/toggle-nested-token-path token-type name)
-              (dwtl/update-token nil
+              (dwtl/update-token selected-token-set-id
                                  (:id token)
                                  {:name name
                                   :value (:value valid-token)
@@ -238,7 +242,7 @@
 
         on-submit
         (mf/use-fn
-         (mf/deps validate-token token tokens token-type value-subfield value-type active-tab on-remap-token on-rename-token is-create on-create-token)
+         (mf/deps validate-token token tokens token-type value-subfield value-type active-tab on-remap-token on-rename-token is-create on-create-token selected-token-set-id)
          (fn [form event]
            (let [name (get-in @form [:clean-data :name])
                  description (get-in @form [:clean-data :description])
@@ -279,10 +283,10 @@
                               (if is-create
                                 (if on-create-token
                                   (on-create-token new-token undo-group)
-                                  (dwtl/create-token nil
+                                  (dwtl/create-token selected-token-set-id
                                                      new-token
                                                      :undo-group undo-group))
-                                (dwtl/update-token nil
+                                (dwtl/update-token selected-token-set-id
                                                    (:id token)
                                                    {:name name
                                                     :value (:value valid-token)

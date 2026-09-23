@@ -24,6 +24,7 @@ import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 import { inspectImage } from "./media.mjs";
 import { prepareFontFiles } from "./font.mjs";
 import { LocalApplicationState } from "./application-state.mjs";
+import { importLibraryUpload, MAX_LIBRARY_UPLOAD_BYTES } from "./library-upload.mjs";
 import { createWebWorkspaceSnapshot } from "./web-projection.mjs";
 import {
   createCanvasWorkspace,
@@ -707,6 +708,18 @@ export async function serveLocalPackage({
           })),
           warnings: description.status?.warnings ?? [],
         });
+        return;
+      }
+      if (request.method === "POST" && route === "/v1/libraries/import-local") {
+        const contentType = request.headers["content-type"] ?? "";
+        if (!contentType.startsWith("multipart/form-data;")) {
+          throw new SmallPenError("invalid_content_type", "Expected a directory upload.");
+        }
+        const bytes = await readBytes(request, MAX_LIBRARY_UPLOAD_BYTES + 1024 * 1024, {
+          label: "library", emptyCode: "empty_library_upload", tooLargeCode: "library_too_large",
+        });
+        const form = await new Response(bytes, { headers: { "content-type": contentType } }).formData();
+        writeJson(response, 200, await importLibraryUpload(locator, form));
         return;
       }
       if (request.method === "POST" && route === "/v1/libraries/link") {

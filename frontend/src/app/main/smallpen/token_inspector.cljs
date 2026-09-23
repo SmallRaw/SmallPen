@@ -14,6 +14,7 @@
   (:require
    [app.main.data.changes :as dch]
    [app.main.store :as st]
+   [app.main.ui.ds.buttons.button :refer [button*]]
    [clojure.string :as str]
    [rumext.v2 :as mf]))
 
@@ -54,13 +55,13 @@
                      (catch :default _ nil)))]
       (when ref
         [:section {:aria-label "组件编辑来源"
-                   :style {:padding "var(--sp-s)" :font-size "12px" :overflow-wrap "anywhere"
-                           :color "var(--color-foreground-primary)" :line-height "1.4"}}
+                   :style #js {:padding "var(--sp-s)" :fontSize "12px" :overflowWrap "anywhere"
+                               :color "var(--color-foreground-primary)" :lineHeight "1.4"}}
          [:strong "组件编辑来源"]
          [:p (str (get ref "familyName" (get ref "componentSetId")) " · "
                   (get ref "combinationLabel" "Source"))]
          [:p (str/join " · " (map (fn [[axis value]] (str axis "=" value)) (get ref "selection")))]
-         [:p (str "节点：" (or (get ref "occurrencePath") (get ref "sourceNodeId"))) ]
+         [:p (str "节点：" (or (get ref "occurrencePath") (get ref "sourceNodeId")))]
          [:p (if (get ref "occurrencePath")
                "范围：当前组件组合内的这个嵌套实例；不修改共享子组件源。"
                "范围：当前组件组合源；未绑定属性会同步到引用它的实例。")]
@@ -72,7 +73,7 @@
                (str field " → " (get binding "path" "未解析") " = " (raw-string (get binding "value"))
                     (when (or (get binding "alias") (get binding "contextual") (get binding "missing"))
                       " · 请从 Token 区编辑来源"))])])
-         [:p {:style {:opacity 0.6}} (str "Owner：" (get ref "ownerPackageId"))]]))))
+         [:p {:style #js {:opacity 0.6}} (str "Owner：" (get ref "ownerPackageId"))]]))))
 
 (defn- parse-num
   [text]
@@ -180,8 +181,8 @@
 
 (defn- typography-row
   [label field value on-change]
-  [:div {:style {:display "flex" :gap "6px" :margin-bottom "4px" :align-items "center"}}
-   [:span {:style {:width "56px" :font-size "11px" :opacity 0.7}} label]
+  [:div {:style #js {:display "flex" :gap "6px" :marginBottom "4px" :alignItems "center"}}
+   [:span {:style #js {:width "56px" :fontSize "11px" :opacity 0.7}} label]
    [:input {:data-testid (str "dse-typo-" (name field))
             :type "text"
             :default-value (str (or value ""))
@@ -191,7 +192,7 @@
                                       (if (and (numeric-field? field) (re-matches #"^\s*-?\d+(\.\d+)?\s*$" v))
                                         (js/parseFloat v)
                                         v))))
-            :style {:flex "1" :font-size "12px" :padding "2px 6px"}}]])
+            :style #js {:color "var(--color-foreground-primary)" :background "var(--color-background-tertiary)" :border "1px solid var(--color-background-quaternary)" :flex "1" :fontSize "12px" :padding "2px 6px"}}]])
 
 (mf/defc token-inspector*
   [{:keys [shapes file-id page-id]}]
@@ -234,21 +235,22 @@
                 (when (some? new-value)
                   (commit-token-value! (:id shape) raw new-value file-id page-id))))]
         [:div {:data-testid "dse-token-inspector"
-               :style {:border-bottom "1px solid var(--color-neutral-200, #e5e7eb)"
-                       :padding "10px 12px"
-                       :font-size "12px"}}
-         [:div {:style {:font-weight "600" :margin-bottom "6px"}}
+               :style #js {:color "var(--color-foreground-primary)"
+                           :borderBottom "1px solid var(--color-background-quaternary)"
+                           :padding "10px 12px"
+                           :fontSize "12px"}}
+         [:div {:style #js {:fontWeight "600" :marginBottom "6px"}}
           "Token · " (or (get ref "path") "?")]
          [:span {:data-testid "dse-token-type"
-                 :style {:background "var(--color-neutral-100, #f1f5f9)"
-                         :padding "1px 6px" :border-radius "4px"
-                         :margin-bottom "6px" :display "inline-block"}}
+                 :style #js {:background "var(--color-background-tertiary)"
+                             :padding "1px 6px" :borderRadius "4px"
+                             :marginBottom "6px" :display "inline-block"}}
           (str (or (get type-labels type) type) " · " type)]
          ;; Technical identity (R18/R26): owner/set/status/Cell id live
          ;; HERE, never on the canvas.
          [:div {:data-testid "dse-token-details"
-                :style {:color "var(--color-neutral-500, #6b7280)"
-                        :margin-top "6px" :margin-bottom "6px" :line-height "1.5"}}
+                :style #js {:color "var(--color-foreground-secondary)"
+                            :marginTop "6px" :marginBottom "6px" :lineHeight "1.5"}}
           [:div (str "Token Set：" (get ref "setName"))]
           [:div (str "owner package：" (get ref "ownerPackageId"))]
           [:div (str "Cell ID：" (get ref "tokenId"))]
@@ -275,27 +277,27 @@
                           :type "text"
                           :default-value (str (or (get base "fontFamily") (get base :fontFamily) ""))
                           :on-change (fn [event] (swap! typo-state assoc :fontFamily (.-value (.-target event))))
-                          :style {:width "100%" :font-size "12px" :padding "2px 6px" :margin-bottom "4px"}}]
+                          :style #js {:color "var(--color-foreground-primary)" :background "var(--color-background-tertiary)" :border "1px solid var(--color-background-quaternary)" :width "100%" :fontSize "12px" :padding "2px 6px" :marginBottom "4px"}}]
                  [:input {:data-testid "dse-typo-fontSize"
                           :type "text"
                           :default-value (str (or (get base "fontSize") (get base :fontSize) ""))
                           :on-change (fn [event] (swap! typo-state assoc :fontSize (js/parseFloat (.-value (.-target event)))))
-                          :style {:width "100%" :font-size "12px" :padding "2px 6px" :margin-bottom "4px"}}]
+                          :style #js {:color "var(--color-foreground-primary)" :background "var(--color-background-tertiary)" :border "1px solid var(--color-background-quaternary)" :width "100%" :fontSize "12px" :padding "2px 6px" :marginBottom "4px"}}]
                  [:input {:data-testid "dse-typo-fontWeight"
                           :type "text"
                           :default-value (str (or (get base "fontWeight") (get base :fontWeight) ""))
                           :on-change (fn [event] (swap! typo-state assoc :fontWeight (js/parseFloat (.-value (.-target event)))))
-                          :style {:width "100%" :font-size "12px" :padding "2px 6px" :margin-bottom "4px"}}]
+                          :style #js {:color "var(--color-foreground-primary)" :background "var(--color-background-tertiary)" :border "1px solid var(--color-background-quaternary)" :width "100%" :fontSize "12px" :padding "2px 6px" :marginBottom "4px"}}]
                  [:input {:data-testid "dse-typo-lineHeight"
                           :type "text"
                           :default-value (str (or (get base "lineHeight") (get base :lineHeight) ""))
                           :on-change (fn [event] (swap! typo-state assoc :lineHeight (js/parseFloat (.-value (.-target event)))))
-                          :style {:width "100%" :font-size "12px" :padding "2px 6px" :margin-bottom "4px"}}]
+                          :style #js {:color "var(--color-foreground-primary)" :background "var(--color-background-tertiary)" :border "1px solid var(--color-background-quaternary)" :width "100%" :fontSize "12px" :padding "2px 6px" :marginBottom "4px"}}]
                  [:input {:data-testid "dse-typo-letterSpacing"
                           :type "text"
                           :default-value (str (or (get base "letterSpacing") (get base :letterSpacing) ""))
                           :on-change (fn [event] (swap! typo-state assoc :letterSpacing (js/parseFloat (.-value (.-target event)))))
-                          :style {:width "100%" :font-size "12px" :padding "2px 6px" :margin-bottom "4px"}}]])
+                          :style #js {:color "var(--color-foreground-primary)" :background "var(--color-background-tertiary)" :border "1px solid var(--color-background-quaternary)" :width "100%" :fontSize "12px" :padding "2px 6px" :marginBottom "4px"}}]])
               ;; NOTE: boolean/text-case/text-decoration also use the plain
               ;; text input (values validated client- AND adapter-side); the
               ;; previous <select> variant crashed React (#31, keyword child)
@@ -306,19 +308,19 @@
                        :placeholder (if alias? "新的 {引用} 表达式" "新值")
                        :on-change (fn [event]
                                     (reset! text-state (.-value (.-target event))))
-                       :style {:width "100%" :font-size "12px" :padding "2px 6px"
-                               :margin-bottom "4px"}}])
+                       :style #js {:color "var(--color-foreground-primary)" :background "var(--color-background-tertiary)" :border "1px solid var(--color-background-quaternary)" :width "100%" :fontSize "12px" :padding "2px 6px"
+                                   :marginBottom "4px"}}])
             (when alias?
-              [:div {:style {:color "var(--color-neutral-500, #6b7280)" :margin-bottom "4px"}}
+              [:div {:style #js {:color "var(--color-foreground-secondary)" :marginBottom "4px"}}
                (str "该 Cell 是引用：提交将写入新的引用表达式（当前 " raw-str "）")])
             (when validation-error
               [:div {:data-testid "dse-token-error"
-                     :style {:color "#dc2626" :margin-bottom "4px"}}
+                     :style #js {:color "var(--color-accent-error)" :marginBottom "4px"}}
                validation-error])
-            [:div {:style {:display "flex" :gap "8px" :margin-top "6px"}}
-             [:button {:data-testid "dse-token-apply"
-                       :on-click apply-edit
-                       :style {:cursor "pointer" :padding "3px 10px"}}
+            [:div {:style #js {:display "flex" :gap "8px" :marginTop "6px"}}
+             [:> button* {:data-testid "dse-token-apply"
+                          :variant "secondary"
+                          :on-click apply-edit}
               "应用到源 Cell"]]])]))))
 
 (mf/defc token-section*
