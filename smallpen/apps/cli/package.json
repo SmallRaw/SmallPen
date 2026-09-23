@@ -1,8 +1,13 @@
 {
   "name": "@smallpen/cli",
   "version": "0.1.0",
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
+  "exports": {
+    "./launcher": "./bin/smallpen-check.cjs"
+  },
   "bin": {
     "smallpen": "./bin/smallpen-check.cjs"
   },

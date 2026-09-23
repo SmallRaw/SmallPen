@@ -99,14 +99,78 @@ Cmd+O opens another independent `.smallpen` in another native window. Each windo
 
 ## CLI Agent surface
 
+The public npm entry package is `smallpen` (`apps/npm-cli`). Its thin launcher
+delegates to `@smallpen/cli` (`apps/cli`), which owns the implementation and
+Node.js runtime check. Users install with `npm install -g smallpen` and run
+`smallpen --help`.
+
+Publish in this order: `@smallpen/core`, `@smallpen/local-package`,
+`@smallpen/cli`, then `smallpen`. The entry package pins the CLI version;
+update that dependency when releasing a new CLI. All four packages are
+configured for public access. Other workspace packages remain private.
+
 Build the standalone Alpha directory with `npm run build:cli`. The resulting
 `dist/SmallPen-CLI` directory includes Unix and Windows launchers and all
 SmallPen JavaScript modules; it requires Node.js 24 or newer on `PATH`.
 
-The manually triggered `SmallPen Alpha` GitHub Actions workflow compiles the
-current Penpot frontend, runs the SmallPen tests, and retains two downloadable
-artifacts for 30 days: `SmallPen-CLI.tar.gz` and the unsigned
-`SmallPen-macOS-arm64-unsigned.zip` application for Apple Silicon Macs.
+Use **CI** (`.github/workflows/smallpen.yml`) in GitHub
+Actions. Select `all`, `cli`, or `desktop`, then enter a version such as
+`0.1.0-alpha.1` with channel `alpha`. All products share that version and
+the selected source commit. `publish_npm` defaults to **false**.
+
+The workflow runs shared checks, then CLI packaging and the shared frontend
+build in parallel. Desktop consumes that frontend artifact and builds on its
+own macOS arm64 runner. Only after every selected product passes can the npm
+publication job start. Web and other Desktop platforms are not enabled yet.
+There is one workflow, with Test, CLI, Frontend, Desktop and Publish jobs.
+The old Alpha entry and nested product workflows have been removed.
+Do not rerun a historical old-workflow run to test the new pipeline: start a
+new run from a branch that contains these files. GitHub's manual entry also
+needs the workflow file on the repository's default branch.
+
+Artifacts are retained for **1 day**: four npm tarballs with a commit/version/
+SHA-512 manifest, a standalone CLI archive, and the macOS App archive with
+SHA-256 checksum and source commit. Desktop is only ad-hoc signed; no Apple
+Developer account, signing secrets, notarization or GitHub Release is required.
+The desktop smoke test launches the exact App that is uploaded.
+
+### Enable npm publication
+
+The four public package names are `@smallpen/core`, `@smallpen/local-package`,
+`@smallpen/cli`, and `smallpen`. Configure a GitHub Actions trusted publisher
+in **each package's npm settings**:
+
+- Organization/user: `SmallRaw`
+- Repository: `SmallPen`
+- Workflow filename: `smallpen.yml`
+- Environment: `npm`
+
+Create the matching GitHub environment `npm`; configure required reviewers
+and permitted release branches there. The publication job uses OIDC and
+`id-token: write`, not an `NPM_TOKEN` secret or GitHub Packages. For a package
+that does not exist on npm yet, bootstrap its first publication under your
+own npm account before configuring its trusted publisher.
+
+For publication, start **CI**, select `cli` or `all`, and explicitly enable
+`publish_npm`. It publishes
+the exact tested tarballs in dependency order. Stable versions use `latest`;
+prerelease versions must match `alpha`, `beta` or `rc`.
+
+```sh
+# Alpha installs are explicit; they do not replace the stable latest tag.
+npm install -g smallpen@alpha
+smallpen --help
+
+# Once a stable version is published:
+npm install -g smallpen
+```
+
+If npm publication stops partway, rerun the failed job within artifact
+retention. Already published versions are accepted only when their integrity
+matches exactly; mismatches or changed dist-tags stop the run. Expired
+artifacts require a new build. npm cannot atomically publish four packages,
+so a failed run can leave some dependencies published; versions are never
+overwritten or automatically unpublished.
 
 Run `node apps/cli/bin/smallpen.mjs --help` for the full contract. Every main command supports stable JSON output and actionable errors.
 

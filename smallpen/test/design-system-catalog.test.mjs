@@ -12,7 +12,7 @@ import {
   listPackageEntries,
   loadPackageFromValues,
 } from "@smallpen/core";
-import { createDesignSystemWorkspace } from "file:///Volumes/DevVault/Dev/Projects/QuincyWork/pen/smallpen/apps/background/src/workspace-view.mjs";
+import { createDesignSystemWorkspace } from "../apps/background/src/workspace-view.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "design-system.smallpen");
