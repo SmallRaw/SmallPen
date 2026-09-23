@@ -54,31 +54,31 @@
   (let [set-filter (fn [key value]
                      (on-change (assoc filters key value)))]
     [:div {:data-testid "workbench-filter-bar"
-           :style {:display "flex"
-                   :flexWrap "wrap"
-                   :gap "8px"
-                   :alignItems "center"
-                   :marginBottom "12px"}}
+           :style #js {:display "flex"
+                       :flexWrap "wrap"
+                       :gap "8px"
+                       :alignItems "center"
+                       :marginBottom "12px"}}
      [:input {:data-testid "workbench-search"
               :value (:search filters)
               :placeholder "搜索名称/路径/值"
               :on-change (fn [event]
                            (set-filter :search (.. event -target -value)))
-              :style {:flex "1 1 200px"
-                      :padding "6px 10px"
-                      :borderRadius "6px"
-                      :border "1px solid #3f3f46"
-                      :backgroundColor "#1f1f23"
-                      :color "#e4e4e7"
-                      :fontSize "13px"}}]
+              :style #js {:flex "1 1 200px"
+                          :padding "6px 10px"
+                          :borderRadius "6px"
+                          :border "1px solid var(--color-background-quaternary)"
+                          :backgroundColor "var(--color-background-secondary)"
+                          :color "var(--color-foreground-primary)"
+                          :fontSize "13px"}}]
      [:select {:data-testid "workbench-filter-type"
                :value (:type filters)
                :on-change (fn [event]
                             (set-filter :type (.. event -target -value)))
-               :style {:padding "6px" :borderRadius "6px"
-                       :border "1px solid #3f3f46"
-                       :backgroundColor "#1f1f23"
-                       :color "#e4e4e7" :fontSize "12px"}}
+               :style #js {:padding "6px" :borderRadius "6px"
+                           :border "1px solid var(--color-background-quaternary)"
+                           :backgroundColor "var(--color-background-secondary)"
+                           :color "var(--color-foreground-primary)" :fontSize "12px"}}
       [:option {:value ""} "全部类型"]
       (for [t types]
         [:option {:key t :value t} t])]
@@ -86,10 +86,10 @@
                :value (:owner filters)
                :on-change (fn [event]
                             (set-filter :owner (.. event -target -value)))
-               :style {:padding "6px" :borderRadius "6px"
-                       :border "1px solid #3f3f46"
-                       :backgroundColor "#1f1f23"
-                       :color "#e4e4e7" :fontSize "12px"}}
+               :style #js {:padding "6px" :borderRadius "6px"
+                           :border "1px solid var(--color-background-quaternary)"
+                           :backgroundColor "var(--color-background-secondary)"
+                           :color "var(--color-foreground-primary)" :fontSize "12px"}}
       [:option {:value ""} "全部来源"]
       (for [o owners]
         [:option {:key o :value o} o])]
@@ -97,24 +97,24 @@
                :value (:group filters)
                :on-change (fn [event]
                             (set-filter :group (.. event -target -value)))
-               :style {:padding "6px" :borderRadius "6px"
-                       :border "1px solid #3f3f46"
-                       :backgroundColor "#1f1f23"
-                       :color "#e4e4e7" :fontSize "12px"}}
+               :style #js {:padding "6px" :borderRadius "6px"
+                           :border "1px solid var(--color-background-quaternary)"
+                           :backgroundColor "var(--color-background-secondary)"
+                           :color "var(--color-foreground-primary)" :fontSize "12px"}}
       [:option {:value ""} "全部分组"]
       (for [g groups]
         [:option {:key g :value g} g])]
      [:span {:data-testid "workbench-filter-count"
-             :style {:color "#a1a1aa" :fontSize "12px"}}
+             :style #js {:color "var(--color-foreground-secondary)" :fontSize "12px"}}
       (str shown "/" total)]
      (when (filters-active? filters)
        [:button {:data-testid "workbench-filter-clear"
                  :on-click (fn [_] (on-change empty-filters))
-                 :style {:padding "4px 10px" :borderRadius "6px"
-                         :border "1px solid #3f3f46"
-                         :backgroundColor "transparent"
-                         :color "#a1a1aa" :fontSize "12px"
-                         :cursor "pointer"}}
+                 :style #js {:padding "4px 10px" :borderRadius "6px"
+                             :border "1px solid var(--color-background-quaternary)"
+                             :backgroundColor "transparent"
+                             :color "var(--color-foreground-secondary)" :fontSize "12px"
+                             :cursor "pointer"}}
         "清除"])]))
 
 (mf/defc specimen-swatch*
@@ -125,32 +125,32 @@
     [:span {:data-testid "specimen-swatch"
             :data-decoration "true"
             :aria-hidden "true"
-            :style {:width "100%"
-                    :height "44px"
-                    :borderRadius "6px"
-                    :border "1px solid #52525b"
-                    :backgroundColor value
-                    :display "block"
-                    :pointerEvents "none"}}]
+            :style #js {:width "100%"
+                        :height "44px"
+                        :borderRadius "6px"
+                        :border "1px solid #52525b"
+                        :backgroundColor value
+                        :display "block"
+                        :pointerEvents "none"}}]
     [:span {:data-testid "specimen-value"
             :data-decoration "true"
             :aria-hidden "true"
-            :style {:minHeight "44px"
-                    :padding "6px"
-                    :borderRadius "6px"
-                    :border "1px dashed #52525b"
-                    :color "#a1a1aa"
-                    :fontFamily "monospace"
-                    :fontSize "12px"
-                    :display "block"
-                    :wordBreak "break-all"
-                    :pointerEvents "none"}}
+            :style #js {:minHeight "44px"
+                        :padding "6px"
+                        :borderRadius "6px"
+                        :border "1px dashed #52525b"
+                        :color "var(--color-foreground-secondary)"
+                        :fontFamily "monospace"
+                        :fontSize "12px"
+                        :display "block"
+                        :wordBreak "break-all"
+                        :pointerEvents "none"}}
      (str value)]))
 
 (def ^:private typography-status-meta
   {:loading  {:color "#f59e0b" :label "字体加载中…"}
    :ready    {:color "#4ade80" :label "字体就绪"}
-   :fallback {:color "#f87171" :label "回退字体"}})
+   :fallback {:color "var(--color-accent-error)" :label "回退字体"}})
 
 (mf/defc typography-specimen*
   {::mf/props :obj}
@@ -177,19 +177,19 @@
                (.then (fn [_] (reset! status* :ready)))
                (.catch (fn [_] (reset! status* :fallback))))))))
     [:div {:data-testid "typography-specimen"
-           :style {:display "flex" :flexDirection "column" :gap "6px"}}
-     [:span {:style {:fontFamily (str family-name ", " family ", sans-serif")
-                     :fontSize (str size "px")
-                     :fontWeight (str weight)
-                     :lineHeight (str line)
-                     :color "#e4e4e7"
-                     :whiteSpace "nowrap"
-                     :overflow "hidden"}}
+           :style #js {:display "flex" :flexDirection "column" :gap "6px"}}
+     [:span {:style #js {:fontFamily (str family-name ", " family ", sans-serif")
+                         :fontSize (str size "px")
+                         :fontWeight (str weight)
+                         :lineHeight (str line)
+                         :color "var(--color-foreground-primary)"
+                         :whiteSpace "nowrap"
+                         :overflow "hidden"}}
       "设计系统 Aa 123"]
-     [:span {:style {:color "#71717a" :fontSize "11px"}}
+     [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "11px"}}
       (str family " · " size "px · " weight " · " line)]
      [:span {:data-testid "typography-status"
-             :style {:color (:color meta) :fontSize "11px"}}
+             :style #js {:color (:color meta) :fontSize "11px"}}
       (str (:label meta) " · " font-id)]]))
 
 (mf/defc specimen-card*
@@ -206,31 +206,31 @@
            :on-key-down (fn [event]
                           (when (= (.-key event) "Enter")
                             (on-select row)))
-           :style (merge
-                   {:padding "10px"
-                    :border "1px solid #3f3f46"
-                    :borderRadius "8px"
-                    :backgroundColor "#1f1f23"
-                    :display "flex"
-                    :flexDirection "column"
-                    :gap "8px"
-                    :cursor "pointer"}
-                   (when selected
-                     {:borderColor "#6750a4"
-                      :boxShadow "0 0 0 1px #6750a4"}))}
+           :style (clj->js (merge
+                            {:padding "10px"
+                             :border "1px solid var(--color-background-quaternary)"
+                             :borderRadius "8px"
+                             :backgroundColor "var(--color-background-secondary)"
+                             :display "flex"
+                             :flexDirection "column"
+                             :gap "8px"
+                             :cursor "pointer"}
+                            (when selected
+                              {:borderColor "#6750a4"
+                               :boxShadow "0 0 0 1px #6750a4"})))}
      (if (and (= "typography" (str (:type row))) (map? (:rawValue row)))
        [:> typography-specimen* {:row row}]
        [:> specimen-swatch* {:value value}])
-     [:span {:style {:color "#e4e4e7" :fontSize "12px"
-                     :fontFamily "monospace" :wordBreak "break-all"}}
+     [:span {:style #js {:color "var(--color-foreground-primary)" :fontSize "12px"
+                         :fontFamily "monospace" :wordBreak "break-all"}}
       (str (:path row))]
-     [:span {:style {:display "flex" :gap "6px" :alignItems "center"}}
-      [:span {:style {:color "#71717a" :fontSize "11px"}}
+     [:span {:style #js {:display "flex" :gap "6px" :alignItems "center"}}
+      [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "11px"}}
        (str (or (:type row) "unknown"))]
       (when read-only?
-        [:span {:style {:color "#52525b" :fontSize "11px"
-                        :border "1px solid #52525b"
-                        :borderRadius "4px" :padding "0 4px"}}
+        [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "11px"
+                            :border "1px solid #52525b"
+                            :borderRadius "4px" :padding "0 4px"}}
          "库"])]]))
 
 (def ^:private numeric-token-types
@@ -266,68 +266,68 @@
                       :else
                       (reset! error* "请输入有效数字。")))]
     [:div {:data-testid "workbench-number-editor"
-           :style {:display "flex"
-                   :flexDirection "column"
-                   :gap "8px"
-                   :padding "10px"
-                   :border "1px solid #3f3f46"
-                   :borderRadius "8px"}}
-      [:span {:style {:color "#a1a1aa" :fontSize "12px"}}
-       (if alias? "编辑 alias 表达式" "编辑数值定义")]
-      [:div {:style {:display "flex" :gap "8px" :alignItems "center"}}
-       (if alias?
-         [:input {:data-testid "workbench-number-alias"
-                  :value value
-                  :on-change (fn [event] (reset! value* (.. event -target -value)))
-                  :style {:flex "1"
-                          :padding "6px 8px"
-                          :borderRadius "6px"
-                          :border "1px solid #3f3f46"
-                          :backgroundColor "#18181b"
-                          :color "#e4e4e7"
-                          :fontFamily "monospace"
-                          :fontSize "12px"}}]
-         [:input {:data-testid "workbench-number-value"
-                  :type "number"
-                  :step "any"
-                  :value value
-                  :on-change (fn [event] (reset! value* (.. event -target -value)))
-                  :style {:flex "1"
-                          :padding "6px 8px"
-                          :borderRadius "6px"
-                          :border "1px solid #3f3f46"
-                          :backgroundColor "#18181b"
-                          :color "#e4e4e7"
-                          :fontFamily "monospace"
-                          :fontSize "12px"}}])]
-       (when-not alias?
-         [:span {:style {:color "#71717a" :fontSize "12px"}} unit])
-      (when @error*
-        [:p {:data-testid "workbench-edit-error"
-             :style {:color "#f87171" :fontSize "12px" :margin "0"}}
-         @error*])
-      [:div {:style {:display "flex" :gap "8px"}}
-       [:button {:data-testid "workbench-edit-confirm"
-                 :disabled pending
-                 :on-click confirm
-                 :style {:padding "4px 12px"
-                         :borderRadius "6px"
-                         :border "1px solid #6750a4"
-                         :backgroundColor "#6750a4"
-                         :color "#ffffff"
-                         :fontSize "12px"
-                         :cursor "pointer"}}
-        "确认"]
-       [:button {:data-testid "workbench-edit-cancel"
-                 :on-click on-cancel
-                 :style {:padding "4px 12px"
-                         :borderRadius "6px"
-                         :border "1px solid #3f3f46"
-                         :backgroundColor "transparent"
-                         :color "#a1a1aa"
-                         :fontSize "12px"
-                         :cursor "pointer"}}
-        "取消"]]]))
+           :style #js {:display "flex"
+                       :flexDirection "column"
+                       :gap "8px"
+                       :padding "10px"
+                       :border "1px solid var(--color-background-quaternary)"
+                       :borderRadius "8px"}}
+     [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "12px"}}
+      (if alias? "编辑 alias 表达式" "编辑数值定义")]
+     [:div {:style #js {:display "flex" :gap "8px" :alignItems "center"}}
+      (if alias?
+        [:input {:data-testid "workbench-number-alias"
+                 :value value
+                 :on-change (fn [event] (reset! value* (.. event -target -value)))
+                 :style #js {:flex "1"
+                             :padding "6px 8px"
+                             :borderRadius "6px"
+                             :border "1px solid var(--color-background-quaternary)"
+                             :backgroundColor "var(--color-background-primary)"
+                             :color "var(--color-foreground-primary)"
+                             :fontFamily "monospace"
+                             :fontSize "12px"}}]
+        [:input {:data-testid "workbench-number-value"
+                 :type "number"
+                 :step "any"
+                 :value value
+                 :on-change (fn [event] (reset! value* (.. event -target -value)))
+                 :style #js {:flex "1"
+                             :padding "6px 8px"
+                             :borderRadius "6px"
+                             :border "1px solid var(--color-background-quaternary)"
+                             :backgroundColor "var(--color-background-primary)"
+                             :color "var(--color-foreground-primary)"
+                             :fontFamily "monospace"
+                             :fontSize "12px"}}])]
+     (when-not alias?
+       [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "12px"}} unit])
+     (when @error*
+       [:p {:data-testid "workbench-edit-error"
+            :style #js {:color "var(--color-accent-error)" :fontSize "12px" :margin "0"}}
+        @error*])
+     [:div {:style #js {:display "flex" :gap "8px"}}
+      [:button {:data-testid "workbench-edit-confirm"
+                :disabled pending
+                :on-click confirm
+                :style #js {:padding "4px 12px"
+                            :borderRadius "6px"
+                            :border "1px solid #6750a4"
+                            :backgroundColor "#6750a4"
+                            :color "#ffffff"
+                            :fontSize "12px"
+                            :cursor "pointer"}}
+       "确认"]
+      [:button {:data-testid "workbench-edit-cancel"
+                :on-click on-cancel
+                :style #js {:padding "4px 12px"
+                            :borderRadius "6px"
+                            :border "1px solid var(--color-background-quaternary)"
+                            :backgroundColor "transparent"
+                            :color "var(--color-foreground-secondary)"
+                            :fontSize "12px"
+                            :cursor "pointer"}}
+       "取消"]]]))
 
 (def ^:private alias-chain-pattern
   #"^\{([^{}]+)\}$")
@@ -425,13 +425,13 @@
         height    (or (:height root) 120)
         selection (first (vals (:selection variant)))]
     [:div {:data-testid "component-variant"
-           :style {:padding "10px"
-                   :border "1px solid #3f3f46"
-                   :borderRadius "8px"
-                   :backgroundColor "#1f1f23"
-                   :display "flex"
-                   :flexDirection "column"
-                   :gap "8px"}}
+           :style #js {:padding "10px"
+                       :border "1px solid var(--color-background-quaternary)"
+                       :borderRadius "8px"
+                       :backgroundColor "var(--color-background-secondary)"
+                       :display "flex"
+                       :flexDirection "column"
+                       :gap "8px"}}
      [:svg {:data-testid "component-variant-svg"
             :viewBox (str 0 " " 0 " " (or (:width root) 200) " " height)
             :width width
@@ -439,18 +439,18 @@
             :role "img"
             :aria-label (str (:name variant))}
       [:> variant-node* {:node root :token-rows token-rows}]]
-     [:span {:style {:color "#e4e4e7" :fontSize "12px"
-                     :fontFamily "monospace"}}
+     [:span {:style #js {:color "var(--color-foreground-primary)" :fontSize "12px"
+                         :fontFamily "monospace"}}
       (str (:name variant))]
-     [:span {:style {:display "flex" :gap "6px" :alignItems "center"}}
+     [:span {:style #js {:display "flex" :gap "6px" :alignItems "center"}}
       (when selection
         [:span {:data-testid "component-variant-axis"
-                :style {:color "#71717a" :fontSize "11px"}}
+                :style #js {:color "var(--color-foreground-secondary)" :fontSize "11px"}}
          (str selection)])
       (when read-only
-        [:span {:style {:color "#52525b" :fontSize "11px"
-                        :border "1px solid #52525b"
-                        :borderRadius "4px" :padding "0 4px"}}
+        [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "11px"
+                            :border "1px solid #52525b"
+                            :borderRadius "4px" :padding "0 4px"}}
          "库"])]]))
 
 (mf/defc component-board*
@@ -458,22 +458,22 @@
   [{:keys [components token-rows]}]
   (when (seq components)
     [:div {:data-testid "component-board"
-           :style {:marginBottom "24px"}}
-     [:h3 {:style {:fontSize "13px" :fontWeight "600"
-                   :color "#a1a1aa" :margin "0 0 10px"
-                   :textTransform "uppercase"
-                   :letterSpacing "0.05em"}}
+           :style #js {:marginBottom "24px"}}
+     [:h3 {:style #js {:fontSize "13px" :fontWeight "600"
+                       :color "var(--color-foreground-secondary)" :margin "0 0 10px"
+                       :textTransform "uppercase"
+                       :letterSpacing "0.05em"}}
       "组件"]
-     [:div {:style {:display "grid"
-                    :gridTemplateColumns "repeat(auto-fill, minmax(200px, 1fr))"
-                    :gap "10px"}}
+     [:div {:style #js {:display "grid"
+                        :gridTemplateColumns "repeat(auto-fill, minmax(200px, 1fr))"
+                        :gap "10px"}}
       (for [component components]
         [:div {:key (str (get-in component [:owner :packageId]) ":" (:id component))
                :data-testid "component-set"
-               :style {:display "flex" :flexDirection "column" :gap "8px"}}
-         [:span {:style {:color "#a1a1aa" :fontSize "12px"}}
+               :style #js {:display "flex" :flexDirection "column" :gap "8px"}}
+         [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "12px"}}
           (str (:name component))]
-         [:div {:style {:display "flex" :flexWrap "wrap" :gap "8px"}}
+         [:div {:style #js {:display "flex" :flexWrap "wrap" :gap "8px"}}
           (for [variant (:variants component)]
             [:> component-variant-card*
              {:key (str (:id variant))
@@ -502,78 +502,78 @@
                          (reset! error* nil)
                          (on-commit (str hex (alpha-to-hex alpha))))))]
     [:div {:data-testid "workbench-color-editor"
-           :style {:display "flex"
-                   :flexDirection "column"
-                   :gap "8px"
-                   :padding "10px"
-                   :border "1px solid #3f3f46"
-                   :borderRadius "8px"}}
-      [:span {:style {:color "#a1a1aa" :fontSize "12px"}} "编辑颜色定义"]
-      [:div {:style {:display "flex" :gap "8px" :alignItems "center"}}
-       [:input {:data-testid "workbench-color-hex"
-                :value hex
-                :on-change (fn [event] (reset! hex* (.. event -target -value)))
-                :style {:flex "1"
-                        :padding "6px 8px"
-                        :borderRadius "6px"
-                        :border "1px solid #3f3f46"
-                        :backgroundColor "#18181b"
-                        :color "#e4e4e7"
-                        :fontFamily "monospace"
-                        :fontSize "12px"}}]
-       [:span {:data-testid "workbench-color-preview"
-               :aria-hidden "true"
-               :style {:width "28px" :height "28px"
-                       :borderRadius "6px"
-                       :border "1px solid #52525b"
-                       :backgroundColor (when (re-matches hex-color-pattern hex)
-                                          (str hex (alpha-to-hex alpha)))
-                       :display "inline-block"}}]]
-      [:label {:style {:display "flex" :gap "8px"
-                       :alignItems "center" :fontSize "12px"
-                       :color "#a1a1aa"}}
-       "Alpha %"
-       [:input {:data-testid "workbench-color-alpha"
-                :type "number"
-                :min 0
-                :max 100
-                :value alpha
-                :on-change (fn [event]
-                             (let [parsed (js/parseInt (.. event -target -value) 10)]
-                               (reset! alpha*
-                                       (if (js/isNaN parsed) 0 parsed))))
-                :style {:width "64px"
-                        :padding "4px 6px"
-                        :borderRadius "6px"
-                        :border "1px solid #3f3f46"
-                        :backgroundColor "#18181b"
-                        :color "#e4e4e7"}}]]
-      (when @error*
-        [:p {:data-testid "workbench-edit-error"
-             :style {:color "#f87171" :fontSize "12px" :margin "0"}}
-         @error*])
-      [:div {:style {:display "flex" :gap "8px"}}
-       [:button {:data-testid "workbench-edit-confirm"
-                 :disabled pending
-                 :on-click confirm
-                 :style {:padding "4px 12px"
-                         :borderRadius "6px"
-                         :border "1px solid #6750a4"
-                         :backgroundColor "#6750a4"
-                         :color "#ffffff"
-                         :fontSize "12px"
-                         :cursor "pointer"}}
-        "确认"]
-       [:button {:data-testid "workbench-edit-cancel"
-                 :on-click on-cancel
-                 :style {:padding "4px 12px"
-                         :borderRadius "6px"
-                         :border "1px solid #3f3f46"
-                         :backgroundColor "transparent"
-                         :color "#a1a1aa"
-                         :fontSize "12px"
-                         :cursor "pointer"}}
-        "取消"]]]))
+           :style #js {:display "flex"
+                       :flexDirection "column"
+                       :gap "8px"
+                       :padding "10px"
+                       :border "1px solid var(--color-background-quaternary)"
+                       :borderRadius "8px"}}
+     [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "12px"}} "编辑颜色定义"]
+     [:div {:style #js {:display "flex" :gap "8px" :alignItems "center"}}
+      [:input {:data-testid "workbench-color-hex"
+               :value hex
+               :on-change (fn [event] (reset! hex* (.. event -target -value)))
+               :style #js {:flex "1"
+                           :padding "6px 8px"
+                           :borderRadius "6px"
+                           :border "1px solid var(--color-background-quaternary)"
+                           :backgroundColor "var(--color-background-primary)"
+                           :color "var(--color-foreground-primary)"
+                           :fontFamily "monospace"
+                           :fontSize "12px"}}]
+      [:span {:data-testid "workbench-color-preview"
+              :aria-hidden "true"
+              :style #js {:width "28px" :height "28px"
+                          :borderRadius "6px"
+                          :border "1px solid #52525b"
+                          :backgroundColor (when (re-matches hex-color-pattern hex)
+                                             (str hex (alpha-to-hex alpha)))
+                          :display "inline-block"}}]]
+     [:label {:style #js {:display "flex" :gap "8px"
+                          :alignItems "center" :fontSize "12px"
+                          :color "var(--color-foreground-secondary)"}}
+      "Alpha %"
+      [:input {:data-testid "workbench-color-alpha"
+               :type "number"
+               :min 0
+               :max 100
+               :value alpha
+               :on-change (fn [event]
+                            (let [parsed (js/parseInt (.. event -target -value) 10)]
+                              (reset! alpha*
+                                      (if (js/isNaN parsed) 0 parsed))))
+               :style #js {:width "64px"
+                           :padding "4px 6px"
+                           :borderRadius "6px"
+                           :border "1px solid var(--color-background-quaternary)"
+                           :backgroundColor "var(--color-background-primary)"
+                           :color "var(--color-foreground-primary)"}}]]
+     (when @error*
+       [:p {:data-testid "workbench-edit-error"
+            :style #js {:color "var(--color-accent-error)" :fontSize "12px" :margin "0"}}
+        @error*])
+     [:div {:style #js {:display "flex" :gap "8px"}}
+      [:button {:data-testid "workbench-edit-confirm"
+                :disabled pending
+                :on-click confirm
+                :style #js {:padding "4px 12px"
+                            :borderRadius "6px"
+                            :border "1px solid #6750a4"
+                            :backgroundColor "#6750a4"
+                            :color "#ffffff"
+                            :fontSize "12px"
+                            :cursor "pointer"}}
+       "确认"]
+      [:button {:data-testid "workbench-edit-cancel"
+                :on-click on-cancel
+                :style #js {:padding "4px 12px"
+                            :borderRadius "6px"
+                            :border "1px solid var(--color-background-quaternary)"
+                            :backgroundColor "transparent"
+                            :color "var(--color-foreground-secondary)"
+                            :fontSize "12px"
+                            :cursor "pointer"}}
+       "取消"]]]))
 
 ;; Recursive projected-node renderer: must be a defc (see the note above)
 ;; so the runtime receives real elements, not raw hiccup vectors.
@@ -597,66 +597,66 @@
                            (first (str/split (str (:group row)) "/")))
           color?     (= "color" (str (:type row)))]
       [:aside {:data-testid "workbench-detail"
-               :style {:width "280px"
-                       :flexShrink "0"
-                       :padding "12px"
-                       :border "1px solid #3f3f46"
-                       :borderRadius "8px"
-                       :backgroundColor "#1f1f23"
-                       :alignSelf "flex-start"
-                       :position "sticky"
-                       :top "12px"
-                       :display "flex"
-                       :flexDirection "column"
-                       :gap "10px"}}
-       [:h3 {:style {:margin "0" :fontSize "13px" :color "#f4f4f5"}}
+               :style #js {:width "280px"
+                           :flexShrink "0"
+                           :padding "12px"
+                           :border "1px solid var(--color-background-quaternary)"
+                           :borderRadius "8px"
+                           :backgroundColor "var(--color-background-secondary)"
+                           :alignSelf "flex-start"
+                           :position "sticky"
+                           :top "12px"
+                           :display "flex"
+                           :flexDirection "column"
+                           :gap "10px"}}
+       [:h3 {:style #js {:margin "0" :fontSize "13px" :color "var(--color-foreground-primary)"}}
         "样本详情"]
-       [:dl {:style {:margin "0" :display "flex"
-                     :flexDirection "column" :gap "8px"
-                     :fontSize "12px"}}
+       [:dl {:style #js {:margin "0" :display "flex"
+                         :flexDirection "column" :gap "8px"
+                         :fontSize "12px"}}
         [:div
-         [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "目标"]
-         [:dd {:style {:margin "0" :fontFamily "monospace"
-                       :color "#e4e4e7" :wordBreak "break-all"}}
+         [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "目标"]
+         [:dd {:style #js {:margin "0" :fontFamily "monospace"
+                           :color "var(--color-foreground-primary)" :wordBreak "break-all"}}
           (str (:path row))]]
         [:div
-         [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "来源"]
+         [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "来源"]
          [:dd {:data-testid "detail-source"
-               :style {:margin "0" :color "#e4e4e7"}}
+               :style #js {:margin "0" :color "var(--color-foreground-primary)"}}
           source]]
         [:div
-         [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "分组"]
+         [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "分组"]
          [:dd {:data-testid "detail-group"
-               :style {:margin "0" :color "#e4e4e7"}}
+               :style #js {:margin "0" :color "var(--color-foreground-primary)"}}
           (str (:group row))]]
         (when (seq combination)
           [:div
-           [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "组合"]
+           [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "组合"]
            [:dd {:data-testid "detail-combination"
-                 :style {:margin "0" :color "#e4e4e7"}}
+                 :style #js {:margin "0" :color "var(--color-foreground-primary)"}}
             combination]])
         [:div
-         [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "当前值"]
-         [:dd {:style {:margin "0" :fontFamily "monospace"
-                       :color "#e4e4e7" :wordBreak "break-all"}}
+         [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "当前值"]
+         [:dd {:style #js {:margin "0" :fontFamily "monospace"
+                           :color "var(--color-foreground-primary)" :wordBreak "break-all"}}
           (str (or (:resolvedValue row) (:rawValue row)))]]
         [:div
-         [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "定义 Cell (raw)"]
+         [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "定义 Cell (raw)"]
          [:dd {:data-testid "detail-raw"
-               :style {:margin "0" :fontFamily "monospace"
-                       :color "#e4e4e7" :wordBreak "break-all"}}
+               :style #js {:margin "0" :fontFamily "monospace"
+                           :color "var(--color-foreground-primary)" :wordBreak "break-all"}}
           (str (:rawValue row))]]
         [:div
-         [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "Resolved"]
+         [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "Resolved"]
          [:dd {:data-testid "detail-resolved"
-               :style {:margin "0" :fontFamily "monospace"
-                       :color "#e4e4e7" :wordBreak "break-all"}}
+               :style #js {:margin "0" :fontFamily "monospace"
+                           :color "var(--color-foreground-primary)" :wordBreak "break-all"}}
           (str (or (:resolvedValue row) (:rawValue row)))]]
         (when alias-name
           [:div
-           [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "Alias 链"]
+           [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "Alias 链"]
            [:dd {:data-testid "detail-alias-chain"
-                 :style {:margin "0" :color "#e4e4e7"}}
+                 :style #js {:margin "0" :color "var(--color-foreground-primary)"}}
             (str "{"
                  alias-name
                  "} → "
@@ -666,54 +666,54 @@
                      "?"))]])
         (when (seq targets)
           [:div
-           [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "编辑目标"]
+           [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "编辑目标"]
            [:dd {:data-testid "edit-targets"
-                 :style {:margin "0" :display "flex" :gap "6px" :flexWrap "wrap"}}
+                 :style #js {:margin "0" :display "flex" :gap "6px" :flexWrap "wrap"}}
             (for [target targets]
               [:button {:key (str (:kind target))
                         :data-testid (str "edit-target-" (name (:kind target)))
                         :onClick (fn [_] (on-select-target target))
-                        :style {:padding "2px 8px"
-                                :borderRadius "999px"
-                                :fontSize "11px"
-                                :cursor "pointer"
-                                :border (str "1px solid "
-                                             (if (:read-only target)
-                                               "#52525b"
-                                               "#3f3f46"))
-                                :backgroundColor (if (= (:kind target) selected-target)
-                                                   "#6750a4" "transparent")
-                                :color (if (= (:kind target) selected-target)
-                                         "#ffffff" "#a1a1aa")}}
+                        :style #js {:padding "2px 8px"
+                                    :borderRadius "999px"
+                                    :fontSize "11px"
+                                    :cursor "pointer"
+                                    :border (str "1px solid "
+                                                 (if (:readOnly target)
+                                                   "var(--color-foreground-secondary)"
+                                                   "#3f3f46"))
+                                    :backgroundColor (if (= (:kind target) selected-target)
+                                                       "#6750a4" "transparent")
+                                    :color (if (= (:kind target) selected-target)
+                                             "#ffffff" "var(--color-foreground-secondary)")}}
                (str (:label target))])]])
         [:div
-         [:dt {:style {:color "#71717a" :margin "0 0 2px"}} "编辑定义"]
+         [:dt {:style #js {:color "var(--color-foreground-secondary)" :margin "0 0 2px"}} "编辑定义"]
          [:dd {:data-testid "detail-edit-state"
-               :style {:margin "0"
-                       :color (if read-only? "#52525b" "#a5b4fc")}}
+               :style #js {:margin "0"
+                           :color (if read-only? "var(--color-foreground-secondary)" "#a5b4fc")}}
           (if read-only?
             "只读来源，不可编辑定义"
             (if (and (or color? (numeric-token? row)) (not editing))
               [:button {:data-testid "workbench-edit-open"
                         :on-click on-edit
-                        :style {:padding "2px 10px"
-                                :borderRadius "6px"
-                                :border "1px solid #6750a4"
-                                :backgroundColor "transparent"
-                                :color "#a5b4fc"
-                                :fontSize "12px"
-                                :cursor "pointer"}}
+                        :style #js {:padding "2px 10px"
+                                    :borderRadius "6px"
+                                    :border "1px solid #6750a4"
+                                    :backgroundColor "transparent"
+                                    :color "#a5b4fc"
+                                    :fontSize "12px"
+                                    :cursor "pointer"}}
                (if color? "修改颜色" "修改数值")]
               "可编辑定义"))]]]
        (when commit-error
          [:p {:data-testid "workbench-commit-error"
-              :style {:color "#f87171" :fontSize "12px" :margin "0"}}
+              :style #js {:color "var(--color-accent-error)" :fontSize "12px" :margin "0"}}
           (str "提交失败：" commit-error)])
        (let [chosen (or (some (fn [target]
                                 (when (= (:kind target) selected-target)
                                   (:row target)))
                               targets)
-                         row)]
+                        row)]
          (cond
            (and (= "color" (str (:type chosen))) (not (:readOnly chosen)) editing)
            [:> color-editor* {:row chosen
@@ -731,15 +731,15 @@
   {::mf/props :obj}
   [{:keys [domain rows selected-key on-select]}]
   [:section {:data-testid "workbench-section"
-             :style {:marginBottom "24px"}}
-   [:h3 {:style {:fontSize "13px" :fontWeight "600"
-                 :color "#a1a1aa" :margin "0 0 10px"
-                 :textTransform "uppercase"
-                 :letterSpacing "0.05em"}}
+             :style #js {:marginBottom "24px"}}
+   [:h3 {:style #js {:fontSize "13px" :fontWeight "600"
+                     :color "var(--color-foreground-secondary)" :margin "0 0 10px"
+                     :textTransform "uppercase"
+                     :letterSpacing "0.05em"}}
     (str domain)]
-   [:div {:style {:display "grid"
-                  :gridTemplateColumns "repeat(auto-fill, minmax(180px, 1fr))"
-                  :gap "10px"}}
+   [:div {:style #js {:display "grid"
+                      :gridTemplateColumns "repeat(auto-fill, minmax(180px, 1fr))"
+                      :gap "10px"}}
     (for [row rows]
       [:> specimen-card* {:key (row-key row)
                           :row row
@@ -753,8 +753,8 @@
                       (group-by #(or (:group %) "ungrouped"))
                       (sort-by first))]
     [:div {:data-testid "workbench-board"
-           :style {:flex "1 1 auto"
-                   :minWidth "0"}}
+           :style #js {:flex "1 1 auto"
+                       :minWidth "0"}}
      (for [[domain rows] sections]
        [:> section-block* {:key (str domain)
                            :domain domain
@@ -767,28 +767,28 @@
   [{:keys [theme-domains]}]
   (when (seq theme-domains)
     [:div {:data-testid "theme-toolbar"
-           :style {:padding "8px 0"
-                   :borderBottom "1px solid #3f3f46"
-                   :marginBottom "16px"
-                   :display "flex"
-                   :flexDirection "column"
-                   :gap "6px"}}
+           :style #js {:padding "8px 0"
+                       :borderBottom "1px solid var(--color-background-quaternary)"
+                       :marginBottom "16px"
+                       :display "flex"
+                       :flexDirection "column"
+                       :gap "6px"}}
      (for [{:keys [domain themes]} theme-domains]
        [:div {:key (str domain)
-              :style {:display "flex" :alignItems "center"
-                      :gap "8px" :flexWrap "wrap"}}
-        [:span {:style {:color "#a1a1aa" :fontSize "12px"
-                        :minWidth "72px"}}
+              :style #js {:display "flex" :alignItems "center"
+                          :gap "8px" :flexWrap "wrap"}}
+        [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "12px"
+                            :minWidth "72px"}}
          (str domain)]
         (for [{:keys [active name themeId]} themes]
           [:span {:key (str themeId)
                   :data-testid (str "theme-" name)
-                  :style {:color (if active "#f4f4f5" "#71717a")
-                          :backgroundColor (if active "#6750a4" "transparent")
-                          :fontSize "12px"
-                          :borderRadius "999px"
-                          :padding "2px 10px"
-                          :border (str "1px solid " (if active "#6750a4" "#3f3f46"))}}
+                  :style #js {:color (if active "var(--color-foreground-primary)" "var(--color-foreground-secondary)")
+                              :backgroundColor (if active "#6750a4" "transparent")
+                              :fontSize "12px"
+                              :borderRadius "999px"
+                              :padding "2px 10px"
+                              :border (str "1px solid " (if active "#6750a4" "#3f3f46"))}}
            (str name)])])]))
 
 (defn- active-theme-map
@@ -872,35 +872,35 @@
                                           (swap! commit* assoc :pending false
                                                  :commit-error (str (ex-message cause))))))))]
       [:div {:data-testid "smallpen-workbench"
-             :style {:padding "20px 24px"
-                     :color "#e4e4e7"
-                     :fontFamily "Inter,sans-serif"
-                     :minHeight "100vh"
-                     :boxSizing "border-box"
-                     :overflow "auto"
-                     :backgroundColor "#18181b"}}
-       [:header {:style {:display "flex"
-                         :alignItems "baseline"
-                         :gap "12px"
-                         :marginBottom "8px"}}
-        [:h2 {:style {:fontSize "16px" :fontWeight "600"
-                      :color "#f4f4f5" :margin "0"}}
+             :style #js {:padding "20px 24px"
+                         :color "var(--color-foreground-primary)"
+                         :fontFamily "Inter,sans-serif"
+                         :minHeight "100vh"
+                         :boxSizing "border-box"
+                         :overflow "auto"
+                         :backgroundColor "var(--color-background-primary)"}}
+       [:header {:style #js {:display "flex"
+                             :alignItems "baseline"
+                             :gap "12px"
+                             :marginBottom "8px"}}
+        [:h2 {:style #js {:fontSize "16px" :fontWeight "600"
+                          :color "var(--color-foreground-primary)" :margin "0"}}
          "设计系统工作台"]
         [:a {:href "#/smallpen"
-             :style {:color "#71717a" :fontSize "12px"
-                     :textDecoration "none"}}
+             :style #js {:color "var(--color-foreground-secondary)" :fontSize "12px"
+                         :textDecoration "none"}}
          "返回首页"]
-        [:span {:style {:color "#52525b" :fontSize "12px"}}
+        [:span {:style #js {:color "var(--color-foreground-secondary)" :fontSize "12px"}}
          (str "file-id: " (or file-id "-"))]]
        (cond
          error
          [:p {:data-testid "workbench-error"
-              :style {:color "#f87171" :fontSize "13px"}}
+              :style #js {:color "var(--color-accent-error)" :fontSize "13px"}}
           (str "加载失败：" error)]
 
          loading
          [:p {:data-testid "workbench-loading"
-              :style {:color "#71717a" :fontSize "13px"}}
+              :style #js {:color "var(--color-foreground-secondary)" :fontSize "13px"}}
           "加载中…"]
 
          :else
@@ -915,24 +915,24 @@
                            :shown (count filtered)}]
           [:> component-board* {:components components
                                 :token-rows tokens}]
-          [:div {:style {:display "flex" :gap "16px" :alignItems "flex-start"}}
+          [:div {:style #js {:display "flex" :gap "16px" :alignItems "flex-start"}}
            (if (seq filtered)
              [:> board* {:tokens (vec filtered)
                          :selected-key (row-key selection)
                          :on-select on-select}]
              [:p {:data-testid "workbench-empty"
-                  :style {:color "#71717a" :fontSize "13px"}}
+                  :style #js {:color "var(--color-foreground-secondary)" :fontSize "13px"}}
               (if (filters-active? filters)
                 "没有匹配的 Token。"
                 "这个 Package 还没有 Token。")])
-          [:> selection-panel* {:row selection
-                                :tokens tokens
-                                :active-themes active-themes
-                                :editing editing
-                                :on-edit (fn [] (reset! editing* true))
-                                :commit-error commit-error
-                                :committing pending
-                                :on-commit on-commit
-                                :on-cancel-edit (fn [] (reset! editing* false))
-                                :selected-target selected-target
-                                :on-select-target on-select-target}]]])])))
+           [:> selection-panel* {:row selection
+                                 :tokens tokens
+                                 :active-themes active-themes
+                                 :editing editing
+                                 :on-edit (fn [] (reset! editing* true))
+                                 :commit-error commit-error
+                                 :committing pending
+                                 :on-commit on-commit
+                                 :on-cancel-edit (fn [] (reset! editing* false))
+                                 :selected-target selected-target
+                                 :on-select-target on-select-target}]]])])))

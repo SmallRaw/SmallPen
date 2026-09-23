@@ -779,6 +779,50 @@ test("unchanged Component metadata and registered bounds are accepted as a no-op
   assert.deepEqual(prepared.result.changedFiles, []);
 });
 
+test("generated Components page bounds registration is a validated no-op", async () => {
+  const snapshot = await openPackage(join(here, "fixtures", "design-system.smallpen"));
+  const nodeId = Object.keys(snapshot.runtime.reverseComponentNodes)[0];
+  assert.ok(nodeId);
+  assert.ok(snapshot.runtime.componentsPage);
+  const commit = {
+    commitId: "projected-component-bounds",
+    changes: [{
+      type: "reg-objects",
+      "page-id": snapshot.runtime.componentsPage,
+      shapes: [nodeId, "00000000-0000-0000-0000-000000000000"],
+    }],
+  };
+  assert.deepEqual(compilePenpotChanges(snapshot, commit).operations, []);
+  assert.throws(() => compilePenpotChanges(snapshot, {
+    ...commit,
+    changes: [{...commit.changes[0], shapes: ["unknown-node"]}],
+  }), /Unknown projected component node/);
+  assert.throws(() => compilePenpotChanges(snapshot, {
+    ...commit,
+    changes: [{...commit.changes[0], "page-id": "unknown-page"}],
+  }), /runtime page is not mapped/);
+});
+
+test("expanded component text measurements do not require a source-page mapping", async () => {
+  const snapshot = await openPackage(join(here, "fixtures", "design-system.smallpen"));
+  const change = {
+    type: "mod-obj",
+    id: "5d91ecde-8e24-5391-b9c9-2131b436ec14",
+    "page-id": snapshot.runtime.componentsPage,
+    operations: [{type: "set", attr: "position-data", val: [{text: "Example", width: 120}]}],
+  };
+  const commit = {commitId: "expanded-component-measurement", changes: [change]};
+  assert.deepEqual(compilePenpotChanges(snapshot, commit).operations, []);
+  const prepared = await prepareOperationBatch(snapshot, compilePenpotChanges(snapshot, commit));
+  assert.equal(prepared.snapshot.revision, snapshot.revision);
+  assert.throws(() => compilePenpotChanges(snapshot, {
+    ...commit, changes: [{...change, operations: [...change.operations, {type: "set", attr: "opacity", val: 0.5}]}],
+  }), /runtime page is not mapped/);
+  assert.throws(() => compilePenpotChanges(snapshot, {
+    ...commit, changes: [{...change, "page-id": "unknown-page"}],
+  }), /runtime page is not mapped/);
+});
+
 test("deleting a Component with live instances is rejected atomically", async () => {
   const snapshot = await loadPackageFromValues(
     "memory://component-in-use.smallpen",

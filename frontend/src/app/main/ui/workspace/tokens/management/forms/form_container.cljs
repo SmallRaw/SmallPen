@@ -19,15 +19,22 @@
    [rumext.v2 :as mf]))
 
 (mf/defc form-container*
-  [{:keys [token token-type initial-errors] :rest props}]
+  [{:keys [token token-type initial-errors selected-token-set-id] :rest props}]
   (let [token-type
         (or (:type token) token-type)
 
-        selected-token-set-id
+        global-selected-token-set-id
         (mf/deref refs/selected-token-set-id)
 
+        selected-token-set-id
+        (or selected-token-set-id global-selected-token-set-id)
+
+        tokens-lib
+        (mf/deref refs/tokens-lib)
+
         tokens-in-selected-set
-        (mf/deref refs/workspace-all-tokens-in-selected-set)
+        (or (when selected-token-set-id
+              (ctob/get-tokens tokens-lib selected-token-set-id)) {})
 
         token-path
         (mf/with-memo [token]

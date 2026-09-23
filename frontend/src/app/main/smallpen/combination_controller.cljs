@@ -81,55 +81,56 @@
 
     (when visible?
       [:div {:data-testid "dse-combination-controller"
-             :style {:position "absolute"
-                     :top "16px"
+             :style #js {:position "absolute"
+                         :top "16px"
                      ;; Keep clear of the right options sidebar (318px) so
                      ;; the panel never overlaps it.
-                     :right "344px"
-                     :z-index 5
-                     :background "#ffffff"
-                     :border "1px solid #e5e7eb"
-                     :border-radius "8px"
-                     :box-shadow "0 4px 16px rgba(15, 23, 42, 0.12)"
-                     :padding "10px 12px"
-                     :font-size "12px"
-                     :min-width "220px"
-                     :max-width "300px"}}
-       [:div {:style {:display "flex" :align-items "center" :gap "8px"
-                      :margin-bottom (if @collapsed? "0" "6px")}}
-        [:span {:style {:font-weight "600"}}
+                         :right "344px"
+                         :zIndex 5
+                         :color "var(--color-foreground-primary)"
+                         :background "var(--color-background-primary)"
+                         :border "1px solid var(--color-background-quaternary)"
+                         :borderRadius "8px"
+                         :boxShadow "0 4px 16px rgba(15, 23, 42, 0.12)"
+                         :padding "10px 12px"
+                         :fontSize "12px"
+                         :minWidth "220px"
+                         :maxWidth "300px"}}
+       [:div {:style #js {:display "flex" :alignItems "center" :gap "8px"
+                          :marginBottom (if @collapsed? "0" "6px")}}
+        [:span {:style #js {:fontWeight "600"}}
          "Workbench 组合"]
-        [:span {:style {:color "#6b7280"}}
+        [:span {:style #js {:color "var(--color-foreground-secondary)"}}
          (str (count combos) " 个已展开")]
         [:button {:data-testid "dse-combination-toggle"
                   :on-click #(swap! collapsed? not)
-                  :style {:margin-left "auto" :cursor "pointer"
-                          :padding "1px 8px"}}
+                  :style #js {:marginLeft "auto" :cursor "pointer"
+                              :padding "1px 8px"}}
          (if @collapsed? "展开" "收起")]]
        (when-not @collapsed?
          (if (seq combos)
            [:div
             [:div {:data-testid "dse-combination-hint"
-                   :style {:color "#6b7280" :margin-bottom "6px"}}
+                   :style #js {:color "var(--color-foreground-secondary)" :marginBottom "6px"}}
              "所有有效组合已并列在画布上；聚焦只是定位视图，不会隐藏其他组合。"]
-            [:div {:style {:display "flex" :flex-direction "column" :gap "6px"}}
+            [:div {:style #js {:display "flex" :flexDirection "column" :gap "6px"}}
              (for [combo combos]
                ^{:key (str (:id combo))}
                [:div {:data-testid "dse-combination-row"
-                      :style {:display "flex" :align-items "center" :gap "6px"}}
-                [:span {:style {:flex "1" :font-weight "500"}}
+                      :style #js {:display "flex" :alignItems "center" :gap "6px"}}
+                [:span {:style #js {:flex "1" :fontWeight "500"}}
                  (:label combo)]
                 [:button {:data-testid "dse-combination-focus"
                           :on-click #(focus-combination (:id combo))
-                          :style {:cursor "pointer" :padding "2px 8px"}}
+                          :style #js {:cursor "pointer" :padding "2px 8px"}}
                  "聚焦"]
                 [:button {:data-testid "dse-combination-set-current"
                           :title (str "把项目当前组合切换为："
                                       (str/join "、" (:themes combo)))
                           :on-click #(st/emit! (set-current-combination
                                                 {:themes (:themes combo)}))
-                          :style {:cursor "pointer" :padding "2px 8px"}}
+                          :style #js {:cursor "pointer" :padding "2px 8px"}}
                  "设为当前"]])]]
            [:div {:data-testid "dse-combination-empty"
-                  :style {:color "#6b7280"}}
+                  :style #js {:color "var(--color-foreground-secondary)"}}
             "当前包没有声明 Workbench Combination（无 Token Domain/主题）。"]))])))

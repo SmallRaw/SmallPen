@@ -43,42 +43,42 @@
                (swap! st assoc :error (str cause))
                nil))))))
     [:div {:data-testid "smallpen-canvas"
-           :style {:display "flex" :flexDirection "column" :height "100vh"
-                   :backgroundColor "#18181b" :color "#e4e4e7"
-                   :fontFamily "Inter,sans-serif" :boxSizing "border-box"}}
-     [:header {:style {:display "flex" :alignItems "baseline" :gap "12px"
-                       :padding "12px 20px 4px"}}
-      [:h2 {:style {:fontSize "16px" :fontWeight "600" :margin "0"
-                    :color "#f4f4f5"}} "设计系统画布"]
+           :style #js {:display "flex" :flexDirection "column" :height "100vh"
+                       :backgroundColor "var(--color-background-primary)" :color "var(--color-foreground-primary)"
+                       :fontFamily "Inter,sans-serif" :boxSizing "border-box"}}
+     [:header {:style #js {:display "flex" :alignItems "baseline" :gap "12px"
+                           :padding "12px 20px 4px"}}
+      [:h2 {:style #js {:fontSize "16px" :fontWeight "600" :margin "0"
+                        :color "var(--color-foreground-primary)"}} "设计系统画布"]
       [:a {:href (str "#/workspace?file-id=" (or file-id ""))
            :data-testid "canvas-back-to-editor"
-           :style {:color "#71717a" :fontSize "12px" :textDecoration "none"}}
+           :style #js {:color "var(--color-foreground-secondary)" :fontSize "12px" :textDecoration "none"}}
        "返回编辑器"]
       [:a {:href "#/smallpen"
-           :style {:color "#71717a" :fontSize "12px" :textDecoration "none"}}
+           :style #js {:color "var(--color-foreground-secondary)" :fontSize "12px" :textDecoration "none"}}
        "首页"]]
      (cond
        error
        [:p {:data-testid "canvas-error"
-            :style {:color "#f87171" :padding "0 24px" :fontSize "13px"}}
+            :style #js {:color "var(--color-accent-error)" :padding "0 24px" :fontSize "13px"}}
         (str "加载失败：" error)]
        loading
        [:p {:data-testid "canvas-loading"
-            :style {:color "#71717a" :padding "0 24px" :fontSize "13px"}}
+            :style #js {:color "var(--color-foreground-secondary)" :padding "0 24px" :fontSize "13px"}}
         "加载中…"]
        :else
-       [:div {:style {:display "flex" :flex "1" :gap "12px"
-                      :padding "8px 20px 20px" :minHeight "0"}}
+       [:div {:style #js {:display "flex" :flex "1" :gap "12px"
+                          :padding "8px 20px 20px" :minHeight "0"}}
         [:div {:ref container-ref
                :data-testid "canvas-viewport"
-               :style {:width "100%" :height "100%"
-                       :backgroundColor "#18181b"
-                       :border "1px solid #3f3f46"
-                       :borderRadius "8px" :display "block"}}]
+               :style #js {:width "100%" :height "100%"
+                           :backgroundColor "var(--color-background-primary)"
+                           :border "1px solid var(--color-background-quaternary)"
+                           :borderRadius "8px" :display "block"}}]
         [:div {:data-testid "canvas-inspector"
-               :style {:width "300px" :flexShrink "0" :padding "12px"
-                       :border "1px solid #3f3f46" :borderRadius "8px"
-                       :backgroundColor "#1f1f23"}}
+               :style #js {:width "300px" :flexShrink "0" :padding "12px"
+                           :border "1px solid var(--color-background-quaternary)" :borderRadius "8px"
+                           :backgroundColor "var(--color-background-secondary)"}}
          (when selection
            [:div
             [:h3 "来源"]

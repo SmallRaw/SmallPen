@@ -22,7 +22,7 @@
 
 (defn- calculate-position
   "Calculates the style properties for the given coordinates and position"
-  [{vh :height} position x y token-type]
+  [{vh :height} position x y token-type rulers?]
   (let [; TODO: Revisit these harcoded values
         modal-height (case token-type
                        :color
@@ -37,13 +37,15 @@
         overflow-fix      (max 0 (+ y (- 50) modal-height (- vh)))
         bottom-offset     "1rem"
         top-offset        (dm/str (- y 70) "px")
-        max-height-top    (str "calc(100vh - " top-offset)
-        max-height-bottom (str "calc(100vh -" bottom-offset)
+        max-height-top    (str "calc(100vh - " top-offset ")")
+        max-height-bottom (str "calc(100vh - " bottom-offset ")")
         x-pos 325
-        rulers?       (mf/deref refs/rulers?)
         left-offset   (if rulers? 80 58)
         left-position (dm/str (- x x-pos) "px")]
     (cond
+      (= position :center)
+      {}
+
       (or (nil? x) (nil? y))
       {:left "auto" :right "16rem" :top "4rem"}
 
@@ -68,15 +70,16 @@
          :maxHeight max-height-top}))))
 
 (defn- use-viewport-position-style [x y position token-type]
-  (let [vport (-> (l/derived :vport refs/workspace-local)
+  (let [rulers? (mf/deref refs/rulers?)
+        vport (-> (l/derived :vport refs/workspace-local)
                   (mf/deref))]
-    (-> (calculate-position vport position x y token-type)
+    (-> (calculate-position vport position x y token-type rulers?)
         (clj->js))))
 
 (mf/defc token-update-create-modal
   {::mf/wrap-props false}
   [{:keys [x y position token token-type action selected-token-set-id initial-errors
-           on-create-token value-only? value-context]
+           on-create-token value-only? value-context owner-bounds]
     :rest props}]
   (let [wrapper-style (use-viewport-position-style x y position token-type)
         modal-size-large* (mf/use-state (or (= token-type :typography)
@@ -89,28 +92,39 @@
         update-modal-size (mf/use-fn
                            (fn [visible]
                              (reset! modal-size-large* visible)))]
-    [:div {:class (stl/css-case
-                   :token-modal-wrapper true
-                   :token-modal-large modal-size-large?)
-           :style wrapper-style
-           :data-testid "token-update-create-modal"}
-     [:> icon-button* {:on-click close-modal
-                       :class (stl/css :close-btn)
-                       :icon i/close
-                       :variant "action"
-                       :aria-label (tr "labels.close")}]
-     [:> form-container* (mf/spread-props
-                          props
-                          {:is-create (not (ctob/token? token))
-                           :token token
-                           :action action
-                           :selected-token-set-id selected-token-set-id
-                           :token-type token-type
-                           :initial-errors initial-errors
-                           :on-create-token on-create-token
-                           :value-only? value-only?
-                           :value-context value-context
-                           :on-display-colorpicker update-modal-size})]]))
+    [:*
+     (when (= position :center)
+       [:div {:class (stl/css :token-modal-backdrop)
+              :on-pointer-down close-modal}])
+     [:div {:class (when (= position :center) (stl/css :token-modal-layer))
+            :style (when (and (= position :center) owner-bounds)
+                     (clj->js (into {} (map (fn [[k v]] [k (str (max 0 v) "px")])) owner-bounds)))}
+      [:div {:class (stl/css-case
+                     :token-modal-wrapper true
+                     :token-modal-centered (= position :center)
+                     :token-modal-large modal-size-large?)
+             :role "dialog"
+             :aria-modal (= position :center)
+             :aria-label (tr "workspace.tokens.tokens-section-title")
+             :style wrapper-style
+             :data-testid "token-update-create-modal"}
+       [:> icon-button* {:on-click close-modal
+                         :class (stl/css :close-btn)
+                         :icon i/close
+                         :variant "action"
+                         :aria-label (tr "labels.close")}]
+       [:> form-container* (mf/spread-props
+                            props
+                            {:is-create (not (ctob/token? token))
+                             :token token
+                             :action action
+                             :selected-token-set-id selected-token-set-id
+                             :token-type token-type
+                             :initial-errors initial-errors
+                             :on-create-token on-create-token
+                             :value-only? value-only?
+                             :value-context value-context
+                             :on-display-colorpicker update-modal-size})]]]]))
 
 ;; Modals ----------------------------------------------------------------------
 
