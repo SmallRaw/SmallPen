@@ -1,117 +1,74 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = join(here, "..");
-const fixture = join(root, "test", "fixtures", "roundtrip.smallpen");
-const buildScript = join(root, "apps", "desktop", "scripts", "build-macos.mjs");
-
-function run(command, args, timeout = 60_000, env = process.env) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "pipe"] });
-    let stderr = "";
-    let stdout = "";
-    child.stderr.setEncoding("utf8");
-    child.stdout.setEncoding("utf8");
-    child.stderr.on("data", (value) => (stderr += value));
-    child.stdout.on("data", (value) => (stdout += value));
-    child.once("error", reject);
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeout);
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stderr, stdout });
-    });
-  });
-}
-
-async function hostProcesses(runtime) {
-  const result = await run("ps", ["-axo", "command="]);
-  assert.equal(result.code, 0, result.stderr || result.stdout);
-  return result.stdout.split("\n").filter((line) => line.includes(`${runtime} `));
-}
-
-async function assertHostStopped(runtime) {
-  for (let attempt = 0; attempt < 20 && (await hostProcesses(runtime)).length > 0; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  assert.deepEqual(await hostProcesses(runtime), []);
-}
-
-async function main() {
-  if (process.platform !== "darwin") {
-    process.stdout.write(`${JSON.stringify({ reason: "macOS-only native shell", status: "skipped" })}\n`);
-    return;
-  }
-  const parent = await mkdtemp(join(tmpdir(), "smallpen-desktop-e2e-"));
-  const existing = process.argv[2];
-  const app = existing ?? join(parent, "SmallPen.app");
-  try {
-    if (!existing) {
-      const built = await run(process.execPath, [buildScript, "--output", app]);
-      assert.equal(built.code, 0, built.stderr || built.stdout);
-    }
-    const executable = join(app, "Contents", "MacOS", "SmallPen");
-    const runtime = join(app, "Contents", "Resources", "runtime", "node");
-    const penpotIndex = join(
-      app,
-      "Contents",
-      "Resources",
-      "frontend",
-      "resources",
-      "public",
-      "index.html",
-    );
-    await access(executable);
-    await access(runtime);
-    await access(penpotIndex);
-
-    const plist = await run("plutil", ["-lint", join(app, "Contents", "Info.plist")]);
-    assert.equal(plist.code, 0, plist.stderr || plist.stdout);
-    const signature = await run("codesign", ["--verify", "--deep", "--strict", app]);
-    assert.equal(signature.code, 0, signature.stderr || signature.stdout);
-
-    const smoke = await run(
-      executable,
-      ["--smoke", fixture],
-      60_000,
-      {
-        ...process.env,
-        SMALLPEN_APPLICATION_STATE_PATH: join(parent, "application-state.json"),
-      },
-    );
-    assert.equal(smoke.code, 0, smoke.stderr || smoke.stdout);
-    assert.deepEqual(JSON.parse(smoke.stdout.trim()), {
-      packageName: "SmallPen Round Trip",
-      status: "ready",
-      ui: "penpot",
-    });
-    await assertHostStopped(runtime);
-    const home = await run(
-      executable,
-      ["--smoke-home"],
-      60_000,
-      {
-        ...process.env,
-        SMALLPEN_APPLICATION_STATE_PATH: join(parent, "home-application-state.json"),
-      },
-    );
-    assert.equal(home.code, 0, home.stderr || home.stdout);
-    assert.deepEqual(JSON.parse(home.stdout.trim()), {
-      status: "ready",
-      ui: "home",
-    });
-    await assertHostStopped(runtime);
-    process.stdout.write(`${JSON.stringify({ app, status: "passed" })}\n`);
-  } finally {
-    await rm(parent, { force: true, recursive: true });
-  }
-}
-
-main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
-  process.exitCode = 1;
+const root = fileURLToPath(new URL("../", import.meta.url));
+const platformApp =
+  process.platform === "darwin" ? "SmallPen.app" : "SmallPen-Windows-x64";
+const app = process.argv[2] ?? join(root, "apps/desktop/dist", platformApp);
+const executable =
+  process.platform === "darwin"
+    ? join(app, "Contents/MacOS/SmallPen")
+    : join(app, "SmallPen.exe");
+const parent = await mkdtemp(join(tmpdir(), "smallpen-electron-smoke-"));
+const fixture = join(parent, "Round trip.smallpen");
+await cp(join(root, "test/fixtures/roundtrip.smallpen"), fixture, {
+  recursive: true,
 });
+
+try {
+  for (const ui of ["home", "penpot"]) {
+    const report = join(parent, `${ui}.json`);
+    const result = await new Promise((resolveRun, reject) => {
+      const child = spawn(
+        executable,
+        ui === "home" ? ["--smoke-home"] : ["--smoke", fixture],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: {
+            ...process.env,
+            SMALLPEN_APPLICATION_STATE_PATH: join(parent, `${ui}-state.json`),
+            SMALLPEN_SMOKE_PROFILE: join(parent, `${ui}-profile`),
+            SMALLPEN_SMOKE_REPORT: report,
+          },
+        },
+      );
+      let output = "";
+      child.stdout.on("data", (part) => {
+        output += part;
+      });
+      child.stderr.on("data", (part) => {
+        output += part;
+      });
+      const timer = setTimeout(() => child.kill(), 120000);
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.once("exit", (code) => {
+        clearTimeout(timer);
+        resolveRun({ code, output });
+      });
+    });
+    assert.equal(result.code, 0, result.output);
+    const data = JSON.parse(await readFile(report));
+    assert.equal(data.status, "ready", JSON.stringify(data));
+    assert.equal(data.ui, ui);
+    assert.ok(data.metrics.some(({ type }) => type === "Tab"));
+    await assert.rejects(
+      fetch(new URL("/health", data.url), {
+        signal: AbortSignal.timeout(1000),
+      }),
+    );
+    assert.throws(() => process.kill(data.servicePid, 0), { code: "ESRCH" });
+    console.log(JSON.stringify(data));
+  }
+  console.log(JSON.stringify({ status: "passed", app, evidence: parent }));
+} catch (error) {
+  console.error(error);
+  console.error(`Evidence retained at ${parent}`);
+  process.exitCode = 1;
+}

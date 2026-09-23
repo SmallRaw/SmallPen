@@ -78,6 +78,27 @@ test("committed lock includes every declared workspace dependency", async () => 
   }
 });
 
+test("desktop build tools have a complete separate registry lock", async () => {
+  const root = new URL("../apps/desktop/tools/", import.meta.url);
+  const pkg = JSON.parse(await readFile(new URL("package.json", root)));
+  const lock = JSON.parse(await readFile(new URL("package-lock.json", root)));
+  assert.equal(lock.lockfileVersion, 3);
+  assert.deepEqual(lock.packages[""].dependencies, pkg.dependencies);
+  for (const [name, version] of Object.entries(pkg.dependencies)) {
+    assert.match(version, /^\d+\.\d+\.\d+$/);
+    assert.equal(lock.packages[`node_modules/${name}`].version, version);
+  }
+  for (const [path, entry] of Object.entries(lock.packages)) {
+    if (!path) continue;
+    assert.equal(
+      new URL(entry.resolved).origin,
+      "https://registry.npmjs.org",
+      path,
+    );
+    assert.match(entry.integrity, /^sha512-/, path);
+  }
+});
+
 test("artifact verification accepts intact files and rejects a modified tarball", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-artifact-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -134,11 +155,6 @@ test("prepare keeps every workspace version and lock entry synchronized", async 
   await cp(
     new URL("scripts/release.mjs", source),
     join(root, "scripts/release.mjs"),
-  );
-  await mkdir(join(root, "apps/desktop/native/macos"), { recursive: true });
-  await cp(
-    new URL("apps/desktop/native/macos/Info.plist", source),
-    join(root, "apps/desktop/native/macos/Info.plist"),
   );
   const result = spawnSync(
     process.execPath,

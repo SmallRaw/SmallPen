@@ -72,22 +72,47 @@ http://127.0.0.1:43128/#/workspace?file-id=<file-uuid>&page-id=<page-uuid>&layou
 
 The stable File ID resolves the Package through SmallPen's durable recent-file registry. A closed Package is reopened when the ID is known and its local locator is still available; an unknown or unavailable File ID returns to Home. A fixed local Team UUID exists only inside the Penpot compatibility adapter and is not part of the URL or SmallPen domain model.
 
-## Native Desktop
+## Electron Desktop
 
-On macOS, build one self-contained local application:
+Desktop uses one Electron entry point for macOS arm64 and Windows x64.
+It shares the Penpot frontend and one local service process across windows.
+There is no Swift, C#, WebView2, separate Node executable, or preload bridge.
+GPU acceleration and Chromium sandboxing stay enabled.
+
+Build on the target platform, with Node 24 and compiled frontend assets:
 
 ```sh
 cd smallpen
-npm run --workspace @smallpen/desktop build:macos
-open apps/desktop/dist/SmallPen.app
+npm ci --ignore-scripts
+npm ci --ignore-scripts --workspaces=false --prefix apps/desktop/tools
+npm run --workspace @smallpen/desktop build
 ```
+
+**Migration status:** the shared shell, separate build-tool lockfile and CI
+pipeline are present. Local dependency preflight and npm advisory checks do
+not replace a complete dependency review. The Electron applications have not
+yet been runtime-verified here. Treat a release as a trial until both platform
+jobs pass: CI tests Home, editor startup and service shutdown before uploading.
+
+The output is `apps/desktop/dist/SmallPen.app` on macOS or
+`apps/desktop/dist/SmallPen-Windows-x64/SmallPen.exe` on Windows. Distribute
+the whole Windows folder, not the executable alone. No separate Node or
+WebView2 installation is required. Windows may show SmartScreen warnings;
+MSI installation and Windows file associations are not included yet.
+An existing output is not overwritten: move it aside or pass a new
+`--output` path after `npm run --workspace @smallpen/desktop build --`.
 
 The Alpha application has no Developer ID signature and is not notarized. Its
 build uses only a certificate-free ad-hoc signature to keep the application
 bundle internally valid. macOS may require the user to approve its first
 launch from Privacy & Security.
 
-The bundle contains its own Node runtime, the SmallPen Core/local adapter services, and the compiled Penpot frontend. Cocoa/WKWebView provides native windows and the file picker; every service binds to an ephemeral loopback port, remote navigation is blocked, and the child host stops with the app. No separately installed Node, database, container, collaboration service, MCP service, or web login is required.
+Electron supplies Chromium and Node. A shared utility process hosts SmallPen
+services on ephemeral loopback ports. The window code restricts navigation
+and permissions. Only required application modules enter `app.asar`; frontend
+assets stay outside it. Build tools never enter the application payload.
+See [the runtime notes](docs/electron-runtime.md) for official sources and the
+measurement plan. No measured memory, CPU or startup improvement is claimed.
 
 You can also open a package directly:
 
@@ -95,7 +120,9 @@ You can also open a package directly:
 apps/desktop/dist/SmallPen.app/Contents/MacOS/SmallPen ./workspace/product.smallpen
 ```
 
-Cmd+O opens another independent `.smallpen` in another native window. Each window runs the original Penpot workspace components and keeps its own package-session ID. Registering the built app with macOS also enables opening `.smallpen` packages from Finder.
+Cmd/Ctrl+O opens a package; Cmd/Ctrl+N creates one. Each package has its own
+window and session. Home can become a package window. Open selects a
+`.smallpen` directory; New refuses to overwrite an existing path.
 
 ## CLI Agent surface
 
@@ -120,8 +147,10 @@ the selected source commit. `publish_npm` defaults to **false**.
 
 The workflow runs shared checks, then CLI packaging and the shared frontend
 build in parallel. Desktop consumes that frontend artifact and builds on its
-own macOS arm64 runner. Only after every selected product passes can the npm
-publication job start. Web and other Desktop platforms are not enabled yet.
+own platform runners (macOS arm64 and Windows x64). CLI install verification
+runs on Linux, macOS and Windows; npm tarballs are uploaded and published only
+once, from Linux. Only after every selected platform passes can npm publication
+start. Web and Linux Desktop are not enabled yet.
 There is one workflow, with Test, CLI, Frontend, Desktop and Publish jobs.
 The old Alpha entry and nested product workflows have been removed.
 Do not rerun a historical old-workflow run to test the new pipeline: start a
@@ -129,10 +158,11 @@ new run from a branch that contains these files. GitHub's manual entry also
 needs the workflow file on the repository's default branch.
 
 Artifacts are retained for **1 day**: four npm tarballs with a commit/version/
-SHA-512 manifest, a standalone CLI archive, and the macOS App archive with
-SHA-256 checksum and source commit. Desktop is only ad-hoc signed; no Apple
+SHA-512 manifest, a standalone CLI archive, and macOS/Windows archives with
+SHA-256 checksums and source commit. macOS is only ad-hoc signed; no Apple
 Developer account, signing secrets, notarization or GitHub Release is required.
-The desktop smoke test launches the exact App that is uploaded.
+The desktop smoke tests launch the exact applications that are uploaded,
+check Home and the editor, then verify that their local service has stopped.
 
 ### Enable npm publication
 
