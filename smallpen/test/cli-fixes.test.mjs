@@ -322,7 +322,8 @@ test("the public launcher gates Node version before ESM instantiation (SP-050)",
   // The public launcher passes through to the CLI on the current runtime.
   const result = await runCli(["version"]);
   assert.equal(result.code, 0);
-  assert.equal(result.stdout.trim(), "0.1.0");
+  const metadata = JSON.parse(await readFile(join(here, "..", "apps", "cli", "package.json"), "utf8"));
+  assert.equal(result.stdout.trim(), metadata.version);
 });
 
 async function componentWorkspace() {

@@ -1,0 +1,192 @@
+name: CI
+run-name: CI · ${{ inputs.version }} · ${{ inputs.product }} · publish=${{ inputs.publish_npm }}
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: Products to build
+        type: choice
+        options: [all, cli, desktop]
+        default: all
+      version:
+        description: Shared version (for example 0.1.0-alpha.1)
+        type: string
+        required: true
+        default: 0.1.0-alpha.1
+      channel:
+        description: npm tag (must match version)
+        type: choice
+        options: [alpha, beta, rc, latest]
+        default: alpha
+      publish_npm:
+        description: Publish verified CLI packages to npm
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: smallpen-ci-${{ inputs.channel }}
+  cancel-in-progress: false
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Validate selection
+        env:
+          PRODUCT: ${{ inputs.product }}
+          PUBLISH: ${{ inputs.publish_npm }}
+        run: |
+          case "$PRODUCT" in all|cli|desktop) ;; *) exit 1 ;; esac
+          if [ "$PRODUCT" = desktop ] && [ "$PUBLISH" = true ]; then
+            echo 'npm publishing requires CLI to be selected'; exit 1
+          fi
+      - name: Prepare shared version
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
+      - run: npm ci --ignore-scripts
+        working-directory: smallpen
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: smallpen
+      - run: npm test
+        working-directory: smallpen
+  cli:
+    name: CLI
+    needs: test
+    if: inputs.product != 'desktop'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Prepare release version
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
+      - run: npm ci --ignore-scripts
+        working-directory: smallpen
+      - name: Pack four public npm packages
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: node smallpen/scripts/release.mjs pack smallpen/dist/npm "$VERSION" "$CHANNEL" "$GITHUB_SHA"
+      - name: Verify clean global install and smallpen command
+        run: node smallpen/scripts/release.mjs smoke smallpen/dist/npm "$GITHUB_SHA"
+      - name: Build standalone CLI
+        working-directory: smallpen
+        run: |
+          npm run build:cli
+          ./dist/SmallPen-CLI/smallpen --help
+          cp dist/npm/manifest.json dist/SmallPen-CLI/release.json
+          tar -czf dist/SmallPen-CLI.tar.gz -C dist SmallPen-CLI
+      - uses: actions/upload-artifact@v7
+        with:
+          name: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
+          path: smallpen/dist/npm/
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SmallPen-CLI-${{ inputs.version }}-${{ github.sha }}-${{ github.run_id }}
+          path: smallpen/dist/SmallPen-CLI.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+  frontend:
+    name: Frontend
+    needs: test
+    if: inputs.product != 'cli'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build frontend once
+        env:
+          BUILD_WASM: "yes"
+        run: ./manage.sh build-frontend-bundle
+      - uses: actions/upload-artifact@v7
+        with:
+          name: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
+          path: bundles/frontend/
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+  desktop:
+    name: Desktop
+    needs: frontend
+    if: inputs.product != 'cli'
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Prepare shared version
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
+      - run: npm ci --ignore-scripts
+        working-directory: smallpen
+      - uses: actions/download-artifact@v7
+        with:
+          name: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
+          path: frontend/resources/public
+      - name: Build Alpha App (ad-hoc signed, not notarized)
+        working-directory: smallpen
+        run: npm run --workspace @smallpen/desktop build:macos
+      - name: Test the exact App that will be uploaded
+        run: node smallpen/e2e/desktop-smoke.mjs "$PWD/smallpen/apps/desktop/dist/SmallPen.app"
+      - name: Archive verified App
+        working-directory: smallpen/apps/desktop/dist
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent SmallPen.app SmallPen-macOS-arm64-unsigned.zip
+          shasum -a 256 SmallPen-macOS-arm64-unsigned.zip > SHA256SUMS
+          printf '%s\n' "$GITHUB_SHA" > SOURCE_COMMIT
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SmallPen-macOS-arm64-${{ inputs.version }}-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            smallpen/apps/desktop/dist/SmallPen-macOS-arm64-unsigned.zip
+            smallpen/apps/desktop/dist/SHA256SUMS
+            smallpen/apps/desktop/dist/SOURCE_COMMIT
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+  publish:
+    name: Publish
+    needs: [test, cli, desktop]
+    if: >-
+      always() && !cancelled() && inputs.publish_npm &&
+      needs.test.result == 'success' && needs.cli.result == 'success' &&
+      (needs.desktop.result == 'success' ||
+       (inputs.product == 'cli' && needs.desktop.result == 'skipped'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v7
+        with:
+          name: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
+          path: smallpen/dist/npm
+      - name: Publish exact verified tarballs using npm trusted publishing
+        run: node smallpen/scripts/release.mjs publish smallpen/dist/npm "$GITHUB_SHA"

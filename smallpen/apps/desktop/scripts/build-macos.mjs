@@ -14,6 +14,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { copyRuntimeDependencies } from "../../../scripts/copy-runtime-dependencies.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
@@ -82,7 +83,8 @@ async function build(output, frontendRoot) {
     await copyModule(appRoot, "apps/web", ["package.json", "src"]);
     await copyModule(appRoot, "apps/desktop", ["package.json", "bin", "src"]);
     await copyModule(appRoot, "packages/core", ["package.json", "src"]);
-    await copyModule(appRoot, "packages/local-package", ["package.json", "src"]);
+    await copyModule(appRoot, "packages/local-package", ["package.json", "src", "assets"]);
+    await copyRuntimeDependencies(smallpenRoot, appRoot);
     await copyModule(appRoot, "packages/penpot-adapter", ["package.json", "src"]);
     await cp(
       frontendRoot,

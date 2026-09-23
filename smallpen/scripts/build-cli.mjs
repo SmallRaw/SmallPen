@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { copyRuntimeDependencies } from "./copy-runtime-dependencies.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const smallpenRoot = resolve(here, "..");
@@ -49,17 +50,7 @@ async function build(output) {
       "local-package",
       ["assets", "package.json", "src"],
     );
-    await copyModule(appRoot, "node_modules/opentype.js", "node_modules/opentype.js", [
-      "LICENSE",
-      "dist",
-      "package.json",
-    ]);
-    await copyModule(
-      appRoot,
-      "node_modules/@jsquash/webp",
-      "node_modules/@jsquash/webp",
-      ["codec", "decode.js", "encode.js", "index.js", "LICENSE", "package.json", "README.md"],
-    );
+    await copyRuntimeDependencies(smallpenRoot, appRoot);
 
     const unixLauncher = `#!/bin/sh
 set -eu
