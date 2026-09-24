@@ -1,17 +1,7 @@
 name: CI
-run-name: CI · ${{ github.ref_name }} · ${{ inputs.product }} · publish=${{ inputs.publish_npm }}
+run-name: CI · ${{ github.ref_name }}
 on:
-  workflow_dispatch:
-    inputs:
-      product:
-        description: 打包目标（all 为 CLI 和桌面端）
-        type: choice
-        options: [all, cli, desktop]
-        default: all
-      publish_npm:
-        description: 发布四个 npm 包（版本自动读取仓库；仅打包桌面时取消勾选）
-        type: boolean
-        default: true
+  workflow_dispatch: {}
 permissions:
   contents: read
 concurrency:
@@ -30,15 +20,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - name: Validate selection
-        env:
-          PRODUCT: ${{ inputs.product }}
-          PUBLISH: ${{ inputs.publish_npm }}
-        run: |
-          case "$PRODUCT" in all|cli|desktop) ;; *) exit 1 ;; esac
-          if [ "$PRODUCT" = desktop ] && [ "$PUBLISH" = true ]; then
-            echo 'npm publishing requires CLI to be selected'; exit 1
-          fi
       - name: Read and validate committed version
         id: release
         run: node smallpen/scripts/release.mjs info >> "$GITHUB_OUTPUT"
@@ -56,7 +37,6 @@ jobs:
   cli:
     name: CLI (${{ matrix.os }})
     needs: test
-    if: inputs.product != 'desktop'
     strategy:
       fail-fast: false
       matrix:
@@ -111,7 +91,6 @@ jobs:
   frontend:
     name: Frontend
     needs: test
-    if: inputs.product != 'cli'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -130,7 +109,6 @@ jobs:
   desktop:
     name: Desktop (${{ matrix.platform }})
     needs: [test, frontend]
-    if: inputs.product != 'cli'
     strategy:
       fail-fast: false
       matrix:
@@ -210,11 +188,6 @@ jobs:
   publish:
     name: Publish
     needs: [test, cli, desktop]
-    if: >-
-      always() && !cancelled() && inputs.publish_npm &&
-      needs.test.result == 'success' && needs.cli.result == 'success' &&
-      (needs.desktop.result == 'success' ||
-       (inputs.product == 'cli' && needs.desktop.result == 'skipped'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: npm

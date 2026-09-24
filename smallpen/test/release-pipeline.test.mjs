@@ -225,9 +225,7 @@ test("CI reads the committed version without dispatch version overrides", async 
   );
   assert.doesNotMatch(workflow, /inputs\.(version|channel)/);
   assert.match(workflow, /release\.mjs info/);
-  assert.match(workflow, /workflow_dispatch:/);
-  assert.match(
-    workflow,
-    /publish_npm:\s+description: [^\n]+\s+type: boolean\s+default: true/,
-  );
+  assert.match(workflow, /workflow_dispatch: \{\}/);
+  assert.doesNotMatch(workflow, /inputs[.:]/);
+  assert.match(workflow, /needs: \[test, cli, desktop\]/);
 });
