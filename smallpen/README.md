@@ -146,7 +146,8 @@ Actions. Select `all`, `cli`, or `desktop`. CI reads the version from
 or `latest` for a stable version. There are no version or channel inputs.
 All workspace versions, internal dependencies and lock entries must agree;
 CI fails before building if they differ. All products share that version and
-the selected source commit. `publish_npm` defaults to **false**.
+the selected source commit. `publish_npm` defaults to **true** in the manual
+run form. Clear it for a build-only run, including a desktop-only build.
 
 To bump a release, run `node smallpen/scripts/release.mjs prepare VERSION CHANNEL`
 from the repository root, review and commit the manifest and lock changes,
@@ -189,8 +190,8 @@ and permitted release branches there. The publication job uses OIDC and
 that does not exist on npm yet, bootstrap its first publication under your
 own npm account before configuring its trusted publisher.
 
-For publication, start **CI**, select `cli` or `all`, and explicitly enable
-`publish_npm`. It publishes
+For publication, start **CI**, select `cli` or `all`, and leave
+`publish_npm` checked. It publishes
 the exact tested tarballs in dependency order. Stable versions use `latest`;
 prerelease versions must match `alpha`, `beta` or `rc`.
 
