@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/cli",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.2",
   "publishConfig": {
     "access": "public"
   },
@@ -15,7 +15,12 @@
     "bin"
   ],
   "dependencies": {
-    "@smallpen/core": "0.1.0",
-    "@smallpen/local-package": "0.1.0"
+    "@smallpen/core": "0.1.0-alpha.2",
+    "@smallpen/local-package": "0.1.0-alpha.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SmallRaw/SmallPen.git",
+    "directory": "smallpen/apps/cli"
   }
 }

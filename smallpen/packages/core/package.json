@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/core",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.2",
   "publishConfig": {
     "access": "public"
   },
@@ -9,5 +9,10 @@
   "files": [
     "src"
   ],
-  "sideEffects": false
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SmallRaw/SmallPen.git",
+    "directory": "smallpen/packages/core"
+  }
 }

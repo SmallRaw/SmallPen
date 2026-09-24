@@ -9,6 +9,7 @@ import {
   validateRelease,
   verifyManifest,
   publicationAction,
+  readRelease,
 } from "../scripts/release.mjs";
 
 test("release inputs reject shell syntax and mismatched channels", () => {
@@ -173,4 +174,55 @@ test("prepare keeps every workspace version and lock entry synchronized", async 
       if (name.startsWith("@smallpen/")) assert.equal(version, pkg.version);
     }
   }
+  assert.deepEqual(await readRelease(root), {
+    version: "2.3.4-alpha.5",
+    channel: "alpha",
+  });
+  const corePath = join(root, "packages/core/package.json");
+  const core = JSON.parse(await readFile(corePath));
+  await writeFile(corePath, JSON.stringify({ ...core, version: "9.0.0" }));
+  await assert.rejects(readRelease(root), /version mismatch/);
+  await writeFile(corePath, JSON.stringify(core));
+  updated.packages["packages/core"].version = "9.0.0";
+  await writeFile(join(root, "package-lock.json"), JSON.stringify(updated));
+  await assert.rejects(readRelease(root), /version mismatch/);
+  for (const [version, channel] of [
+    ["2.3.4-beta.1", "beta"],
+    ["2.3.4-rc.1", "rc"],
+    ["2.3.4", "latest"],
+  ]) {
+    const prepared = spawnSync(
+      process.execPath,
+      [join(root, "scripts/release.mjs"), "prepare", version, channel],
+      { encoding: "utf8" },
+    );
+    assert.equal(prepared.status, 0, prepared.stderr);
+    assert.deepEqual(await readRelease(root), { version, channel });
+  }
+  const cliPath = join(root, "apps/cli/package.json");
+  const cli = JSON.parse(await readFile(cliPath));
+  cli.dependencies["@smallpen/core"] = "9.0.0";
+  await writeFile(cliPath, JSON.stringify(cli));
+  await assert.rejects(readRelease(root), /lock dependencies mismatch/);
+  const changedLock = JSON.parse(
+    await readFile(join(root, "package-lock.json")),
+  );
+  changedLock.packages["apps/cli"].dependencies = cli.dependencies;
+  await writeFile(join(root, "package-lock.json"), JSON.stringify(changedLock));
+  await assert.rejects(readRelease(root), /version mismatch/);
+});
+
+test("CI reads the committed version without dispatch version overrides", async () => {
+  const release = await readRelease();
+  const pkg = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url)),
+  );
+  assert.equal(release.version, pkg.version);
+  validateRelease(release.version, release.channel);
+  const workflow = await readFile(
+    new URL("../../.github/workflows/smallpen.yml", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(workflow, /inputs\.(version|channel)/);
+  assert.match(workflow, /release\.mjs info/);
 });
