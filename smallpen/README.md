@@ -141,9 +141,17 @@ Build the standalone Alpha directory with `npm run build:cli`. The resulting
 SmallPen JavaScript modules; it requires Node.js 24 or newer on `PATH`.
 
 Use **CI** (`.github/workflows/smallpen.yml`) in GitHub
-Actions. Select `all`, `cli`, or `desktop`, then enter a version such as
-`0.1.0-alpha.1` with channel `alpha`. All products share that version and
+Actions. Select `all`, `cli`, or `desktop`. CI reads the version from
+`smallpen/package.json` and derives the npm channel: `alpha`, `beta`, `rc`,
+or `latest` for a stable version. There are no version or channel inputs.
+All workspace versions, internal dependencies and lock entries must agree;
+CI fails before building if they differ. All products share that version and
 the selected source commit. `publish_npm` defaults to **false**.
+
+To bump a release, run `node smallpen/scripts/release.mjs prepare VERSION CHANNEL`
+from the repository root, review and commit the manifest and lock changes,
+then run CI on that commit. CI never chooses a new version. Use a new version
+when publishing changed package contents; npm versions cannot be overwritten.
 
 The workflow runs shared checks, then CLI packaging and the shared frontend
 build in parallel. Desktop consumes that frontend artifact and builds on its

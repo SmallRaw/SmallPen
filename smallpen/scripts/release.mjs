@@ -86,6 +86,45 @@ export function publicationAction(existing, integrity) {
   return "existing";
 }
 
+export async function readRelease(directory = root) {
+  const pkg = await json(join(directory, "package.json"));
+  const version = pkg.version;
+  const channel = version?.includes("-")
+    ? version.split("-")[1].split(".")[0]
+    : "latest";
+  validateRelease(version, channel);
+  const lock = await json(join(directory, "package-lock.json"));
+  assert.equal(lock.version, version, "Lock version mismatch");
+  const paths = Object.keys(lock.packages).filter(
+    (path) => !path || /^(apps|packages)\//.test(path),
+  );
+  const manifests = await Promise.all(
+    paths.map((path) => json(join(directory, path, "package.json"))),
+  );
+  const names = new Set(manifests.map((entry) => entry.name));
+  for (const [i, path] of paths.entries()) {
+    const manifest = manifests[i];
+    assert.equal(manifest.version, version, `${path}: version mismatch`);
+    assert.equal(
+      lock.packages[path].version,
+      version,
+      `${path}: lock version mismatch`,
+    );
+    assert.deepEqual(
+      lock.packages[path].dependencies,
+      manifest.dependencies,
+      `${path}: lock dependencies mismatch`,
+    );
+    for (const [name, dependency] of Object.entries(
+      manifest.dependencies ?? {},
+    )) {
+      if (names.has(name))
+        assert.equal(dependency, version, `${path}: ${name} version mismatch`);
+    }
+  }
+  return { version, channel };
+}
+
 // Only edits the disposable checkout used for this run. No source commit or tag.
 async function prepare(version, channel) {
   validateRelease(version, channel);
@@ -407,12 +446,17 @@ async function publish(dir, commit) {
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
+  if (command === "info") {
+    const { version, channel } = await readRelease();
+    console.log(`version=${version}\nchannel=${channel}`);
+    return;
+  }
   if (command === "prepare") return prepare(...args);
   if (command === "pack") return pack(resolve(args[0]), ...args.slice(1));
   if (command === "verify") return verifyManifest(resolve(args[0]), args[1]);
   if (command === "smoke") return smoke(resolve(args[0]), args[1]);
   if (command === "publish") return publish(resolve(args[0]), args[1]);
-  throw new Error("Expected prepare, pack, verify, smoke or publish");
+  throw new Error("Expected info, prepare, pack, verify, smoke or publish");
 }
 
 if (

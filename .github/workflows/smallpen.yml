@@ -1,5 +1,5 @@
 name: CI
-run-name: CI · ${{ inputs.version }} · ${{ inputs.product }} · publish=${{ inputs.publish_npm }}
+run-name: CI · ${{ github.ref_name }} · ${{ inputs.product }} · publish=${{ inputs.publish_npm }}
 on:
   workflow_dispatch:
     inputs:
@@ -8,16 +8,6 @@ on:
         type: choice
         options: [all, cli, desktop]
         default: all
-      version:
-        description: Shared version (for example 0.1.0-alpha.1)
-        type: string
-        required: true
-        default: 0.1.0-alpha.1
-      channel:
-        description: npm tag (must match version)
-        type: choice
-        options: [alpha, beta, rc, latest]
-        default: alpha
       publish_npm:
         description: Publish verified CLI packages to npm
         type: boolean
@@ -25,13 +15,16 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: smallpen-ci-${{ inputs.channel }}
+  group: smallpen-ci
   cancel-in-progress: false
 jobs:
   test:
     name: Test
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      channel: ${{ steps.release.outputs.channel }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -46,10 +39,13 @@ jobs:
           if [ "$PRODUCT" = desktop ] && [ "$PUBLISH" = true ]; then
             echo 'npm publishing requires CLI to be selected'; exit 1
           fi
-      - name: Prepare shared version
+      - name: Read and validate committed version
+        id: release
+        run: node smallpen/scripts/release.mjs info >> "$GITHUB_OUTPUT"
+      - name: Prepare package metadata
         env:
-          VERSION: ${{ inputs.version }}
-          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ steps.release.outputs.version }}
+          CHANNEL: ${{ steps.release.outputs.channel }}
         run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
       - run: npm ci --ignore-scripts
         working-directory: smallpen
@@ -75,17 +71,17 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - name: Prepare release version
+      - name: Prepare package metadata
         env:
-          VERSION: ${{ inputs.version }}
-          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ needs.test.outputs.version }}
+          CHANNEL: ${{ needs.test.outputs.channel }}
         run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
       - run: npm ci --ignore-scripts
         working-directory: smallpen
       - name: Pack four public npm packages
         env:
-          VERSION: ${{ inputs.version }}
-          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ needs.test.outputs.version }}
+          CHANNEL: ${{ needs.test.outputs.channel }}
         run: node smallpen/scripts/release.mjs pack smallpen/dist/npm "$VERSION" "$CHANNEL" "$GITHUB_SHA"
       - name: Verify clean global install and smallpen command
         run: node smallpen/scripts/release.mjs smoke smallpen/dist/npm "$GITHUB_SHA"
@@ -107,7 +103,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: runner.os == 'Linux'
         with:
-          name: SmallPen-CLI-${{ inputs.version }}-${{ github.sha }}-${{ github.run_id }}
+          name: SmallPen-CLI-${{ needs.test.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
           path: smallpen/dist/SmallPen-CLI.tar.gz
           if-no-files-found: error
           retention-days: 1
@@ -133,7 +129,7 @@ jobs:
           overwrite: true
   desktop:
     name: Desktop (${{ matrix.platform }})
-    needs: frontend
+    needs: [test, frontend]
     if: inputs.product != 'cli'
     strategy:
       fail-fast: false
@@ -153,10 +149,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - name: Prepare shared version
+      - name: Prepare package metadata
         env:
-          VERSION: ${{ inputs.version }}
-          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ needs.test.outputs.version }}
+          CHANNEL: ${{ needs.test.outputs.channel }}
         run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
       - run: npm ci --ignore-scripts
         working-directory: smallpen
@@ -183,7 +179,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: runner.os == 'macOS'
         with:
-          name: SmallPen-macOS-arm64-${{ inputs.version }}-${{ github.sha }}-${{ github.run_id }}
+          name: SmallPen-macOS-arm64-${{ needs.test.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
           path: |
             smallpen/apps/desktop/dist/SmallPen-macOS-arm64-unsigned.zip
             smallpen/apps/desktop/dist/SHA256SUMS
@@ -203,7 +199,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: runner.os == 'Windows'
         with:
-          name: SmallPen-Windows-x64-${{ inputs.version }}-${{ github.sha }}-${{ github.run_id }}
+          name: SmallPen-Windows-x64-${{ needs.test.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
           path: |
             smallpen/apps/desktop/dist/SmallPen-Windows-x64.zip
             smallpen/apps/desktop/dist/SHA256SUMS
