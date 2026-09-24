@@ -1,6 +1,6 @@
 {
   "name": "smallpen",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.2",
   "description": "SmallPen command-line interface",
   "publishConfig": {
     "access": "public"
@@ -12,6 +12,11 @@
     "bin"
   ],
   "dependencies": {
-    "@smallpen/cli": "0.1.0"
+    "@smallpen/cli": "0.1.0-alpha.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SmallRaw/SmallPen.git",
+    "directory": "smallpen/apps/npm-cli"
   }
 }
