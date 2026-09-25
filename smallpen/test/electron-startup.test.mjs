@@ -89,7 +89,23 @@ test("desktop artifacts are uploaded before smoke tests without bypassing public
   const testStep = workflow.indexOf("- name: Test the packaged App");
   assert.ok(testStep > workflow.indexOf("name: SmallPen-macOS-arm64-"));
   assert.ok(testStep > workflow.indexOf("name: SmallPen-Windows-x64-"));
-  assert.match(workflow, /always\(\) && steps\.smoke\.outcome != 'skipped'/);
+  assert.match(workflow, /failure\(\) && steps\.smoke\.outcome == 'failure'/);
   assert.match(workflow, /publish:[\s\S]*needs: \[test, cli, desktop\]/);
   assert.doesNotMatch(workflow, /continue-on-error/);
+});
+
+test("intermediate artifacts are removed after all consumers finish", async () => {
+  const workflow = await readFile(
+    new URL("../../.github/workflows/smallpen.yml", import.meta.url),
+    "utf8",
+  );
+  const cleanup = workflow.slice(workflow.indexOf("  cleanup:"));
+  assert.match(cleanup, /needs: \[cli, frontend, desktop, publish\]/);
+  assert.match(cleanup, /if: always\(\)/);
+  assert.match(
+    cleanup,
+    /select\(\.name == env.NPM_ARTIFACT or \.name == env.FRONTEND_ARTIFACT\)/,
+  );
+  assert.match(cleanup, /actions\/runs\/\$RUN_ID\/artifacts/);
+  assert.match(cleanup, /gh api --method DELETE/);
 });
