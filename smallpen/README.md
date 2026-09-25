@@ -167,16 +167,18 @@ Do not rerun a historical old-workflow run to test the new pipeline: start a
 new run from a branch that contains these files. GitHub's manual entry also
 needs the workflow file on the repository's default branch.
 
-Artifacts are retained for **1 day**: four npm tarballs with a commit/version/
-SHA-512 manifest, a standalone CLI archive, and macOS/Windows archives with
-SHA-256 checksums and source commit. macOS is only ad-hoc signed; no Apple
+Downloadable artifacts are retained for **1 day**: a standalone CLI archive
+and macOS/Windows archives with SHA-256 checksums and source commit.
+Frontend and npm transfer artifacts are deleted after all consumers finish,
+including failed runs. Their 1-day retention is a fallback if cleanup fails.
+macOS is only ad-hoc signed; no Apple
 Developer account, signing secrets, notarization or GitHub Release is required.
 Desktop archives are uploaded before smoke tests, so a failed test does not
 prevent downloading a build for diagnosis. An uploaded archive is not proof
 that the App works: check the Desktop job result before using it.
 The smoke tests launch those applications, check Home and the editor, then
 verify that their local service has stopped. Startup stages, process output
-and test results are uploaded even on failure; test profiles and documents
+and test results are uploaded only on failure and retained for 1 day; test profiles and documents
 stay on the runner. A failed desktop test still blocks npm publication.
 
 ### Enable npm publication
