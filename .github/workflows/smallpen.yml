@@ -189,7 +189,7 @@ jobs:
           SMALLPEN_SMOKE_EVIDENCE: ${{ runner.temp }}/smallpen-desktop-evidence
         run: node smallpen/e2e/desktop-smoke.mjs
       - name: Upload desktop test evidence
-        if: ${{ always() && steps.smoke.outcome != 'skipped' }}
+        if: ${{ failure() && steps.smoke.outcome == 'failure' }}
         uses: actions/upload-artifact@v7
         with:
           name: SmallPen-Desktop-test-${{ matrix.platform }}-${{ github.sha }}-${{ github.run_id }}
@@ -217,3 +217,26 @@ jobs:
           path: smallpen/dist/npm
       - name: Publish exact verified tarballs using npm trusted publishing
         run: node smallpen/scripts/release.mjs publish smallpen/dist/npm "$GITHUB_SHA"
+  cleanup:
+    name: Remove intermediate artifacts
+    needs: [cli, frontend, desktop, publish]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete only this run's frontend and npm transfer artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          NPM_ARTIFACT: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
+          FRONTEND_ARTIFACT: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
+        run: |
+          gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.name == env.NPM_ARTIFACT or .name == env.FRONTEND_ARTIFACT) | .id' > artifact-ids.txt
+          while IFS= read -r artifact_id; do
+            [[ "$artifact_id" =~ ^[0-9]+$ ]] || exit 1
+            gh api --method DELETE "repos/$REPO/actions/artifacts/$artifact_id"
+          done < artifact-ids.txt
