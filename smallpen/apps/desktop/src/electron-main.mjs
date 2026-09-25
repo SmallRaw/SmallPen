@@ -218,7 +218,7 @@ async function smokeCheck(window, ui) {
   const selector =
     ui === "home"
       ? '[data-testid="smallpen-home"]'
-      : "#workspace .viewport, .workspace .viewport, .viewport";
+      : '[data-testid="viewport"]';
   const deadline = Date.now() + 90000;
   while (Date.now() < deadline) {
     if (window.isDestroyed())
