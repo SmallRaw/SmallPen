@@ -169,8 +169,9 @@ needs the workflow file on the repository's default branch.
 
 Downloadable artifacts are retained for **1 day**: a standalone CLI archive
 and macOS/Windows archives with SHA-256 checksums and source commit.
-Frontend and npm transfer artifacts are deleted after all consumers finish,
-including failed runs. Their 1-day retention is a fallback if cleanup fails.
+Frontend transfer artifacts are deleted after all consumers finish.
+Npm transfer artifacts are deleted only after publication succeeds; failed
+or skipped publication keeps them for 1 day so the same packages can be retried.
 macOS is only ad-hoc signed; no Apple
 Developer account, signing secrets, notarization or GitHub Release is required.
 Desktop archives are uploaded before smoke tests, so a failed test does not

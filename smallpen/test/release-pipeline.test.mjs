@@ -10,7 +10,60 @@ import {
   verifyManifest,
   publicationAction,
   readRelease,
+  waitForPublication,
 } from "../scripts/release.mjs";
+
+test("publication waits for registry processing without publishing again", async () => {
+  const responses = [
+    undefined,
+    undefined,
+    { dist: { integrity: "sha512-good" } },
+  ];
+  let waits = 0;
+  await waitForPublication(
+    { name: "test", version: "1.0.0", integrity: "sha512-good" },
+    {
+      lookup: async () => responses.shift(),
+      pause: async () => {
+        waits++;
+      },
+      attempts: 3,
+    },
+  );
+  assert.equal(waits, 2);
+});
+
+test("publication waiting is bounded and preserves integrity failures", async () => {
+  const pkg = { name: "test", version: "1.0.0", integrity: "sha512-good" };
+  let waits = 0;
+  await assert.rejects(
+    waitForPublication(pkg, {
+      lookup: async () => undefined,
+      pause: async () => {
+        waits++;
+      },
+      attempts: 3,
+    }),
+    /still processing/,
+  );
+  assert.equal(waits, 2);
+  await assert.rejects(
+    waitForPublication(pkg, {
+      lookup: async () => ({ dist: { integrity: "sha512-other" } }),
+      pause: async () => assert.fail("must not retry an integrity conflict"),
+    }),
+    /different integrity/,
+  );
+  await assert.rejects(
+    waitForPublication(pkg, {
+      lookup: async () => {
+        throw new Error("Forbidden");
+      },
+      pause: async () => assert.fail("must not hide registry errors"),
+    }),
+    /Forbidden/,
+  );
+});
 
 test("release inputs reject shell syntax and mismatched channels", () => {
   assert.doesNotThrow(() => validateRelease("1.2.3-alpha.1", "alpha"));
