@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { cp, mkdtemp, readFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runDesktopProcess } from "./run-desktop-process.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const platformApp =
@@ -14,6 +14,9 @@ const executable =
     ? join(app, "Contents/MacOS/SmallPen")
     : join(app, "SmallPen.exe");
 const parent = await mkdtemp(join(tmpdir(), "smallpen-electron-smoke-"));
+const evidence =
+  process.env.SMALLPEN_SMOKE_EVIDENCE ?? join(parent, "evidence");
+await mkdir(evidence, { recursive: true });
 const fixture = join(parent, "Round trip.smallpen");
 await cp(join(root, "test/fixtures/roundtrip.smallpen"), fixture, {
   recursive: true,
@@ -21,39 +24,29 @@ await cp(join(root, "test/fixtures/roundtrip.smallpen"), fixture, {
 
 try {
   for (const ui of ["home", "penpot"]) {
-    const report = join(parent, `${ui}.json`);
-    const result = await new Promise((resolveRun, reject) => {
-      const child = spawn(
-        executable,
-        ui === "home" ? ["--smoke-home"] : ["--smoke", fixture],
-        {
-          stdio: ["ignore", "pipe", "pipe"],
-          env: {
-            ...process.env,
-            SMALLPEN_APPLICATION_STATE_PATH: join(parent, `${ui}-state.json`),
-            SMALLPEN_SMOKE_PROFILE: join(parent, `${ui}-profile`),
-            SMALLPEN_SMOKE_REPORT: report,
-          },
+    const report = join(evidence, `${ui}.json`);
+    const log = join(evidence, `${ui}.log`);
+    const result = await runDesktopProcess(
+      executable,
+      ui === "home" ? ["--smoke-home"] : ["--smoke", fixture],
+      {
+        log,
+        env: {
+          ...process.env,
+          SMALLPEN_APPLICATION_STATE_PATH: join(parent, `${ui}-state.json`),
+          SMALLPEN_SMOKE_PROFILE: join(parent, `${ui}-profile`),
+          SMALLPEN_SMOKE_REPORT: report,
         },
-      );
-      let output = "";
-      child.stdout.on("data", (part) => {
-        output += part;
-      });
-      child.stderr.on("data", (part) => {
-        output += part;
-      });
-      const timer = setTimeout(() => child.kill(), 120000);
-      child.once("error", (error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-      child.once("exit", (code) => {
-        clearTimeout(timer);
-        resolveRun({ code, output });
-      });
-    });
-    assert.equal(result.code, 0, result.output);
+      },
+    );
+    const output = await readFile(log, "utf8");
+    if (result.timedOut)
+      throw new Error(`${ui}: App timed out after 120 seconds\n${output}`);
+    assert.equal(
+      result.code,
+      0,
+      `${ui}: App exited with signal ${result.signal}\n${output}`,
+    );
     const data = JSON.parse(await readFile(report));
     assert.equal(data.status, "ready", JSON.stringify(data));
     assert.equal(data.ui, ui);
@@ -66,9 +59,17 @@ try {
     assert.throws(() => process.kill(data.servicePid, 0), { code: "ESRCH" });
     console.log(JSON.stringify(data));
   }
-  console.log(JSON.stringify({ status: "passed", app, evidence: parent }));
+  await writeFile(
+    join(evidence, "result.json"),
+    JSON.stringify({ status: "passed" }),
+  );
+  console.log(JSON.stringify({ status: "passed", app, evidence }));
 } catch (error) {
+  await writeFile(
+    join(evidence, "result.json"),
+    JSON.stringify({ status: "failed", error: error.stack }),
+  );
   console.error(error);
-  console.error(`Evidence retained at ${parent}`);
+  console.error(`Evidence retained at ${evidence}`);
   process.exitCode = 1;
 }

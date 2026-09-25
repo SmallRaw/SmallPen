@@ -145,9 +145,7 @@ jobs:
       - name: Build Electron Desktop
         working-directory: smallpen
         run: npm run --workspace @smallpen/desktop build
-      - name: Test the exact App that will be uploaded
-        run: node smallpen/e2e/desktop-smoke.mjs
-      - name: Archive verified App
+      - name: Archive macOS build (smoke test follows)
         if: runner.os == 'macOS'
         working-directory: smallpen/apps/desktop/dist
         run: |
@@ -183,6 +181,20 @@ jobs:
             smallpen/apps/desktop/dist/SHA256SUMS
             smallpen/apps/desktop/dist/SOURCE_COMMIT
           if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+      - name: Test the packaged App
+        id: smoke
+        env:
+          SMALLPEN_SMOKE_EVIDENCE: ${{ runner.temp }}/smallpen-desktop-evidence
+        run: node smallpen/e2e/desktop-smoke.mjs
+      - name: Upload desktop test evidence
+        if: ${{ always() && steps.smoke.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: SmallPen-Desktop-test-${{ matrix.platform }}-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/smallpen-desktop-evidence/
+          if-no-files-found: warn
           retention-days: 1
           overwrite: true
   publish:

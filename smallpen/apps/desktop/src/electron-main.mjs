@@ -6,7 +6,7 @@ import {
   session,
   utilityProcess,
 } from "electron";
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { realpath, stat, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,16 +28,32 @@ let quitting = false;
 let choosing = false;
 const opening = new Map();
 
+function trace(stage, detail = {}) {
+  if (!smoke) return;
+  const line = JSON.stringify({
+    stage,
+    elapsedMs: Math.round(performance.now() - started),
+    ...detail,
+  });
+  console.log(line);
+  appendFileSync(
+    `${process.env.SMALLPEN_SMOKE_REPORT}.stages.jsonl`,
+    `${line}\n`,
+  );
+}
+
 if (smoke) {
   if (!process.env.SMALLPEN_SMOKE_PROFILE || !process.env.SMALLPEN_SMOKE_REPORT)
     throw new Error("Smoke tests require a disposable profile and report path");
   app.setPath("userData", process.env.SMALLPEN_SMOKE_PROFILE);
+  trace("entry-loaded");
 }
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
 function fail(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (smoke) {
+    trace("error", { message });
     void writeFile(
       process.env.SMALLPEN_SMOKE_REPORT,
       JSON.stringify({ status: "error", message }),
@@ -138,6 +154,8 @@ function openWindow(url, binding) {
   });
   windows.set(window, binding);
   window.once("ready-to-show", () => window.show());
+  trace("window-created");
+  window.webContents.on("did-finish-load", () => trace("page-loaded"));
   window.webContents.on("will-navigate", (event) => {
     const target = event.url;
     if (navigationAllowed(target, origin)) return;
@@ -211,6 +229,7 @@ async function smokeCheck(window, ui) {
       )
       .catch(() => false);
     if (loaded) {
+      trace("ui-ready", { ui });
       const startupMs = Math.round(performance.now() - started);
       // Sample after load, with no permanent polling in production.
       await new Promise((resolveWait) => setTimeout(resolveWait, 3000));
@@ -268,123 +287,133 @@ app.on("will-quit", (event) => {
   if (!service || serviceStopped || quitting) return;
   event.preventDefault();
   quitting = true;
+  trace("service-stopping");
   const timer = setTimeout(() => {
     service.kill();
     app.exit(1);
   }, 5000);
   service.once("exit", () => {
     clearTimeout(timer);
+    trace("service-stopped");
     app.exit(0);
   });
   service.postMessage("close");
 });
 
-await app.whenReady();
-try {
-  const frontend = app.isPackaged
-    ? join(process.resourcesPath, "frontend", "resources", "public")
-    : fileURLToPath(
-        new URL("../../../../../frontend/resources/public", import.meta.url),
+// Electron waits for ESM evaluation before emitting ready. Never await this
+// promise at module scope, or neither side can finish initializing.
+app
+  .whenReady()
+  .then(async () => {
+    trace("app-ready");
+    const frontend = app.isPackaged
+      ? join(process.resourcesPath, "frontend", "resources", "public")
+      : fileURLToPath(
+          new URL("../../../../../frontend/resources/public", import.meta.url),
+        );
+    service = utilityProcess.fork(
+      fileURLToPath(new URL("./electron-service.mjs", import.meta.url)),
+      [frontend],
+      {
+        serviceName: "SmallPen local service",
+        stdio: "pipe",
+      },
+    );
+    service.stderr?.on("data", (chunk) => process.stderr.write(chunk));
+    service.stdout?.on("data", (chunk) => process.stdout.write(chunk));
+    trace("service-starting");
+    service.on("exit", (code) => {
+      serviceStopped = true;
+      if (!quitting) {
+        fail(new Error(`Local service stopped (${code})`));
+        app.quit();
+      }
+    });
+    ready = await new Promise((resolveReady, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Local service startup timed out")),
+        30000,
       );
-  service = utilityProcess.fork(
-    fileURLToPath(new URL("./electron-service.mjs", import.meta.url)),
-    [frontend],
-    {
-      serviceName: "SmallPen local service",
-      stdio: "pipe",
-    },
-  );
-  service.stderr?.on("data", (chunk) => process.stderr.write(chunk));
-  service.stdout?.on("data", (chunk) => process.stdout.write(chunk));
-  service.on("exit", (code) => {
-    serviceStopped = true;
-    if (!quitting) {
-      fail(new Error(`Local service stopped (${code})`));
-      app.quit();
-    }
-  });
-  ready = await new Promise((resolveReady, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("Local service startup timed out")),
-      30000,
+      service.once("message", (message) => {
+        clearTimeout(timer);
+        resolveReady(message);
+      });
+      service.once("exit", () => {
+        clearTimeout(timer);
+        reject(new Error("Local service failed to start"));
+      });
+    });
+    const origin = new URL(ready.url).origin;
+    trace("service-ready");
+    if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(origin))
+      throw new Error("Local service returned a non-loopback URL");
+    session.defaultSession.setPermissionCheckHandler(() => false);
+    session.defaultSession.setPermissionRequestHandler(
+      (_contents, _permission, callback) => callback(false),
     );
-    service.once("message", (message) => {
-      clearTimeout(timer);
-      resolveReady(message);
+    session.defaultSession.on("will-download", (event, item, contents) => {
+      const target = item.getURL();
+      if (
+        !contents ||
+        !navigationAllowed(contents.getURL(), origin) ||
+        !(
+          navigationAllowed(target, origin) ||
+          target.startsWith(`blob:${origin}/`)
+        )
+      ) {
+        event.preventDefault();
+        return;
+      }
+      item.setSaveDialogOptions({
+        defaultPath: basename(item.getFilename()).replaceAll("\\", "_"),
+      });
     });
-    service.once("exit", () => {
-      clearTimeout(timer);
-      reject(new Error("Local service failed to start"));
-    });
-  });
-  const origin = new URL(ready.url).origin;
-  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(origin))
-    throw new Error("Local service returned a non-loopback URL");
-  session.defaultSession.setPermissionCheckHandler(() => false);
-  session.defaultSession.setPermissionRequestHandler(
-    (_contents, _permission, callback) => callback(false),
-  );
-  session.defaultSession.on("will-download", (event, item, contents) => {
-    const target = item.getURL();
-    if (
-      !contents ||
-      !navigationAllowed(contents.getURL(), origin) ||
-      !(
-        navigationAllowed(target, origin) ||
-        target.startsWith(`blob:${origin}/`)
-      )
-    ) {
-      event.preventDefault();
-      return;
-    }
-    item.setSaveDialogOptions({
-      defaultPath: basename(item.getFilename()).replaceAll("\\", "_"),
-    });
-  });
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
-      {
-        label: "File",
-        submenu: [
-          {
-            label: "New Package",
-            accelerator: "CmdOrCtrl+N",
-            click: () => void choose("create").catch(fail),
-          },
-          {
-            label: "Open Package",
-            accelerator: "CmdOrCtrl+O",
-            click: () => void choose("open").catch(fail),
-          },
-          { role: "close" },
-          ...(process.platform === "darwin" ? [] : [{ role: "quit" }]),
-        ],
-      },
-      { role: "editMenu" },
-      {
-        label: "View",
-        submenu: [{ role: "reload" }, { role: "togglefullscreen" }],
-      },
-    ]),
-  );
-  pendingPaths.push(
-    ...args.filter(
-      (arg) => !arg.startsWith("-") && arg.toLowerCase().endsWith(".smallpen"),
-    ),
-  );
-  let initial;
-  for (const path of pendingPaths) initial = await openPackage(path);
-  if (!initial) initial = openWindow(ready.url);
-  if (smoke) {
-    if (args.includes("--smoke") && !pendingPaths.length)
-      throw new Error("--smoke requires a package path");
-    await smokeCheck(
-      initial,
-      args.includes("--smoke-home") ? "home" : "penpot",
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+        {
+          label: "File",
+          submenu: [
+            {
+              label: "New Package",
+              accelerator: "CmdOrCtrl+N",
+              click: () => void choose("create").catch(fail),
+            },
+            {
+              label: "Open Package",
+              accelerator: "CmdOrCtrl+O",
+              click: () => void choose("open").catch(fail),
+            },
+            { role: "close" },
+            ...(process.platform === "darwin" ? [] : [{ role: "quit" }]),
+          ],
+        },
+        { role: "editMenu" },
+        {
+          label: "View",
+          submenu: [{ role: "reload" }, { role: "togglefullscreen" }],
+        },
+      ]),
     );
-  }
-} catch (error) {
-  fail(error);
-  if (!smoke) app.quit();
-}
+    pendingPaths.push(
+      ...args.filter(
+        (arg) =>
+          !arg.startsWith("-") && arg.toLowerCase().endsWith(".smallpen"),
+      ),
+    );
+    let initial;
+    for (const path of pendingPaths) initial = await openPackage(path);
+    if (!initial) initial = openWindow(ready.url);
+    if (smoke) {
+      if (args.includes("--smoke") && !pendingPaths.length)
+        throw new Error("--smoke requires a package path");
+      await smokeCheck(
+        initial,
+        args.includes("--smoke-home") ? "home" : "penpot",
+      );
+    }
+  })
+  .catch((error) => {
+    fail(error);
+    if (!smoke) app.quit();
+  });
