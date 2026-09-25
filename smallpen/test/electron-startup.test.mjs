@@ -6,6 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runDesktopProcess } from "../e2e/run-desktop-process.mjs";
 
+test("desktop readiness uses the viewport test id, not a compiled CSS class", async () => {
+  const source = await readFile(
+    new URL("../apps/desktop/src/electron-main.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.ok(source.includes('[data-testid="viewport"]'));
+  assert.doesNotMatch(source, /#workspace \.viewport/);
+});
+
 test("Electron entry finishes loading before app readiness", () => {
   // Electron emits ready only after its ESM entry finishes evaluating.
   // Keep readiness pending and verify the real entry can still be imported.
