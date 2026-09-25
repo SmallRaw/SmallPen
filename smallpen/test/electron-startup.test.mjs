@@ -51,6 +51,101 @@ test("Electron entry finishes loading before app readiness", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
+for (const scenario of ["quit", "last-window", "close-failure"]) {
+  test(`desktop shutdown drains package closes: ${scenario}`, () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+    import assert from "node:assert/strict";
+    import { registerHooks } from "node:module";
+    const stub = 'data:text/javascript,' + encodeURIComponent(\`
+      import { EventEmitter } from "node:events";
+      export const app = new EventEmitter();
+      app.requestSingleInstanceLock = () => true;
+      app.whenReady = () => Promise.resolve();
+      app.exit = code => { globalThis.exitCode = code; };
+      export class BrowserWindow extends EventEmitter {
+        constructor() {
+          super();
+          globalThis.window = this;
+          this.webContents = new EventEmitter();
+          this.webContents.setWindowOpenHandler = () => {};
+        }
+        loadURL() { return Promise.resolve(); }
+      }
+      export const dialog = { showErrorBox: (_, message) => {
+        globalThis.failure = message;
+      }};
+      export const Menu = { buildFromTemplate: value => value,
+        setApplicationMenu() {} };
+      export const session = { defaultSession: new EventEmitter() };
+      session.defaultSession.setPermissionCheckHandler = () => {};
+      session.defaultSession.setPermissionRequestHandler = () => {};
+      export const utilityProcess = { fork() {
+        const service = new EventEmitter();
+        globalThis.service = service;
+        service.postMessage = () => {
+          globalThis.stopped = true;
+          service.emit("exit", 0);
+        };
+        setImmediate(() => service.emit("message", {
+          url: "http://127.0.0.1:12345/#/smallpen"
+        }));
+        return service;
+      }};
+    \`);
+    registerHooks({ resolve(specifier, context, next) {
+      return specifier === "electron"
+        ? { url: stub, shortCircuit: true } : next(specifier, context);
+    }});
+    const scenario = process.argv[2];
+    const pending = [];
+    let requests = 0;
+    globalThis.fetch = () => {
+      requests++;
+      return new Promise((resolve, reject) => { pending.push(() => {
+        if (scenario === "close-failure") reject(new Error("close failed"));
+        else resolve({ ok: true, json: async () => ({}) });
+      }); });
+    };
+    await import(process.argv[1]);
+    const { app } = await import("electron");
+    for (let i = 0; !globalThis.window && i < 100; i++)
+      await new Promise(resolve => setImmediate(resolve));
+    assert.ok(globalThis.window, "entry must create its window");
+    const navigate = id => window.webContents.emit("did-navigate-in-page",
+      {}, "http://127.0.0.1:12345/#/workspace?file-id=" + id, true);
+    navigate("first");
+    navigate("second");
+    assert.equal(requests, 1);
+    if (scenario === "last-window") window.emit("closed");
+    app.emit("before-quit");
+    if (scenario !== "last-window") window.emit("closed");
+    app.emit("will-quit", { preventDefault() {} });
+    assert.equal(globalThis.stopped, undefined,
+      "service must remain alive until pending closes finish");
+    assert.equal(requests, scenario === "last-window" ? 2 : 1,
+      "quitting must not issue another close");
+    pending.forEach(finish => finish());
+    for (let i = 0; !globalThis.stopped && i < 100; i++)
+      await new Promise(resolve => setImmediate(resolve));
+    assert.equal(globalThis.stopped, true);
+    assert.equal(globalThis.exitCode, scenario === "close-failure" ? 1 : 0);
+    assert.equal(globalThis.failure,
+      scenario === "close-failure" ? "close failed" : undefined);
+  `,
+        new URL("../apps/desktop/src/electron-main.mjs", import.meta.url).href,
+        scenario,
+      ],
+      { encoding: "utf8", timeout: 5000 },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  });
+}
+
 test("desktop test distinguishes timeouts, failed exits and successful exits", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "smallpen-process-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
