@@ -171,8 +171,13 @@ Artifacts are retained for **1 day**: four npm tarballs with a commit/version/
 SHA-512 manifest, a standalone CLI archive, and macOS/Windows archives with
 SHA-256 checksums and source commit. macOS is only ad-hoc signed; no Apple
 Developer account, signing secrets, notarization or GitHub Release is required.
-The desktop smoke tests launch the exact applications that are uploaded,
-check Home and the editor, then verify that their local service has stopped.
+Desktop archives are uploaded before smoke tests, so a failed test does not
+prevent downloading a build for diagnosis. An uploaded archive is not proof
+that the App works: check the Desktop job result before using it.
+The smoke tests launch those applications, check Home and the editor, then
+verify that their local service has stopped. Startup stages, process output
+and test results are uploaded even on failure; test profiles and documents
+stay on the runner. A failed desktop test still blocks npm publication.
 
 ### Enable npm publication
 
