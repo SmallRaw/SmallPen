@@ -25,8 +25,10 @@ let ready;
 let service;
 let serviceStopped = false;
 let quitting = false;
+let stoppingService = false;
 let choosing = false;
 const opening = new Map();
+const closing = new Set();
 
 function trace(stage, detail = {}) {
   if (!smoke) return;
@@ -74,6 +76,13 @@ async function request(action, body) {
   if (!response.ok)
     throw new Error(`Unable to ${action} package (${response.status})`);
   return response.json();
+}
+
+function closePackage(url) {
+  if (quitting) return;
+  const operation = request("close", { url });
+  closing.add(operation);
+  void operation.catch(fail).finally(() => closing.delete(operation));
 }
 
 async function openPackage(rawPath, action = "open", home) {
@@ -201,14 +210,13 @@ function openWindow(url, binding) {
         );
       if (previousId === fileId) return;
       windows.set(window, { url: target });
-      if (previous) void request("close", { url: previous.url }).catch(fail);
+      if (previous) closePackage(previous.url);
     },
   );
   window.once("closed", () => {
     const original = windows.get(window);
     windows.delete(window);
-    if (original && !quitting)
-      void request("close", { url: original.url }).catch(fail);
+    if (original) closePackage(original.url);
   });
   void window.loadURL(url).catch(fail);
   return window;
@@ -283,10 +291,19 @@ app.on("window-all-closed", () => {
 app.on("activate", () => {
   if (ready && windows.size === 0) openWindow(ready.url);
 });
-app.on("will-quit", (event) => {
-  if (!service || serviceStopped || quitting) return;
-  event.preventDefault();
+app.on("before-quit", () => {
   quitting = true;
+});
+app.on("will-quit", async (event) => {
+  if (!service || serviceStopped) return;
+  event.preventDefault();
+  if (stoppingService) return;
+  stoppingService = true;
+  quitting = true;
+  // Window closes can precede before-quit (last-window close on Windows).
+  // Keep the host alive until those requests finish; never swallow failures.
+  const results = await Promise.allSettled([...closing]);
+  const closeFailed = results.some((result) => result.status === "rejected");
   trace("service-stopping");
   const timer = setTimeout(() => {
     service.kill();
@@ -295,7 +312,7 @@ app.on("will-quit", (event) => {
   service.once("exit", () => {
     clearTimeout(timer);
     trace("service-stopped");
-    app.exit(0);
+    app.exit(closeFailed ? 1 : 0);
   });
   service.postMessage("close");
 });
