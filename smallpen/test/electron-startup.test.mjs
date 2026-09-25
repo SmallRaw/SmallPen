@@ -199,8 +199,9 @@ test("intermediate artifacts are removed after all consumers finish", async () =
   assert.match(cleanup, /if: always\(\)/);
   assert.match(
     cleanup,
-    /select\(\.name == env.NPM_ARTIFACT or \.name == env.FRONTEND_ARTIFACT\)/,
+    /select\(\.name == env.FRONTEND_ARTIFACT or \(\.name == env.NPM_ARTIFACT and env.PUBLISH_RESULT == "success"\)\)/,
   );
+  assert.match(cleanup, /PUBLISH_RESULT: \$\{\{ needs.publish.result \}\}/);
   assert.match(cleanup, /actions\/runs\/\$RUN_ID\/artifacts/);
   assert.match(cleanup, /gh api --method DELETE/);
 });

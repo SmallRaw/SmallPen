@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
+import { setTimeout as pause } from "node:timers/promises";
 import { existsSync } from "node:fs";
 import {
   mkdir,
@@ -387,6 +388,28 @@ async function published(name, version) {
   return response.json();
 }
 
+export async function waitForPublication(
+  pkg,
+  { lookup = published, pause: wait = pause, attempts = 31 } = {},
+) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (
+      publicationAction(await lookup(pkg.name, pkg.version), pkg.integrity) ===
+      "existing"
+    )
+      return;
+    if (attempt < attempts) {
+      console.log(
+        `${pkg.name}@${pkg.version}: registry processing (${attempt}/${attempts}); checking again in 10s`,
+      );
+      await wait(10000);
+    }
+  }
+  throw new Error(
+    `${pkg.name}@${pkg.version}: registry still processing; publication was accepted, do not change the version or tarball. Retry with the same artifacts later.`,
+  );
+}
+
 async function publish(dir, commit) {
   assert.equal(
     process.env.GITHUB_ACTIONS,
@@ -424,11 +447,7 @@ async function publish(dir, commit) {
         registry,
       ]);
     }
-    assert.equal(
-      publicationAction(await published(pkg.name, pkg.version), pkg.integrity),
-      "existing",
-      "Published package is not visible; retry this job",
-    );
+    await waitForPublication(pkg);
     const response = await fetch(
       `${registry}/-/package/${encodeURIComponent(pkg.name)}/dist-tags`,
       { signal: AbortSignal.timeout(30_000) },

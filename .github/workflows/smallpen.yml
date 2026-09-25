@@ -201,7 +201,7 @@ jobs:
     name: Publish
     needs: [test, cli, desktop]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 35
     environment: npm
     permissions:
       contents: read
@@ -233,9 +233,10 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           NPM_ARTIFACT: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
           FRONTEND_ARTIFACT: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
           gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
-            --jq '.artifacts[] | select(.name == env.NPM_ARTIFACT or .name == env.FRONTEND_ARTIFACT) | .id' > artifact-ids.txt
+            --jq '.artifacts[] | select(.name == env.FRONTEND_ARTIFACT or (.name == env.NPM_ARTIFACT and env.PUBLISH_RESULT == "success")) | .id' > artifact-ids.txt
           while IFS= read -r artifact_id; do
             [[ "$artifact_id" =~ ^[0-9]+$ ]] || exit 1
             gh api --method DELETE "repos/$REPO/actions/artifacts/$artifact_id"
