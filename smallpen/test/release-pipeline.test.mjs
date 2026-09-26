@@ -5,64 +5,84 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import {
   validateRelease,
   verifyManifest,
   publicationAction,
   readRelease,
-  waitForPublication,
 } from "../scripts/release.mjs";
 
-test("publication waits for registry processing without publishing again", async () => {
-  const responses = [
-    undefined,
-    undefined,
-    { dist: { integrity: "sha512-good" } },
-  ];
-  let waits = 0;
-  await waitForPublication(
-    { name: "test", version: "1.0.0", integrity: "sha512-good" },
-    {
-      lookup: async () => responses.shift(),
-      pause: async () => {
-        waits++;
-      },
-      attempts: 3,
-    },
+test("publishing does not query registry visibility or tags after submission", async () => {
+  const source = await readFile(
+    new URL("../scripts/release.mjs", import.meta.url),
+    "utf8",
   );
-  assert.equal(waits, 2);
+  const body = source.slice(
+    source.indexOf("async function publish("),
+    source.indexOf("async function main("),
+  );
+  const submissions = body.slice(body.indexOf("for (let i = 0;"));
+  assert.ok(submissions.includes('run("npm", ['));
+  assert.doesNotMatch(
+    submissions,
+    /await|fetch\(|published\(|waitForPublication|dist-tags/,
+  );
+  assert.doesNotMatch(
+    source,
+    /waitForPublication|publishedTags|node:timers\/promises/,
+  );
 });
 
-test("publication waiting is bounded and preserves integrity failures", async () => {
-  const pkg = { name: "test", version: "1.0.0", integrity: "sha512-good" };
-  let waits = 0;
-  await assert.rejects(
-    waitForPublication(pkg, {
-      lookup: async () => undefined,
-      pause: async () => {
-        waits++;
+test("publish submits every missing package without waiting and propagates npm errors", async () => {
+  const source = await readFile(
+    new URL("../scripts/release.mjs", import.meta.url),
+    "utf8",
+  );
+  const body = source.slice(
+    source.indexOf("async function publish("),
+    source.indexOf("async function main("),
+  );
+  const packages = ["core", "local-package", "cli", "smallpen"].map((name) => ({
+    name,
+    version: "0.1.0-alpha.2",
+    integrity: "same",
+    filename: `${name}.tgz`,
+  }));
+  for (const failAt of [undefined, "cli.tgz"]) {
+    const submitted = [];
+    const publish = runInNewContext(`${body}; publish`, {
+      assert,
+      join,
+      publicationAction,
+      process: { env: { GITHUB_ACTIONS: "true" } },
+      registry: "https://registry.npmjs.org",
+      console: { log() {} },
+      verifyManifest: async () => ({ packages, channel: "alpha" }),
+      published: async (name) => {
+        assert.equal(
+          submitted.length,
+          0,
+          "registry reads must finish before submission",
+        );
+        return name === "core" ? { dist: { integrity: "same" } } : undefined;
       },
-      attempts: 3,
-    }),
-    /still processing/,
-  );
-  assert.equal(waits, 2);
-  await assert.rejects(
-    waitForPublication(pkg, {
-      lookup: async () => ({ dist: { integrity: "sha512-other" } }),
-      pause: async () => assert.fail("must not retry an integrity conflict"),
-    }),
-    /different integrity/,
-  );
-  await assert.rejects(
-    waitForPublication(pkg, {
-      lookup: async () => {
-        throw new Error("Forbidden");
+      run: (_command, args) => {
+        if (args[0] === "--version") return "11.5.1";
+        submitted.push(args[1]);
+        if (args[1] === failAt) throw new Error("npm publish failed");
       },
-      pause: async () => assert.fail("must not hide registry errors"),
-    }),
-    /Forbidden/,
-  );
+    });
+    if (failAt)
+      await assert.rejects(publish(".", "commit"), /npm publish failed/);
+    else await publish(".", "commit");
+    assert.deepEqual(
+      submitted,
+      failAt
+        ? ["local-package.tgz", "cli.tgz"]
+        : ["local-package.tgz", "cli.tgz", "smallpen.tgz"],
+    );
+  }
 });
 
 test("release inputs reject shell syntax and mismatched channels", () => {

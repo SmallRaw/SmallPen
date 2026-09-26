@@ -201,7 +201,7 @@ jobs:
     name: Publish
     needs: [test, cli, desktop]
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 15
     environment: npm
     permissions:
       contents: read
