@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/penpot-adapter",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "private": true,
   "type": "module",
   "exports": "./src/index.mjs",
@@ -8,6 +8,6 @@
     "src"
   ],
   "dependencies": {
-    "@smallpen/core": "0.1.0-alpha.2"
+    "@smallpen/core": "0.1.0-alpha.3"
   }
 }
