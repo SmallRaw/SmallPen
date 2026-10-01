@@ -12,7 +12,7 @@ It does not require PostgreSQL, Valkey, MinIO, LDAP, a collaboration server, MCP
 - CLI calls never inherit those UI sessions: every package, selector, Context, target, and operation is explicit and no current selection survives across calls.
 - Every write is a complete typed Operation Batch against `baseRevision`. The full candidate is validated before an atomic filesystem replacement.
 - External valid revisions reload automatically. Invalid or incompatible state retains the last valid read-only projection and enters Repair.
-- Local Undo/Redo applies inverse Operation Batches; stale writers are rejected instead of overwriting newer work.
+- Local Undo/Redo applies inverse Operation Batches; stale writers are rejected instead of overwriting newer work. An external revision clears Undo/Redo, because its entries target content that no longer exists; the workspace shows a notice when it drops any.
 
 ## Penpot UI reuse
 
@@ -33,12 +33,14 @@ Those upstream Penpot features remain unchanged outside the SmallPen profile.
 - `packages/penpot-adapter/` maps supported completed Penpot changes to typed SmallPen Operations.
 - `apps/cli/` is the complete public Agent surface and never starts Web or Background.
 - `apps/background/` exposes session-scoped local HTTP services used by the Penpot adapter.
-- `apps/web/` only serves a compiled `frontend/resources/public` tree, emits the Penpot workspace URL, and handles the native open-file control route. It contains no product UI implementation.
+- `apps/web/` only serves a compiled `frontend/resources/public` tree, emits the Penpot workspace URL, proxies Google Fonts files and stylesheets, and handles the native open-file control route. It contains no product UI implementation.
+- Web and Background bind to loopback only. They answer only `127.0.0.1`, `localhost`, or `[::1]` Host headers with their own port (`forbidden_host` otherwise), which blocks DNS rebinding. Web accepts only loopback origins on its own port; Background grants CORS to plain-HTTP loopback origins (`forbidden_origin` otherwise).
+- These checks stop web pages, not local programs. There is no per-launch token: any process or other user on the same machine can read the Background URL from the Web index page and act as you. Run SmallPen only on a single-user machine.
 - `frontend/src/app/main/smallpen*` is the bounded CLJS integration. Unsupported Penpot reads and writes fail explicitly rather than pretending to persist.
 
 ## Install and run
 
-Materialize the seven local workspace links without lifecycle scripts:
+Materialize the eight local workspace links without lifecycle scripts:
 
 ```sh
 cd smallpen
@@ -67,7 +69,7 @@ Open the emitted `frontend` URL. The root origin is always the SmallPen Home ent
 The equivalent route shape is:
 
 ```text
-http://127.0.0.1:43128/#/workspace?file-id=<file-uuid>&page-id=<page-uuid>&layout=layers
+http://127.0.0.1:43128/?screen=workspace&file-id=<file-uuid>&page-id=<page-uuid>&layout=layers
 ```
 
 The stable File ID resolves the Package through SmallPen's durable recent-file registry. A closed Package is reopened when the ID is known and its local locator is still available; an unknown or unavailable File ID returns to Home. A fixed local Team UUID exists only inside the Penpot compatibility adapter and is not part of the URL or SmallPen domain model.
@@ -132,9 +134,10 @@ Node.js runtime check. Users install with `npm install -g smallpen` and run
 `smallpen --help`.
 
 Publish in this order: `@smallpen/core`, `@smallpen/local-package`,
-`@smallpen/cli`, then `smallpen`. The entry package pins the CLI version;
-update that dependency when releasing a new CLI. All four packages are
-configured for public access. Other workspace packages remain private.
+`@smallpen/cli`, then `smallpen`. Each package pins the exact version of the
+packages it depends on; `release.mjs prepare` updates those pins with the
+version. All four packages are configured for public access. Other workspace
+packages remain private.
 
 Build the standalone Alpha directory with `npm run build:cli`. The resulting
 `dist/SmallPen-CLI` directory includes Unix and Windows launchers and all
@@ -213,8 +216,10 @@ npm install -g smallpen
 ```
 
 If npm publication stops partway, rerun the failed job within artifact
-retention. Already published versions are accepted only when their integrity
-matches exactly; mismatches or changed dist-tags stop the run. Expired
+retention. Already published versions are skipped only when their integrity
+matches exactly; a mismatch stops the run before any upload. Publication
+does not wait for the registry to show new versions and does not check or
+move dist-tags of versions already published. Expired
 artifacts require a new build. npm cannot atomically publish four packages,
 so a failed run can leave some dependencies published; versions are never
 overwritten or automatically unpublished.
@@ -242,7 +247,7 @@ node apps/cli/bin/smallpen.mjs apply ./workspace/product.smallpen --batch batch.
 node apps/cli/bin/smallpen.mjs repair ./workspace/product.smallpen --json
 ```
 
-Other public reads include `inspect`, `list`, `read`, `compare`, `tokens`, `search-tokens`, `search-components`, `effective-token`, `explain-token`, and `render`. Public binary entries for an existing Product are `import-media` (PNG/JPEG/GIF/WebP/SVG with content-addressed blobs), `remove-media`, and `import-font` (TTF/OTF convert to WOFF; WOFF imports as-is; WOFF2 reaches an explicit conversion boundary). `library-refresh` re-fetches one declared URL Library into its verified cache, `watch` streams NDJSON revision events for local changes, and `apply --explain` previews every write with per-operation targets and a canonical before/after diff without writing. Token search includes visible Foundation Tokens, searches every finite Web/Desktop/theme Context unless one is explicit, and ranks exact or nearby color and numeric values. Component search includes complete Product and public Foundation candidates with legal variants. Write results contain non-blocking `design_token_not_used` plus an exact `recommendedBinding` when a value resolves to a Token, or `design_token_value_unmatched` when no Token resolves to the raw value and the hard-coding requires confirmation.
+Other public reads include `inspect`, `list`, `read`, `compare`, `tokens`, `search-tokens`, `search-components`, `effective-token`, `explain-token`, and `render`. Public binary entries for an existing Product are `import-media` (PNG/JPEG/GIF/WebP/SVG with content-addressed blobs), `remove-media`, and `import-font` (TTF/OTF convert to WOFF; WOFF imports as-is; WOFF2 reaches an explicit conversion boundary). `library-refresh` re-fetches one declared URL Library into its verified cache (URL Libraries must resolve to public addresses; set `SMALLPEN_ALLOW_PRIVATE_LIBRARY_HOSTS=1` to serve one from localhost or a private network during development), `watch` streams NDJSON revision events for local changes, and `apply --explain` previews every write with per-operation targets and a canonical before/after diff without writing. Token search includes visible Foundation Tokens, searches every finite Web/Desktop/theme Context unless one is explicit, and ranks exact or nearby color and numeric values. Component search includes complete Product and public Foundation candidates with legal variants. Write results contain non-blocking `design_token_not_used` plus an exact `recommendedBinding` when a value resolves to a Token, or `design_token_value_unmatched` when no Token resolves to the raw value and the hard-coding requires confirmation.
 
 ## Figma Draft workflow
 
@@ -271,6 +276,8 @@ An image-capable client should decode the current response and verify the decode
 
 Package reads retain the existing concurrency guard: a reusable empty sibling `.<package>.write-lock` directory remains after its temporary ownership records are released. It contains no rendered image and does not grow per preview. Inline image delivery does not bypass package locking or interrupted-commit recovery.
 
+Where the lock cannot be created, as on a read-only volume, reads proceed without it, and writes fail `package_not_writable` without touching the Package. An interrupted commit there still needs a writable location. A symlinked lock path fails `invalid_write_lock`.
+
 ## Verification
 
 Run focused SmallPen gates from this directory:
@@ -282,4 +289,4 @@ npm run test:e2e
 npm run test:desktop
 ```
 
-The Web E2E loads the real Penpot frontend, asserts the original workspace component surfaces, edits opacity through Penpot's layer panel, verifies the Canonical file write, and proves the workspace remains alive after persistence. The Desktop smoke builds the ad-hoc-signed Alpha app bundle, confirms the Penpot assets are embedded, launches a real package through WKWebView, and confirms clean shutdown.
+The Web E2E loads the real Penpot frontend, asserts the original workspace component surfaces, edits opacity through Penpot's layer panel, verifies the Canonical file write, and proves the workspace remains alive after persistence. The Desktop smoke takes an already built Electron app (`apps/desktop/dist` by default, or a path argument), starts it once on Home and once on a copy of a real package, waits for each to report ready, and confirms that the shared service process has stopped after exit.

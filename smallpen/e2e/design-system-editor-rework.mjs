@@ -307,7 +307,7 @@ async function runPhase({
       }
     });
     const url = new URL(web.url);
-    url.hash = `#/design-system?file-id=${fileId}`;
+    url.search = `?screen=smallpen-design-system&file-id=${fileId}`;
 
     const noInternalError = async () => {
       const body = await page.locator("body").innerText();

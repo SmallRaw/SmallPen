@@ -40,6 +40,7 @@
 - 同名不同 owner、未使用/未激活、alias、无文字、纯白/透明、located 及只读来源不得静默遗漏。
 - 展示身份稳定且区别于源身份；父子关系一致，无重复 children、悬空引用或循环展开。
 - 展示坐标不回写源 x/y；bounds、selrect、points、transform、命中和测量一致，测量簿记不产生源历史。
+- 在 DS 移动组件定义的 x/y 被拒绝（`design_system_layout_locked`）。路径编辑随提交携带展台位移（plugin-data `layout-offset`），据此映射回源坐标；缺位移则拒绝（`design_system_layout_offset_missing`），不把源节点移到展台位置。
 
 ### D2 · Token 展示
 

@@ -46,4 +46,4 @@ console.log("DSE delivery server");
 console.log("  package:", packagePath);
 console.log("  originalHash:", originalHash);
 console.log("  packageRevision:", snapshot.revision);
-console.log("  open:", `${web.url}/#/design-system?file-id=${fileId}`);
+console.log("  open:", `${web.url}?screen=smallpen-design-system&file-id=${fileId}`);

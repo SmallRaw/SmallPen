@@ -545,6 +545,18 @@ test("the Library bridge links and unlinks a local Package source", async (conte
   });
   context.after(() => service.close());
 
+  // Machine-specific paths are refused before anything is committed, so a
+  // typed absolute path cannot link and then put the Product into Repair.
+  for (const path of [libraryPath, "C:\\libs\\icons.smallpen", "..\\icons.smallpen"]) {
+    const refused = await fetch(`${service.url}/v1/libraries/link`, {
+      body: JSON.stringify({ source: { path, type: "local" } }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    assert.equal(refused.status, 422, path);
+    assert.equal((await refused.json()).error.code, "invalid_library_source");
+  }
+
   const linked = await fetch(`${service.url}/v1/libraries/link`, {
     body: JSON.stringify({
       source: { path: "icons.smallpen", type: "local" },
@@ -1023,6 +1035,7 @@ test("the local HTTP bridge creates, renames, and deletes an offline Font", asyn
   const created = await createdResponse.json();
   assert.equal(createdResponse.status, 201, JSON.stringify(created));
   assert.equal(created["font-id"], rawFontId);
+  assert.equal(created["variant-name"], "Regular");
   assert.equal(created["team-id"], "00000000-0000-4000-8000-000000000001");
   assert.match(created.id, /^[a-f0-9-]{36}$/);
   assert.match(created["woff1-file-id"], /^[a-f0-9-]{36}$/);

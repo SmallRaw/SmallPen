@@ -38,7 +38,7 @@ export async function startDesktopHost({
       // but the native shell needs a deterministic first paint. Loading the
       // explicit local Home route also avoids Penpot's unauthenticated root
       // bootstrap while no Package is open yet.
-      url: web.workspaceUrl ?? new URL("#/smallpen", web.url).href,
+      url: web.workspaceUrl ?? new URL("?screen=smallpen-home", web.url).href,
       async close() {
         if (closed) return;
         closed = true;

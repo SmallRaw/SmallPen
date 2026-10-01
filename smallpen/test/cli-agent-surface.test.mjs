@@ -23,10 +23,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
 
-function runCli(args, { cwd } = {}) {
+function runCli(args, { cwd, env } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
       cwd,
+      env: env && { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -722,7 +723,7 @@ test("component details accept a remote Library locator returned by search", asy
   const locator = `http://127.0.0.1:${server.address().port}/manifest.json`;
   const inspected = await runCli([
     "component", locator, "--component-id", "cmp_button", "--json",
-  ], { cwd: parent });
+  ], { cwd: parent, env: { SMALLPEN_ALLOW_PRIVATE_LIBRARY_HOSTS: "1" } });
   assert.equal(inspected.code, 0, inspected.stdout);
   const result = JSON.parse(inspected.stdout);
   assert.equal(result.component.id, "cmp_button");

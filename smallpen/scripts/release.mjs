@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import {
+  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -218,6 +219,79 @@ export async function verifyManifest(dir, commit) {
   return manifest;
 }
 
+// Renders text and a WebP image with the installed CLI: the packed tree must
+// carry the bundled fonts and the WebP decoder, not only the JavaScript.
+export async function smokeRender(cli, temp) {
+  const packagePath = join(temp, "render-smoke.smallpen");
+  await cp(join(root, "test/fixtures/roundtrip.smallpen"), packagePath, {
+    recursive: true,
+  });
+  run(
+    process.execPath,
+    [
+      cli,
+      "import-media",
+      packagePath,
+      "--file",
+      join(root, "test/fixtures/quadrant-lossy.webp"),
+      "--media-id",
+      "media_smoke",
+      "--json",
+    ],
+    temp,
+  );
+  const screenPath = join(packagePath, "screens/roundtrip.json");
+  const screen = await json(screenPath);
+  const nodes = screen.presentations[0].nodes;
+  nodes.node_rectangle.fills = [{ mediaRef: "media_smoke", type: "image" }];
+  nodes.node_canvas.children.push("node_smoke_text");
+  nodes.node_smoke_text = {
+    children: [],
+    fills: [{ color: "#111827", type: "solid" }],
+    height: 40,
+    id: "node_smoke_text",
+    name: "Smoke text",
+    text: "Smoke",
+    textStyle: {
+      fontFamily: "sourcesanspro",
+      fontId: "sourcesanspro",
+      fontSize: 32,
+      fontStyle: "normal",
+      fontWeight: 700,
+      letterSpacing: 0,
+      lineHeight: 1.2,
+      textAlign: "left",
+      verticalAlign: "top",
+    },
+    type: "TEXT",
+    width: 200,
+    x: 400,
+    y: 96,
+  };
+  await save(screenPath, screen);
+  const evidence = JSON.parse(
+    run(
+      process.execPath,
+      [
+        cli,
+        "evidence",
+        packagePath,
+        "--output",
+        join(temp, "render-smoke"),
+        "--json",
+      ],
+      temp,
+    ),
+  );
+  assert.deepEqual(evidence.diagnostics, [], "Render smoke diagnostics");
+  const png = await readFile(evidence.imagePath);
+  assert.equal(
+    png.subarray(1, 4).toString("latin1"),
+    "PNG",
+    "Render smoke did not write a PNG",
+  );
+}
+
 async function smoke(dir, commit) {
   const manifest = await verifyManifest(dir, commit);
   const temp = await mkdtemp(join(tmpdir(), "smallpen-npm-smoke-"));
@@ -368,6 +442,7 @@ async function smoke(dir, commit) {
       ),
     );
     assert.equal(validated.status, "valid");
+    await smokeRender(cli, temp);
   } finally {
     if (server) {
       server.closeAllConnections();

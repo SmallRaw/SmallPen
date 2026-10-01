@@ -62,6 +62,6 @@ const web = await servePenpotFrontend({
 });
 const snapshot = await (await fetch(`${bg.url.replace(/\/$/, "")}/v1/workspace`)).json();
 const base = new URL(web.url);
-console.log("DEMO URL:", `${base.href}#/design-system?file-id=${snapshot.runtime.file}`);
+console.log("DEMO URL:", `${base.href}?screen=smallpen-design-system&file-id=${snapshot.runtime.file}`);
 console.log("SCREEN PAGE:", `${base.href}#/screen?file-id=${snapshot.runtime.file}&page-id=${snapshot.runtime.pages.scr_design_system}`);
 console.log("(backend:", bg.url + ", Ctrl+C to stop)");

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   mkdir,
   readdir,
@@ -36,6 +36,7 @@ import {
   applyOperationBatch,
   createEvidence,
   defaultLibraryCacheRoot,
+  fontVariantName,
   importDraft,
   importFontVariant,
   importMedia,
@@ -67,6 +68,8 @@ const FLAG_OPTIONS = new Set([
   "--json",
   "-h",
 ]);
+// Value options read with options(); every other value option is single.
+const REPEATABLE_OPTIONS = new Set(["--answer", "--context", "--select", "--selector"]);
 const COMMAND_OPTIONS = {
   version: ["--json"],
   apply: ["--batch", "--confirm-unmatched", "--diff", "--dry-run", "--explain", "--json", "--warning-detail"],
@@ -135,14 +138,13 @@ const COMMAND_OPTIONS = {
     "--file",
     "--font-id",
     "--json",
-    "--media-path",
     "--name",
     "--style",
     "--variant-id",
     "--weight",
   ],
   "import-media": ["--file", "--json", "--media-id", "--media-path", "--name"],
-  "library-refresh": ["--interval", "--json", "--library", "--max-events"],
+  "library-refresh": ["--json", "--library"],
   watch: ["--interval", "--json", "--max-events"],
   list: ["--json", "--kind", "--limit", "--offset"],
   read: ["--json"],
@@ -199,6 +201,29 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+// Locale-independent order for JSON output: localeCompare follows the host
+// LANG (Danish sorts "aa" after "ab"), which would reorder lists and pages.
+function compareText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+// Caller-supplied input files fail with a typed error instead of a raw
+// filesystem internal_error.
+async function readInputFile(path, optionName, encoding) {
+  try {
+    return await readFile(path, encoding);
+  } catch (error) {
+    if (!["EACCES", "EISDIR", "ENOENT", "ENOTDIR", "EPERM"].includes(error?.code)) {
+      throw error;
+    }
+    throw new SmallPenError(
+      "unreadable_input_file",
+      `${optionName} file cannot be read: ${error.message}`,
+      { option: optionName, path: resolve(path), reason: error.code },
+    );
+  }
+}
+
 function option(args, name) {
   const index = args.indexOf(name);
   if (index === -1) return undefined;
@@ -240,6 +265,7 @@ function validateCommandArguments(command, args) {
     "--help",
     "-h",
   ]);
+  const seen = new Set();
   for (let index = 2; index < args.length; index += 1) {
     const value = args[index];
     if (!value.startsWith("-")) {
@@ -256,7 +282,18 @@ function validateCommandArguments(command, args) {
         validOptions: [...allowed].sort(),
       });
     }
-    if (!FLAG_OPTIONS.has(value)) index += 1;
+    if (FLAG_OPTIONS.has(value)) continue;
+    // option() reads only the first occurrence; a second value would be
+    // silently ignored.
+    if (seen.has(value) && !REPEATABLE_OPTIONS.has(value)) {
+      throw new SmallPenError(
+        "duplicate_option",
+        `${value} may be given only once`,
+        { command, option: value },
+      );
+    }
+    seen.add(value);
+    index += 1;
   }
 }
 
@@ -343,7 +380,7 @@ function printJson(value) {
         child instanceof Map
           ? Object.fromEntries(
               [...child.entries()].sort(([left], [right]) =>
-                String(left).localeCompare(String(right)),
+                compareText(String(left), String(right)),
               ),
             )
           : child,
@@ -381,7 +418,7 @@ function inspect(snapshot) {
           screenId,
         }),
       ),
-    ].sort((left, right) => left.id.localeCompare(right.id)),
+    ].sort((left, right) => compareText(left.id, right.id)),
     contexts: {
       axes: [...snapshot.domain.contextAxes.values()],
       profiles: [...snapshot.domain.contextProfiles.values()],
@@ -626,6 +663,20 @@ async function applyBatch(packagePath, batch, args) {
       "CLI Operation Batch JSON cannot contain binary blob writes",
     );
   }
+  // High-level commands rebuild their batch from the current revision, so a
+  // retry with the same --batch-id after success carries the recorded result
+  // as its base and may no longer prepare (its nodes already exist). Consult
+  // the ledger first; previews never write and skip it.
+  if (
+    args[0] !== "apply" &&
+    option(args, "--batch-id") !== undefined &&
+    !flag(args, "--dry-run") &&
+    !flag(args, "--explain") &&
+    !flag(args, "--diff")
+  ) {
+    const replayed = await replayRecordedBatch(packagePath, batch, { rebuilt: true });
+    if (replayed) return replayed;
+  }
   // 通用 apply 仍然能修复处于 Repair 的 Product；Token 建议不能变成写入门禁。
   const { foundation, product } = await tokenAdviceWorkspace(packagePath);
   let prepared;
@@ -799,10 +850,17 @@ async function initializeCommand(workspacePath, args) {
   const answersPath = option(args, "--answers");
   if (answersPath) {
     fileAnswers = parseJson(
-      await readFile(answersPath, "utf8"),
+      await readInputFile(answersPath, "--answers", "utf8"),
       "invalid_initialization_answers_json",
       { path: answersPath },
     );
+    if (!isRecord(fileAnswers)) {
+      throw new SmallPenError(
+        "invalid_initialization_answers_json",
+        "--answers must contain a JSON object keyed by question id",
+        { path: answersPath },
+      );
+    }
   }
   const answers = {
     ...(persisted.answers ?? {}),
@@ -996,7 +1054,7 @@ async function renderMatrixCommand(packagePath, args) {
     );
   }
   const contexts = parseJson(
-    await readFile(contextsPath, "utf8"),
+    await readInputFile(contextsPath, "--contexts", "utf8"),
     "invalid_render_contexts_json",
     { path: contextsPath },
   );
@@ -1096,7 +1154,7 @@ function tokenImpact(snapshot, tokenId, packageId) {
     }
   }
   return locations.sort((left, right) =>
-    JSON.stringify(left).localeCompare(JSON.stringify(right)),
+    compareText(JSON.stringify(left), JSON.stringify(right)),
   );
 }
 
@@ -1130,7 +1188,7 @@ function componentDetails(snapshot, componentId) {
           scenario.target.component.assetId === componentId,
       )
       .map(({ id, name, target }) => ({ id, name, target }))
-      .sort((left, right) => left.id.localeCompare(right.id)),
+      .sort((left, right) => compareText(left.id, right.id)),
   };
 }
 
@@ -1240,7 +1298,7 @@ async function repairOperations(resolution, conflict, action, args) {
       );
     }
     const asset = parseJson(
-      await readFile(assetPath, "utf8"),
+      await readInputFile(assetPath, "--asset", "utf8"),
       "invalid_recreated_asset_json",
       { path: assetPath },
     );
@@ -1315,7 +1373,11 @@ function insertionAdvice(owner, product, component) {
   const instanceNode = {
     children: [],
     height: dimensions.height,
-    id: `node_instance_${randomUUID().slice(0, 8)}`,
+    // Derived from the revision so a repeated read returns the same advice.
+    id: `node_instance_${createHash("sha256")
+      .update(`${product.revision}\0${component.packageId}\0${component.id}`)
+      .digest("hex")
+      .slice(0, 8)}`,
     instance: {
       component: { assetId: component.id, packageId: component.packageId },
       variant,
@@ -1566,7 +1628,7 @@ async function main(args) {
         "import-draft requires --input FILE",
       );
     }
-    const input = await readFile(inputPath);
+    const input = await readInputFile(inputPath, "--input");
     printJson(
       await importDraft({
         ...(kind === "figma"
@@ -1588,7 +1650,7 @@ async function main(args) {
       );
     }
     const document = parseJson(
-      await readFile(inputPath, "utf8"),
+      await readInputFile(inputPath, "--input", "utf8"),
       "invalid_import_json",
       { path: inputPath },
     );
@@ -1643,7 +1705,7 @@ async function main(args) {
       );
     }
     const selections = parseJson(
-      await readFile(selectionsPath, "utf8"),
+      await readInputFile(selectionsPath, "--selections", "utf8"),
       "invalid_draft_selections_json",
       { path: selectionsPath },
     );
@@ -1695,7 +1757,7 @@ async function main(args) {
     const offset = integerOption(args, "--offset", 0);
     const limit = integerOption(args, "--limit", 100, 100);
     const all = listDomain(snapshot, kind).sort((left, right) =>
-      String(left.item.id ?? "").localeCompare(String(right.item.id ?? "")),
+      compareText(String(left.item.id ?? ""), String(right.item.id ?? "")),
     );
     printJson({
       items: all.slice(offset, offset + limit),
@@ -2013,10 +2075,17 @@ async function main(args) {
       );
     }
     const batch = parseJson(
-      await readFile(batchPath, "utf8"),
+      await readInputFile(batchPath, "--batch", "utf8"),
       "invalid_batch_json",
       { path: batchPath },
     );
+    if (!isRecord(batch)) {
+      throw new SmallPenError(
+        "invalid_batch",
+        "Operation Batch must be a JSON object",
+        { path: batchPath },
+      );
+    }
     await checkExternalComponentConsumers(packagePath, batch.operations ?? []);
     printJson(await applyBatch(packagePath, batch, args));
     return;
@@ -2030,7 +2099,7 @@ async function main(args) {
       );
     }
     const intent = parseJson(
-      await readFile(intentPath, "utf8"),
+      await readInputFile(intentPath, "--intent", "utf8"),
       "invalid_flow_intent_json",
       { path: intentPath },
     );
@@ -2099,7 +2168,7 @@ async function main(args) {
       );
     }
     const intent = parseJson(
-      await readFile(intentPath, "utf8"),
+      await readInputFile(intentPath, "--intent", "utf8"),
       "invalid_token_intent_json",
       { path: intentPath },
     );
@@ -2120,14 +2189,14 @@ async function main(args) {
     return;
   }
   if (command === "import-media") {
-    const mediaPath = option(args, "--file") ?? args[1];
+    const mediaPath = option(args, "--file");
     if (!mediaPath) {
       throw new SmallPenError(
         "missing_media_file",
         "import-media requires --file MEDIA_FILE",
       );
     }
-    const bytes = new Uint8Array(await readFile(resolve(mediaPath)));
+    const bytes = new Uint8Array(await readInputFile(mediaPath, "--file"));
     const inspected = inspectMedia(bytes);
     const mediaId = option(args, "--media-id") ?? `media_${randomUUID()}`;
     const name = option(args, "--name") ?? mediaPath.split(/[\\/]/).pop();
@@ -2141,7 +2210,9 @@ async function main(args) {
       width: inspected.width,
     });
     printJson({
+      batchId: print.result.batchId,
       descriptor: print.descriptor,
+      inverseBatch: print.result.inverseBatch,
       revision: print.result.revision,
     });
     return;
@@ -2155,11 +2226,17 @@ async function main(args) {
       );
     }
     const result = await removeMedia(packagePath, mediaId);
-    printJson({ mediaId, removed: true, revision: result.revision });
+    printJson({
+      batchId: result.batchId,
+      inverseBatch: result.inverseBatch,
+      mediaId,
+      removed: true,
+      revision: result.revision,
+    });
     return;
   }
   if (command === "import-font") {
-    const fontPath = option(args, "--file") ?? args[1];
+    const fontPath = option(args, "--file");
     if (!fontPath) {
       throw new SmallPenError(
         "missing_font_file",
@@ -2173,7 +2250,7 @@ async function main(args) {
         "import-font requires --family NAME",
       );
     }
-    const bytes = new Uint8Array(await readFile(resolve(fontPath)));
+    const bytes = new Uint8Array(await readInputFile(fontPath, "--file"));
     const signatureTtf = bytes[0] === 0x00 && bytes[1] === 0x01;
     const signatureOtf = bytes[0] === 0x4f && bytes[1] === 0x54;
     const signatureWoff = bytes[0] === 0x77 && bytes[1] === 0x4f && bytes[2] === 0x46 && bytes[3] === 0x46;
@@ -2216,13 +2293,15 @@ async function main(args) {
       files,
       fontId,
       id: variantId,
-      name: option(args, "--name") ?? `${style}-${weight}`,
+      name: option(args, "--name") ?? fontVariantName(weight, style),
       style,
       weight,
     });
     printJson({
-      fontId,
+      batchId: result.batchId,
       files: variant.files,
+      fontId,
+      inverseBatch: result.inverseBatch,
       revision: result.revision,
       variantId: variant.id,
     });
@@ -2271,6 +2350,8 @@ async function main(args) {
         cache: refreshed.remote.cache,
         packageId: refreshed.manifest.packageId,
         revision: refreshed.revision,
+        // A failed fetch with a verified cache reports "stale": keep the reason.
+        warning: refreshed.remote.warning,
       },
       before: before
         ? { packageId: before.manifest.packageId, revision: before.revision }
@@ -2282,20 +2363,34 @@ async function main(args) {
     return;
   }
   if (command === "watch") {
-    const interval = Math.max(100, Number(option(args, "--interval") ?? 500));
+    // Validate before clamping: Number("abc") is NaN and would poll nonstop.
+    const interval = Math.max(
+      100,
+      integerOption(args, "--interval", 500, 3_600_000),
+    );
     // Default is unlimited: watch without --max-events must keep observing
     // (SP-041-A caught a fallback of 1 that exited after the first event).
     const maxEvents = integerOption(args, "--max-events", Number.POSITIVE_INFINITY, 10_000);
+    if (maxEvents === 0) {
+      throw new SmallPenError(
+        "invalid_integer_option",
+        "--max-events requires an integer from 1 through 10000",
+        { maximum: 10_000, name: "--max-events", value: "0" },
+      );
+    }
     const emit = (payload) =>
       process.stdout.write(`${JSON.stringify(payload)}\n`);
+    // The last emitted state: an unchanged invalid state is not repeated
+    // every poll, and recovery reports the revision again even when it is
+    // the one before the Package became invalid.
     let previous;
     let events = 0;
     process.on("SIGINT", () => process.exit(0));
     for (;;) {
       try {
         const snapshot = await openPackage(packagePath);
-        if (snapshot.revision !== previous) {
-          previous = snapshot.revision;
+        if (`revision:${snapshot.revision}` !== previous) {
+          previous = `revision:${snapshot.revision}`;
           events += 1;
           emit({
             event: "revision",
@@ -2305,13 +2400,17 @@ async function main(args) {
           if (maxEvents !== undefined && events >= maxEvents) return;
         }
       } catch (error) {
-        events += 1;
-        emit({
+        const invalid = {
           code: error instanceof SmallPenError ? error.code : "internal_error",
           event: "invalid",
           message: error instanceof Error ? error.message : String(error),
-        });
-        if (maxEvents !== undefined && events >= maxEvents) return;
+        };
+        if (`invalid:${invalid.code}:${invalid.message}` !== previous) {
+          previous = `invalid:${invalid.code}:${invalid.message}`;
+          events += 1;
+          emit(invalid);
+          if (maxEvents !== undefined && events >= maxEvents) return;
+        }
       }
       await delay(interval);
     }

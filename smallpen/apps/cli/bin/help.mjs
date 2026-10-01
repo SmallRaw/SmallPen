@@ -347,12 +347,16 @@ Errors and recovery:
   Corrupt or unsupported bytes exit 1 invalid_media_file and write nothing.
   Reusing --media-id exits duplicate_media_id with the existing descriptor.
 
+Output:
+  descriptor and revision, plus batchId and the exact inverseBatch for undo.
+
 `,
   "remove-media": `Usage:
   smallpen remove-media <package.smallpen> --media-id MEDIA [--json]
 
-Removes one Media descriptor from the Asset Library atomically; the inverse batch
-restores it. Unknown ids exit missing_media.
+Removes one Media descriptor from the Asset Library atomically. The result
+carries batchId and inverseBatch; smallpen apply with that inverseBatch restores
+the descriptor (the blob is retained). Unknown ids exit missing_media.
 
 `,
   "import-font": `Usage:
@@ -364,7 +368,8 @@ Public Font entry for an existing Product. TTF and OTF are validated by SFNT
 signature and converted to WOFF (the renderer loads ttf/otf/woff). WOFF imports
 as-is after table validation. A valid WOFF2 reaches an explicit
 unsupported_font_conversion boundary (no WOFF2 decoder is bundled); corrupt
-fonts fail invalid_font_blob. Either way nothing is written.
+fonts fail invalid_font_blob. Either way nothing is written. Success returns
+fontId, variantId, files, revision, batchId, and the exact inverseBatch.
 
 `,
   "library-refresh": `Usage:
@@ -375,6 +380,13 @@ verified cache. The refreshed snapshot must match the declared Package ID; a
 mismatch exits library_id_mismatch with expected/actual identities and leaves the
 previous verified snapshot readable offline. Success reports before/after
 revisions; failures keep the previous revision.
+
+When a fetch fails and a verified cache exists, the command exits 0 with
+after.cache "stale", the cached revision, and after.warning naming the cause.
+With no cache the Library cannot resolve: the command exits repair_required
+with a library_unavailable conflict whose message names the cause. Requests
+follow at most five redirects, only within the Library's origin; each file
+is capped at 50 MB.
 
 `,
   "import-draft": `Usage:
@@ -441,7 +453,8 @@ Output:
   This command does not apply the batch. Review it, then use smallpen apply.`,
   flow: `Usage:
   smallpen flow <product.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
-                [--warning-detail compact|full] [--json]
+                [--explain] [--diff] [--warning-detail compact|full]
+                [--confirm-unmatched] [--json]
 
 Purpose:
   Compile and atomically apply a declarative flowchart intent. The intent contains
@@ -460,7 +473,8 @@ Node types:
   The normal atomic apply result. Follow with read-view or render to inspect it.`,
   page: `Usage:
   smallpen page <product.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
-                [--warning-detail compact|full] [--json]
+                [--explain] [--diff] [--warning-detail compact|full]
+                [--confirm-unmatched] [--json]
 
 Purpose:
   Compile and atomically apply declarative page nodes. The intent uses the same
@@ -469,14 +483,17 @@ Purpose:
   Warning output follows apply; see smallpen apply --help for the compact schema.`,
   token: `Usage:
   smallpen token <product.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
-                 [--warning-detail compact|full] [--json]
+                 [--explain] [--diff] [--warning-detail compact|full]
+                 [--confirm-unmatched] [--json]
 
 Purpose:
   Apply declarative Token operations through the canonical atomic batch contract.
   Intent JSON contains an operations array using put-token, set-token-value,
   set-active-token-themes, set-token-binding, clear-token-binding, remove-token,
   or deprecate-token. Theme selection uses themePaths such as Product/Dark.
-  The current package revision is read immediately before applying the intent.`,
+  The current package revision is read immediately before applying the intent.
+  Rerunning with the same --batch-id and intent after success returns
+  alreadyApplied:true; see smallpen apply --help for replay rules.`,
   impact: `Usage:
   smallpen impact <product.smallpen> (--token-id TOK | --path TOKEN.PATH) [--package-id PKG] [--json]
 
@@ -487,7 +504,7 @@ Purpose:
   Tokens are resolved through the Product dependency; use --package-id to
   disambiguate a Token ID or path that exists in both Packages.`,
   apply: `Usage:
-  smallpen apply <package.smallpen> --batch BATCH.json [--dry-run]
+  smallpen apply <package.smallpen> --batch BATCH.json [--dry-run] [--explain] [--diff]
                  [--warning-detail compact|full] [--confirm-unmatched] [--json]
 
 Batch contract:
@@ -496,6 +513,13 @@ Batch contract:
   affected stable IDs/files, and an exact inverseBatch for Undo/Redo.
   Revisions are content hashes, not increasing counters: restoring the exact
   Canonical content restores its previous revision.
+
+Component instance overrides:
+  set-instance-override {screenId, presentationId?, nodeId, overridePath, value}
+  and clear-instance-override {screenId, presentationId?, nodeId, overridePath}
+  change one field of one Instance node without touching the shared component.
+  overridePath is "<sourceNodeId>:<field>", or "<nestedInstanceId>__<sourceNodeId>:<field>"
+  inside a nested instance. Fields: fills, name, opacity, text, visible.
 
 Token references on nodes:
   tokenBindings uses package-qualified references, for example
@@ -521,20 +545,31 @@ Warning output:
   already contains every occurrence, and stale-revision checks still apply.
 
 Errors and recovery:
-  Each CLI call is independent; confirmed batch results are not retained across
-  calls. Retrying a committed batch against its old base returns stale_revision,
-  not a cached success. Batch IDs do not provide cross-process deduplication.
+  Committed batch identities are recorded beside the Package. Retrying the same
+  batchId with the same baseRevision and operations, from any process, returns the
+  recorded confirmation with alreadyApplied:true and writes nothing, as long as
+  the Package is still at the recorded revision. If the batch's effect was undone
+  (the Package is back at its baseRevision) the retry applies it again as a new
+  write. If later writes moved the Package elsewhere the retry exits
+  batch_superseded with committedRevision and currentRevision. The same batchId
+  with a different baseRevision or operations exits batch_id_conflict.
+  flow, page, token, and import-tokens rebuild the batch from the current
+  revision; rerunning one with the same --batch-id and input after success
+  returns alreadyApplied:true under the same rules.
   stale_revision returns actual/base revisions. Inspect current content first:
   the intended change may already be committed. Rebuild only the remaining intent
   against the actual revision and use a new unique batch ID; do not blindly replay.
-  --dry-run validates and returns the result/inverse without writing.
+  --dry-run validates and returns the result/inverse without writing. --explain
+  adds per-operation targets and --diff a before/after field diff of every
+  changed entry; both are previews that never write, with or without --dry-run.
   Invalid batches never write.`,
   watch: `Usage:
   smallpen watch <package.smallpen> [--interval MS] [--max-events N] [--json]
 
 Watch is the public live mode: it polls the Canonical Package and emits one NDJSON
 {event:"revision", packageId, revision} line whenever the on-disk revision
-changes, and {event:"invalid"} lines when the package is temporarily unreadable.
+changes. An unreadable package emits one {event:"invalid", code, message} line
+(again only when the error changes); recovery emits its revision line again.
 The initial revision is emitted immediately. --max-events bounds the run for
 scripted use; Ctrl-C exits 0. Watch never writes.
 
@@ -562,7 +597,9 @@ Common output and error contract:
   --json emits stable English keys; localized labels remain additional data. Success
   exits 0. Errors exit 1 as {error:{code,message,details}} and include exact
   nextOperations when recovery requires refresh, replay, Repair, or confirmation.
-  Unknown options are not part of the command contract shown above.
+  Unknown options are not part of the command contract shown above. Only options
+  shown with ..., repeated, or described as repeatable may appear more than once;
+  any other option given twice exits duplicate_option.
 
 Help / next:
   smallpen --help

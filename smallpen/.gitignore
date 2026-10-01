@@ -3,5 +3,8 @@
 /dist/
 /examples/*.smallpen.batches.json
 
+# Local debugging scripts.
+/dbg-*.mjs
+
 # Historical CLI runs wrote timestamped copies beside the real fixtures.
 /test/fixtures/*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].smallpen*

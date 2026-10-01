@@ -23,13 +23,30 @@ Penpot UI.
 - high-level page/node commands compile to the same Operation Batch
 - flow commands create nodes and connections using stable IDs
 - Token commands create, update, bind, rename, and activate values
-- every write supports dry-run, explain (`--explain` returns per-operation targets
-  plus a canonical before/after field diff of every changed entry), validation,
-  and exact inverse output; explain and diff never write
+- `set-instance-override` / `clear-instance-override` write one field of one
+  component occurrence (`overridePath` `<sourceNodeId>:<field>`, or
+  `<nestedInstanceId>__<sourceNodeId>:<field>` inside a nested instance; fields
+  `fills`, `name`, `opacity`, `text`, `visible`) and leave the shared definition
+  alone
+- every Operation Batch write (`apply`, `flow`, `page`, `token`) supports
+  dry-run, explain (`--explain` returns per-operation targets plus a canonical
+  before/after field diff of every changed entry), validation, and exact inverse
+  output; explain and diff never write. `import-tokens` reviews by default and
+  validates with `--apply --dry-run`. File imports (`import-media`,
+  `import-font`) and `remove-media` validate before writing and return the exact
+  inverse batch
 - repeated batch identities replay idempotently: the same batchId with the same
-  operations returns the recorded confirmation (`alreadyApplied: true`) without a
-  second write, while the same batchId with different operations is rejected
-  (`batch_id_conflict`)
+  baseRevision and operations returns the recorded confirmation
+  (`alreadyApplied: true`) without a second write while the Package is still at
+  the recorded revision; if the batch's effect was undone (the Package is back
+  at its baseRevision) the retry applies it again as a new write; if later
+  writes moved the Package elsewhere the retry is rejected (`batch_superseded`,
+  with `committedRevision` and `currentRevision`). The same batchId with a
+  different baseRevision or different operations is rejected
+  (`batch_id_conflict`). `flow`, `page`, `token`, and `import-tokens` rebuild
+  their batch from the current revision, so rerunning one with the same
+  `--batch-id` and input after success returns `alreadyApplied: true` under the
+  same rules
 - hard-coded design styles return Token-reuse warnings and exact binding advice
 - Token value advice searches every finite Context when the operation supplies no
   explicit Context and reports where each candidate resolves
