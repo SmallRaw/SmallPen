@@ -8,6 +8,56 @@ const TOKEN_TYPES = new Set([
 ]);
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
+// The $value each Token type accepts, as tokenValueMatchesType checks it.
+// Errors and `smallpen schema token-types` print these; a test checks every
+// example against tokenValueMatchesType.
+export const TOKEN_VALUE_SHAPES = Object.freeze({
+  boolean: { example: true, shape: "boolean" },
+  "border-radius": { example: 8, shape: "number (px)" },
+  color: {
+    example: "#6750a4",
+    shape: '"#rrggbb" or "#rrggbbaa", or {colorSpace:"srgb", components:[r,g,b] in 0..1, alpha?}',
+  },
+  dimensions: { example: 16, shape: "number (px)" },
+  "font-family": { example: "Inter", shape: "string" },
+  "font-size": { example: 16, shape: "number (px), not a string" },
+  "font-weight": { example: 700, shape: "number or string" },
+  "letter-spacing": { example: 0.5, shape: "number" },
+  number: { example: 1.5, shape: "number" },
+  opacity: { example: 0.6, shape: "number from 0 to 1" },
+  other: { example: "any text", shape: "string" },
+  rotation: { example: 45, shape: "number (degrees)" },
+  shadow: {
+    example: { blur: 8, color: "#00000033", spread: 0, x: 0, y: 2 },
+    shape: "object or array of objects",
+  },
+  sizing: { example: 48, shape: "number (px)" },
+  spacing: { example: 16, shape: "number (px)" },
+  string: { example: "Label", shape: "string" },
+  "stroke-width": { example: 1, shape: "number (px)" },
+  "text-case": { example: "uppercase", shape: "string" },
+  "text-decoration": { example: "underline", shape: "string" },
+  typography: {
+    example: { fontFamily: "Inter", fontSize: 24, fontWeight: 700 },
+    shape:
+      "{fontFamily: string, fontSize: number, fontWeight: number, lineHeight?, letterSpacing?}",
+  },
+});
+
+function expectedValue(type) {
+  const shape = TOKEN_VALUE_SHAPES[type];
+  return shape
+    ? { expected: shape.shape, example: structuredClone(shape.example) }
+    : {};
+}
+
+function expectedValueText(type) {
+  const shape = TOKEN_VALUE_SHAPES[type];
+  return shape
+    ? `; ${type} expects ${shape.shape}, for example ${JSON.stringify(shape.example)}`
+    : "";
+}
+
 function assetReference(value, path) {
   if (value === undefined) return undefined;
   if (
@@ -41,7 +91,7 @@ function stringRecord(value, path) {
     ) {
       fail(
         "invalid_token_context_rule",
-        `${path} must map Axis ids to value ids`,
+        `${path} must map Axis ids to value ids, for example {"axis_theme":"dark"}`,
         { path },
       );
     }
@@ -122,7 +172,8 @@ function extension(value, path) {
       ) {
         fail(
           "invalid_token_context_value",
-          `${candidatePath} requires value and when`,
+          `${candidatePath} requires exactly {when: {axisId: valueId}, value}, ` +
+            'for example {"when":{"axis_theme":"dark"},"value":"#1c1b1f"}',
           { path: candidatePath },
         );
       }
@@ -255,10 +306,16 @@ function visitDtcgGroup(value, segments, inheritedType, filePath, state) {
     if (Object.hasOwn(child, "$value") || hasContextValues) {
       const type = typeof child.$type === "string" ? child.$type : declaredType;
       if (!TOKEN_TYPES.has(type)) {
-        fail("invalid_token_type", `Unsupported token type at ${semanticPath}`, {
-          path: `${semanticPath}.$type`,
-          type,
-        });
+        fail(
+          "invalid_token_type",
+          `Unsupported token type ${JSON.stringify(type ?? null)} at ${semanticPath}. ` +
+            `Set $type to one of: ${SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenTypes.join(", ")}`,
+          {
+            allowedValues: [...SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenTypes],
+            path: `${semanticPath}.$type`,
+            type,
+          },
+        );
       }
       const metadata = extension(child, semanticPath);
       if (state.tokens.has(metadata.id)) {
@@ -385,8 +442,9 @@ function resolveBaseToken(token, byPath) {
     if (!tokenValueMatchesType(value, link.type)) {
       fail(
         "invalid_token_value",
-        `Value does not match Token type at ${link.path}`,
-        { path: link.path, tokenId: link.id, type: link.type },
+        `Value ${JSON.stringify(value)} does not match Token type at ${link.path}` +
+          expectedValueText(link.type),
+        { path: link.path, tokenId: link.id, type: link.type, ...expectedValue(link.type) },
       );
     }
     link.resolvedValue = structuredClone(value);
@@ -492,8 +550,9 @@ function validateContextValues(token, byPath) {
     } else if (!tokenValueMatchesType(contextual.value, token.type)) {
       fail(
         "invalid_token_context_value",
-        `Context value does not match Token type at ${token.path}`,
-        { index, path, tokenId: token.id, type: token.type },
+        `Context value ${JSON.stringify(contextual.value)} does not match Token ` +
+          `type at ${token.path}${expectedValueText(token.type)}`,
+        { index, path, tokenId: token.id, type: token.type, ...expectedValue(token.type) },
       );
     }
   }

@@ -14,6 +14,7 @@ const CONTEXT_KINDS = new Set([
   "theme",
   "viewport",
 ]);
+export const CONTEXT_AXIS_KINDS = Object.freeze([...CONTEXT_KINDS]);
 
 function nonEmptyString(value, code, path) {
   if (typeof value !== "string" || value.length === 0) {
@@ -59,10 +60,12 @@ function parseAxis(value, path) {
   stableId(value.id, "axis_", "invalid_context_axis_id", `${path}.id`);
   nonEmptyString(value.name, "invalid_context_axis", `${path}.name`);
   if (!CONTEXT_KINDS.has(value.kind)) {
-    fail("invalid_context_axis_kind", `${path}.kind is unsupported`, {
-      path: `${path}.kind`,
-      value: value.kind,
-    });
+    fail(
+      "invalid_context_axis_kind",
+      `${path}.kind ${JSON.stringify(value.kind ?? null)} is unsupported. ` +
+        `Kinds: ${[...CONTEXT_KINDS].join(", ")}`,
+      { allowedValues: [...CONTEXT_KINDS], path: `${path}.kind`, value: value.kind },
+    );
   }
   if (!Array.isArray(value.values) || value.values.length === 0) {
     fail(

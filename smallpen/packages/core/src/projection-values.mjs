@@ -2,11 +2,13 @@ import { resolveContext } from "./contexts.mjs";
 import { resolveEffectiveToken } from "./effective-tokens.mjs";
 import { fail } from "./errors.mjs";
 
-const FIELD_TYPES = new Map([
+// The Token types each tokenBindings field accepts.
+export const TOKEN_BINDING_FIELD_TYPES = new Map([
   ["backgroundBlur", ["other", "number"]],
   ["blur", ["other", "number"]],
   ["cornerRadius", ["border-radius", "dimension", "dimensions", "number"]],
   ["fill", ["color"]],
+  ["fills.N", ["color"]],
   ["fontFamily", ["font-family", "string"]],
   ["fontSize", ["dimension", "dimensions", "font-size", "number"]],
   ["fontWeight", ["font-weight", "number"]],
@@ -18,14 +20,28 @@ const FIELD_TYPES = new Map([
   ["paddingRight", ["dimension", "dimensions", "number", "spacing"]],
   ["paddingTop", ["dimension", "dimensions", "number", "spacing"]],
   ["shadow", ["shadow"]],
+  ["stroke", ["color"]],
+  ["strokes.N", ["color"]],
   ["strokeWidth", ["stroke-width", "dimension", "dimensions", "number"]],
   ["typography", ["typography"]],
   ["width", ["dimension", "dimensions", "number", "sizing"]],
 ]);
 
 function compatible(field, token) {
-  const baseField = field.startsWith("fills.") ? "fill" : field;
-  return FIELD_TYPES.get(baseField)?.includes(token.type) === true;
+  const baseField = field.startsWith("fills.") ? "fill"
+    : field.startsWith("strokes.") ? "stroke"
+      : field;
+  return TOKEN_BINDING_FIELD_TYPES.get(baseField)?.includes(token.type) === true;
+}
+
+// Whether the node has the paint a binding field writes into.
+export function hasTokenBindingTarget(node, field) {
+  const indexed = /^(fills|strokes)\.(\d+)$/.exec(field);
+  if (indexed) return node[indexed[1]]?.[Number(indexed[2])] !== undefined;
+  if (field === "stroke" || field === "strokeWidth") {
+    return Array.isArray(node.strokes) && node.strokes.length > 0;
+  }
+  return true;
 }
 
 function assign(node, field, value) {
@@ -45,6 +61,23 @@ function assign(node, field, value) {
       ...stroke,
       width: value,
     }));
+    return;
+  }
+  // stroke binds the first stroke's color, strokes.N one stroke's color;
+  // width, alignment and style stay the node's own.
+  const strokeMatch = field === "stroke" ? [field, "0"]
+    : /^strokes\.(\d+)$/.exec(field);
+  if (strokeMatch) {
+    const index = Number(strokeMatch[1]);
+    const strokes = structuredClone(node.strokes ?? []);
+    if (!strokes[index]) {
+      fail("missing_token_binding_target", `Token binding target is missing: ${field}`, {
+        field,
+        nodeId: node.id,
+      });
+    }
+    strokes[index] = { ...strokes[index], color: value, type: "solid" };
+    node.strokes = strokes;
     return;
   }
   const fillMatch = /^fills\.(\d+)$/.exec(field);

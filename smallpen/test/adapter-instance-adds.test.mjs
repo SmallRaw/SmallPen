@@ -397,17 +397,22 @@ test("an Instance root that holds its own name or fills projects them as touched
 
 test("deleting a freshly dropped Instance before a reload deletes it", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-instance-adds-"));
-  context.after(() => rm(root, { force: true, recursive: true }));
+  let service;
+  // Close the service before removing its package: a write it still has in
+  // flight would otherwise race the removal and keep the server open.
+  context.after(async () => {
+    await service?.close();
+    await rm(root, { force: true, recursive: true });
+  });
   for (const name of ["design-system.smallpen", "dsp-shared.smallpen"]) {
     await cp(join(here, "fixtures", name), join(root, name), {
       recursive: true,
     });
   }
-  const service = await serveLocalPackage({
+  service = await serveLocalPackage({
     packagePath: join(root, "design-system.smallpen"),
     port: 0,
   });
-  context.after(() => service.close());
   let workspace = await fetch(`${service.url}/v1/workspace`).then((response) =>
     response.json(),
   );

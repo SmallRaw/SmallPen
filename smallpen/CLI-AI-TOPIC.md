@@ -19,8 +19,20 @@ Penpot UI.
 
 ### Write
 
+- `smallpen schema` is the self-description of every write input: operation
+  types, fields, allowed values, examples, inverses, and the node, Token,
+  Component Set, Instance, Presentation, Screen, Scenario, Context, batch, and
+  init shapes. It is generated from the validators and its examples are tested
+- unknown operation types and unknown fields fail with the allowed names and a
+  suggestion; no error names `undefined` instead of the missing field; a batch
+  that changes nothing reports `changed: false` and `noChange`
 - `apply` remains the atomic low-level contract
-- high-level page/node commands compile to the same Operation Batch
+- high-level page/node commands compile to the same Operation Batch; an
+  INSTANCE node in a `page`/`flow` intent may carry `overrides`, which compile to
+  `set-instance-override` operations in the same batch
+- `init --confirm` returns the Package ids and paths, the default Screen,
+  Presentation, and root node ids, and the seeded starter Tokens and Component
+  Sets; `put-token`/`put-component-set` with an existing id replace it whole
 - flow commands create nodes and connections using stable IDs
 - Token commands create, update, bind, rename, and activate values
 - `set-instance-override` / `clear-instance-override` write one field of one
@@ -34,7 +46,9 @@ Penpot UI.
   output; explain and diff never write. `import-tokens` reviews by default and
   validates with `--apply --dry-run`. File imports (`import-media`,
   `import-font`) and `remove-media` validate before writing and return the exact
-  inverse batch
+  inverse batch. The default reply keeps `inverseBatch` (the documented undo
+  contract); `--inverse-out FILE` saves it to a file and `--compact` replaces it
+  and `guidance` with a short `summary`
 - repeated batch identities replay idempotently: the same batchId with the same
   baseRevision and operations returns the recorded confirmation
   (`alreadyApplied: true`) without a second write while the Package is still at
@@ -47,7 +61,10 @@ Penpot UI.
   their batch from the current revision, so rerunning one with the same
   `--batch-id` and input after success returns `alreadyApplied: true` under the
   same rules
-- hard-coded design styles return Token-reuse warnings and exact binding advice
+- hard-coded design styles return Token-reuse warnings and exact binding advice;
+  raw width/height values without an exact or near (10%) Token are counted in
+  `warningSummary.suppressed` instead of listed. The advice never gates a write
+  and `validate` does not repeat it
 - Token value advice searches every finite Context when the operation supplies no
   explicit Context and reports where each candidate resolves
 
@@ -78,6 +95,8 @@ Penpot UI.
 3. Stale revisions return refresh/replay instructions rather than guessing.
 4. Selectors are explicit and context resolution is deterministic.
 5. `--json` output is the machine contract; human text is supplementary.
+   Localized labels follow `--locale`, else `LC_ALL`/`LC_MESSAGES`/`LANG`
+   (`zh*` selects Chinese, anything else English).
 6. Preview output includes the resolved context, revision, and render hash.
 7. Every call is self-contained: there is no current selection, current page,
    previous result, or cross-call session state.

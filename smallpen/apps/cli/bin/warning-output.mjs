@@ -1,5 +1,10 @@
 // Presentation only: the core warning list and mutation semantics stay unchanged.
-export function warningOutput(warnings, detail, { confirmUnmatched = false } = {}) {
+// validate checks Package validity only; say so, so advice on a valid write
+// does not read as a defect that validate failed to report.
+const ADVISORY_NOTE =
+  "Design advice only: the write is valid and was not gated. validate does not repeat this advice.";
+
+export function warningOutput(warnings, detail, { confirmUnmatched = false, suppressed } = {}) {
   const rank = (warning) => warning.match === "exact"
     ? 0
     : warning.suggestions.length > 0 ? 1 : 2;
@@ -16,6 +21,8 @@ export function warningOutput(warnings, detail, { confirmUnmatched = false } = {
     total: warnings.length,
     counts,
     contextScope: warnings[0]?.contextScope,
+    ...(suppressed ? { suppressed } : {}),
+    ...(warnings.length > 0 ? { note: ADVISORY_NOTE } : {}),
   };
   if (detail === "full") {
     return {

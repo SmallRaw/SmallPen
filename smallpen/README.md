@@ -226,6 +226,36 @@ overwritten or automatically unpublished.
 
 Run `node apps/cli/bin/smallpen.mjs --help` for the full contract. Every main command supports stable JSON output and actionable errors.
 
+`smallpen schema` prints the JSON every write takes: `schema operations` lists
+each operation type with its Package and required fields, `schema operation
+TYPE` gives fields, allowed values, a valid example, and the inverse, and the
+`node`, `token`, `token-types`, `component-set`, `instance`, `presentation`,
+`screen`, `scenario`, `context`, `batch`, and `init` topics describe the
+nested shapes. Field lists come from the validators, and a test applies every
+example to a workspace made by `smallpen init`. Writes reject unknown operation
+types and unknown fields with the allowed names and a suggestion, and a batch
+that changes nothing returns `changed: false` with a `noChange` notice.
+
+Tokens, Context Axes, and shared Component Sets belong to the Foundation
+package; Screens, nodes, Instances, and Scenarios belong to the Product, which
+`read-view`, `render`, `evidence`, `tokens`, and `search-*` take. A
+Presentation renders at the size of its root node; `update-presentation`
+`{viewport}` and `put-scenario` keep the declared sizes in step.
+
+`init --confirm` returns the Package ids and paths, the default Screen,
+Presentation, and root node ids, and the starter Tokens and Component Sets it
+seeded (one per `initialTokens` and `initialComponents` answer, such as
+`tok_color_brand` and `cmp_button`). `put-token` and `put-component-set` with
+an existing id replace it whole. In a `page` or `flow` intent an INSTANCE node
+may carry `overrides` (`{"node_button_label:text": "Add task"}`); each becomes a
+checked `set-instance-override` in the same batch.
+
+Write replies include `inverseBatch`, the exact undo, by default.
+`--inverse-out FILE` saves it to a file, and `--compact` drops it (and
+`guidance`) from the reply in favour of a one-line `summary`. Localized labels
+follow `--locale` where a command offers it, else `LC_ALL`, `LC_MESSAGES`, or
+`LANG`: `zh*` selects Chinese, anything else English.
+
 ```sh
 # Guided Foundation + Product creation
 node apps/cli/bin/smallpen.mjs init ./workspace --json
@@ -247,7 +277,7 @@ node apps/cli/bin/smallpen.mjs apply ./workspace/product.smallpen --batch batch.
 node apps/cli/bin/smallpen.mjs repair ./workspace/product.smallpen --json
 ```
 
-Other public reads include `inspect`, `list`, `read`, `compare`, `tokens`, `search-tokens`, `search-components`, `effective-token`, `explain-token`, and `render`. Public binary entries for an existing Product are `import-media` (PNG/JPEG/GIF/WebP/SVG with content-addressed blobs), `remove-media`, and `import-font` (TTF/OTF convert to WOFF; WOFF imports as-is; WOFF2 reaches an explicit conversion boundary). `library-refresh` re-fetches one declared URL Library into its verified cache (URL Libraries must resolve to public addresses; set `SMALLPEN_ALLOW_PRIVATE_LIBRARY_HOSTS=1` to serve one from localhost or a private network during development), `watch` streams NDJSON revision events for local changes, and `apply --explain` previews every write with per-operation targets and a canonical before/after diff without writing. Token search includes visible Foundation Tokens, searches every finite Web/Desktop/theme Context unless one is explicit, and ranks exact or nearby color and numeric values. Component search includes complete Product and public Foundation candidates with legal variants. Write results contain non-blocking `design_token_not_used` plus an exact `recommendedBinding` when a value resolves to a Token, or `design_token_value_unmatched` when no Token resolves to the raw value and the hard-coding requires confirmation.
+Other public reads include `inspect`, `list`, `read`, `compare`, `tokens`, `search-tokens`, `search-components`, `effective-token`, `explain-token`, and `render`. Public binary entries for an existing Product are `import-media` (PNG/JPEG/GIF/WebP/SVG with content-addressed blobs), `remove-media`, and `import-font` (TTF/OTF convert to WOFF; WOFF imports as-is; WOFF2 reaches an explicit conversion boundary). `library-refresh` re-fetches one declared URL Library into its verified cache (URL Libraries must resolve to public addresses; set `SMALLPEN_ALLOW_PRIVATE_LIBRARY_HOSTS=1` to serve one from localhost or a private network during development), `watch` streams NDJSON revision events for local changes, and `apply --explain` previews every write with per-operation targets and a canonical before/after diff without writing. Token search includes visible Foundation Tokens, searches every finite Web/Desktop/theme Context unless one is explicit, and ranks exact or nearby color and numeric values. Component search includes complete Product and public Foundation candidates with legal variants. Write results contain non-blocking `design_token_not_used` plus an exact `recommendedBinding` when a value resolves to a Token, or `design_token_value_unmatched` when no Token resolves to the raw value and the hard-coding requires confirmation. Raw width and height values are listed only when a Token resolves to them or lies within 10%; the rest are counted in `warningSummary.suppressed`. This advice does not make a write invalid, and `validate` does not repeat it. When a text node uses a font that is neither bundled (Source Sans Pro) nor imported, `render` reports one `font_render_fallback` per missing family with its node ids, the available fonts, and the `import-font` command.
 
 ## Figma Draft workflow
 

@@ -20,7 +20,7 @@ import {
   createCompareView,
   createInitializationState,
   diffDrafts,
-  designTokenWarningsForBatch,
+  designTokenAdviceForBatch,
   draftFromSnapshot,
   explainEffectiveToken,
   importTokens,
@@ -53,11 +53,13 @@ import {
 } from "@smallpen/local-package";
 
 import { COMMAND_NAMES, printHelp } from "./help.mjs";
+import { schemaTopic } from "./schema.mjs";
 import { warningOutput } from "./warning-output.mjs";
 
 const FLAG_OPTIONS = new Set([
   "--apply",
   "--base64",
+  "--compact",
   "--confirm",
   "--confirm-unmatched",
   "--diff",
@@ -72,7 +74,18 @@ const FLAG_OPTIONS = new Set([
 const REPEATABLE_OPTIONS = new Set(["--answer", "--context", "--select", "--selector"]);
 const COMMAND_OPTIONS = {
   version: ["--json"],
-  apply: ["--batch", "--confirm-unmatched", "--diff", "--dry-run", "--explain", "--json", "--warning-detail"],
+  schema: ["--json"],
+  apply: [
+    "--batch",
+    "--compact",
+    "--confirm-unmatched",
+    "--diff",
+    "--dry-run",
+    "--explain",
+    "--inverse-out",
+    "--json",
+    "--warning-detail",
+  ],
   catalog: ["--context", "--json"],
   component: ["--component-id", "--json"],
   compare: ["--json", "--selector"],
@@ -117,17 +130,52 @@ const COMMAND_OPTIONS = {
   ],
   "render-matrix": ["--contexts", "--json", "--output", "--scale"],
   impact: ["--json", "--package-id", "--path", "--token-id"],
-  flow: ["--batch-id", "--confirm-unmatched", "--diff", "--dry-run", "--explain", "--intent", "--json", "--warning-detail"],
-  page: ["--batch-id", "--confirm-unmatched", "--diff", "--dry-run", "--explain", "--intent", "--json", "--warning-detail"],
-  token: ["--batch-id", "--confirm-unmatched", "--diff", "--dry-run", "--explain", "--intent", "--json", "--warning-detail"],
+  flow: [
+    "--batch-id",
+    "--compact",
+    "--confirm-unmatched",
+    "--diff",
+    "--dry-run",
+    "--explain",
+    "--intent",
+    "--inverse-out",
+    "--json",
+    "--warning-detail",
+  ],
+  page: [
+    "--batch-id",
+    "--compact",
+    "--confirm-unmatched",
+    "--diff",
+    "--dry-run",
+    "--explain",
+    "--intent",
+    "--inverse-out",
+    "--json",
+    "--warning-detail",
+  ],
+  token: [
+    "--batch-id",
+    "--compact",
+    "--confirm-unmatched",
+    "--diff",
+    "--dry-run",
+    "--explain",
+    "--intent",
+    "--inverse-out",
+    "--json",
+    "--warning-detail",
+  ],
   "explain-token": ["--context", "--json", "--package-id", "--token-id"],
   init: ["--answer", "--answers", "--confirm", "--json", "--locale", "--state"],
   "import-draft": ["--input", "--json", "--kind", "--package-id"],
   "import-tokens": [
     "--apply",
     "--batch-id",
+    "--compact",
     "--dry-run",
     "--input",
+    "--inverse-out",
     "--json",
     "--select",
     "--set-name",
@@ -193,9 +241,23 @@ const COMMAND_OPTIONS = {
     "--type",
     "--value",
   ],
-  tokens: ["--context", "--json"],
+  tokens: ["--context", "--json", "--locale"],
   validate: ["--json"],
 };
+
+// Localized labels follow the environment unless --locale is given: any
+// zh* locale selects the Chinese labels, everything else English.
+function defaultLocale() {
+  const source =
+    process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || "";
+  return /^zh/i.test(source) ? "zh-TW" : "en";
+}
+
+function tokenLabels(locale) {
+  return /^zh/i.test(locale)
+    ? { context: "設計狀態", items: "有效設計變數" }
+    : { context: "Design Context", items: "Effective Tokens" };
+}
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -650,7 +712,42 @@ function explainBatch(before, prepared, batch) {
   return { diff, explain };
 }
 
+// The full reply carries the inverse batch twice (inverseBatch and
+// guidance.undo), which is most of its size. inverseBatch stays in the
+// default reply because undo relies on it; --inverse-out saves it to a file
+// and --compact drops it from the reply in favour of a short summary.
+async function writeReply(result, args) {
+  const inverseOut = option(args, "--inverse-out");
+  const inverseBatchPath =
+    inverseOut !== undefined && result.inverseBatch && !result.dryRun
+      ? await writeAtomic(inverseOut, `${JSON.stringify(result.inverseBatch, null, 2)}\n`)
+      : undefined;
+  if (!flag(args, "--compact")) {
+    return inverseBatchPath ? { ...result, inverseBatchPath } : result;
+  }
+  const { guidance: _guidance, inverseBatch, ...rest } = result;
+  const files = (result.changedFiles?.length ?? 0) + (result.deletedFiles?.length ?? 0);
+  const warnings = result.warningSummary?.total ?? result.warnings?.length ?? 0;
+  const verb = result.dryRun ? "Previewed" : result.alreadyApplied ? "Already applied" : "Applied";
+  return {
+    ...rest,
+    ...(inverseBatch ? { inverseOperationCount: inverseBatch.operations.length } : {}),
+    ...(inverseBatchPath ? { inverseBatchPath } : {}),
+    summary:
+      `${verb} ${result.batchId}: revision ${result.revision}, ` +
+      `${files} changed file(s), ${result.affectedIds?.length ?? 0} affected id(s), ` +
+      `${warnings} warning(s).` +
+      (inverseBatchPath || !inverseBatch || result.dryRun
+        ? ""
+        : " The inverse batch was not kept: rerun writes with --inverse-out FILE to save it for undo."),
+  };
+}
+
 async function applyBatch(packagePath, batch, args) {
+  return writeReply(await prepareAndApplyBatch(packagePath, batch, args), args);
+}
+
+async function prepareAndApplyBatch(packagePath, batch, args) {
   const detail = option(args, "--warning-detail") ?? "compact";
   if (!["compact", "full"].includes(detail)) {
     throw new SmallPenError("invalid_warning_detail", "--warning-detail must be compact or full", {
@@ -678,10 +775,12 @@ async function applyBatch(packagePath, batch, args) {
     if (replayed) return replayed;
   }
   // 通用 apply 仍然能修复处于 Repair 的 Product；Token 建议不能变成写入门禁。
-  const { foundation, product } = await tokenAdviceWorkspace(packagePath);
+  const { foundation, libraries, product } = await tokenAdviceWorkspace(packagePath);
   let prepared;
   try {
-    prepared = await prepareOperationBatch(product, batch);
+    // Foundation and Library components let preparation check Instance
+    // override paths that target them.
+    prepared = await prepareOperationBatch(product, batch, { foundation, libraries });
   } catch (error) {
     if (error?.code === "stale_revision") {
       const replayed = await replayRecordedBatch(packagePath, batch);
@@ -689,13 +788,17 @@ async function applyBatch(packagePath, batch, args) {
     }
     throw error;
   }
-  const warnings = designTokenWarningsForBatch(prepared.snapshot, batch, {
+  const { suppressed, warnings } = designTokenAdviceForBatch(prepared.snapshot, batch, {
     foundation,
   });
   // Import warnings have their own schema and are not design-style advice.
   const advice = args[0] === "import-tokens"
     ? { warnings }
-    : warningOutput(warnings, detail, { confirmUnmatched: flag(args, "--confirm-unmatched") });
+    : warningOutput(warnings, detail, {
+        confirmUnmatched: flag(args, "--confirm-unmatched"),
+        suppressed,
+      });
+  const change = changeSummary(product, prepared, batch);
   if (flag(args, "--explain") || flag(args, "--diff")) {
     // explain/diff are read-only previews in any combination; neither flag
     // writes, with or without --dry-run (CLI-AI-TOPIC: "explain and diff
@@ -703,16 +806,34 @@ async function applyBatch(packagePath, batch, args) {
     return {
       ...prepared.result,
       ...explainBatch(product, prepared, batch),
+      ...change,
       dryRun: true,
       ...advice,
     };
   }
   if (flag(args, "--dry-run")) {
-    return { ...prepared.result, dryRun: true, ...advice };
+    return { ...prepared.result, ...change, dryRun: true, ...advice };
   }
   return {
     ...(await applyOperationBatch(packagePath, batch)),
+    ...change,
     ...advice,
+  };
+}
+
+// A valid batch can still leave every byte as it was (for example a value
+// that is already set). Say so instead of reporting a silent success.
+function changeSummary(before, prepared, batch) {
+  if (prepared.snapshot.revision !== before.revision) return { changed: true };
+  return {
+    changed: false,
+    noChange: {
+      code: "no_change",
+      message:
+        `The batch is valid but changes nothing: the ${batch.operations.length} ` +
+        "operation(s) leave the Package at its current revision. Check the " +
+        "target ids and values (smallpen read-view PACKAGE --format semantic --json).",
+    },
   };
 }
 
@@ -867,7 +988,7 @@ async function initializeCommand(workspacePath, args) {
     ...fileAnswers,
     ...answerArguments(args),
   };
-  const locale = option(args, "--locale") ?? "zh-TW";
+  const locale = option(args, "--locale") ?? defaultLocale();
   let state = createInitializationState(answers, {
     locale,
     statePath,
@@ -890,7 +1011,22 @@ async function initializeCommand(workspacePath, args) {
   if (state.status === "needs_input") {
     state.nextQuestion.continuation.args[1] = resolve(workspacePath);
     state.nextQuestion.continuation.args.push("--locale", locale);
-    return { ...state, statePath };
+    return {
+      ...state,
+      answersTemplate:
+        "smallpen schema init prints every question and a complete answers file for --answers",
+      // Without --state a call never reads earlier answers, so a chain of
+      // single --answer calls would keep only the last one.
+      ...(explicitStatePath
+        ? {}
+        : {
+            stateNotice:
+              "This call did not read earlier answers because --state was not given. " +
+              "Pass --state with the statePath below on every call (as continuation.args does) " +
+              "to collect answers one at a time, or answer everything at once with --answers FILE.",
+          }),
+      statePath,
+    };
   }
   const confirmation = {
     args: [
@@ -920,7 +1056,160 @@ async function initializeCommand(workspacePath, args) {
       status: "initialized",
     }),
   );
-  return { ...initialized, statePath };
+  return { ...initialized, ...(await initializedSummary(initialized)), statePath };
+}
+
+// The init reply names every id the first writes need (Packages, Screen,
+// root node, starter Tokens and Component Sets), so an Agent can start
+// without reading the new files.
+async function initializedSummary({ foundationPath, productPath }) {
+  const foundation = await openPackage(foundationPath);
+  const product = await openPackage(productPath);
+  const screenEntry = product.manifest.entries.screens.find(
+    (entry) => product.entries[entry].id === product.manifest.defaultScreenId,
+  );
+  const screen = product.entries[screenEntry];
+  const presentation = screen.presentations.find(
+    ({ id }) => id === screen.basePresentationId,
+  );
+  const root = presentation.nodes[presentation.rootId];
+  const packageSummary = (snapshot) => ({
+    packageId: snapshot.manifest.packageId,
+    path: snapshot.locator,
+    revision: snapshot.revision,
+  });
+  return {
+    packages: {
+      foundation: packageSummary(foundation),
+      product: packageSummary(product),
+    },
+    start: {
+      contextAxes: [...foundation.domain.contextAxes.values()].map(
+        ({ defaultValue, id, values }) => ({
+          defaultValue,
+          id,
+          values: values.map((value) => value.id),
+        }),
+      ),
+      presentationId: presentation.id,
+      rootNode: { height: root.height, id: root.id, width: root.width },
+      scenarioIds: [...product.domain.scenarios.keys()].sort(compareText),
+      screenId: screen.id,
+    },
+    seeded: {
+      componentSets: [...foundation.domain.componentSets.values()].map(
+        ({ axes, id, name, variants }) => ({
+          axes: axes.map((axis) => axis.id),
+          componentSetId: id,
+          name,
+          packageId: foundation.manifest.packageId,
+          variants: variants.map((variant) => ({
+            rootId: variant.rootId,
+            selection: variant.selection,
+            variantId: variant.id,
+          })),
+        }),
+      ),
+      note:
+        "Starter content. put-token or put-component-set with one of these ids replaces it " +
+        "whole (no merge). Write Tokens and Component Sets to packages.foundation.path; " +
+        "write Screens and nodes to packages.product.path.",
+      tokens: [...foundation.domain.tokens.values()].map(
+        ({ filePath, id, path, rawValue, type }) => ({
+          filePath,
+          packageId: foundation.manifest.packageId,
+          path,
+          tokenId: id,
+          type,
+          value: rawValue,
+        }),
+      ),
+    },
+  };
+}
+
+// The renderer reports one font_render_fallback per text node. Collapse them
+// to one diagnostic per missing family that names the fonts it can draw and
+// the import-font command that adds the missing one.
+async function renderEvidence(product, options) {
+  const bundle = await createEvidence(product, options);
+  const fallbacks = new Map();
+  const diagnostics = [];
+  for (const diagnostic of bundle.render.diagnostics) {
+    if (diagnostic.code !== "font_render_fallback") {
+      diagnostics.push(diagnostic);
+      continue;
+    }
+    const requestedFont =
+      diagnostic.details?.requestedFont ??
+      /substituted .+ for (.+)$/.exec(diagnostic.message)?.[1] ??
+      "<family>";
+    let collapsed = fallbacks.get(requestedFont);
+    if (!collapsed) {
+      collapsed = { diagnostic, nodeIds: [], paths: [], requestedFont };
+      fallbacks.set(requestedFont, collapsed);
+      diagnostics.push(collapsed);
+    }
+    if (diagnostic.nodeId !== undefined) collapsed.nodeIds.push(diagnostic.nodeId);
+    if (diagnostic.path !== undefined) collapsed.paths.push(diagnostic.path);
+  }
+  if (fallbacks.size === 0) return bundle;
+  const imported = [
+    ...new Set(
+      [options.foundation, ...(options.libraries ?? []), product]
+        .filter(Boolean)
+        .flatMap((snapshot) =>
+          snapshot.manifest.entries.assets.flatMap((entry) =>
+            (snapshot.entries[entry].fonts ?? []).map(({ family }) => family),
+          ),
+        ),
+    ),
+  ].sort(compareText);
+  const availableFonts = [
+    "Source Sans Pro (bundled)",
+    ...imported.map((family) => `${family} (imported)`),
+  ];
+  const collapsedEntries = new Set(fallbacks.values());
+  const explained = diagnostics.map((entry) => {
+    if (!collapsedEntries.has(entry)) return entry;
+    const { requestedFont } = entry;
+    return {
+      availableFonts,
+      code: entry.diagnostic.code,
+      details: {
+        ...entry.diagnostic.details,
+        requestedFont,
+        substituteFont: entry.diagnostic.details?.substituteFont ?? "Source Sans Pro",
+      },
+      message:
+        `${entry.diagnostic.message} on ${entry.nodeIds.length} text node(s): ` +
+        `${requestedFont} is neither bundled nor imported. Available fonts: ` +
+        `${availableFonts.join(", ")}. Import ${requestedFont} with smallpen import-font ` +
+        "(once per weight/style; see nextOperations), or use an available family.",
+      nextOperations: [
+        {
+          argv: [
+            "import-font",
+            product.locator,
+            "--file",
+            `<${requestedFont} .ttf|.otf|.woff file>`,
+            "--family",
+            requestedFont,
+            "--weight",
+            "<400|700|...>",
+            "--json",
+          ],
+          operation: "smallpen.import-font",
+        },
+      ],
+      nodeIds: entry.nodeIds,
+      paths: entry.paths,
+      requestedFont,
+    };
+  });
+  bundle.render.diagnostics = explained;
+  bundle.evidence.diagnostics = explained;
+  return bundle;
 }
 
 async function deliverImage(
@@ -958,7 +1247,7 @@ async function renderCommand(packagePath, args, evidenceOnly) {
   }
   const workspace = await tokenWorkspace(packagePath);
   const { foundation, libraries, product } = workspace;
-  const bundle = await createEvidence(product, {
+  const bundle = await renderEvidence(product, {
     foundation,
     libraries,
     scale: numberOption(args, "--scale", 1),
@@ -1008,13 +1297,13 @@ async function inspectViewCommand(packagePath, args) {
   const semantic = readDesignView(product, {
     foundation,
     libraries,
-    locale: option(args, "--locale") ?? "zh-TW",
+    locale: option(args, "--locale") ?? defaultLocale(),
     selector: { ...selector, viewFormat: "semantic" },
   });
   const wireframe = readDesignView(product, {
     foundation,
     libraries,
-    locale: option(args, "--locale") ?? "zh-TW",
+    locale: option(args, "--locale") ?? defaultLocale(),
     selector: { ...selector, viewFormat: "wireframe" },
   });
   const context = semantic.selection.context;
@@ -1029,7 +1318,7 @@ async function inspectViewCommand(packagePath, args) {
     wireframe: wireframe.result,
   };
   if (flag(args, "--include-image")) {
-    const bundle = await createEvidence(product, {
+    const bundle = await renderEvidence(product, {
       foundation,
       libraries,
       scale: numberOption(args, "--scale", 1),
@@ -1083,7 +1372,7 @@ async function renderMatrixCommand(packagePath, args) {
         },
       );
     }
-    const bundle = await createEvidence(product, {
+    const bundle = await renderEvidence(product, {
       foundation,
       libraries,
       scale,
@@ -1594,6 +1883,25 @@ async function main(args) {
     else process.stdout.write(`${version}\n`);
     return;
   }
+  if (command === "schema") {
+    if (flag(args, "--help") || flag(args, "-h")) {
+      printHelp("schema");
+      return;
+    }
+    const positional = args.slice(1).filter((value) => !value.startsWith("-"));
+    validateCommandArguments("schema", ["schema", "", ...args.slice(1).filter(
+      (value) => value.startsWith("-"),
+    )]);
+    if (positional.length > 2) {
+      throw new SmallPenError(
+        "unexpected_argument",
+        `Unexpected positional argument: ${positional[2]}`,
+        { argument: positional[2], command },
+      );
+    }
+    printJson(schemaTopic(positional[0], positional[1]));
+    return;
+  }
   if (!COMMAND_NAMES.includes(command)) {
     throw new SmallPenError("unknown_command", `Unknown command: ${command}`, {
       validCommands: COMMAND_NAMES,
@@ -1779,7 +2087,7 @@ async function main(args) {
     printJson({
       context,
       items: listEffectiveTokens(product, { context, foundation, libraries }),
-      labels: { context: "設計狀態", items: "有效設計變數" },
+      labels: tokenLabels(option(args, "--locale") ?? defaultLocale()),
       packageId: product.manifest.packageId,
       ...workspaceRevisions(product, foundation, libraries),
     });
@@ -1851,14 +2159,14 @@ async function main(args) {
       foundation,
       libraries,
       limit: integerOption(args, "--limit", 20, 100),
-      locale: option(args, "--locale") ?? "zh-TW",
+      locale: option(args, "--locale") ?? defaultLocale(),
       offset: integerOption(args, "--offset", 0),
       selector: designSelector(args),
     });
     if (command === "discover") {
       printJson(read.discovery);
     } else if (read.format === "screenshot") {
-      const bundle = await createEvidence(product, {
+      const bundle = await renderEvidence(product, {
         foundation,
         libraries,
         scale: 1,
@@ -2142,14 +2450,43 @@ async function main(args) {
     const parentId = intent.parentId === undefined
       ? presentation.rootId
       : intent.parentId;
-    const operations = intent.nodes.map((node, index) => ({
-      index: intent.index === undefined ? undefined : intent.index + index,
-      node,
-      parentId,
-      presentationId,
-      screenId: intent.screenId,
-      type: "add-presentation-node",
-    }));
+    // overrides on an INSTANCE intent node compile to set-instance-override
+    // operations after the node is added, in the same atomic batch, so batch
+    // preparation checks each override path and value against the component.
+    const overrideOperations = [];
+    const operations = intent.nodes.map((intentNode, index) => {
+      let node = intentNode;
+      if (isRecord(intentNode) && Object.hasOwn(intentNode, "overrides")) {
+        const { overrides, ...rest } = intentNode;
+        if (intentNode.type !== "INSTANCE" || !isRecord(overrides)) {
+          throw new SmallPenError(
+            "invalid_flow_intent",
+            'overrides is only allowed on INSTANCE intent nodes, as {"<sourceNodeId>:<field>": value}',
+            { nodeId: intentNode.id, nodeIndex: index },
+          );
+        }
+        node = rest;
+        for (const [overridePath, value] of Object.entries(overrides)) {
+          overrideOperations.push({
+            nodeId: intentNode.id,
+            overridePath,
+            presentationId,
+            screenId: intent.screenId,
+            type: "set-instance-override",
+            value,
+          });
+        }
+      }
+      return {
+        index: intent.index === undefined ? undefined : intent.index + index,
+        node,
+        parentId,
+        presentationId,
+        screenId: intent.screenId,
+        type: "add-presentation-node",
+      };
+    });
+    operations.push(...overrideOperations);
     printJson(
       await applyBatch(packagePath, {
         baseRevision: snapshot.revision,
@@ -2485,7 +2822,7 @@ function errorDetails(error, args) {
     }
     if (!replaced) retry.push("--answer", `${details.questionId}=<JSON>`);
     if (!retry.includes("--json")) retry.push("--json");
-    if (!retry.includes("--locale")) retry.push("--locale", "zh-TW");
+    if (!retry.includes("--locale")) retry.push("--locale", defaultLocale());
     return {
       ...details,
       nextOperations: [{ argv: retry, operation: "smallpen.init.answer" }],

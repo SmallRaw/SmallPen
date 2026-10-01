@@ -512,12 +512,22 @@ function layoutPaddingOf(node) {
   };
 }
 
+function isColumnLayout(node) {
+  const direction = node["layout-flex-dir"];
+  return direction === "column" || direction === "column-reverse";
+}
+
+// Penpot writes row-gap/column-gap; older packages hold rowGap/columnGap.
 function layoutMainGapOf(node) {
   const gap = node["layout-gap"];
   if (!gap || typeof gap !== "object") return 0;
-  const rowGap = Number.isFinite(Number(gap.rowGap)) ? Number(gap.rowGap) : 0;
-  const columnGap = Number.isFinite(Number(gap.columnGap)) ? Number(gap.columnGap) : 0;
-  return node["layout-flex-dir"] === "column" ? rowGap : columnGap;
+  const number = (...values) => {
+    const value = values.find((item) => item !== undefined && item !== null);
+    return Number.isFinite(Number(value)) ? Number(value) : 0;
+  };
+  return isColumnLayout(node)
+    ? number(gap["row-gap"], gap.rowGap)
+    : number(gap["column-gap"], gap.columnGap);
 }
 
 // Deterministic flex reflow for projected nodes: gap/padding/direction drive
@@ -528,11 +538,19 @@ function reflowFlexLayout(nodes, nodeId) {
   if (!node) return;
   for (const childId of node.children ?? []) reflowFlexLayout(nodes, childId);
   if (node.layout !== "flex") return;
-  const items = (node.children ?? [])
+  // Like Penpot (flex_layout/layout_data.cljc), a row or column starts
+  // with the top layer, the last child; a -reverse direction starts with
+  // the first child.
+  const direction = node["layout-flex-dir"];
+  const children =
+    direction === "row-reverse" || direction === "column-reverse"
+      ? (node.children ?? [])
+      : [...(node.children ?? [])].reverse();
+  const items = children
     .map((childId) => nodes[childId])
     .filter((child) => child && child["layout-item-absolute"] !== true);
   if (items.length === 0) return;
-  const column = node["layout-flex-dir"] === "column";
+  const column = isColumnLayout(node);
   const padding = layoutPaddingOf(node);
   const gap = layoutMainGapOf(node);
   const innerWidth = Math.max(0, node.width - padding.left - padding.right);
@@ -566,9 +584,13 @@ function reflowFlexLayout(nodes, nodeId) {
     items.reduce((sum, child) => sum + mainSize(child), 0) +
     gap * (items.length - 1);
   const justify = node["layout-justify-content"];
-  const free = Math.max(0, (column ? innerHeight : innerWidth) - contentMain);
+  // Like Penpot, center and end let overflowing content run past the
+  // start edge; space-between never shrinks the gap.
+  const free = (column ? innerHeight : innerWidth) - contentMain;
   const spaceBetween =
-    justify === "space-between" && items.length > 1 ? free / (items.length - 1) : 0;
+    justify === "space-between" && items.length > 1
+      ? Math.max(0, free) / (items.length - 1)
+      : 0;
   let cursor = column ? padding.top : padding.left;
   if (justify === "center") cursor += free / 2;
   else if (justify === "end") cursor += free;

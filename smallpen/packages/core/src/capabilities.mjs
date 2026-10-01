@@ -68,6 +68,8 @@ export const SMALLPEN_FORMAT_CAPABILITIES = deepFreeze({
       "paddingLeft",
       "paddingRight",
       "paddingTop",
+      "stroke",
+      "strokes.N",
       "strokeWidth",
       "typography",
       "width",

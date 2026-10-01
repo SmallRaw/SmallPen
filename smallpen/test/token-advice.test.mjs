@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  designTokenAdviceForBatch,
   designTokenWarningsForBatch,
   loadPackageFromValues,
   prepareOperationBatch,
@@ -253,6 +254,8 @@ test("put-screen checks every inserted node for unbound Design Token values", as
     ),
     true,
   );
-  assert.equal(warnings.some(({ field }) => field === "height"), true);
-  assert.equal(warnings.some(({ field }) => field === "width"), true);
+  // No sizing Token lies near 240x120, so the raw sizes are counted, not listed.
+  assert.equal(warnings.some(({ field }) => field === "height" || field === "width"), false);
+  const advice = designTokenAdviceForBatch(prepared.snapshot, batch);
+  assert.deepEqual(advice.suppressed.fields, { height: 1, width: 1 });
 });

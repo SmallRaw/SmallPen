@@ -1,7 +1,11 @@
 import { combineContextAxes, resolveContext } from "./contexts.mjs";
 import { fail } from "./errors.mjs";
 import { compareStrings } from "./internal.mjs";
-import { tokenAliasPath, tokenValueMatchesType } from "./tokens-domain.mjs";
+import {
+  TOKEN_VALUE_SHAPES,
+  tokenAliasPath,
+  tokenValueMatchesType,
+} from "./tokens-domain.mjs";
 
 function contextualDefinition(token, context, axes) {
   for (const [index, candidate] of token.contextValues.entries()) {
@@ -201,8 +205,15 @@ function contextualTokenValue(token, owner, context, axes, byPath, cache) {
     if (!tokenValueMatchesType(value, link.type)) {
       fail(
         "invalid_token_value",
-        "Value does not match Token type in the selected Context",
-        { path: link.path, tokenId: link.id, type: link.type },
+        `Value ${JSON.stringify(value)} does not match Token type ${link.type} ` +
+          `at ${link.path} in the selected Context; expected ` +
+          (TOKEN_VALUE_SHAPES[link.type]?.shape ?? link.type),
+        {
+          expected: TOKEN_VALUE_SHAPES[link.type]?.shape,
+          path: link.path,
+          tokenId: link.id,
+          type: link.type,
+        },
       );
     }
     result = { ...definition, value: structuredClone(value) };

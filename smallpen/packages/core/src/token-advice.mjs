@@ -17,6 +17,7 @@ const FIELD_TYPES = new Map([
   ["paddingRight", ["dimensions", "number", "spacing"]],
   ["paddingTop", ["dimensions", "number", "spacing"]],
   ["shadow", ["shadow"]],
+  ["stroke", ["color"]],
   ["typography", ["typography"]],
   ["width", ["dimensions", "number", "sizing"]],
 ]);
@@ -211,7 +212,7 @@ function nodesForOperation(snapshot, operation) {
 function assignments(changes) {
   const result = [];
   for (const [field, types] of FIELD_TYPES) {
-    if (field === "fill" || field === "typography") continue;
+    if (field === "fill" || field === "stroke" || field === "typography") continue;
     if (Object.hasOwn(changes, field) && changes[field] !== null) {
       result.push({ bindingField: field, field, types, value: changes[field] });
     }
@@ -219,6 +220,10 @@ function assignments(changes) {
   for (const [index, paint] of (changes.fills ?? []).entries()) {
     if (paint?.color !== undefined) result.push({ bindingField: `fills.${index}`,
       field: `fills.${index}`, types: FIELD_TYPES.get("fill"), value: paint.color });
+  }
+  for (const [index, paint] of (changes.strokes ?? []).entries()) {
+    if (paint?.color !== undefined) result.push({ bindingField: `strokes.${index}`,
+      field: `strokes.${index}`, types: FIELD_TYPES.get("stroke"), value: paint.color });
   }
   if (changes.textStyle !== undefined && changes.textStyle !== null) {
     result.push({ bindingField: "typography", field: "textStyle",
@@ -235,11 +240,27 @@ function hasBinding(node, bindingField) {
   const bindings = node.tokenBindings ?? {};
   if (Object.hasOwn(bindings, bindingField)) return true;
   if (bindingField.startsWith("fills.") && Object.hasOwn(bindings, "fill")) return true;
+  // stroke binds the first stroke's color only.
+  if (bindingField === "strokes.0" && Object.hasOwn(bindings, "stroke")) return true;
   return ["fontFamily", "fontSize", "fontWeight"].includes(bindingField) && Object.hasOwn(bindings, "typography");
 }
 
-export function designTokenWarningsForBatch(product, batch, options = {}) {
+// Layout geometry rarely maps to Tokens: width/height advice is kept only
+// when a Token resolves to the value or lies near it (within 10%, at least
+// 2). The rest is counted, not listed, so a screen of raw sizes does not
+// bury the advice that can act.
+const GEOMETRY_FIELDS = new Set(["height", "width"]);
+
+function nearGeometryToken(value, suggestions) {
+  if (typeof value !== "number") return suggestions.length > 0;
+  const tolerance = Math.max(2, Math.abs(value) * 0.1);
+  return suggestions.some((item) => typeof item.value === "number" &&
+    Math.abs(item.value - value) <= tolerance);
+}
+
+export function designTokenAdviceForBatch(product, batch, options = {}) {
   const warnings = [];
+  const suppressedFields = {};
   // Context 展开和 Effective Token 解析每批只做一次；字段只做类型和值过滤。
   const searchIndex = createSearchIndex(product, options);
   for (const [operationIndex, operation] of (batch.operations ?? []).entries()) {
@@ -250,6 +271,11 @@ export function designTokenWarningsForBatch(product, batch, options = {}) {
           { ...options, types: assignment.types, value: assignment.value }, searchIndex);
         const suggestions = searched.items.slice(0, 3);
         const exactSuggestion = suggestions.find(({ exactValue }) => exactValue);
+        if (GEOMETRY_FIELDS.has(assignment.field) &&
+            !nearGeometryToken(assignment.value, suggestions)) {
+          suppressedFields[assignment.field] = (suppressedFields[assignment.field] ?? 0) + 1;
+          continue;
+        }
         warnings.push({
           code: exactSuggestion ? "design_token_not_used" : "design_token_value_unmatched",
           field: assignment.field,
@@ -268,5 +294,17 @@ export function designTokenWarningsForBatch(product, batch, options = {}) {
       }
     }
   }
-  return warnings;
+  const count = Object.values(suppressedFields).reduce((sum, value) => sum + value, 0);
+  return {
+    suppressed: count === 0 ? undefined : {
+      count,
+      fields: suppressedFields,
+      reason: "Raw width/height values with no exact or near (within 10%) Token are not listed; no action is needed.",
+    },
+    warnings,
+  };
+}
+
+export function designTokenWarningsForBatch(product, batch, options = {}) {
+  return designTokenAdviceForBatch(product, batch, options).warnings;
 }

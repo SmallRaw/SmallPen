@@ -268,7 +268,7 @@ test("Token, Component Variant, instance selection, and Repair Operations are re
     batchId: "batch_domain_change",
     operations: [
       { path: "color.brand", type: "set-token-value", value: "#123456" },
-      { deprecated: true, tokenId: "tok_brand", type: "deprecate-token" },
+      { tokenId: "tok_brand", type: "deprecate-token" },
       {
         definition: tokenDefinition("tok_accent"),
         filePath: "tokens/design.json",

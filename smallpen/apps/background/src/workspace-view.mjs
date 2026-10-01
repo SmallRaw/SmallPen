@@ -1,4 +1,5 @@
 import {
+  applyEffectiveTokenBindings,
   buildCanvasScene,
   createCatalog,
   createCompareView,
@@ -7,7 +8,7 @@ import {
   layoutCanvasScene,
   projectScreen,
   readDesignView,
-  resolveEffectiveToken,
+  resolveContext,
   tokenInventoryRows,
   aggregateTokenInventory,
 } from "@smallpen/core";
@@ -357,30 +358,25 @@ export async function createCanvasWorkspace(description, { themes } = {}) {
     };
   }
 
-  // Component variants: real trees with token bindings resolved against the
-  // observed combination.
+  // Component variants: real trees with token bindings resolved the way
+  // page projections resolve them (fill -> fills, stroke -> strokes[0],
+  // typography -> textStyle, ...) in the default Context.
+  const context = resolveContext(product, foundation, {});
   const variantRender = (snapshot, owner) => {
     for (const entry of snapshot.manifest.entries.components) {
       const file = snapshot.entries[entry];
       for (const componentSet of file.componentSets ?? []) {
         for (const variant of componentSet.variants) {
-          const nodes = structuredClone(variant.nodes);
-          for (const node of Object.values(nodes)) {
-            for (const [field, binding] of Object.entries(
-              node.tokenBindings ?? {},
-            )) {
-              const resolution = resolveEffectiveToken(
-                product,
-                { assetId: binding.assetId, packageId: binding.packageId },
-                { foundation, libraries },
-              );
-              if (resolution.status === "resolved") {
-                node[field] = structuredClone(
-                  resolution.resolution.value,
-                );
-              }
-            }
-          }
+          const nodes = Object.fromEntries(
+            Object.entries(variant.nodes).map(([nodeId, node]) => [
+              nodeId,
+              applyEffectiveTokenBindings(node, product, {
+                context,
+                foundation,
+                libraries,
+              }),
+            ]),
+          );
           const sceneId = `scn/cmp/${encodeURIComponent(
             owner,
           )}/${componentSet.id}/${variant.id}/${encodeURIComponent(

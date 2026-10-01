@@ -306,7 +306,8 @@ test("flex gap and padding reflow child positions and pixels", async () => {
     nodes.node_rectangle.fills = [];
     nodes.node_canvas.children.push("node_row");
     nodes.node_row = {
-      children: ["node_cell_a", "node_cell_b"],
+      // As in Penpot, a row starts with the top layer: Cell A.
+      children: ["node_cell_b", "node_cell_a"],
       height: 200,
       id: "node_row",
       layout: "flex",

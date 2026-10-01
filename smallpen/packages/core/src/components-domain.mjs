@@ -7,6 +7,10 @@ import {
   stableId,
 } from "./internal.mjs";
 
+// configuration: an option the designer picks (style, size, content).
+// state: an interaction state the user causes (hover, pressed, disabled).
+export const AXIS_ROLES = Object.freeze(["configuration", "state"]);
+
 const NODE_TYPES = new Set([
   "COMPONENT",
   "COMPONENT_SET",
@@ -55,10 +59,12 @@ function validateNode(nodeValue, nodeId, path) {
   }
   stableId(nodeId, "node_", "invalid_node_id", `${path}.id`);
   if (!NODE_TYPES.has(nodeValue.type)) {
-    fail("unsupported_node_type", `${path}.type is unsupported`, {
-      path: `${path}.type`,
-      type: nodeValue.type,
-    });
+    fail(
+      "unsupported_node_type",
+      `${path}.type ${JSON.stringify(nodeValue.type ?? null)} is unsupported. ` +
+        `Variant node types: ${[...NODE_TYPES].join(", ")}`,
+      { allowedValues: [...NODE_TYPES], path: `${path}.type`, type: nodeValue.type },
+    );
   }
   nonEmpty(nodeValue.name, "invalid_node_name", `${path}.name`);
   for (const field of ["height", "width", "x", "y"]) {
@@ -159,8 +165,15 @@ function parseAxis(value, path) {
   if (!isRecord(value)) fail("invalid_variant_axis", `${path} is invalid`);
   stableId(value.id, "axis_", "invalid_variant_axis_id", `${path}.id`);
   const name = nonEmpty(value.name, "invalid_variant_axis_name", `${path}.name`);
-  if (value.role !== "configuration" && value.role !== "state") {
-    fail("invalid_variant_axis_role", `${path}.role is unsupported`);
+  if (!AXIS_ROLES.includes(value.role)) {
+    fail(
+      "invalid_variant_axis_role",
+      `${path}.role ${JSON.stringify(value.role ?? null)} is unsupported. Use ` +
+        '"configuration" for authored options such as style, size, or ' +
+        'content (primary/secondary), or "state" for interaction states ' +
+        "such as hover or disabled (requires domain). See: smallpen schema component-set",
+      { allowedValues: [...AXIS_ROLES], path: `${path}.role` },
+    );
   }
   let domain;
   if (value.domain !== undefined) {
@@ -175,7 +188,10 @@ function parseAxis(value, path) {
     domain = [...value.domain];
   }
   if (value.role === "state" && !domain) {
-    fail("missing_state_domain", `${path}.domain is required for a state Axis`);
+    fail(
+      "missing_state_domain",
+      `${path}.domain is required for a state Axis, for example ["default","hover","disabled"]`,
+    );
   }
   return { ...(domain ? { domain } : {}), id: value.id, name, role: value.role };
 }
@@ -255,7 +271,11 @@ function parseComponentSet(value, path) {
     value.visibility !== "private" &&
     value.visibility !== "public"
   ) {
-    fail("invalid_component_visibility", `${path}.visibility is invalid`);
+    fail(
+      "invalid_component_visibility",
+      `${path}.visibility must be "public" or "private"`,
+      { allowedValues: ["private", "public"] },
+    );
   }
   if (value.deprecated !== undefined && typeof value.deprecated !== "boolean") {
     fail("invalid_component_deprecated", `${path}.deprecated must be boolean`);
