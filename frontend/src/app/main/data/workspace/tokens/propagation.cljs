@@ -208,8 +208,7 @@
               (l/inf :status "END" :hint "propagate-tokens" :elapsed elapsed)))))))
 
 (defn propagate-workspace-tokens
-  ([] (propagate-workspace-tokens nil))
-  ([undo-group]
+  [& [undo-group]]
   (ptk/reify ::propagate-workspace-tokens
     ptk/WatchEvent
     (watch [_ state _]
@@ -238,4 +237,3 @@
                                         (rx/throw %))))
                        (rx/of (dwsh/update-shapes-buffer-stop))
                        (rx/of (dwu/commit-undo-transaction undo-id)))))))))))))
-)

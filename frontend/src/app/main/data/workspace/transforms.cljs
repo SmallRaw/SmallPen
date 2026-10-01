@@ -1144,8 +1144,7 @@
 
       ptk/UpdateEvent
       (update [_ state]
-        (if (and (not (dsep/current-page-locked? state))
-                 (nil? (get state ::current-move-selected)))
+        (if (nil? (get state ::current-move-selected))
           (-> state
               (assoc-in [:workspace-local :transform] :move)
               (assoc ::current-move-selected same-event))
@@ -1153,8 +1152,7 @@
 
       ptk/WatchEvent
       (watch [_ state stream]
-        (if (and (not (dsep/current-page-locked? state))
-                 (= same-event (get state ::current-move-selected)))
+        (if (= same-event (get state ::current-move-selected))
           (let [selected (dsh/lookup-selected state {:omit-blocked? true})
                 nudge (get-in state [:profile :props :nudge] {:big 10 :small 1})
                 move-events (->> stream
@@ -1232,14 +1230,11 @@
       (let [objects (dsh/lookup-page-objects state)
             selected (dsh/lookup-selected state {:omit-blocked? true})
             selected-shapes (->> selected (map (d/getf objects)))]
-        (cond
-          (dsep/current-page-locked? state) (rx/empty)
-          (every? #(and (ctl/any-layout-immediate-child? objects %)
+        (if (every? #(and (ctl/any-layout-immediate-child? objects %)
                           (not (ctl/position-absolute? %)))
                     selected-shapes)
-          (rx/of (reorder-selected-layout-child direction))
-          :else
-          (rx/of (nudge-selected-shapes direction shift?)))))))
+          (dsep/unless-locked state (reorder-selected-layout-child direction))
+          (dsep/unless-locked state (nudge-selected-shapes direction shift?)))))))
 
 (defn- calculate-delta
   [position bbox relative-to]

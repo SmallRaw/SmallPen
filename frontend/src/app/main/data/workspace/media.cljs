@@ -24,11 +24,11 @@
    [app.main.data.helpers :as dsh]
    [app.main.data.media :as dmm]
    [app.main.data.notifications :as ntf]
-   [app.main.smallpen.edit-policy :as dsep]
    [app.main.data.uploads :as uploads]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.svg-upload :as svg]
    [app.main.repo :as rp]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.store :as st]
    [app.util.http :as http]
    [app.util.i18n :refer [tr]]
@@ -295,7 +295,7 @@
       ptk/WatchEvent
       (watch [_ state _]
         (if (dsep/current-page-locked? state)
-          (rx/of (ntf/warn (dsep/blocked-message :structure)))
+          (rx/of (dsep/blocked-warning :structure))
           (rx/of (process-media-objects params)))))))
 
 (defn upload-fill-image

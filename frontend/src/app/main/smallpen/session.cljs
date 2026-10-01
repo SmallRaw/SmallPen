@@ -49,6 +49,18 @@
   (some->> (first (get-in snapshot [:manifest :entries :assets]))
            (lookup (:entries snapshot))))
 
+(def ^:private generated-variant-name
+  "Names that earlier imports derived from weight and style (\"normal-400\",
+  \"Italic 700\"). Without a name Penpot shows its own (\"Regular\",
+  \"Bold Italic\")."
+  #"^(?:(?:normal|italic)-\d+|(?:Italic )?\d+)$")
+
+(defn- display-variant-name
+  [name]
+  (when-not (and (string? name)
+                 (re-matches generated-variant-name name))
+    name))
+
 (defn font-variants
   [snapshot]
   (let [team-id local-team-id]
@@ -63,7 +75,7 @@
                         :font-family family
                         :font-weight weight
                         :font-style style
-                        :variant-name name
+                        :variant-name (display-variant-name name)
                         :woff1-file-id
                         (runtime-id snapshot :fontFiles variant-id "woff")}
                  (:woff2 files)

@@ -9576,31 +9576,31 @@ msgstr "Autosaved versions will be kept for %s days."
 msgid "workspace.assets.tokens"
 msgstr "Tokens"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.add-source"
 msgstr "ADD A LIBRARY SOURCE"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.foundation"
 msgstr "Foundation"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.local-help"
 msgstr "Browse uploads a copy of a self-contained library folder beside this project (up to 50 MB / 2000 files). Then click Add to link it. You can also enter a local path manually."
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.local-path"
 msgstr "Local path"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.remote-help"
 msgstr "The URL remains the Library source. SmallPen keeps a verified local snapshot for faster loading and offline use."
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.remote-url"
 msgstr "Remote URL"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.tokens"
 msgid_plural "workspace.libraries.smallpen.tokens"
 msgstr[0] "1 token"
@@ -9623,6 +9623,22 @@ msgstr "Enter where to create the new .smallpen Package"
 #: src/app/main/ui/workspace/main_menu.cljs:1048
 msgid "smallpen.home.navigation"
 msgstr "Home"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.notice.dismiss"
+msgstr "Got it"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.notice.file-identity-mismatch"
+msgstr "This link now points to a different file: another Package is at the same location. Reopen the right Package from the list below."
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.notice.file-not-found"
+msgstr "This file cannot be found: it may have been moved, renamed or deleted. Reopen it from the list below, or create a new Package."
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.notice.link-unavailable"
+msgstr "SmallPen cannot open this link. Reopen a Package from the list below, or create a new one."
 
 #: src/app/main/smallpen/home.cljs:80
 msgid "smallpen.home.open"
@@ -9790,12 +9806,6 @@ msgstr "Use global"
 msgid "workspace.tokens.matrix.contract.open"
 msgstr "Open"
 
-msgid "workspace.tokens.matrix.contract.token"
-msgstr "%s override"
-
-msgid "workspace.tokens.matrix.contract.type"
-msgstr "%s rules"
-
 #: src/app/main/ui/workspace/tokens/matrix.cljs:302
 msgid "workspace.tokens.matrix.contract.type-column"
 msgstr "Token type"
@@ -9835,10 +9845,6 @@ msgstr "Delete variant"
 #: src/app/main/ui/workspace/tokens/matrix.cljs:871
 msgid "workspace.tokens.matrix.delete-variant-message"
 msgstr "Delete the %s variant? Its token set and paired theme will be deleted."
-
-#: src/app/main/ui/workspace/tokens/matrix.cljs:1149
-msgid "workspace.tokens.matrix.disabled"
-msgstr "Not enabled"
 
 #: src/app/main/ui/workspace/tokens/matrix.cljs:1297
 msgid "workspace.tokens.matrix.empty"
@@ -9918,15 +9924,9 @@ msgstr "Underscore (_)"
 msgid "workspace.tokens.matrix.set-value"
 msgstr "Set %s for %s"
 
-msgid "workspace.tokens.matrix.token-contract"
-msgstr "Key rules for %s"
-
 #: src/app/main/ui/workspace/tokens/matrix.cljs:1293
 msgid "workspace.tokens.matrix.token-menu"
 msgstr "Open %s token menu"
-
-msgid "workspace.tokens.matrix.type-contract"
-msgstr "%s key rules"
 
 #: src/app/main/ui/workspace/tokens/matrix.cljs:553,
 #: src/app/main/ui/workspace/tokens/matrix.cljs:633
@@ -9961,6 +9961,562 @@ msgstr "token set"
 msgid "workspace.undo.entry.single.token-theme"
 msgstr "token theme"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.browse"
 msgstr "Browse…"
+
+#: src/app/main/ui/workspace/sidebar/assets/media.cljs
+msgid "workspace.assets.graphics"
+msgstr "Graphics"
+
+#: src/app/main/smallpen/ui/reference_hex_input.cljs
+msgid "workspace.colorpicker.hex-or-token-reference"
+msgstr "Hexadecimal color value or token reference"
+
+#: src/app/main/smallpen/ui/main_menu.cljs
+msgid "smallpen.design-system"
+msgstr "Design System"
+
+#: src/app/main/smallpen/ui/options.cljs
+msgid "smallpen.design-system.editing-note.select"
+msgstr "Select a Token or component content to edit its properties. Backgrounds, titles and layout are generated and cannot be changed."
+
+#: src/app/main/smallpen/ui/options.cljs
+msgid "smallpen.design-system.editing-note.write-back"
+msgstr "Property changes are written back to their source. To add, delete or rearrange content, use the source page."
+
+#: src/app/main/smallpen/ui/layers.cljs
+msgid "smallpen.design-system.badge.token"
+msgstr "Token"
+
+#: src/app/main/smallpen/ui/layers.cljs
+msgid "smallpen.design-system.badge.source"
+msgstr "Source"
+
+#: src/app/main/smallpen/ui/layers.cljs
+msgid "smallpen.design-system.badge.decoration"
+msgstr "Decoration"
+
+#: src/app/main/smallpen/ui/layers.cljs
+msgid "smallpen.design-system.badge.page"
+msgstr "DS"
+
+#: src/app/main/smallpen/token_import.cljs
+msgid "smallpen.tokens.import.stale-review"
+msgstr "The package changed after this review. Review the file again before applying."
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.create-component-failed"
+msgstr "Could not create the component. Nothing was changed."
+
+#: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-decoration"
+msgstr "This is a generated display frame and can't be edited. Select a token or component instead."
+
+#: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-position"
+msgstr "Positions on the Design System page are arranged automatically; adjust the layout at the source."
+
+#: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-structure"
+msgstr "The Design System page only supports attribute edits; add, delete, paste and restructure on the source page."
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.summary"
+msgstr "Add component…"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.hint"
+msgstr "Adds to the source page; the Design System page updates automatically."
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.read-only"
+msgstr "This package is read-only; the source page can't be written."
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.no-container"
+msgstr "No writable source container: create a board on a regular page first."
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.target"
+msgstr "Source page / container"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.target-placeholder"
+msgstr "Choose a writable source container…"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.no-components"
+msgstr "No components yet; you can create one on the source page."
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.component"
+msgstr "Existing component"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.component-placeholder"
+msgstr "Choose a component variant…"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.insert-instance"
+msgstr "Insert instance"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.create-component"
+msgstr "Create component"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.unnamed"
+msgstr "Unnamed"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.projection-failed"
+msgstr "SmallPen can't load this design on the web."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.location"
+msgstr "Location: %s / %s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.object"
+msgstr "Object: %s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.error-code"
+msgstr "Error: %s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.error-message"
+msgstr "Details: %s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.file-unchanged"
+msgstr "The original file was not changed. Fix the object above, then reopen the design."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.repair-read-only"
+msgstr "This SmallPen Package needs repair: it opened read-only at its last valid state."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.projection-errors"
+msgstr "SmallPen loaded safely, with projection errors (%s). %s: %s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.external.merge-failed"
+msgstr "SmallPen preserved your local edits, but could not merge the external Package change automatically. Keep this window open and copy any unsaved work before reloading."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.external.invalid-package"
+msgstr "SmallPen found an invalid external file change. The last valid read-only view is kept; fix the file to continue."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.external.history-cleared"
+msgstr "The Package changed outside SmallPen, so undo history was cleared. The workspace now shows the latest version."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.save.change-rejected"
+msgstr "SmallPen could not save your last change, so it was undone. Your later edits keep saving. Reason: %s"
+
+#: src/app/main/smallpen/projection.cljs, src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.design-system.alias-cycle"
+msgstr "%s (circular reference)"
+
+#: src/app/main/smallpen/projection.cljs, src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.design-system.alias-unresolved"
+msgstr "%s (unresolved reference)"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.font-family"
+msgstr "Ag Type Aa 123"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.font-weight"
+msgstr "Ag Weight"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.letter-spacing"
+msgstr "Spacing"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.text-case"
+msgstr "Ag Case text"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.text-decoration"
+msgstr "Ag Link text"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.style"
+msgstr "Style"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.content"
+msgstr "Content"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.state"
+msgstr "State"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.theme"
+msgstr "Theme"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.tone"
+msgstr "Tone"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.level"
+msgstr "Level"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.kind"
+msgstr "Kind"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.primary"
+msgstr "Primary"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.secondary"
+msgstr "Secondary"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.ghost"
+msgstr "Ghost"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.text"
+msgstr "Text only"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.leading"
+msgstr "Leading icon"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.trailing"
+msgstr "Trailing icon"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.icon"
+msgstr "Icon only"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.default"
+msgstr "Default"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.hover"
+msgstr "Hover"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.pressed"
+msgstr "Pressed"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.disabled"
+msgstr "Disabled"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.light"
+msgstr "Light"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.dark"
+msgstr "Dark"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.neutral"
+msgstr "Neutral"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.success"
+msgstr "Success"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.danger"
+msgstr "Danger"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.focus"
+msgstr "Focus"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.error"
+msgstr "Error"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.page"
+msgstr "Page title"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.section"
+msgstr "Section title"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.dialog"
+msgstr "Dialog title"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.confirm"
+msgstr "Confirm"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.form"
+msgstr "Form"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.facet"
+msgstr "%s: %s"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.family-samples"
+msgstr "%s · Samples shown: %s"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.component"
+msgstr "Component"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.archived"
+msgstr "Archived (inactive)"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.other-tokens"
+msgstr "Other tokens"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.no-tokens"
+msgstr "No tokens yet"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.no-components"
+msgstr "No components yet"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.components-source"
+msgstr "Component sources"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.summary"
+msgstr "Display groups: %s · Valid combinations: %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.boolean"
+msgstr "Boolean"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.border-radius"
+msgstr "Border radius"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.color"
+msgstr "Color"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.dimensions"
+msgstr "Dimensions (width and height)"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.font-family"
+msgstr "Font family"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.font-size"
+msgstr "Font size"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.font-weight"
+msgstr "Font weight"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.letter-spacing"
+msgstr "Letter spacing"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.number"
+msgstr "Number"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.opacity"
+msgstr "Opacity"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.other"
+msgstr "Other"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.rotation"
+msgstr "Rotation"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.shadow"
+msgstr "Shadow"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.sizing"
+msgstr "Sizing (height)"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.spacing"
+msgstr "Spacing"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.string"
+msgstr "String"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.stroke-width"
+msgstr "Stroke width"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.text-case"
+msgstr "Text case"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.text-decoration"
+msgstr "Text decoration"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.typography"
+msgstr "Typography"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.component-source"
+msgstr "Component edit source"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.node"
+msgstr "Node: %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.scope-occurrence"
+msgstr "Scope: this nested instance inside the current component combination. The shared child component source is not changed."
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.scope-source"
+msgstr "Scope: the current component combination source. Unbound properties sync to the instances that use it."
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.bindings-occurrence"
+msgstr "Token sources (local overrides first):"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.bindings-source"
+msgstr "Bound properties edit the Token source, which affects every component that uses this Token:"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.unresolved"
+msgstr "unresolved"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.edit-in-tokens"
+msgstr "edit the source in the Token section"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.owner"
+msgstr "Owner: %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.title"
+msgstr "Token · %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.set"
+msgstr "Token Set: %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.owner-package"
+msgstr "Owner package: %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.cell-id"
+msgstr "Cell ID: %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.status"
+msgstr "Status: %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.status-archived"
+msgstr "Status: %s (inactive)"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.alias-resolution"
+msgstr "Alias: %s → resolved value: %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.read-only"
+msgstr "Read-only external source: this Cell can't be edited on this page"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.boolean"
+msgstr "Boolean values accept only true or false"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.number"
+msgstr "Number tokens need a numeric value"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.opacity-range"
+msgstr "Opacity must be between 0 and 1"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.opacity"
+msgstr "Opacity needs a numeric value"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.numeric"
+msgstr "This type needs a numeric value"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.font-size-positive"
+msgstr "Font size must be positive"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.font-size"
+msgstr "Font size needs a numeric value"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.letter-spacing"
+msgstr "Letter spacing needs a numeric value (negative allowed)"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.rotation"
+msgstr "Rotation needs a numeric value (negative or over one turn allowed)"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.font-weight"
+msgstr "Font weight can't be empty"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.typography"
+msgstr "Edit typography Cells with the fields below"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.other"
+msgstr "Other tokens need JSON text"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.json"
+msgstr "Needs valid JSON text"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.empty"
+msgstr "The value can't be empty"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.alias-placeholder"
+msgstr "New alias expression, e.g. {color.base}"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.value-placeholder"
+msgstr "New value"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.alias-notice"
+msgstr "This Cell is an alias: applying writes a new alias expression (currently %s)"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.apply"
+msgstr "Apply to source Cell"

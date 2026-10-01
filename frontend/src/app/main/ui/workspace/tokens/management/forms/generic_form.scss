@@ -39,6 +39,10 @@
   align-items: center;
 }
 
+.input-row-hidden {
+  display: none;
+}
+
 .token-value-context {
   @include t.use-typography("body-small");
 

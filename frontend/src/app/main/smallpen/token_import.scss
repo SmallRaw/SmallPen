@@ -11,6 +11,7 @@
 .modal-dialog {
   @extend %modal-container-base;
 
+  color: var(--color-foreground-primary);
   display: flex;
   flex-direction: column;
   user-select: none;

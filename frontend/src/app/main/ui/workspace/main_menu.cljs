@@ -31,9 +31,8 @@
    [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.repo :as rp]
-   [app.main.router :as rt]
    [app.main.smallpen :as smallpen]
-   [clojure.string :as str]
+   [app.main.smallpen.ui.main-menu :as sp-menu]
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*
                                                  dropdown-menu-item*]]
@@ -114,12 +113,10 @@
         (mf/use-fn #(st/emit! (dcm/go-to-feedback)))
 
         plugins?
-        (and (smallpen/capability-enabled? :plugins)
-             (features/active-feature? @st/state "plugins/runtime"))
+        (and (smallpen/capability-enabled? :plugins) (features/active-feature? @st/state "plugins/runtime"))
 
         mcp-enabled?
-        (and (smallpen/capability-enabled? :mcp)
-             (contains? cf/flags :mcp))
+        (and (smallpen/capability-enabled? :mcp) (contains? cf/flags :mcp))
 
         show-shortcuts
         (mf/use-fn
@@ -237,7 +234,7 @@
 (mf/defc preferences-menu*
   {::mf/private true
    ::mf/wrap [mf/memo]}
-  [{:keys [layout profile toggle-flag on-close open-settings toggle-theme toggle-render]}]
+  [{:keys [layout profile toggle-flag on-close toggle-theme toggle-render]}]
   (let [renderer (or (-> profile :props :renderer) :svg)
 
         show-nudge-options
@@ -335,27 +332,8 @@
          "system" (tr "workspace.header.menu.toggle-dark-theme")
          (tr "workspace.header.menu.toggle-light-theme"))]
       [:> shortcuts* {:id :toggle-theme}]]
-     (when (smallpen/enabled?)
-       [:> dropdown-menu-item* {:on-click open-settings
-                                :class (stl/css :base-menu-item :submenu-item)
-                                :id "file-menu-smallpen-settings"}
-        [:span {:class (stl/css :item-name)}
-         (tr "labels.settings")]])
-     (when (smallpen/enabled?)
-       (let [file-id (-> (.-hash js/location)
-                         (str/split #"\?" 2)
-                         (second)
-                         (js/URLSearchParams.)
-                         (.get "file-id"))]
-         (when file-id
-           [:> dropdown-menu-item*
-            {:on-click (fn [_]
-                         (st/emit! (rt/nav :smallpen-design-system
-                                           {"file-id" file-id})))
-             :class (stl/css :base-menu-item :submenu-item)
-             :id "file-menu-smallpen-design-system"}
-            [:span {:class (stl/css :item-name)}
-             "设计系统"]])))
+     [:> sp-menu/preferences-items* {:item-class (stl/css :base-menu-item :submenu-item)
+                                     :name-class (stl/css :item-name)}]
      (when (contains? cf/flags :render-switch)
        [:> dropdown-menu-item* {:on-click    toggle-render
                                 :class       (stl/css :base-menu-item :submenu-item)
@@ -726,9 +704,8 @@
           [:span {:class (stl/css :item-name)}
            (tr "dashboard.add-shared")]]))
 
-     ;; SmallPen keeps history local (ACTIONS); cloud versions/history entries
-     ;; would promise a service that does not exist in the local profile.
-     (when (and can-edit (not (smallpen/enabled?)))
+     ;; SmallPen keeps history local; cloud versions are not available.
+     (when (and can-edit (smallpen/capability-enabled? :remote-history))
        [:*
         [:div {:class (stl/css :separator)}]
 
@@ -777,8 +754,7 @@
   {::mf/private true
    ::mf/wrap [mf/memo]}
   [{:keys [open-plugins on-close]}]
-  (when (and (smallpen/capability-enabled? :plugins)
-             (features/active-feature? @st/state "plugins/runtime"))
+  (when (and (smallpen/capability-enabled? :plugins) (features/active-feature? @st/state "plugins/runtime"))
     (let [plugins          (preg/plugins-list)
           user-can-edit?   (:can-edit (deref refs/permissions))
           permissions-peek (deref refs/plugins-permissions-peek)]
@@ -845,8 +821,7 @@
 (mf/defc mcp-menu*
   {::mf/private true}
   [{:keys [on-close mcp]}]
-  (let [plugins-enabled? (and (smallpen/capability-enabled? :plugins)
-                              (features/use-feature "plugins/runtime"))
+  (let [plugins-enabled? (and (features/use-feature "plugins/runtime") (smallpen/capability-enabled? :plugins))
         has-valid-token? (get mcp :token-valid)
         enabled?         (get mcp :enabled)
 
@@ -949,20 +924,6 @@
            (reset! show-menu* false)
            (reset! selected-sub-menu* nil)))
 
-        open-home
-        (mf/use-fn
-         (fn [event]
-           (dom/stop-propagation event)
-           (close-all-menus)
-           (st/emit! (rt/nav :smallpen-home))))
-
-        open-settings
-        (mf/use-fn
-         (fn [event]
-           (dom/stop-propagation event)
-           (close-all-menus)
-           (st/emit! (rt/nav :settings-options))))
-
         on-menu-click
         (mf/use-fn
          (fn [event]
@@ -1058,12 +1019,8 @@
                          :id "workspace:menu"
                          :on-close close-menu
                          :class (stl/css :base-menu :menu)}
-      (when (smallpen/enabled?)
-        [:> dropdown-menu-item* {:class (stl/css :base-menu-item :menu-item)
-                                 :on-click open-home
-                                 :id "file-menu-smallpen-home"}
-         [:span {:class (stl/css :item-name)}
-          (tr "smallpen.home.navigation")]])
+      [:> sp-menu/home-item* {:item-class (stl/css :base-menu-item :menu-item)
+                              :name-class (stl/css :item-name)}]
 
       [:> dropdown-menu-item* {:class (stl/css :base-menu-item :menu-item)
                                :on-click    on-menu-click
@@ -1117,8 +1074,7 @@
        [:> icon* {:icon-id i/arrow-right
                   :class (stl/css :item-arrow)}]]
 
-      (when (and (smallpen/capability-enabled? :plugins)
-                 (features/active-feature? @st/state "plugins/runtime"))
+      (when (and (smallpen/capability-enabled? :plugins) (features/active-feature? @st/state "plugins/runtime"))
         [:> dropdown-menu-item* {:class (stl/css :base-menu-item :menu-item)
                                  :on-click    on-menu-click
                                  :on-key-down (fn [event]
@@ -1132,8 +1088,7 @@
          [:> icon* {:icon-id i/arrow-right
                     :class (stl/css :item-arrow)}]])
 
-      (when (and (smallpen/capability-enabled? :mcp)
-                 (contains? cf/flags :mcp))
+      (when (and (smallpen/capability-enabled? :mcp) (contains? cf/flags :mcp))
         (let [enabled?         (get mcp :enabled)
               conn-status      (get mcp :connection-status)
               has-valid-token? (get mcp :token-valid)
@@ -1200,7 +1155,6 @@
        [:> preferences-menu* {:layout layout
                               :profile profile
                               :toggle-flag toggle-flag
-                              :open-settings open-settings
                               :toggle-theme toggle-theme
                               :toggle-render toggle-render
                               :show-shortcuts show-shortcuts

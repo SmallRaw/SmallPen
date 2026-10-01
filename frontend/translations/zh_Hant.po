@@ -9016,31 +9016,31 @@ msgstr "自動儲存的版本將保留 %s 天。"
 msgid "workspace.assets.tokens"
 msgstr "權杖"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.add-source"
 msgstr "新增資源庫來源"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.foundation"
 msgstr "基礎庫"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.local-help"
 msgstr "建議使用專案附近的相對路徑。仍可連接專案目錄外的檔案，但移動檔案後可能失效。"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.local-path"
 msgstr "本機路徑"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.remote-help"
 msgstr "URL 會始終作為資源庫來源；SmallPen 會保留經過驗證的本機快照，用於加速載入和離線使用。"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.remote-url"
 msgstr "遠端 URL"
 
-#: src/app/main/ui/workspace/libraries.cljs
+#: src/app/main/smallpen/ui/libraries.cljs
 msgid "workspace.libraries.smallpen.tokens"
 msgid_plural "workspace.libraries.smallpen.tokens"
 msgstr[0] "%s 個令牌"
@@ -9071,6 +9071,22 @@ msgstr "新增 Package…"
 
 msgid "smallpen.home.new-prompt"
 msgstr "輸入新 .smallpen Package 的建立位置"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.notice.dismiss"
+msgstr "知道了"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.notice.file-identity-mismatch"
+msgstr "這個位址指向的檔案身分已經變更（同一位置現在是另一個 Package）。請從下方的清單重新開啟正確的 Package。"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.notice.file-not-found"
+msgstr "找不到這個檔案：它可能已被移動、重新命名或刪除。請從下方的清單重新開啟，或新建一個 Package。"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.notice.link-unavailable"
+msgstr "SmallPen 無法開啟這個連結。請從下方的清單重新開啟，或新建一個 Package。"
 
 msgid "smallpen.home.open"
 msgstr "已開啟"
@@ -9170,9 +9186,6 @@ msgstr "目前主題組合"
 msgid "workspace.tokens.matrix.current-domain"
 msgstr "選擇 %s 目前使用的選項"
 
-msgid "workspace.tokens.matrix.disabled"
-msgstr "未啟用"
-
 msgid "workspace.tokens.matrix.activate-variant"
 msgstr "啟用 %s"
 
@@ -9211,12 +9224,6 @@ msgstr "新增模式或變數，開始定義設計權杖。"
 
 msgid "workspace.tokens.matrix.global-contract"
 msgstr "依權杖類型設定 Key 規則"
-
-msgid "workspace.tokens.matrix.type-contract"
-msgstr "%s Key 規則"
-
-msgid "workspace.tokens.matrix.token-contract"
-msgstr "%s 的 Key 規則"
 
 msgid "workspace.tokens.matrix.variant-menu"
 msgstr "開啟 %s 細分項選單"
@@ -9266,12 +9273,6 @@ msgstr "權杖 Key 規則"
 msgid "workspace.tokens.matrix.contract.global"
 msgstr "全域規則"
 
-msgid "workspace.tokens.matrix.contract.type"
-msgstr "%s 規則"
-
-msgid "workspace.tokens.matrix.contract.token"
-msgstr "%s 單項覆寫"
-
 msgid "workspace.tokens.matrix.contract-description"
 msgstr "先設定全域預設值，也可依每種權杖類型個別覆寫。「開放」表示不限制名稱。"
 
@@ -9316,3 +9317,567 @@ msgstr "預覽"
 
 msgid "workspace.tokens.matrix.contract-draft-note"
 msgstr "本次評審草稿只保存在面板本地，暫不變更 Package 格式。"
+
+#: src/app/main/ui/workspace/sidebar/assets/media.cljs
+msgid "workspace.assets.graphics"
+msgstr "圖形"
+
+#: src/app/main/smallpen/ui/reference_hex_input.cljs
+msgid "workspace.colorpicker.hex-or-token-reference"
+msgstr "十六進位色彩值或權杖參照"
+
+#: src/app/main/smallpen/ui/main_menu.cljs
+msgid "smallpen.design-system"
+msgstr "設計系統"
+
+#: src/app/main/smallpen/ui/options.cljs
+msgid "smallpen.design-system.editing-note.select"
+msgstr "選擇 Token 或元件內容來編輯屬性。背景、標題和排列由系統產生，無法修改。"
+
+#: src/app/main/smallpen/ui/options.cljs
+msgid "smallpen.design-system.editing-note.write-back"
+msgstr "屬性修改會寫回對應來源。新增、刪除和版面調整，請到來源頁面操作。"
+
+#: src/app/main/smallpen/ui/layers.cljs
+msgid "smallpen.design-system.badge.token"
+msgstr "權杖"
+
+#: src/app/main/smallpen/ui/layers.cljs
+msgid "smallpen.design-system.badge.source"
+msgstr "來源"
+
+#: src/app/main/smallpen/ui/layers.cljs
+msgid "smallpen.design-system.badge.decoration"
+msgstr "裝飾"
+
+#: src/app/main/smallpen/ui/layers.cljs
+msgid "smallpen.design-system.badge.page"
+msgstr "DS"
+
+#: src/app/main/smallpen/token_import.cljs
+msgid "smallpen.tokens.import.stale-review"
+msgstr "審閱後套件已變更，請重新審閱檔案後再套用。"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.create-component-failed"
+msgstr "無法建立元件，未做任何修改。"
+
+#: src/app/main/smallpen/ui/libraries.cljs
+msgid "workspace.libraries.smallpen.browse"
+msgstr "瀏覽…"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.empty-subtitle"
+msgstr "建立新的 .smallpen Package，或開啟已有檔案。"
+
+#: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-decoration"
+msgstr "這是自動產生的展示框，無法修改。請選擇 Token 或元件內容。"
+
+#: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-position"
+msgstr "DS 展示位置由系統排列；請到來源位置調整元件版面。"
+
+#: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-structure"
+msgstr "DS 僅支援屬性編輯；新增、刪除、貼上和結構調整請到來源頁面操作。"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.summary"
+msgstr "新增元件…"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.hint"
+msgstr "新增到來源頁面，Design System 展示會自動更新。"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.read-only"
+msgstr "目前套件為唯讀，無法寫入來源頁面"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.no-container"
+msgstr "沒有可寫入的來源容器：請先在一般頁面建立一個 Frame"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.target"
+msgstr "來源頁面 / 容器"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.target-placeholder"
+msgstr "選擇可寫入的來源容器…"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.no-components"
+msgstr "尚無可用元件，可在來源頁面新建。"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.component"
+msgstr "現有元件"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.component-placeholder"
+msgstr "選擇元件變體…"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.insert-instance"
+msgstr "插入實例"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.create-component"
+msgstr "新建元件"
+
+#: src/app/main/smallpen/dse.cljs
+msgid "smallpen.dse.insert.unnamed"
+msgstr "未命名"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.projection-failed"
+msgstr "SmallPen 無法在 Web 中載入這個設計。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.location"
+msgstr "位置：%s / %s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.object"
+msgstr "物件：%s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.error-code"
+msgstr "錯誤：%s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.error-message"
+msgstr "說明：%s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.file-unchanged"
+msgstr "原始檔案沒有被修改，請修復上述物件後重新開啟。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.repair-read-only"
+msgstr "SmallPen Package 需要修復：已按最後一次有效狀態以唯讀方式開啟。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.projection-errors"
+msgstr "SmallPen 已安全載入，但有 %s 個投影錯誤。%s: %s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.external.merge-failed"
+msgstr "SmallPen 已保留你的本機編輯，但無法自動合併外部 Package 的變更。請保持此視窗開啟，並在重新載入前複製所有未儲存的內容。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.external.invalid-package"
+msgstr "SmallPen 偵測到外部檔案無效：已保留最後有效的唯讀檢視，請修復檔案後繼續。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.external.history-cleared"
+msgstr "Package 在 SmallPen 之外發生了變更，復原記錄已清除。工作區現在顯示最新版本。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.save.change-rejected"
+msgstr "SmallPen 無法儲存你的上一次變更，已將其撤回。之後的編輯會繼續儲存。原因：%s"
+
+#: src/app/main/smallpen/projection.cljs, src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.design-system.alias-cycle"
+msgstr "%s（循環參照）"
+
+#: src/app/main/smallpen/projection.cljs, src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.design-system.alias-unresolved"
+msgstr "%s（參照未解析）"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.font-family"
+msgstr "Ag 字形 Aa 123"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.font-weight"
+msgstr "Ag 字重"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.letter-spacing"
+msgstr "Spacing 間距"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.text-case"
+msgstr "Ag Case 文字"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.specimen.text-decoration"
+msgstr "Ag Link 文字"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.style"
+msgstr "樣式"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.content"
+msgstr "圖文排列"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.state"
+msgstr "狀態"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.theme"
+msgstr "主題"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.tone"
+msgstr "語意"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.level"
+msgstr "層級"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.kind"
+msgstr "類型"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.primary"
+msgstr "主要"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.secondary"
+msgstr "次要"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.ghost"
+msgstr "透明"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.text"
+msgstr "純文字"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.leading"
+msgstr "左側圖示"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.trailing"
+msgstr "右側圖示"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.icon"
+msgstr "僅圖示"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.default"
+msgstr "預設"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.hover"
+msgstr "懸停"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.pressed"
+msgstr "按下"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.disabled"
+msgstr "停用"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.light"
+msgstr "淺色"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.dark"
+msgstr "深色"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.neutral"
+msgstr "中性"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.success"
+msgstr "成功"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.danger"
+msgstr "警示"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.focus"
+msgstr "聚焦"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.error"
+msgstr "錯誤"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.page"
+msgstr "頁面標題"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.section"
+msgstr "區塊標題"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.dialog"
+msgstr "對話框標題"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.confirm"
+msgstr "確認"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.axis.form"
+msgstr "表單"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.facet"
+msgstr "%s：%s"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.family-samples"
+msgstr "%s · %s 個展示組合"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.component"
+msgstr "元件"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.archived"
+msgstr "已封存（未啟用）"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.other-tokens"
+msgstr "其他權杖"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.no-tokens"
+msgstr "尚無權杖"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.no-components"
+msgstr "尚無元件"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.components-source"
+msgstr "元件來源"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.design-system.summary"
+msgstr "%s 個展示分組 · %s 個有效組合"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.boolean"
+msgstr "布林"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.border-radius"
+msgstr "圓角"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.color"
+msgstr "顏色"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.dimensions"
+msgstr "尺寸（寬高）"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.font-family"
+msgstr "字型"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.font-size"
+msgstr "字級"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.font-weight"
+msgstr "字重"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.letter-spacing"
+msgstr "字距"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.number"
+msgstr "數字"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.opacity"
+msgstr "不透明度"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.other"
+msgstr "其他"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.rotation"
+msgstr "旋轉"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.shadow"
+msgstr "陰影"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.sizing"
+msgstr "尺寸（高）"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.spacing"
+msgstr "間距"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.string"
+msgstr "字串"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.stroke-width"
+msgstr "筆畫寬度"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.text-case"
+msgstr "大小寫"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.text-decoration"
+msgstr "文字裝飾"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.type.typography"
+msgstr "字體排印"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.component-source"
+msgstr "元件編輯來源"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.node"
+msgstr "節點：%s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.scope-occurrence"
+msgstr "範圍：目前元件組合內的這個巢狀實例；不修改共用子元件來源。"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.scope-source"
+msgstr "範圍：目前元件組合來源；未綁定屬性會同步到參照它的實例。"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.bindings-occurrence"
+msgstr "權杖來源（局部覆寫優先）："
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.bindings-source"
+msgstr "綁定屬性修改權杖來源，會影響所有參照此權杖的元件："
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.unresolved"
+msgstr "未解析"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.edit-in-tokens"
+msgstr "請從權杖區編輯來源"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.owner"
+msgstr "擁有者：%s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.title"
+msgstr "權杖 · %s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.set"
+msgstr "權杖集：%s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.owner-package"
+msgstr "所屬 Package：%s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.cell-id"
+msgstr "Cell ID：%s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.status"
+msgstr "狀態：%s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.status-archived"
+msgstr "狀態：%s（未啟用）"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.alias-resolution"
+msgstr "參照運算式：%s → 解析值：%s"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.read-only"
+msgstr "外部唯讀來源：此 Cell 無法在本頁修改"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.boolean"
+msgstr "布林值只接受 true / false"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.number"
+msgstr "數字類型需要一個數值"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.opacity-range"
+msgstr "不透明度取值範圍 0..1"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.opacity"
+msgstr "不透明度需要一個數值"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.numeric"
+msgstr "此類型需要一個數值"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.font-size-positive"
+msgstr "字級必須是正數"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.font-size"
+msgstr "字級需要一個數值"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.letter-spacing"
+msgstr "字距需要一個數值（可為負）"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.rotation"
+msgstr "旋轉角度需要一個數值（可為負、可超過一圈）"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.font-weight"
+msgstr "字重不能為空"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.typography"
+msgstr "排印 Cell 請使用下方欄位編輯"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.other"
+msgstr "其他類型需要 JSON 文字"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.json"
+msgstr "需要合法的 JSON 文字"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.error.empty"
+msgstr "值不能為空"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.alias-placeholder"
+msgstr "新的參照運算式，例如 {color.base}"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.value-placeholder"
+msgstr "新值"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.alias-notice"
+msgstr "此 Cell 是參照：提交將寫入新的參照運算式（目前 %s）"
+
+#: src/app/main/smallpen/token_inspector.cljs
+msgid "smallpen.dse.inspector.apply"
+msgstr "套用到來源 Cell"

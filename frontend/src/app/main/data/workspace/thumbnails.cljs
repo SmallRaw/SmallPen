@@ -23,6 +23,7 @@
    [app.main.refs :as refs]
    [app.main.render :as render]
    [app.main.repo :as rp]
+   [app.main.smallpen :as smallpen]
    [app.util.queue :as q]
    [app.util.storage :as storage]
    [app.util.timers :as tm]
@@ -77,6 +78,8 @@
     (->> (render/render-frame objects shape object-id)
          (rx/take 1)
          (rx/filter some?)
+         ;; SmallPen: the measuring commit renders it again.
+         (rx/filter #(not (smallpen/unmeasured-text? objects frame-id)))
          (rx/mapcat thr/render)
          (rx/tap #(l/dbg :hint "thumbnail rendered"
                          :elapsed (dm/str (tp) "ms"))))))

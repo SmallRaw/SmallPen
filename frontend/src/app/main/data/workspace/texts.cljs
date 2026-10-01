@@ -40,6 +40,7 @@
    [app.main.features :as features]
    [app.main.fonts :as fonts]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.api.fonts :as wasm.fonts]
@@ -977,16 +978,16 @@
     ptk/WatchEvent
     (watch [_ state _]
       (let [position-data (::update-position-data state)]
-        ;; Position data is renderer bookkeeping (SVG text layout), never
-        ;; user history: saving it as undoable changes would truncate the
-        ;; redo tail whenever texts re-measure (SmallPen generated pages
-        ;; re-project after structural source changes).
         (rx/of (dwsh/update-shapes
                 (keys position-data)
                 (fn [shape]
                   (-> shape
                       (assoc :position-data (get position-data (:id shape)))))
-                {:save-undo? false :reg-objects? false}))))))
+                ;; SmallPen re-measures texts whenever generated pages are
+                ;; re-projected; an undo entry here would drop the redo tail.
+                (if (smallpen/enabled?)
+                  {:save-undo? false :reg-objects? false}
+                  {:stack-undo? true :reg-objects? false})))))))
 
 (defn update-position-data
   [id position-data]

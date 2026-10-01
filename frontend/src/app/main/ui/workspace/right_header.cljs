@@ -216,20 +216,20 @@
         :on-zoom-fit on-zoom-fit
         :on-zoom-selected on-zoom-selected}]]
 
-     (when (smallpen/capability-enabled? :comments)
-       [:div {:class (stl/css :comments-section)}
-        [:button {:title (tr "workspace.toolbar.comments" (get-tt :add-comment))
-                  :aria-label (tr "workspace.toolbar.comments" (get-tt :add-comment))
-                  :class (stl/css-case :comments-btn true
-                                       :selected (= selected-drawtool :comments))
-                  :on-click toggle-comments
-                  :data-tool "comments"
-                  :style {:position "relative"}}
-         deprecated-icon/comments
-         (when ^boolean has-unread-comments?
-           [:div {:class (stl/css :unread)}])]])
+     [:div {:class (stl/css :comments-section)
+            :hidden (not (smallpen/capability-enabled? :comments))}
+      [:button {:title (tr "workspace.toolbar.comments" (get-tt :add-comment))
+                :aria-label (tr "workspace.toolbar.comments" (get-tt :add-comment))
+                :class (stl/css-case :comments-btn true
+                                     :selected (= selected-drawtool :comments))
+                :on-click toggle-comments
+                :data-tool "comments"
+                :style {:position "relative"}}
+       deprecated-icon/comments
+       (when ^boolean has-unread-comments?
+         [:div {:class (stl/css :unread)}])]]
 
-     (when (not read-only?)
+     (when-not ^boolean read-only?
        [:div {:class (stl/css :history-section)}
         [:button
          {:title (tr "workspace.sidebar.history")
@@ -249,3 +249,4 @@
           :title (tr "workspace.header.viewer" (get-tt :open-viewer))
           :on-click nav-to-viewer}
       deprecated-icon/play]]))
+

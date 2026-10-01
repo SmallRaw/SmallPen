@@ -10,7 +10,6 @@
    [app.common.files.tokens :as cfo]
    [app.common.schema :as sm]
    [app.common.types.tokens-lib :as ctob]
-   [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.constants :refer [max-input-length]]
    [app.main.data.helpers :as dh]
@@ -23,6 +22,7 @@
    [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.data.workspace.tokens.remapping :as remap]
    [app.main.refs :as refs]
+   [app.main.smallpen.ui.token-modal :as sp-token-modal]
    [app.main.store :as st]
    [app.main.ui.context :as muc]
    [app.main.ui.ds.buttons.button :refer [button*]]
@@ -106,12 +106,20 @@
         tokens-tree (mf/deref refs/workspace-all-tokens-map)
 
         ;; A map name -> token, tokens only in actual set.
+        tokens-in-selected-set
+        (mf/deref refs/workspace-all-tokens-in-selected-set)
+
         tokens-lib
         (mf/deref refs/tokens-lib)
 
-        tokens-in-selected-set
-        (or (when selected-token-set-id
-              (ctob/get-tokens tokens-lib selected-token-set-id)) {})
+        global-token-set-id
+        (mf/deref refs/selected-token-set-id)
+
+        [_ tokens-in-selected-set]
+        (sp-token-modal/target-set selected-token-set-id
+                                   global-token-set-id
+                                   tokens-in-selected-set
+                                   tokens-lib)
 
         ;; Make actual set tokens take precedence over tokens in other sets.
         tokens
@@ -210,39 +218,42 @@
         on-remap-token
         (mf/use-fn
          (mf/deps token token-type selected-token-set-id)
-         (fn [valid-token new-name old-name description]
-           (let [undo-group (uuid/next)]
-             (st/emit!
-              (dwtl/toggle-nested-token-path token-type new-name)
-              (dwtl/update-token selected-token-set-id
-                                 (:id token)
-                                 {:name new-name
-                                  :value (:value valid-token)
-                                  :description description}
-                                 :undo-group undo-group)
-              (remap/remap-tokens old-name new-name :undo-group undo-group)
-              (dwtp/propagate-workspace-tokens undo-group)
-              (modal/hide!)))))
+         (fn [valid-token new-name old-name description undo-group]
+           (st/emit!
+            (dwtl/toggle-nested-token-path token-type new-name)
+            (dwtl/update-token selected-token-set-id (:id token)
+                               {:name new-name
+                                :value (:value valid-token)
+                                :description description}
+                               :undo-group undo-group)
+            (remap/remap-tokens old-name new-name :undo-group undo-group)
+            (dwtp/propagate-workspace-tokens undo-group)
+            (modal/hide!))))
 
         on-rename-token
         (mf/use-fn
          (mf/deps token token-type selected-token-set-id)
-         (fn [valid-token name description]
-           (let [undo-group (uuid/next)]
-             (st/emit!
-              (dwtl/toggle-nested-token-path token-type name)
-              (dwtl/update-token selected-token-set-id
-                                 (:id token)
-                                 {:name name
-                                  :value (:value valid-token)
-                                  :description description}
-                                 :undo-group undo-group)
-              (dwtp/propagate-workspace-tokens undo-group)
-              (modal/hide!)))))
+         (fn [valid-token name description undo-group]
+           (st/emit!
+            (dwtl/toggle-nested-token-path token-type name)
+            (dwtl/update-token selected-token-set-id (:id token)
+                               {:name name
+                                :value (:value valid-token)
+                                :description description}
+                               :undo-group undo-group)
+            (modal/hide!))))
+
+        create-token
+        (mf/use-fn
+         (mf/deps on-create-token selected-token-set-id)
+         (fn [token undo-group]
+           (if (fn? on-create-token)
+             (on-create-token token undo-group)
+             (dwtl/create-token selected-token-set-id token :undo-group undo-group))))
 
         on-submit
         (mf/use-fn
-         (mf/deps validate-token token tokens token-type value-subfield value-type active-tab on-remap-token on-rename-token is-create on-create-token selected-token-set-id)
+         (mf/deps validate-token token tokens token-type value-subfield value-type active-tab on-remap-token on-rename-token is-create create-token selected-token-set-id)
          (fn [form event]
            (let [name (get-in @form [:clean-data :name])
                  description (get-in @form [:clean-data :description])
@@ -261,9 +272,9 @@
                            old-name (:name token)
                            is-rename (and (= action "edit") (not= name old-name))
                            references-count (remap/count-token-references file-data old-name)
-                           undo-group (uuid/next)
-                           on-remap #(on-remap-token valid-token name old-name description)
-                           on-rename #(on-rename-token valid-token name description)
+                           undo-group (sp-token-modal/undo-group)
+                           on-remap #(on-remap-token valid-token name old-name description undo-group)
+                           on-rename #(on-rename-token valid-token name description undo-group)
                            remap-data {:new-name name
                                        :old-name old-name
                                        :type "token"}]
@@ -281,13 +292,8 @@
                                                                :description description}))]
                              (st/emit!
                               (if is-create
-                                (if on-create-token
-                                  (on-create-token new-token undo-group)
-                                  (dwtl/create-token selected-token-set-id
-                                                     new-token
-                                                     :undo-group undo-group))
-                                (dwtl/update-token selected-token-set-id
-                                                   (:id token)
+                                (create-token new-token undo-group)
+                                (dwtl/update-token selected-token-set-id (:id token)
                                                    {:name name
                                                     :value (:value valid-token)
                                                     :description description}
@@ -322,16 +328,15 @@
             [:span {:class (stl/css :token-value-context-location)}
              (str domain " / " (:variant value-context))])])
 
-       (when-not value-only?
-         [:div {:class (stl/css :input-row)}
-          [:> fc/form-input* {:id "token-name"
-                              :name :name
-                              :label (tr "workspace.tokens.token-name")
-                              :placeholder (tr "workspace.tokens.enter-token-name" token-title)
-                              :max-length max-input-length
-                              :variant "comfortable"
-                              :trim true
-                              :auto-focus true}]])
+       [:div {:class (stl/css-case :input-row true :input-row-hidden value-only?)}
+        [:> fc/form-input* {:id "token-name"
+                            :name :name
+                            :label (tr "workspace.tokens.token-name")
+                            :placeholder (tr "workspace.tokens.enter-token-name" token-title)
+                            :max-length max-input-length
+                            :variant "comfortable"
+                            :trim true
+                            :auto-focus true}]]
 
        [:div {:class (stl/css :input-row)}
         (case value-type
@@ -359,23 +364,21 @@
             :token-type  token-type
             :tokens      tokens}])]
 
-       (when-not value-only?
-         [:div {:class (stl/css :input-row)}
-          [:> fc/form-input* {:id "token-description"
-                              :name :description
-                              :label (tr "workspace.tokens.token-description")
-                              :placeholder (tr "workspace.tokens.token-description")
-                              :max-length max-input-length
-                              :variant "comfortable"
-                              :is-optional true}]])
+       [:div {:class (stl/css-case :input-row true :input-row-hidden value-only?)}
+        [:> fc/form-input* {:id "token-description"
+                            :name :description
+                            :label (tr "workspace.tokens.token-description")
+                            :placeholder (tr "workspace.tokens.token-description")
+                            :max-length max-input-length
+                            :variant "comfortable"
+                            :is-optional true}]]
        (when (some? general-errors)
          [:> context-notification* {:level :warning
                                     :appearance :ghost}
           (:message general-errors)])
 
        [:div {:class (stl/css-case :button-row true
-                                   :with-delete (and (= action "edit")
-                                                     (not value-only?)))}
+                                   :with-delete (and (= action "edit") (not value-only?)))}
         (when (and (= action "edit") (not value-only?))
           [:> button* {:on-click on-delete-token
                        :on-key-down handle-key-down-delete

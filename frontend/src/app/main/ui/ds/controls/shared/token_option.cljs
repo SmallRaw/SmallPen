@@ -25,7 +25,7 @@
    [:resolved {:optional true} [:maybe [:or :int :string :float :map]]]
    [:value {:optional true} [:maybe [:or :int :string :float :map]]]
    [:name {:optional true} :string]
-   [:token-type {:optional true} :keyword]
+   [:token-type {:optional true} [:maybe :keyword]]
    [:on-click {:optional true} fn?]
    [:selected {:optional true} :boolean]
    [:focused {:optional true} :boolean]])

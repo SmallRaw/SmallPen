@@ -45,6 +45,15 @@
   [opening locator]
   (and (some? locator) (= opening locator)))
 
+(defn notice-message
+  [notice]
+  (case (keyword (:code notice))
+    :file_not_found
+    (tr "smallpen.home.notice.file-not-found")
+    :file_identity_mismatch
+    (tr "smallpen.home.notice.file-identity-mismatch")
+    (tr "smallpen.home.notice.link-unavailable")))
+
 (defn- format-opened-at
   [value]
   (try
@@ -248,30 +257,24 @@
                           :maxWidth "960px"
                           :padding "12px 16px"
                           :width "calc(100% - 32px)"}}
-        [:span
-         (case (keyword (:code notice))
-           :file_not_found
-           "找不到这个文件：它可能已被移动、重命名或删除。请从下面的列表重新打开，或新建一个 Package。"
-           :file_identity_mismatch
-           "这个地址指向的文件身份已发生变化（同一位置现在是另一个 Package）。请从下面的列表重新打开正确的 Package。"
-           "SmallPen 无法打开这个链接。请从下面的列表重新打开，或新建一个 Package。")]
+        [:span (notice-message notice)]
         [:> button* {:on-click dismiss-notice
                      :variant "secondary"
                      :type "button"}
-         "知道了"]])
+         (tr "smallpen.home.notice.dismiss")]])
      [:> modal* {:is-open package-dialog-open
                  :on-open-change change-package-dialog
                  :size "small"}
       [:form {:on-submit submit-package}
-       [:> modal-header* {:title (tr (if (= package-dialog-action :create)
-                                       "smallpen.home.new-package"
-                                       "smallpen.home.open-package"))}]
+       [:> modal-header* {:title (if (= package-dialog-action :create)
+                                   (tr "smallpen.home.new-package")
+                                   (tr "smallpen.home.open-package"))}]
        [:> modal-content* {}
         [:> input* {:auto-focus true
                     :default-value ""
-                    :label (tr (if (= package-dialog-action :create)
-                                 "smallpen.home.new-prompt"
-                                 "smallpen.home.open-prompt"))
+                    :label (if (= package-dialog-action :create)
+                             (tr "smallpen.home.new-prompt")
+                             (tr "smallpen.home.open-prompt"))
                     :on-change change-package-locator
                     :variant "comfortable"}]]
        [:> modal-footer* {}
@@ -282,9 +285,9 @@
         [:> button* {:disabled (str/blank? package-locator)
                      :on-click submit-package
                      :type "button"}
-         (tr (if (= package-dialog-action :create)
-               "labels.create"
-               "labels.open"))]]]]
+         (if (= package-dialog-action :create)
+           (tr "labels.create")
+           (tr "labels.open"))]]]]
 
      [:header {:class (stl/css :header)}
       [:div

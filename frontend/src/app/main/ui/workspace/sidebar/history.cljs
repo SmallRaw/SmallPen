@@ -12,6 +12,7 @@
    [app.common.time :as ct]
    [app.main.data.workspace.undo :as dwu]
    [app.main.refs :as refs]
+   [app.main.smallpen.ui.history :as sp-history]
    [app.main.store :as st]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.main.ui.ds.product.empty-state :refer [empty-state*]]
@@ -52,59 +53,41 @@
     nil))
 
 (defn parse-change
-  "Given a single change parses the information into an uniform map"
-  ([change]
-   (parse-change change nil))
-  ([change undo-change]
-   (let [r (fn [type id]
-             {:type type
-              :operation (extract-operation change)
-              :detail (:operations change)
-              :id (cond
-                    (and (coll? id) (= 1 (count id))) (first id)
-                    (coll? id) :multiple
-                    :else id)})
-         set-operation
-         (fn []
-           (cond
-             (nil? (:attrs change)) :delete
-             (nil? (:attrs undo-change)) :new
-             :else :modify))]
-     (case (:type change)
-       :set-option (r :page (:page-id change))
-       (:add-obj
-        :mod-obj
-        :del-obj) (r :shape (:id change))
-       :reg-objects nil
-       :mov-objects (r :shape (:shapes change))
-       (:add-page
-        :mod-page :del-page
-        :mov-page) (r :page (:id change))
-       (:add-color
-        :mod-color) (r :color (get-in change [:color :id]))
-       :del-color (r :color (:id change))
-       :add-recent-color nil
-       (:add-media
-        :mod-media) (r :media (get-in change [:object :id]))
-       :del-media (r :media (:id change))
-       (:add-component
-        :mod-component
-        :del-component) (r :component (:id change))
-       (:add-typography
-        :mod-typography) (r :typography (get-in change [:typography :id]))
-       :del-typography (r :typography (:id change))
-       :set-token (assoc (r :token (:token-id change))
-                         :operation (set-operation))
-       :set-token-set (assoc (r :token-set (:id change))
-                             :operation (set-operation))
-       :set-token-theme (assoc (r :token-theme (:id change))
-                               :operation (set-operation))
-       (:set-active-token-themes :set-tokens-status) (assoc (r :token-theme :multiple)
-                                       :operation :modify)
-       :rename-token-set-group (assoc (r :token-set
-                                         (last (:set-group-path change)))
-                                      :operation :modify)
-       nil))))
+  "Given a single change parses the information into an uniform map.
+  Token changes also take the undo change that reverts them."
+  [change & [undo-change]]
+  (let [r (fn [type id]
+            {:type type
+             :operation (extract-operation change)
+             :detail (:operations change)
+             :id (cond
+                   (and (coll? id) (= 1 (count id))) (first id)
+                   (coll? id) :multiple
+                   :else id)})]
+    (case (:type change)
+      :set-option (r :page (:page-id change))
+      (:add-obj
+       :mod-obj
+       :del-obj) (r :shape (:id change))
+      :reg-objects nil
+      :mov-objects (r :shape (:shapes change))
+      (:add-page
+       :mod-page :del-page
+       :mov-page) (r :page (:id change))
+      (:add-color
+       :mod-color) (r :color (get-in change [:color :id]))
+      :del-color (r :color (:id change))
+      :add-recent-color nil
+      (:add-media
+       :mod-media) (r :media (get-in change [:object :id]))
+      :del-media (r :media (:id change))
+      (:add-component
+       :mod-component
+       :del-component) (r :component (:id change))
+      (:add-typography
+       :mod-typography) (r :typography (get-in change [:typography :id]))
+      :del-typography (r :typography (:id change))
+      (sp-history/token-change change undo-change))))
 
 (defn resolve-shape-types
   "Retrieve the type to be shown to the user"
@@ -203,32 +186,9 @@
 (defn is-shape? [type]
   (contains? #{:shape :rect :circle :text :path :frame :group} type))
 
-(defn parse-entry [{:keys [redo-changes undo-changes]}]
-  (map parse-change redo-changes (reverse undo-changes)))
-
-(defn group-undo-entries
-  "Coalesces adjacent undo entries that belong to one user action.
-  The undo stack intentionally keeps propagation commits separate, but
-  history should present the shared undo group as a single selectable row."
-  [entries]
-  (reduce-kv
-   (fn [groups index entry]
-     (let [entry (assoc entry
-                        ::start-index index
-                        ::end-index index)
-           previous (peek groups)]
-       (if (and previous
-                (some? (:undo-group entry))
-                (= (:undo-group previous) (:undo-group entry)))
-         (conj (pop groups)
-               (-> previous
-                   (update :redo-changes into (:redo-changes entry))
-                   (update :undo-changes #(into (:undo-changes entry) %))
-                   (assoc ::end-index index
-                          :selected-after (:selected-after entry))))
-         (conj groups entry))))
-   []
-   (vec entries)))
+(defn parse-entry [{:keys [redo-changes] :as entry}]
+  (->> (sp-history/paired-undo-changes entry)
+       (map parse-change redo-changes)))
 
 (defn- short-id
   "Build a short git-like label for an undo entry. Derives it from the
@@ -260,32 +220,7 @@
         ;; Retrieve also by-type and by-operation
         types (group-by first (keys entries))
         operations (group-by second (keys entries))
-
-        token-action-entry
-        (when (and (seq types)
-                   (some #{:token :token-set :token-theme} (keys types))
-                   (every? #(or (contains? #{:token :token-set :token-theme} %)
-                                (is-shape? %))
-                           (keys types)))
-          (let [preferred-type (cond
-                                 (contains? types :token) :token
-                                 (contains? types :token-set) :token-set
-                                 :else :token-theme)
-                preferred-keys (filter #(= preferred-type (first %))
-                                       (keys entries))
-                preferred-operation
-                (cond
-                  (some #(= :new (second %)) preferred-keys) :new
-                  (some #(= :delete (second %)) preferred-keys) :delete
-                  (some #(= :modify (second %)) preferred-keys) :modify
-                  :else :multiple)
-                preferred-keys (filter #(= preferred-operation (second %))
-                                       preferred-keys)]
-            {:type preferred-type
-             :operation preferred-operation
-             :id (if (= 1 (count preferred-keys))
-                   (-> preferred-keys first last)
-                   :multiple)}))
+        token-entry (sp-history/token-action-entry entries is-shape?)
 
         ;; The cases for the selection of the representative entry are a bit
         ;; convoluted. Best to read the comments to clarify.
@@ -298,10 +233,8 @@
           (single? entries)
           (-> entries (get (first (keys entries))) (last))
 
-          ;; Token edits can also update paired Themes and concrete shape
-          ;; values. Present those implementation details as one Token action.
-          token-action-entry
-          token-action-entry
+          (some? token-entry)
+          token-entry
 
           ;; If we're creating an object it will have priority
           (single? (:new operations))
@@ -320,10 +253,7 @@
           ;; types (i.e: delete various shapes). If that happens we return
           ;; the operation with `:multiple` id
           (single? operations)
-          {:type (cond
-                   (single? types) (first (keys types))
-                   (every? is-shape? (keys types)) :shape
-                   :else :multiple)
+          {:type (if (every? is-shape? (keys types)) :shape :multiple)
            :id :multiple
            :operation (first (keys operations))}
 
@@ -353,10 +283,7 @@
                        (map :id))
           candidates)]
 
-    (assoc selected-entry
-           :detail (when-not (contains? #{:token :token-set :token-theme}
-                                        (:type selected-entry))
-                     detail))))
+    (assoc selected-entry :detail (when-not (sp-history/token-type? (:type selected-entry)) detail))))
 
 (defn parse-entries [entries objects]
   ;; Propagate per-entry metadata (timestamp, undo-group, author) onto
@@ -369,8 +296,8 @@
               (assoc :timestamp  (:timestamp  raw-entry)
                      :undo-group (:undo-group raw-entry)
                      :by         (:by         raw-entry)
-                     ::start-index (::start-index raw-entry)
-                     ::end-index   (::end-index raw-entry))))
+                     ::sp-history/start-index (::sp-history/start-index raw-entry)
+                     ::sp-history/end-index   (::sp-history/end-index raw-entry))))
         entries))
 
 (mf/defc history-entry-details* [{:keys [entry]}]
@@ -466,9 +393,7 @@
   []
   (let [objects (mf/deref refs/workspace-page-objects)
         {:keys [items index]} (mf/deref workspace-undo)
-        entries (-> items
-                    (group-undo-entries)
-                    (parse-entries objects))]
+        entries (parse-entries (sp-history/undo-rows items) objects)]
     [:div {:class (stl/css :history-toolbox)}
      (if (empty? entries)
        [:div {:class (stl/css :history-entry-empty)}
@@ -476,10 +401,13 @@
                           :text (tr "workspace.undo.empty")}]]
        [:ul {:class (stl/css :history-entries)}
         (for [entry (reverse entries)
-              :let [start-index (::start-index entry)
-                    end-index (::end-index entry)]]
-          [:> history-entry* {:key (str "entry-" end-index)
+              :let [start-index (::sp-history/start-index entry)
+                    idx-entry   (::sp-history/end-index entry)]]
+          [:> history-entry* {:key (str "entry-" idx-entry)
                               :entry entry
-                              :idx-entry end-index
-                              :is-current (<= start-index index end-index)
+                              :idx-entry idx-entry
+                              :is-current (<= start-index index idx-entry)
                               :is-disabled (> start-index index)}])])]))
+
+
+

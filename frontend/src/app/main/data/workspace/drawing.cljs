@@ -10,7 +10,6 @@
    [app.common.data.macros :as dm]
    [app.common.math :as mth]
    [app.common.uuid :as uuid]
-   [app.main.data.notifications :as ntf]
    [app.main.data.workspace.common :as dwc]
    [app.main.data.workspace.drawing.box :as box]
    [app.main.data.workspace.drawing.common :as common]
@@ -31,35 +30,34 @@
   (ptk/reify ::select-for-drawing
     ptk/UpdateEvent
     (update [_ state]
-      (if (and (dsep/current-page-locked? state) (not= tool :comments))
-        (update state :workspace-drawing dissoc :tool)
-        (-> state
-            (update :workspace-layout (fn [workspace-layout]
-                                        (if (= tool :comments)
-                                          (disj workspace-layout :document-history)
-                                          workspace-layout)))
-            (update :workspace-drawing assoc :tool tool)
-            ;; When changing drawing tool disable "scale text" mode
-            ;; automatically, to help users that ignore how this
-            ;; mode works.
-            (update :workspace-layout disj :scale-text))))
+      (-> state
+          (update :workspace-layout (fn [workspace-layout]
+                                      (if (= tool :comments)
+                                        (disj workspace-layout :document-history)
+                                        workspace-layout)))
+          (update :workspace-drawing assoc :tool (when-not (dsep/drawing-blocked? state tool) tool))
+          ;; When changing drawing tool disable "scale text" mode
+          ;; automatically, to help users that ignore how this
+          ;; mode works.
+          (update :workspace-layout disj :scale-text)))
 
     ptk/WatchEvent
     (watch [_ state stream]
-      (if (and (dsep/current-page-locked? state) (not= tool :comments))
-        (rx/of (ntf/warn (dsep/blocked-message :structure)))
-        (rx/merge
-         (when (= tool :path)
-           (rx/of (start-drawing :path)))
+      (rx/merge
+       (when (dsep/drawing-blocked? state tool)
+         (rx/of (dsep/blocked-warning :structure)))
 
-         (when (and (not= tool :comments)
-                    (not= tool :path))
-           (let [stopper (rx/filter (ptk/type? ::clear-drawing) stream)]
-             (->> stream
-                  (rx/filter dwc/interrupt?)
-                  (rx/take 1)
-                  (rx/map #(common/clear-drawing {:preserve-tool? true}))
-                  (rx/take-until stopper)))))))))
+       (when (and (= tool :path) (not (dsep/drawing-blocked? state tool)))
+         (rx/of (start-drawing :path)))
+
+       (when (and (not= tool :comments)
+                  (not= tool :path))
+         (let [stopper (rx/filter (ptk/type? ::clear-drawing) stream)]
+           (->> stream
+                (rx/filter dwc/interrupt?)
+                (rx/take 1)
+                (rx/map #(common/clear-drawing {:preserve-tool? true}))
+                (rx/take-until stopper))))))))
 
 ;; NOTE/TODO: when an exception is raised in some point of drawing the
 ;; draw lock is not released so the user need to refresh in order to
@@ -72,14 +70,12 @@
     (ptk/reify ::start-drawing
       ptk/UpdateEvent
       (update [_ state]
-        (if (dsep/current-page-locked? state)
-          state
-          (update-in state [:workspace-drawing :lock] #(if (nil? %) lock-id %))))
+        (update-in state [:workspace-drawing :lock] #(if (and (nil? %) (not (dsep/drawing-blocked? state type))) lock-id %)))
 
       ptk/WatchEvent
       (watch [_ state stream]
         (let [lock (dm/get-in state [:workspace-drawing :lock])]
-          (when (and (not (dsep/current-page-locked? state)) (= lock lock-id))
+          (when (= lock lock-id)
             (rx/merge
              (rx/of (handle-drawing type))
              (->> stream
@@ -91,15 +87,14 @@
   [type]
   (ptk/reify ::handle-drawing
     ptk/WatchEvent
-    (watch [_ state _]
-      (when-not (dsep/current-page-locked? state)
-        (rx/of
-         (case type
-           :path  (path/handle-drawing)
-           :curve (curve/handle-drawing)
-           :line  (line/handle-drawing :line)
-           :arrow (line/handle-drawing :arrow)
-           (box/handle-drawing type)))))))
+    (watch [_ _ _]
+      (rx/of
+       (case type
+         :path  (path/handle-drawing)
+         :curve (curve/handle-drawing)
+         :line  (line/handle-drawing :line)
+         :arrow (line/handle-drawing :arrow)
+         (box/handle-drawing type))))))
 
 (defn change-orientation
   [orientation]
@@ -132,3 +127,6 @@
     ptk/UpdateEvent
     (update [_ state]
       (update state :workspace-drawing assoc :width width :height height))))
+
+
+

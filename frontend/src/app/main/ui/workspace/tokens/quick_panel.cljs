@@ -12,8 +12,8 @@
    [app.common.types.shape.layout :as ctsl]
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace.tokens.application :as dwta]
-   [app.main.data.workspace.tokens.library-edit :as dwtl]
    [app.main.refs :as refs]
+   [app.main.smallpen.token-matrix :as sptm]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.button :refer [button*]]
@@ -65,6 +65,7 @@
 
         open-combination
         (mf/use-fn
+         (mf/deps can-edit?)
          (fn []
            (when can-edit?
              (reset! combination-open* true))))
@@ -74,7 +75,7 @@
          (fn [value axis]
            (when-let [variant (some #(when (= (str (:id %)) value) %)
                                     (:variants axis))]
-             (st/emit! (dwtl/activate-token-matrix-variant
+             (st/emit! (sptm/activate-token-matrix-variant
                         (:name axis)
                         (:set-id variant))))))
 
@@ -126,6 +127,7 @@
                                 :selected-shapes selected-shapes
                                 :is-selected-inside-layout selected-inside-layout?
                                 :active-theme-tokens resolved-active-tokens
+                                :can-edit can-edit?
                                 :on-click apply-token}])]])]
         [:> text* {:as "p"
                    :typography "body-small"

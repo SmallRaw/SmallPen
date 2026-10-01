@@ -5,22 +5,28 @@
 (ns app.main.smallpen
   (:require
    [app.common.data :as d]
+   [app.common.files.helpers :as cfh]
    [app.common.geom.point :as gpt]
    [app.common.transit :as t]
    [app.common.uuid :as uuid]
    [app.config :as cf]
-   [app.main.features.pointer-map :as fpmap]
+   [app.main.data.changes :as-alias dch]
+   [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
    [app.main.data.persistence :as dps]
+   [app.main.data.workspace :as-alias dw]
    [app.main.data.workspace.common :as dwc]
+   [app.main.data.workspace.undo :as dwu]
    [app.main.data.workspace.viewport :as dwv]
+   [app.main.features.pointer-map :as fpmap]
    [app.main.repo :as rp]
    [app.main.smallpen.projection :as projection]
    [app.main.smallpen.session :as local-session]
    [app.main.store :as st]
+   [app.util.i18n :refer [tr]]
+   [app.util.timers :as tm]
    [beicon.v2.core :as rx]
    [clojure.string :as str]
-   [app.util.timers :as tm]
    [potok.v2.core :as ptk]))
 
 (defonce ^:private backend-url (atom nil))
@@ -28,6 +34,14 @@
 (defonce ^:private workspace-state (atom nil))
 (defonce ^:private workspace-promise (atom nil))
 (defonce ^:private external-reconciliation? (atom false))
+;; Every Package write moves the revision, so writes go out one at a time:
+;; a commit is based on the revision left by the write before it.
+(defonce ^:private write-queue (atom (js/Promise.resolve nil)))
+;; The latest revisions this window's own writes produced.
+(defonce ^:private own-revisions (atom []))
+;; Runtime ids of Media uploaded for a shape (Penpot's `:is-local`) that no
+;; saved change references yet.
+(defonce ^:private local-media (atom #{}))
 ;; SP-045/046: Home renders the last routing failure so an unusable deep link
 ;; returns to an actionable Home instead of a silent redirect or a stuck loader.
 (defonce home-notice (atom nil))
@@ -60,7 +74,7 @@
         (map (fn [id]
                [id (or (get-method rp/cmd! id) default-command)]))
         [:get-profile
-         :get-enabled-flags
+         :get-environment-data
          :update-profile-props
          :update-profile
          :get-teams
@@ -118,37 +132,6 @@
         (true? (get-in @workspace-state [:capabilities field]
                        (get default-capability-profile capability)))
         false))))
-
-(defn penpot-attributes-supported?
-  [attributes]
-  (if-not (enabled?)
-    true
-    (let [supported (->> (get-in @workspace-state
-                                 [:format-capabilities :penpotWrite :attributes])
-                         (into #{}))]
-      (every? #(contains? supported (name %)) attributes))))
-
-(defn penpot-attribute-supported?
-  [attribute]
-  (penpot-attributes-supported? [attribute]))
-
-(defn penpot-page-attribute-supported?
-  [attribute]
-  (if-not (enabled?)
-    true
-    (contains? (->> (get-in @workspace-state
-                            [:format-capabilities :penpotWrite :pageAttributes])
-                    (into #{}))
-               (name attribute))))
-
-(defn canonical-node-type-supported?
-  [node-type]
-  (if-not (enabled?)
-    true
-    (contains? (->> (get-in @workspace-state
-                            [:format-capabilities :canonicalPackage :nodeTypes])
-                    (into #{}))
-               node-type)))
 
 (defn- fallback-command
   [id params]
@@ -228,11 +211,6 @@
   []
   (request "/v1/packages"))
 
-(defn design-system-workspace
-  "Read-only aggregation of the package design system (DSP-002-A)."
-  []
-  (request "/v1/ui/design-system"))
-
 (defn- json-value
   [value]
   (cond
@@ -265,24 +243,21 @@
                 :headers #js {"content-type" "application/json"}
                 :body (js/JSON.stringify (clj->js (json-value value)))}))
 
-(defn commit-operations
-  "Apply a canonical Operation Batch to the selected Package (DSP-017-B)."
-  [batch]
-  (post-json "/v1/operations" batch))
-
-(defn font-asset-url
-  "Binary URL of a Package font asset served by the Background (DSP-008-A)."
-  [id]
-  (package-endpoint (str "/v1/font/" id)))
-
-(defn canvas-workspace
-  "Generated canvas surface: scene + layout + render payload (DSC-009/010).
-  themes is an optional observational Workbench Combination."
-  [themes]
-  (let [query (if (seq themes)
-                (str "?themes=" (str/join "," (map name themes)))
-                "")]
-    (request (str "/v1/ui/canvas" query))))
+(defn- serialized-write
+  "Start the Package write `start` (a thunk returning a promise) once every
+  earlier write has settled. A Media import that lands while a commit is in
+  flight moves the revision under it, and the Background then rejects the
+  commit as stale (409)."
+  [start]
+  (let [result (.then @write-queue (fn [_] (start)))]
+    (reset! write-queue
+            (-> result
+                (.then (fn [{:keys [revision]}]
+                         (when revision
+                           (swap! own-revisions
+                                  #(->> (conj % revision) (take-last 64) (vec))))))
+                (.catch (constantly nil))))
+    result))
 
 (defn- home-url
   []
@@ -343,14 +318,20 @@
                           object-id  (or (:instanceId cause-data)
                                          (:nodeId cause-data)
                                          (:componentId cause-data))
-                          message   (str
-                                     "SmallPen 无法在 Web 中加载这个设计。\n\n"
-                                     "位置：" (:screenName details)
-                                     " / " (:presentationName details)
-                                     (when object-id (str "\n对象：" object-id))
-                                     "\n错误：" cause-code
-                                     "\n说明：" (ex-message cause)
-                                     "\n\n原文件没有被修改，请修复上述对象后重新打开。")
+                          message   (str/join
+                                     "\n"
+                                     (remove nil?
+                                             [(tr "smallpen.load.projection-failed")
+                                              ""
+                                              (tr "smallpen.load.location"
+                                                  (str (:screenName details))
+                                                  (str (:presentationName details)))
+                                              (when object-id
+                                                (tr "smallpen.load.object" (str object-id)))
+                                              (tr "smallpen.load.error-code" (str cause-code))
+                                              (tr "smallpen.load.error-message" (str (ex-message cause)))
+                                              ""
+                                              (tr "smallpen.load.file-unchanged")]))
                           home      (home-url)]
                       ;; A modal is intentional here: workspace initialization
                       ;; has failed, so a toast could disappear behind Penpot's
@@ -358,8 +339,12 @@
                       ;; SmallPen Home instead of leaving an endless spinner.
                       (js/alert message)
                       (.replace js/location (.-href home))))
-                  (throw cause)))
+                  ;; Callers receive the rejection through `pending`; this
+                  ;; branch only reacts to it. Rethrowing here would reject
+                  ;; the discarded `.catch` promise as an unhandled rejection.
+                  nil))
         pending)))
+
 (defn workspace-snapshot
   "Public handle to the memoized Package workspace snapshot promise
   (DSE-008). Rejects like the internal boot when the Package cannot load."
@@ -405,6 +390,23 @@
                      :project-id project-id})]
     (:file result)))
 
+(def ^:private history-cleared-key "smallpen-history-cleared")
+
+(defn- session-storage
+  []
+  (unchecked-get js/globalThis "sessionStorage"))
+
+(defn- take-history-cleared-notice!
+  "True once for the Package session whose history an external revision
+  cleared."
+  [session-id]
+  (let [storage (session-storage)]
+    (when (and (some? session-id)
+               (some? storage)
+               (= session-id (.getItem storage history-cleared-key)))
+      (.removeItem storage history-cleared-key)
+      true)))
+
 (defn- project-workspace-file
   [snapshot id]
   (let [project-id (-> snapshot :runtime :project uuid/parse)
@@ -428,32 +430,27 @@
       (st/emit! (dwc/set-workspace-read-only true))
       (st/emit!
        (ntf/show
-        {:content "SmallPen Package 处于 Repair 状态：以最后有效的只读视图打开。"
+        {:content (tr "smallpen.load.repair-read-only")
          :level :error
          :timeout 30000
+         :type :toast})))
+    (when (take-history-cleared-notice! (:packageSessionId snapshot))
+      (st/async-emit!
+       (ntf/show
+        {:content (tr "smallpen.external.history-cleared")
+         :level :info
+         :timeout 10000
          :type :toast})))
     (when (seq (:projectionErrors snapshot))
       (let [{:keys [code message]} (first (:projectionErrors snapshot))
             total (count (:projectionErrors snapshot))]
         (st/async-emit!
          (ntf/show
-          {:content (str "SmallPen 已安全加载，但有 " total
-                         " 个投影错误。" code ": " message)
+          {:content (tr "smallpen.load.projection-errors" total (str code) (str message))
            :level :error
            :timeout 12000
            :type :toast}))))
     (project-file snapshot id libraries)))
-
-(defn- open-library-file
-  [id]
-  (if-let [snapshot (get-in @workspace-state
-                            [:library-snapshots (str id)])]
-    (rx/of (project-file snapshot id (vals (:library-snapshots
-                                            @workspace-state))))
-    (rx/throw (ex-info "SmallPen Library snapshot is unavailable"
-                       {:type :validation
-                        :code :missing-smallpen-library
-                        :file-id (str id)}))))
 
 (defn- reconcile-library-files!
   [{:keys [libraries revision] :as result}]
@@ -501,7 +498,7 @@
 
 (defn link-library!
   [source]
-  (-> (post-json "/v1/libraries/link" {:source source})
+  (-> (serialized-write #(post-json "/v1/libraries/link" {:source source}))
       (.then reconcile-library-files!)))
 
 (defn import-local-library!
@@ -516,12 +513,12 @@
 
 (defn unlink-library!
   [package-id]
-  (-> (post-json "/v1/libraries/unlink" {:packageId package-id})
+  (-> (serialized-write #(post-json "/v1/libraries/unlink" {:packageId package-id}))
       (.then reconcile-library-files!)))
 
 (defn refresh-library!
   [package-id]
-  (-> (post-json "/v1/libraries/refresh" {:packageId package-id})
+  (-> (serialized-write #(post-json "/v1/libraries/refresh" {:packageId package-id}))
       (.then reconcile-library-files!)))
 
 (defn- open-workspace
@@ -545,22 +542,39 @@
   #{"add-obj" "del-obj" "mov-objects" "reorder-children" "reg-objects"
     "add-component" "del-component" "add-page" "del-page" "mov-page"})
 
+(defn generated-page?
+  "True for projection-only pages (generated Design System board, Components
+  overview) that can never be a write destination."
+  [page]
+  (boolean
+   (some (fn [[key _]]
+           (and (string? key)
+                (or (str/starts-with? key "design-system")
+                    (= key "components-page"))))
+         (-> page :plugin-data :smallpen))))
+
+(defn unmeasured-text?
+  "True when a frame holds a text that has no `position-data` yet. Packages
+  do not store that derived attribute; until the viewport measures the text
+  it renders as a `foreignObject`, which taints the rasterizer canvas.
+  Empty texts are never measured."
+  [objects frame-id]
+  (and (enabled?)
+       (boolean
+        (some #(and (cfh/text-shape? %) (nil? (:position-data %)))
+              (cfh/get-children-with-self objects frame-id)))))
+
 (defn- generated-page-open?
-  "True when the page currently open is a generated (projection-only) page:
-  the Design System board or the Components overview."
+  "True when the page currently open is a generated (projection-only) page."
   []
   (let [state   (deref st/state)
         page-id (:current-page-id state)
-        file-id (:current-file-id state)
-        page    (when (and page-id file-id)
-                  (get-in state [:files (uuid/parse (str file-id))
-                                 :data :pages-index page-id]))]
-    (boolean
-     (some (fn [[key _]]
-             (and (string? key)
-                  (or (str/starts-with? key "design-system")
-                      (= key "components-page"))))
-           (-> page :plugin-data :smallpen)))))
+        file-id (:current-file-id state)]
+    (and (some? page-id)
+         (some? file-id)
+         (generated-page?
+          (get-in state [:files (uuid/parse (str file-id))
+                         :data :pages-index page-id])))))
 
 (defn- replace-projected-file
   "Swap the projected file data in place. Deterministic runtime ids keep open
@@ -588,29 +602,75 @@
                   (gpt/point (+ (:x shape) (/ (or (:width shape) 0) 2))
                              (+ (:y shape) (/ (or (:height shape) 0) 2))))))))))
 
+(def ^:private undo-settle-ms 2500)
+
+(defn- settled-undo-stack
+  "The undo stack to keep once the renderer's follow-up commits after a
+  re-projection have settled. Those ride-alongs (text measurement, touched
+  bookkeeping) are not user work; when they land after an undo they truncate
+  the redo tail. The captured stack comes back only when it had a redo tail
+  that newer entries replaced (not a redo of it), every entry up to its
+  index is still in place, and the user has not undone into the newer
+  entries. Otherwise current wins."
+  [captured current]
+  (let [index     (get captured :index -1)
+        items     (vec (get captured :items []))
+        kept      (inc index)
+        cur-items (vec (get current :items []))
+        cur-index (get current :index -1)]
+    (if (and (< kept (count items))
+             (< kept (count cur-items))
+             (= cur-index (dec (count cur-items)))
+             (not= (nth cur-items kept) (nth items kept))
+             (= (subvec items 0 kept) (subvec cur-items 0 kept)))
+      captured
+      current)))
+
+(defn- user-edit?
+  "A local commit that opens its own undo entry. The renderer's follow-ups
+  after a re-projection (text measurement, layout reflow) save no undo or
+  stack onto the current entry."
+  [commit]
+  (boolean
+   (and (= :local (:source commit))
+        (:save-undo? commit)
+        (not (:stack-undo? commit))
+        (seq (:undo-changes commit)))))
+
 (defn- restore-undo-stack
-  "Restore the undo stack captured before a re-projection once the renderer's
-  follow-up commits (text measurement, touched bookkeeping) have settled.
-  Those ride-alongs are not user work; when they land after an undo they
-  would truncate the redo tail. Skipped when newer work grew the stack in the
-  meantime."
-  [undo-stack]
-  (ptk/reify ::restore-undo-stack
-    ptk/WatchEvent
-    (watch [_ _ _]
-      (tm/schedule
-       2500
-       (fn []
-         (st/emit!
-          (ptk/reify ::restore-undo-stack!
-            ptk/UpdateEvent
-            (update [_ state]
-              (let [current (get state :workspace-undo)]
-                (if (< (count (get current :items []))
-                       (count (get undo-stack :items [])))
-                  (assoc state :workspace-undo undo-stack)
-                  state)))))))
-      (rx/empty))))
+  "Once the renderer's follow-up commits after the swap (`swapped`) have
+  settled, put back the undo stack captured before the re-projection (see
+  `settled-undo-stack`). A user edit since the capture truncates the redo
+  tail on purpose and cancels the restore, as does leaving the workspace. A
+  restore never applies to a different file than the one it was captured on."
+  [file-id undo-stack swapped stream]
+  (->> swapped
+       (rx/take 1)
+       (rx/mapcat (fn [_] (rx/timer undo-settle-ms)))
+       (rx/map (fn [_]
+                 (ptk/reify ::restore-undo-stack!
+                   ptk/UpdateEvent
+                   (update [_ state]
+                     (if (= file-id (:current-file-id state))
+                       (update state :workspace-undo
+                               #(settled-undo-stack undo-stack %))
+                       state)))))
+       (rx/take-until
+        (rx/merge
+         (->> stream
+              (rx/filter (ptk/type? ::dch/commit))
+              (rx/map deref)
+              (rx/filter user-edit?))
+         (rx/filter (ptk/type? ::dw/finalize-workspace) stream)))))
+
+(defn- current-projection?
+  "A re-projection result applies only to the file it was requested for and
+  only while it still matches the revision the workspace is on."
+  [file-id snapshot]
+  (let [{current-file :file-id current-revision :revision} @workspace-state]
+    (and (= (str file-id) current-file)
+         (some? (:revision snapshot))
+         (= (:revision snapshot) current-revision))))
 
 (defn- reproject-generated-page
   "Re-fetch the Package snapshot and swap the projected file data in place so
@@ -618,43 +678,51 @@
   persistence first, then recenters the viewport on the current selection
   (e.g. the just-created component) so the new content is on screen. Token
   resyncs pass {:recenter? false}: the user stays where they are and keeps
-  reading the panorama while the other combination columns update."
+  reading the panorama while the other combination columns update.
+
+  A newer re-projection cancels this one, and a snapshot that no longer
+  matches the current revision is dropped, so results never land out of
+  order."
   [{:keys [recenter?] :or {recenter? true}}]
   (ptk/reify ::reproject-generated-page
     ptk/WatchEvent
-    (watch [_ state _]
+    (watch [_ state stream]
       (let [file-id    (:current-file-id state)
             undo-stack (get state :workspace-undo)]
         (when (and (enabled?) file-id)
-          (->> (dps/wait-persisted 15000)
-               (rx/mapcat (fn [_]
-                            (reset! workspace-promise nil)
-                            (->> (workspace)
-                                 (rx/from)
-                                 (rx/map
-                                  (fn [snapshot]
-                                    (project-file
-                                     snapshot
-                                     (uuid/parse (str file-id))
-                                     (or (:libraries snapshot) []))))
-                                 ;; Same pointer resolution as the boot path
-                                 ;; (data.workspace/resolve-file): projected
-                                 ;; files carry lazy pointers that must be
-                                 ;; materialized before entering the store.
-                                 (rx/mapcat
-                                  (fn [file]
-                                    (->> (fpmap/resolve-file file)
-                                         (rx/map :data)
-                                         (rx/map (fn [data]
-                                                   (assoc file :data (d/removem (comp t/pointer? val) data)))))))
-                                 (rx/map replace-projected-file))))
-               (rx/mapcat (fn [event]
-                            (if recenter?
-                              (rx/of event
-                                     (center-viewport-on-selection)
-                                     (restore-undo-stack undo-stack))
-                              (rx/of event
-                                     (restore-undo-stack undo-stack)))))))))))
+          (let [swapped (->> (dps/wait-persisted 15000)
+                             (rx/mapcat (fn [_]
+                                          (reset! workspace-promise nil)
+                                          (->> (workspace)
+                                               (rx/from)
+                                               (rx/filter #(current-projection? file-id %))
+                                               (rx/map
+                                                (fn [snapshot]
+                                                  (project-file
+                                                   snapshot
+                                                   (uuid/parse (str file-id))
+                                                   (or (:libraries snapshot) []))))
+                                       ;; Same pointer resolution as the boot path
+                                       ;; (data.workspace/resolve-file): projected
+                                       ;; files carry lazy pointers that must be
+                                       ;; materialized before entering the store.
+                                               (rx/mapcat
+                                                (fn [file]
+                                                  (->> (fpmap/resolve-file file)
+                                                       (rx/map :data)
+                                                       (rx/map (fn [data]
+                                                                 (assoc file :data (d/removem (comp t/pointer? val) data)))))))
+                                               (rx/map replace-projected-file))))
+                             (rx/take-until
+                              (rx/filter (ptk/type? ::reproject-generated-page) stream))
+                             (rx/share))]
+            (rx/merge
+             (rx/mapcat (fn [event]
+                          (if recenter?
+                            (rx/of event (center-viewport-on-selection))
+                            (rx/of event)))
+                        swapped)
+             (restore-undo-stack file-id undo-stack swapped stream))))))))
 
 ;; DSE-R26: canonical operations that change Token Cell values or the
 ;; project's active themes. When such a batch lands while a generated page
@@ -673,23 +741,122 @@
                     {:type :persistence :code :invalid-save-response})))
   (assoc response :revn (inc (or revn 0))))
 
+(defn- no-op-change?
+  "Penpot emits a `mov-objects` without shapes when a drag ends inside the
+  shapes' own parent. Penpot applies it as a no-op; the Background rejects
+  an empty node move, so it is never sent."
+  [change]
+  (and (= "mov-objects" (some-> (:type change) name))
+       (empty? (:shapes change))))
+
+(defn- shape-layout-offset
+  "The shift a generated page draws a source tree with (projection.cljs
+  `with-layout-offset`), as {:x :y}."
+  [shape]
+  (when-let [value (get-in shape [:plugin-data :smallpen "layout-offset"])]
+    (let [[x y] (map js/Number (str/split value #" "))]
+      (when (and (js/isFinite x) (js/isFinite y))
+        {:x x :y y}))))
+
+(declare generated-page?)
+
+(defn with-layout-offsets
+  "Attach to each shape edit on a generated page the layout offset its tree
+  is drawn with. Penpot reports that copy's page-absolute geometry; the
+  adapter removes the offset to map the edit back to the source node. A
+  shape elsewhere can still carry an offset it inherited from a main, which
+  means nothing there."
+  [state changes]
+  (mapv (fn [change]
+          (let [page   (when (= "mod-obj" (some-> (:type change) name))
+                         (dsh/lookup-page state (:page-id change)))
+                offset (when (generated-page? page)
+                         (-> (:objects page)
+                             (get (:id change))
+                             (shape-layout-offset)))]
+            (cond-> change
+              (some? offset) (assoc :smallpen-layout-offset offset))))
+        changes))
+
+(defn- rejected-commit?
+  "The Background refused the change itself (422): it can never be written
+  to the Package. A stale revision (409) or a transport failure is not a
+  rejection and keeps Penpot's own persistence handling."
+  [cause]
+  (let [{:keys [type status]} (ex-data cause)]
+    (and (= :smallpen-backend type)
+         (= 422 status))))
+
+(defn- drop-rejected-commit
+  "Penpot halts autosave for the session after a failed save, so every
+  later edit would be lost. A rejected change exists only locally: say so,
+  and roll the workspace back to the Package so the next edits build on what
+  was saved. Undo entries may target the dropped change, so history goes."
+  [cause]
+  (ptk/reify ::drop-rejected-commit
+    ptk/WatchEvent
+    (watch [_ _ _]
+      (rx/of (ntf/show
+              {:content (tr "smallpen.save.change-rejected" (str (ex-message cause)))
+               :level :error
+               :timeout 15000
+               :type :toast})
+             dwu/reinitialize-undo
+             (reproject-generated-page {:recenter? false})))))
+
+(defn- referenced-local-media
+  "The pending `local-media` ids that `changes` refer to."
+  [changes]
+  (let [pending @local-media]
+    (if (empty? pending)
+      #{}
+      (into #{}
+            (filter #(and (uuid? %) (contains? pending %)))
+            (tree-seq coll? seq changes)))))
+
+(defn- remove-orphan-media
+  "Penpot keeps a pasted or dropped image out of the library (`:is-local`),
+  but a Package only has library Media. When the Background refuses the
+  change that placed such an upload, nothing uses it any more: remove it so
+  the failed paste leaves no library entry behind."
+  [changes]
+  (if-let [orphans (not-empty (referenced-local-media changes))]
+    (->> (serialized-write
+          #(post-json "/v1/penpot/commit"
+                      {:baseRevision (:revision @workspace-state)
+                       :changes (mapv (fn [id] {:type :del-media :id id}) orphans)
+                       :commitId (str (uuid/next))}))
+         (rx/from)
+         (rx/tap (fn [response]
+                   (swap! local-media #(reduce disj % orphans))
+                   (update-revision! response)))
+         (rx/map (constantly nil))
+         (rx/catch (fn [cause]
+                     (js/console.error "SmallPen could not remove unused Media" cause)
+                     (rx/of nil))))
+    (rx/of nil)))
+
 (defn- commit-workspace
   [{:keys [changes commit-id revn]}]
-  (if (seq changes)
-    (let [{:keys [file-id revision]} @workspace-state
+  (if-let [changes (not-empty (->> changes
+                                   (into [] (remove no-op-change?))
+                                   (with-layout-offsets @st/state)))]
+    (let [{:keys [file-id]} @workspace-state
           structural? (boolean
                        (some #(contains? structural-change-types
                                          (name (or (:type %) %)))
                              changes))]
-      (->> (post-json "/v1/penpot/commit"
-                      {:baseRevision revision
-                       :changes changes
-                       :commitId (str commit-id)})
+      (->> (serialized-write
+            #(post-json "/v1/penpot/commit"
+                        {:baseRevision (:revision @workspace-state)
+                         :changes changes
+                         :commitId (str commit-id)}))
            (rx/from)
            (rx/map #(save-acknowledgement % revn))
            ;; 切换文件后到达的旧响应不能污染新文件的修订状态。
            (rx/tap (fn [response]
                      (when (= file-id (:file-id @workspace-state))
+                       (swap! local-media #(reduce disj % (referenced-local-media changes)))
                        (update-revision! response)
                        ;; DSE-R11: structural source changes (create/undo/redo/
                        ;; delete of components or source objects) make the
@@ -704,24 +871,60 @@
                                             (filter token-operation-types)
                                             (distinct))))
                          (st/async-emit! (reproject-generated-page
-                                          {:recenter? false}))))))))
+                                          {:recenter? false}))))))
+           ;; Acknowledge a rejected change as a no-op save so the queue
+           ;; moves on; the workspace drops it locally.
+           (rx/catch (fn [cause]
+                       (if (and (rejected-commit? cause)
+                                (= file-id (:file-id @workspace-state)))
+                         (->> (remove-orphan-media changes)
+                              (rx/map (fn [_]
+                                        (st/async-emit! (drop-rejected-commit cause))
+                                        {:revision (:revision @workspace-state)
+                                         :revn (or revn 0)})))
+                         (rx/throw cause))))))
     (rx/of {:revision (:revision @workspace-state)
             :revn (or revn 0)})))
 
+(defn- media-upload-headers
+  "HTTP header values must be ISO-8859-1, so a file name such as 截图.png
+  would make fetch throw. The name travels percent-encoded and the
+  Background decodes it."
+  [content name]
+  #js {"content-type" (.-type content)
+       "x-smallpen-media-name" (js/encodeURIComponent (or name ""))})
+
+(defn media-object
+  "Penpot reads a file media object's ids as uuids; the Background answers
+  them as JSON strings."
+  [value]
+  (reduce (fn [value key] (d/update-when value key uuid/parse*))
+          (dissoc value :revision)
+          [:id :file-id :media-id :thumbnail-id]))
+
+(defn- track-local-media
+  "Remember an upload made for a shape (`:is-local`) until a saved change
+  references it; see `remove-orphan-media`."
+  [is-local media]
+  (when (true? is-local)
+    (swap! local-media conj (:id media)))
+  media)
+
 (defn- upload-media
-  [{:keys [content name]}]
+  [{:keys [content name is-local]}]
   (when-not (instance? js/Blob content)
     (throw (ex-info "SmallPen Media upload requires a Blob"
                     {:type :validation
                      :code :invalid-media-blob})))
-  (->> (request "/v1/media/import"
-                #js {:method "POST"
-                     :headers #js {"content-type" (.-type content)
-                                   "x-smallpen-media-name" name}
-                     :body content})
+  (->> (serialized-write
+        #(request "/v1/media/import"
+                  #js {:method "POST"
+                       :headers (media-upload-headers content name)
+                       :body content}))
        (rx/from)
        (rx/tap update-revision!)
-       (rx/map #(dissoc % :revision))))
+       (rx/map media-object)
+       (rx/map (partial track-local-media is-local))))
 
 (defn- upload-chunk
   [{:keys [content index session-id]}]
@@ -738,7 +941,7 @@
 
 (defn- font-command
   [path params]
-  (->> (post-json path params)
+  (->> (serialized-write #(post-json path params))
        (rx/from)
        (rx/tap update-revision!)))
 
@@ -752,23 +955,49 @@
     (snapshot-result local-session/profile)
     (fallback-command id params)))
 
-(defmethod rp/cmd! :get-enabled-flags
+(defmethod rp/cmd! :get-environment-data
   [id params]
   (if (enabled?)
     ;; SmallPen is a local Package workspace. Returning no remote feature flags
     ;; keeps Penpot's official instrumentation lifecycle intact while preventing
     ;; it from starting telemetry/audit collection against a nonexistent server.
-    (rx/of #{})
+    ;; A failed request would make Penpot fall back to telemetry instead.
+    (rx/of {:deployment "selfhost" :flags #{}})
     (fallback-command id params)))
+
+(def ^:private satisfied-profile-props
+  "First-run markers Penpot writes on its own. The local profile already
+  reports every one of them as done, so there is nothing to persist."
+  #{:onboarding-questions
+    :onboarding-questions-answered
+    :onboarding-team-id
+    :onboarding-viewed
+    :release-notes-viewed
+    :v2-info-shown
+    :workspace-visited})
+
+(defn- unsupported-profile-props
+  [props]
+  (->> (keys props)
+       (remove #(or (= :renderer %)
+                    (contains? satisfied-profile-props %)))
+       (sort)
+       (seq)))
 
 (defmethod rp/cmd! :update-profile-props
   [id params]
   (if (enabled?)
-    (if-let [renderer (get-in params [:props :renderer])]
-      (->> (post-json "/v1/preferences" {:renderer renderer})
-           (rx/from)
-           (rx/tap #(reset! workspace-promise nil)))
-      (rx/of nil))
+    (let [props (:props params)]
+      (if-let [unsupported (unsupported-profile-props props)]
+        (rx/throw (ex-info "SmallPen cannot store these profile properties"
+                           {:type :restriction
+                            :code :smallpen-unsupported-profile-props
+                            :props (vec unsupported)}))
+        (if-let [renderer (:renderer props)]
+          (->> (post-json "/v1/preferences" {:renderer renderer})
+               (rx/from)
+               (rx/tap #(reset! workspace-promise nil)))
+          (rx/of nil))))
     (fallback-command id params)))
 
 (defmethod rp/cmd! :update-profile
@@ -828,7 +1057,8 @@
   [id params]
   (if (enabled?)
     (->> (font-command "/v1/media/assemble" params)
-         (rx/map #(dissoc % :revision)))
+         (rx/map media-object)
+         (rx/map (partial track-local-media (:is-local params))))
     (fallback-command id params)))
 
 (defmethod rp/cmd! :create-font-variant
@@ -975,8 +1205,7 @@
     ptk/EffectEvent
     (effect [_ _ _]
       (reset! external-reconciliation? false)
-      (js/alert
-       "SmallPen preserved your local edits, but could not merge the external Package change automatically. Keep this window open and copy any unsaved work before reloading."))))
+      (js/alert (tr "smallpen.external.merge-failed")))))
 
 (defn- persist-before-external-reload
   []
@@ -989,16 +1218,90 @@
             (rx/map (fn [_] (finish-external-reconciliation)))
             (rx/if-empty (external-reconciliation-timeout)))))))
 
-(defn- reconcile-external-change!
-  [message update-product-revision?]
+(defn- begin-external-reconciliation!
+  "Start reconciling with a Package revision written outside this workspace.
+  The known revision stays the one local edits were made against: pending
+  edits flush with that baseRevision, so the Background rejects a stale one
+  (409) instead of writing it over the external change, and the rejection
+  reaches the alert in `external-reconciliation-timeout`. The new revision
+  is adopted only by the reload, from a fresh snapshot. False when a
+  reconciliation is already running."
+  []
   (when (compare-and-set! external-reconciliation? false true)
     (reset! workspace-promise nil)
-    (when update-product-revision?
-      (when-let [revision (unchecked-get message "revision")]
-        (swap! workspace-state assoc :revision revision)))
+    true))
+
+(defn- reconcile-external-change!
+  []
+  (when (begin-external-reconciliation!)
     (st/emit! (freeze-for-external-reconciliation)
               (dwc/set-workspace-read-only true)
               (persist-before-external-reload))))
+
+(defn- note-history-cleared!
+  "The Background dropped its local Undo/Redo with an external revision:
+  every entry targets content that no longer exists. Penpot's stack is
+  cleared too. When it offered anything, the notice is staged in
+  sessionStorage so it survives the reconciliation reload; the Background
+  history may come from an earlier window this one never showed."
+  [session-id]
+  (when (seq (get-in @st/state [:workspace-undo :items]))
+    (some-> (session-storage) (.setItem history-cleared-key session-id)))
+  (st/emit! dwu/reinitialize-undo))
+
+(defn- foreign-write?
+  "Resolves true when a write announced with `revision` came from another
+  window on the same Package session. This window's own writes are
+  announced the same way, sometimes before their response arrives, so the
+  answer waits for the writes in flight to settle."
+  [revision]
+  (.then @write-queue
+         (fn [_]
+           (not (or (= revision (:revision @workspace-state))
+                    (some #{revision} @own-revisions))))))
+
+(defn- handle-event!
+  [message]
+  (let [type       (unchecked-get message "type")
+        session-id (unchecked-get message "sessionId")
+        current?   (= session-id (:package-session-id @workspace-state))]
+    (case type
+      "external-revision"
+      (when current?
+        (when (true? (unchecked-get message "historyCleared"))
+          (note-history-cleared! session-id))
+        (reconcile-external-change!))
+      "external-recovered"
+      (when current?
+        (reconcile-external-change!))
+      ("package-committed" "package-undone" "package-redone")
+      (when current?
+        (.then (foreign-write? (unchecked-get message "revision"))
+               #(when % (reconcile-external-change!))))
+      "package-dependency-changed"
+      (when current?
+        (reconcile-external-change!))
+      "invalid-external-state"
+      (when current?
+        (swap! workspace-state assoc
+               :package-status
+               (-> (:package-status @workspace-state)
+                   (assoc :readOnly true)
+                   (assoc :state "repair")
+                   (assoc :error
+                          (js->clj (unchecked-get message "error")
+                                   :keywordize-keys true))))
+        ;; The backend keeps serving the last valid projection; stay
+        ;; on it read-only instead of reloading into a repair loop.
+        (st/emit! (dwc/set-workspace-read-only true))
+        (st/emit!
+         (ntf/show
+          {:content (tr "smallpen.external.invalid-package")
+           :level :error
+           :timeout 30000
+           :type :toast}))
+        (js/console.error "SmallPen package is invalid; keeping the last valid workspace read-only"))
+      nil)))
 
 (defn- start-events!
   []
@@ -1006,68 +1309,35 @@
   (let [source (js/EventSource. (endpoint "/v1/events"))]
     (set! (.-onmessage source)
           (fn [event]
-            (let [message (js/JSON.parse (.-data event))
-                  type    (unchecked-get message "type")]
-              (case type
-                "external-revision"
-                (when (= (unchecked-get message "sessionId")
-                         (:package-session-id @workspace-state))
-                  (reconcile-external-change! message true))
-                "external-recovered"
-                (when (= (unchecked-get message "sessionId")
-                         (:package-session-id @workspace-state))
-                  (reconcile-external-change! message true))
-                "package-dependency-changed"
-                (when (= (unchecked-get message "sessionId")
-                         (:package-session-id @workspace-state))
-                  (reconcile-external-change! message false))
-                "invalid-external-state"
-                (when (= (unchecked-get message "sessionId")
-                         (:package-session-id @workspace-state))
-                  (swap! workspace-state assoc
-                         :package-status
-                         (-> (:package-status @workspace-state)
-                             (assoc :readOnly true)
-                             (assoc :state "repair")
-                             (assoc :error
-                                    (js->clj (unchecked-get message "error")
-                                             :keywordize-keys true))))
-                  ;; The backend keeps serving the last valid projection; stay
-                  ;; on it read-only instead of reloading into a repair loop.
-                  (st/emit! (dwc/set-workspace-read-only true))
-                  (st/emit!
-                   (ntf/show
-                    {:content "SmallPen 检测到外部文件无效：已保留最后有效的只读视图，请修复文件后继续。"
-                     :level :error
-                     :timeout 30000
-                     :type :toast}))
-                  (js/console.error "SmallPen package is invalid; keeping the last valid workspace read-only"))
-                nil))))
+            (handle-event! (js/JSON.parse (.-data event)))))
     (reset! event-source source)))
 
 (defn runtime-options
+  "Only the SmallPen web host injects `smallpenRuntime`. Without it this
+  bundle is an ordinary Penpot deployment and the URL parameters are
+  ignored, so a crafted link cannot switch it into SmallPen mode."
   ([href]
    (runtime-options href (unchecked-get js/globalThis "smallpenRuntime")))
   ([href runtime]
-   (let [url              (js/URL. href)
-         parameters       (.-searchParams url)
-         route-query      (some-> (.-hash url)
-                                  (str/split #"\?" 2)
-                                  (second))
-         route-parameters (js/URLSearchParams. (or route-query ""))
-         injected-backend (when runtime (unchecked-get runtime "backendUrl"))
-         injected-package (when runtime (unchecked-get runtime "packageSessionId"))
-         backend          (some-> (or injected-backend
-                                      (.get parameters "smallpen-backend"))
-                                  (str/replace #"/$" ""))
-         package          (or injected-package
-                              (.get parameters "smallpen-package"))
-         file-id          (or (.get parameters "file-id")
-                              (.get route-parameters "file-id"))]
-     (cond-> {}
-       (seq backend) (assoc :backend-url backend)
-       (seq package) (assoc :package-session-id package)
-       (seq file-id) (assoc :file-id file-id)))))
+   (if-not runtime
+     {}
+     (let [url              (js/URL. href)
+           parameters       (.-searchParams url)
+           route-query      (some-> (.-hash url)
+                                    (str/split #"\?" 2)
+                                    (second))
+           route-parameters (js/URLSearchParams. (or route-query ""))
+           backend          (some-> (or (unchecked-get runtime "backendUrl")
+                                        (.get parameters "smallpen-backend"))
+                                    (str/replace #"/$" ""))
+           package          (or (unchecked-get runtime "packageSessionId")
+                                (.get parameters "smallpen-package"))
+           file-id          (or (.get parameters "file-id")
+                                (.get route-parameters "file-id"))]
+       (cond-> {}
+         (seq backend) (assoc :backend-url backend)
+         (seq package) (assoc :package-session-id package)
+         (seq file-id) (assoc :file-id file-id))))))
 
 (defn- design-system-route?
   "The Workbench page reuses the SmallPen runtime (backend URL, events) but
@@ -1111,13 +1381,26 @@
 
 (defn reload-after-external-write!
   "The Background wrote a new revision on our behalf outside Penpot's own
-  persistence (for example a token import). Persist pending edits, then reload
-  the workspace from the new revision exactly like an external change."
-  [revision]
-  (when revision
-    (swap! workspace-state assoc :revision revision))
+  persistence (for example a token import). Reconcile exactly like an
+  external change: pending edits keep their original baseRevision, so a
+  stale one is rejected instead of overwriting the write, and the reload
+  picks up the new revision."
+  []
   (reset! workspace-promise nil)
-  (when (compare-and-set! external-reconciliation? false true)
-    (st/emit! (freeze-for-external-reconciliation)
-              (dwc/set-workspace-read-only true)
-              (persist-before-external-reload))))
+  (reconcile-external-change!))
+
+(defn current-revision
+  "The Package revision the open workspace was projected from."
+  []
+  (:revision @workspace-state))
+
+(defn persist-pending-edits!
+  "Flush queued local edits. Resolves once they are saved; rejects when they
+  cannot be, so a caller never builds on a revision that is about to move."
+  []
+  (js/Promise.
+   (fn [resolve reject]
+     (st/emit! ::dps/force-persist)
+     (->> (dps/wait-persisted-or-error 15000)
+          (rx/take 1)
+          (rx/subs! resolve reject #(resolve nil))))))

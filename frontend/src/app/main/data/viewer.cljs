@@ -26,6 +26,7 @@
    [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.router :as rt]
+   [app.main.smallpen.routing :as sprt]
    [app.render-wasm.api :as wasm.api]
    [app.util.globals :as ug]
    [beicon.v2.core :as rx]
@@ -631,14 +632,6 @@
       (let [params  (rt/get-params state)]
         (rx/of (rt/nav :viewer (assoc params :index index)))))))
 
-(defn- find-viewer-frame
-  [state frame-id]
-  (some (fn [[page-id page]]
-          (when-some [index (d/index-of-pred (:frames page)
-                                             #(= (:id %) frame-id))]
-            [page-id index]))
-        (get-in state [:viewer :pages])))
-
 (defn go-to-frame
   ([frame-id]
    (go-to-frame frame-id nil))
@@ -674,20 +667,11 @@
        (let [route   (:route state)
              qparams (:query-params route)
              page-id (some-> (:page-id qparams) uuid/parse)
-             [target-page-id target-index] (find-viewer-frame state frame-id)]
-         (cond
-           (nil? target-page-id)
-           (rx/of (go-to-frame-by-index 0))
-
-           (= page-id target-page-id)
-           (rx/of (go-to-frame-by-index target-index))
-
-           :else
-           (let [params (rt/get-params state)]
-             (rx/of (rt/nav :viewer
-                            (assoc params
-                                   :page-id target-page-id
-                                   :index target-index))))))))))
+             frames  (get-in state [:viewer :pages page-id :frames])
+             index   (d/index-of-pred frames #(= (:id %) frame-id))]
+         (if-let [nav (when (nil? index) (sprt/viewer-frame-nav state frame-id))]
+           (rx/of nav)
+           (rx/of (go-to-frame-by-index (or index 0)))))))))
 
 (defn go-to-frame-auto
   []

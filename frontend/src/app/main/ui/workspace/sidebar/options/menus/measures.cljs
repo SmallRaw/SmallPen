@@ -22,7 +22,7 @@
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
    [app.main.refs :as refs]
-   [app.main.smallpen.edit-policy :as dsep]
+   [app.main.smallpen.ui.refs :as sp-refs]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.components.numeric-input :as deprecated-input]
@@ -209,9 +209,6 @@
   (let [token-numeric-inputs
         (features/use-feature "tokens/numeric-input")
 
-        page (mf/deref refs/workspace-page)
-        ds-page? (dsep/design-system-page? page)
-
         all-types
         (mf/with-memo [type shapes]
           ;; We only need this when multiple type is used
@@ -219,10 +216,18 @@
             (into #{} xf:map-type shapes)))
 
         options
-        (mf/with-memo [type all-types ds-page?]
-          (cond-> (if (= type :multiple)
-                    (into #{} xf:mapcat-type-to-options all-types)
-                    (type->options type))
+        (mf/with-memo [type all-types]
+          (if (= type :multiple)
+            (into #{} xf:mapcat-type-to-options all-types)
+            (type->options type)))
+
+        ;; The generated SmallPen Design System page owns its layout.
+        ds-page?
+        (mf/deref sp-refs/design-system-page?)
+
+        options
+        (mf/with-memo [options ds-page?]
+          (cond-> options
             ds-page? (disj :position :presets)))
 
         frames

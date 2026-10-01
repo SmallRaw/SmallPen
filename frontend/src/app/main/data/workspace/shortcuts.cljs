@@ -443,8 +443,7 @@
     :section [:workspace]
     :subsections [:main-menu]
     :fn #(when (smallpen/capability-enabled? :comments)
-           (st/emit! (dwcm/toggle-comments-visibility
-                      {:origin "workspace-shortcuts"})))}
+           (st/emit! (dwcm/toggle-comments-visibility {:origin "workspace-shortcuts"})))}
 
    :insert-image         {:tooltip (ds/shift "K")
                           :label (fn [] (tr "shortcuts.insert-image"))
@@ -658,9 +657,8 @@
                           :command (ds/ca-mod "h")
                           :subsections [:panels]
                           :section [:workspace]
-                          :fn #(when-not (smallpen/enabled?)
-                                 (emit-when-no-readonly
-                                  (dw/toggle-layout-flag :document-history)))}
+                          :fn #(emit-when-no-readonly
+                                (dw/toggle-layout-flag :document-history))}
 
    :toggle-colorpalette  {:tooltip (ds/alt "P")
                           :label (fn [] (tr "shortcuts.toggle-colorpalette"))

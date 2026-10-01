@@ -243,10 +243,12 @@
     (watch [_ state _]
       (let [file-id     (or file-id (:current-file-id state))
             uchg        (vec undo-changes)
-            rchg        (vec redo-changes)
+            rchg        (dsep/without-copied-identity (get-in state [:files file-id])
+                                                      (vec redo-changes))
             features    (get state :features)
             permissions (get state :permissions)
-            blocked     (dsep/commit-block-reason (get-in state [:files file-id]) rchg)]
+            blocked     (dsep/commit-block-reason (get-in state [:files file-id]) rchg
+                                                  (ptk/type (:origin params)))]
 
         ;; Historical previews must not create edits to the live file. Check
         ;; this when creating commits so previously queued edits can still save.

@@ -2,7 +2,61 @@
   (:require
    [app.common.uuid :as uuid]
    [app.main.smallpen.projection :as projection]
+   [app.util.i18n :as i18n :refer [tr]]
    [cljs.test :as t]))
+
+;; Generated labels size the layout, so the layout tests measure real English
+;; text instead of raw PO keys (no translations are loaded in tests).
+(def ^:private en-labels
+  #js {"smallpen.design-system.axis.style" "Style"
+       "smallpen.design-system.axis.content" "Content"
+       "smallpen.design-system.axis.state" "State"
+       "smallpen.design-system.axis.theme" "Theme"
+       "smallpen.design-system.axis.tone" "Tone"
+       "smallpen.design-system.axis.level" "Level"
+       "smallpen.design-system.axis.kind" "Kind"
+       "smallpen.design-system.axis.primary" "Primary"
+       "smallpen.design-system.axis.secondary" "Secondary"
+       "smallpen.design-system.axis.ghost" "Ghost"
+       "smallpen.design-system.axis.text" "Text only"
+       "smallpen.design-system.axis.leading" "Leading icon"
+       "smallpen.design-system.axis.trailing" "Trailing icon"
+       "smallpen.design-system.axis.icon" "Icon only"
+       "smallpen.design-system.axis.default" "Default"
+       "smallpen.design-system.axis.hover" "Hover"
+       "smallpen.design-system.axis.pressed" "Pressed"
+       "smallpen.design-system.axis.disabled" "Disabled"
+       "smallpen.design-system.axis.light" "Light"
+       "smallpen.design-system.axis.dark" "Dark"
+       "smallpen.design-system.axis.neutral" "Neutral"
+       "smallpen.design-system.axis.success" "Success"
+       "smallpen.design-system.axis.danger" "Danger"
+       "smallpen.design-system.axis.focus" "Focus"
+       "smallpen.design-system.axis.error" "Error"
+       "smallpen.design-system.axis.page" "Page title"
+       "smallpen.design-system.axis.section" "Section title"
+       "smallpen.design-system.axis.dialog" "Dialog title"
+       "smallpen.design-system.axis.confirm" "Confirm"
+       "smallpen.design-system.axis.form" "Form"
+       "smallpen.design-system.facet" "%s: %s"
+       "smallpen.design-system.family-samples" "%s \u00b7 Samples shown: %s"
+       "smallpen.design-system.component" "Component"
+       "smallpen.design-system.archived" "Archived (inactive)"
+       "smallpen.design-system.other-tokens" "Other tokens"
+       "smallpen.design-system.no-tokens" "No tokens yet"
+       "smallpen.design-system.no-components" "No components yet"
+       "smallpen.design-system.components-source" "Component sources"
+       "smallpen.design-system.summary" "Display groups: %s \u00b7 Valid combinations: %s"})
+
+(t/use-fixtures :each
+  (fn [test-fn]
+    (let [locale i18n/*current-locale*]
+      (i18n/set-translations "smallpen_en_test" en-labels)
+      (set! i18n/*current-locale* "smallpen_en_test")
+      (try
+        (test-fn)
+        (finally
+          (set! i18n/*current-locale* locale))))))
 
 ;; Minimal combination-aware refs (same shape the runtime emits for the demo
 ;; package): two combinations, one radius Cell covered by both, one archived
@@ -43,8 +97,8 @@
                             :pages {}
                             :designSystemPage "a1e50000-0000-4000-8000-000000000002"
                             :designSystem (zipmap [:board :tokenLabel :tokensSection
-                                                  :componentsSection :pagesSection :tokensEmpty
-                                                  :componentsEmpty :pagesEmpty] ids)
+                                                   :componentsSection :pagesSection :tokensEmpty
+                                                   :componentsEmpty :pagesEmpty] ids)
                             :designSystemRefs (cond-> {:specimens items :combinations (or combinations combos)
                                                        :families [] :pages []}
                                                 samples (assoc :componentSamples samples))
@@ -111,7 +165,7 @@
         matrices (filter #(.startsWith (or (:name %) "") "Component matrix ·") (vals objects))
         root-at (fn [content state]
                   (let [sample (some #(when (and (= {:style "primary" :content content :state state} (:selection %))
-                                                (= "Light" (:combinationId %))) %) samples)]
+                                                 (= "Light" (:combinationId %))) %) samples)]
                     (get objects (uuid/parse (get-in sample [:runtimeNodes :node_root])))))]
     (t/is (= 96 (count (filter some? roots))))
     (t/is (= 6 (count matrices)))
@@ -169,54 +223,83 @@
       (t/is (= gap (:width ruler)))
       (t/is (= (+ (:x frame) 32) (:x ruler))))))
 
+(def ^:private combination-snapshot
+  {:manifest {:packageId "pkg" :name "Fixture"}
+   :formatCapabilities {:webProjection projection/format-capabilities}
+   :runtime {:file "1c241d42-8fd3-56f0-958f-0eabe092adaf"
+             :pages {}
+             :designSystemPage "a1e50000-0000-4000-8000-000000000002"
+             :designSystem {:board "b0000000-0000-4000-8000-000000000001"
+                            :tokenLabel "b0000000-0000-4000-8000-000000000002"
+                            :tokensSection "b0000000-0000-4000-8000-000000000003"
+                            :componentsSection "b0000000-0000-4000-8000-000000000004"
+                            :pagesSection "b0000000-0000-4000-8000-000000000005"
+                            :tokensEmpty "b0000000-0000-4000-8000-000000000006"
+                            :componentsEmpty "b0000000-0000-4000-8000-000000000007"
+                            :pagesEmpty "b0000000-0000-4000-8000-000000000008"
+                            :combinations {"cb-light" "c0000000-0000-4000-8000-000000000001"
+                                           "cb-dark" "c0000000-0000-4000-8000-000000000002"}
+                            :types {"border-radius" "d0000000-0000-4000-8000-000000000001"
+                                    "color" "d0000000-0000-4000-8000-000000000002"}}
+             :designSystemRefs {:specimens specimens
+                                :combinations combos
+                                :types [{:type "border-radius" :cells 1}
+                                        {:type "color" :cells 1}]
+                                :tokenGroups []
+                                :families []
+                                :pages []}
+             :components {}
+             :variants {}
+             :componentNodes {}
+             :nodes {}
+             :fonts {}}})
+
+(defn- design-system-page
+  [snapshot]
+  (let [result (projection/project-snapshot snapshot {:file-id uuid/zero :project-id uuid/zero})]
+    (get-in result [:file :data :pages-index (uuid/parse "a1e50000-0000-4000-8000-000000000002")])))
+
 (t/deftest panorama-projects-combination-specimens
-  (let [snapshot {:manifest {:packageId "pkg" :name "Fixture"}
-                  :formatCapabilities {:webProjection projection/format-capabilities}
-                  :runtime {:file "1c241d42-8fd3-56f0-958f-0eabe092adaf"
-                            :pages {}
-                            :designSystemPage "a1e50000-0000-4000-8000-000000000002"
-                            :designSystem {:board "b0000000-0000-4000-8000-000000000001"
-                                           :tokenLabel "b0000000-0000-4000-8000-000000000002"
-                                           :tokensSection "b0000000-0000-4000-8000-000000000003"
-                                           :componentsSection "b0000000-0000-4000-8000-000000000004"
-                                           :pagesSection "b0000000-0000-4000-8000-000000000005"
-                                           :tokensEmpty "b0000000-0000-4000-8000-000000000006"
-                                           :componentsEmpty "b0000000-0000-4000-8000-000000000007"
-                                           :pagesEmpty "b0000000-0000-4000-8000-000000000008"
-                                           :combinations {"cb-light" "c0000000-0000-4000-8000-000000000001"
-                                                          "cb-dark" "c0000000-0000-4000-8000-000000000002"}
-                                           :types {"border-radius" "d0000000-0000-4000-8000-000000000001"
-                                                   "color" "d0000000-0000-4000-8000-000000000002"}}
-                            :designSystemRefs {:specimens specimens
-                                               :combinations combos
-                                               :types [{:type "border-radius" :cells 1}
-                                                       {:type "color" :cells 1}]
-                                               :tokenGroups []
-                                               :families []
-                                               :pages []}
-                            :components {}
-                            :variants {}
-                            :componentNodes {}
-                            :nodes {}
-                            :fonts {}}}
-        result (projection/project-snapshot snapshot {:file-id uuid/zero :project-id uuid/zero})
-        page (get-in result [:file :data :pages-index (uuid/parse "a1e50000-0000-4000-8000-000000000002")])
+  (let [page (design-system-page combination-snapshot)
         objects (:objects page)
         names (into #{} (map (fn [[_ shape]] (:name shape))) objects)
         token-rows (filter #(and (string? %) (.startsWith % "Token /")) names)]
     ;; 2 combination specimens + the archived band specimen.
     (t/is (= #{"Token / radius/md/base · Light"
                "Token / radius/md/base · Dark"
-               "Token / color/archived/legacy · Archived · 未激活"}
+               (str "Token / color/archived/legacy · " (tr "smallpen.design-system.archived"))}
              (set token-rows)))
     ;; Each type gets its own white card, not a global combination column.
     (t/is (= 14 (count (filter #(and (string? %) (.startsWith % "Token type ·")) names))))
     (t/is (contains? names "Light"))
-    (t/is (contains? names "其他 Token"))
+    (t/is (contains? names (tr "smallpen.design-system.other-tokens")))
     (t/is (not-any? (fn [[_ shape]]
-                  (some-> shape :plugin-data :smallpen
-                          (get "design-system-combination")))
-                objects))))
+                      (some-> shape :plugin-data :smallpen
+                              (get "design-system-combination")))
+                    objects))))
+
+(t/deftest panorama-generated-text-has-no-hardcoded-language
+  ;; Without loaded translations every generated label is its PO key, so any
+  ;; CJK left on the page is a hardcoded string.
+  (let [page (design-system-page combination-snapshot)]
+    (t/is (not (re-find #"[\u3400-\u9fff\uff00-\uffef]" (pr-str page))))
+    (t/is (= (tr "smallpen.design-system") (:name page)))))
+
+(t/deftest panorama-labels-follow-the-ui-language
+  (let [locale i18n/*current-locale*]
+    (i18n/set-translations "smallpen_test"
+                           #js {"smallpen.design-system" "设计系统"
+                                "smallpen.design-system.archived" "已归档（未激活）"
+                                "smallpen.design-system.other-tokens" "其他令牌"})
+    (set! i18n/*current-locale* "smallpen_test")
+    (try
+      (let [page  (design-system-page combination-snapshot)
+            names (into #{} (map :name) (vals (:objects page)))]
+        (t/is (= "设计系统" (:name page)))
+        (t/is (contains? names "其他令牌"))
+        (t/is (contains? names "Token / color/archived/legacy · 已归档（未激活）")))
+      (finally
+        (set! i18n/*current-locale* locale)))))
 
 (t/deftest typography-is-the-only-font-section
   (let [value {:fontFamily "Inter" :fontSize 24 :fontWeight 600 :lineHeight 1.4}
@@ -230,7 +313,7 @@
     (t/is (some? (get objects (uuid/parse (:shape style)))))
     (t/is (nil? (get objects (uuid/parse (:shape primitive)))))
     (doseq [type ["font-family" "font-size" "font-weight" "letter-spacing"
-                 "text-case" "text-decoration"]]
+                  "text-case" "text-decoration"]]
       (t/is (not (contains? names (str "Token type · " type)))))))
 
 ;; DSE-R19 regression: a color specimen's swatch is a real color chip — its

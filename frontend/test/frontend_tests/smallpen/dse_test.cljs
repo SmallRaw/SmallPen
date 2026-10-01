@@ -4,6 +4,10 @@
 
 (ns frontend-tests.smallpen.dse-test
   (:require
+   [app.common.files.changes-builder :as pcb]
+   [app.common.geom.point :as gpt]
+   [app.common.logic.libraries :as cll]
+   [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.common :as dcm]
@@ -12,6 +16,9 @@
    [app.main.data.workspace.media :as media]
    [app.main.smallpen.dse :as dse]
    [app.main.smallpen.edit-policy :as policy]
+   [app.main.smallpen.token-inspector :as dseti]
+   [app.main.smallpen.viewport :as spvp]
+   [app.util.i18n :refer [tr]]
    [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [cljs.test :as t]
@@ -25,7 +32,8 @@
   [{:keys [components can-edit page-plugin-data frames?]
     :or {components {} can-edit true page-plugin-data {} frames? true}}]
   {:data
-   {:pages [page-id]
+   {:plugin-data {:smallpen {}}
+    :pages [page-id]
     :pages-index
     {page-id
      {:id page-id
@@ -108,6 +116,54 @@
                  file [(assoc change :operations [{:type :set :attr :position-data :val []}])
                        {:type :reg-objects :page-id page-id :shapes [frame-id]}])))
     (t/is (nil? (policy/commit-block-reason (file-with {}) [change])))))
+
+(defn- file-with-source-rect
+  "A screen page holding one projected rect that carries its source node
+  identity, the way the projection names it."
+  [rect-id]
+  (let [rect (cts/setup-shape
+              {:id rect-id :type :rect :name "Source"
+               :x 10 :y 10 :width 20 :height 20
+               :parent-id uuid/zero :frame-id uuid/zero
+               :plugin-data {:smallpen {"node-id" "node_a"
+                                        "presentation-id" "pres_a"
+                                        "screen-id" "scr_a"}}})]
+    (-> (file-with {:frames? false})
+        (update-in [:data :pages-index page-id :objects]
+                   #(-> %
+                        (assoc rect-id rect)
+                        (assoc-in [uuid/zero :shapes] [rect-id]))))))
+
+(defn- added-objects
+  [changes]
+  (keep #(when (= :add-obj (:type %)) (:obj %)) changes))
+
+(t/deftest copies-drop-the-original-smallpen-identity
+  (let [rect-id (uuid/next)
+        file    (file-with-source-rect rect-id)
+        page    (get-in file [:data :pages-index page-id])
+        changes (:redo-changes
+                 (cll/generate-duplicate-changes (pcb/empty-changes nil)
+                                                 (:objects page) page #{rect-id}
+                                                 (gpt/point 0 0) {} (:data file)
+                                                 (uuid/next)))
+        saved   (fn [file changes]
+                  (->> (emitted-commits file changes)
+                       (mapcat (comp :redo-changes deref))
+                       (added-objects)))]
+    (t/is (= "node_a" (get-in (first (added-objects changes))
+                              [:plugin-data :smallpen "node-id"]))
+          "Penpot copies the original's plugin-data into the duplicate")
+    (t/is (= [nil] (map #(get-in % [:plugin-data :smallpen]) (saved file changes)))
+          "the copy is a new node: no source identity reaches state or the Background")
+    (t/is (= ["node_a"]
+             (map #(get-in % [:plugin-data :smallpen "node-id"])
+                  (saved file (mapv #(dissoc % :old-id) changes))))
+          "undo restoring a deleted shape keeps its identity")
+    (t/is (= ["node_a"]
+             (map #(get-in % [:plugin-data :smallpen "node-id"])
+                  (saved (update file :data dissoc :plugin-data) changes)))
+          "files outside SmallPen keep upstream behaviour")))
 
 (t/deftest ds-blocks-drawing-and-decoration-text-editing-at-entry
   (let [file-id (uuid/next)
@@ -200,19 +256,19 @@
         valid-local {:zoom 0.75
                      :vbox {:x -20 :y 10 :width 1200 :height 800}}]
     (t/is (= board-id
-             (dcm/initial-workspace-board-id {} file-id page-id board-id true))
+             (spvp/initial-board-id {} file-id page-id board-id true))
           "first entry requests a fit to the generated board")
-    (t/is (nil? (dcm/initial-workspace-board-id
+    (t/is (nil? (spvp/initial-board-id
                  {:workspace-cache {[file-id page-id] valid-local}}
                  file-id page-id board-id true))
           "reopening restores the cached viewport instead of fitting again")
     (t/is (= board-id
-             (dcm/initial-workspace-board-id
+             (spvp/initial-board-id
               {:workspace-cache {[file-id page-id] valid-local}}
               file-id page-id board-id false))
           "ordinary workspace navigation preserves an explicit board target")
     (t/is (= board-id
-             (dcm/initial-workspace-board-id
+             (spvp/initial-board-id
               {:workspace-cache {[file-id page-id]
                                  {:zoom 0 :vbox {:width 0 :height 0}}}}
               file-id page-id board-id true))
@@ -226,7 +282,7 @@
         file     (file-with {:page-plugin-data generated-page-plugin-data})
         before   @storage/session]
     (try
-      (dcm/persist-current-workspace-viewport!
+      (spvp/persist-current-viewport!
        {:current-file-id file-id
         :current-page-id page-id
         :files {file-id file}
@@ -238,7 +294,7 @@
                                             :design-system? true)
                        {})]
         (t/is (= local (get-in restarted [:workspace-cache [file-id page-id]])))
-        (t/is (nil? (dcm/initial-workspace-board-id
+        (t/is (nil? (spvp/initial-board-id
                      restarted file-id page-id board-id true))))
       (finally
         (reset! storage/session before)))))
@@ -249,7 +305,7 @@
                   :vbox {:x 1 :y 2 :width 900 :height 600}}
         before   @storage/session]
     (try
-      (dcm/persist-current-workspace-viewport!
+      (spvp/persist-current-viewport!
        {:current-file-id file-id
         :current-page-id page-id
         :files {file-id (file-with {})}
@@ -261,7 +317,35 @@
         (t/is (nil? (get-in restarted [:workspace-cache [file-id page-id]]))
               "an ordinary route must not hydrate SmallPen session state")
         (t/is (nil? (get-in @storage/session
-                            [::dcm/workspace-viewports [file-id page-id]]))
+                            [::spvp/workspace-viewports [file-id page-id]]))
               "pagehide persistence must ignore an ordinary workspace"))
       (finally
         (reset! storage/session before)))))
+
+(t/deftest token-inspector-commits-the-parsed-value
+  (let [edited #'dseti/edited-value]
+    (t/testing "an unedited Cell has nothing to apply, so it is never retyped"
+      (t/is (= [nil nil] (edited "number" 8 false "8" {})))
+      (t/is (= [nil nil] (edited "font-weight" "400" false "400" {}))))
+    (t/testing "an edited numeric Cell commits a number, not the text"
+      (t/is (= [nil 12] (edited "number" 8 false " 12 " {}))))
+    (t/testing "text with a unit is refused instead of truncated"
+      (t/is (= (tr "smallpen.dse.inspector.error.numeric")
+               (first (edited "spacing" 4 false "12px" {})))))
+    (t/testing "alias Cells are validated too"
+      (t/is (some? (first (edited "number" "{base}" true "abc" {}))))
+      (t/is (= [nil "{space.md}"]
+               (edited "number" "{base}" true "{space.md}" {}))))))
+
+(t/deftest token-inspector-typography-edits-merge-without-duplicate-keys
+  (let [edited #'dseti/edited-value
+        raw    {"fontFamily" "Inter" "fontSize" 16 "fontWeight" 400}]
+    (t/is (= [nil nil] (edited "typography" raw false "" {:fontSize "16"})))
+    (let [[error value] (edited "typography" raw false "" {:fontSize "18"})]
+      (t/is (nil? error))
+      (t/is (= {"fontFamily" "Inter" "fontSize" 18 "fontWeight" 400}
+               (js->clj value))))
+    (t/testing "a blank numeric field is an error, never NaN"
+      (let [[error value] (edited "typography" raw false "" {:fontSize ""})]
+        (t/is (some? error))
+        (t/is (nil? value))))))

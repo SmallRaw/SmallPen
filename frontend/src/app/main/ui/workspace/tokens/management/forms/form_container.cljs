@@ -9,6 +9,7 @@
    [app.common.types.tokens-lib :as ctob]
    [app.config :as cf]
    [app.main.refs :as refs]
+   [app.main.smallpen.ui.token-modal :as sp-token-modal]
    [app.main.ui.workspace.tokens.management.forms.color :as color]
    [app.main.ui.workspace.tokens.management.forms.controls :as token.controls]
    [app.main.ui.workspace.tokens.management.forms.font-family :as font-family]
@@ -23,18 +24,24 @@
   (let [token-type
         (or (:type token) token-type)
 
-        global-selected-token-set-id
-        (mf/deref refs/selected-token-set-id)
+        target-set-id
+        selected-token-set-id
 
         selected-token-set-id
-        (or selected-token-set-id global-selected-token-set-id)
+        (mf/deref refs/selected-token-set-id)
+
+        tokens-in-selected-set
+        (mf/deref refs/workspace-all-tokens-in-selected-set)
 
         tokens-lib
         (mf/deref refs/tokens-lib)
 
-        tokens-in-selected-set
-        (or (when selected-token-set-id
-              (ctob/get-tokens tokens-lib selected-token-set-id)) {})
+        ;; The SmallPen token matrix edits a Set other than the selected one.
+        [selected-token-set-id tokens-in-selected-set]
+        (sp-token-modal/target-set target-set-id
+                                   selected-token-set-id
+                                   tokens-in-selected-set
+                                   tokens-lib)
 
         token-path
         (mf/with-memo [token]

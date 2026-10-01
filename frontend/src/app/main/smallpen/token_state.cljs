@@ -56,7 +56,33 @@
 (defn file-library [data]
   (library-with-status (:tokens-lib data) (:tokens-status data)))
 
-(defn set-active-token-themes [changes paths]
-  (let [lib (:tokens-lib (::pcb/library-data (meta changes)))
-        status (cfo/make-tokens-status-from-lib (set-active-themes lib paths))]
-    (pcb/set-tokens-status changes status)))
+(defn- status-for-theme-paths
+  "Resolve theme `paths` against `lib`, the library as it will be after the
+  pending changes, so themes and sets created in the same commit are kept.
+  Active themes define the active sets; without any, the previously active
+  sets that still exist are preserved (same rule as `sync-tokens-status-with-lib`)."
+  [status lib paths]
+  (let [theme-ids (into #{}
+                        (comp (keep #(ctob/get-theme-by-path lib %))
+                              (map ctob/get-id)
+                              (remove #(= % ctob/hidden-theme-id)))
+                        paths)
+        set-ids   (if (seq theme-ids)
+                    (into #{}
+                          (comp (keep #(ctob/get-theme lib %))
+                                (mapcat :sets)
+                                (keep #(ctob/get-set-by-name lib %))
+                                (map ctob/get-id))
+                          theme-ids)
+                    (into #{}
+                          (filter #(some? (ctob/get-set lib %)))
+                          (some-> status ctos/get-active-set-ids)))]
+    (ctos/make-tokens-status :active-theme-ids theme-ids
+                             :active-set-ids set-ids)))
+
+(defn set-active-token-themes
+  "Write the TokensStatus that activates the theme `paths` of `lib`, which
+  must already include the sets and themes added or removed by `changes`."
+  [changes lib paths]
+  (let [status (cfo/get-tokens-status (::pcb/library-data (meta changes)))]
+    (pcb/set-tokens-status changes (status-for-theme-paths status lib paths))))
