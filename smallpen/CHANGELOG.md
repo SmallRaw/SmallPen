@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-## 0.1.0-alpha.4 (2026-10-02)
+## 0.1.0-alpha.5 (2026-10-02)
+
+0.1.0-alpha.4 was prepared but never published; its changes ship here.
 
 Rebased onto upstream Penpot `develop` (8b2ec216e). This release is a
 review and hardening pass; the Package format is unchanged.

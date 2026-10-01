@@ -1,6 +1,6 @@
 {
   "name": "smallpen",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.5",
   "description": "SmallPen command-line interface",
   "publishConfig": {
     "access": "public"
@@ -12,7 +12,7 @@
     "bin"
   ],
   "dependencies": {
-    "@smallpen/cli": "0.1.0-alpha.4"
+    "@smallpen/cli": "0.1.0-alpha.5"
   },
   "repository": {
     "type": "git",
