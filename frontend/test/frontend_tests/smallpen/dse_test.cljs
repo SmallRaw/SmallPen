@@ -88,9 +88,12 @@
                     (modify :r1 8) (modify :token-value "#ffffff")]]
       (t/is (nil? (policy/commit-block-reason file [change]))))
     (t/is (= 1 (count (emitted-commits file [opacity]))))
-    (doseq [type [:add-obj :del-obj :mov-objects :reorder-children :mod-page :del-page]]
+    (doseq [type [:add-obj :del-obj :mov-objects :reorder-children]]
       (t/is (= :structure (policy/commit-block-reason
                            file [{:type type :id frame-id :page-id page-id}]))))
+    (doseq [type [:mod-page :del-page]]
+      (t/is (= :generated-page (policy/commit-block-reason
+                                file [{:type type :id frame-id :page-id page-id}]))))
     (t/is (= :structure (policy/commit-block-reason file [(modify :layout :flex)])))
     (t/is (= :position (policy/commit-block-reason file [(modify :x 100)])))
     (t/is (nil? (policy/commit-block-reason
@@ -104,7 +107,7 @@
     (t/is (nil? (policy/commit-block-reason
                  file [{:type :add-obj :page-id (uuid/next) :id (uuid/next)}]))
           "explicit creation in a source page is not blocked")
-    (t/is (= :structure (policy/commit-block-reason file [{:type :del-page :id page-id}])))))
+    (t/is (= :generated-page (policy/commit-block-reason file [{:type :del-page :id page-id}])))))
 
 (t/deftest ds-decoration-edits-never-enter-persistence
   (let [file (file-with {:page-plugin-data generated-page-plugin-data})

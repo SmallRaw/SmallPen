@@ -8679,6 +8679,10 @@ msgid "smallpen.design-system.blocked-decoration"
 msgstr "这是自动生成的展示框，不能修改。请选择 Token 或组件内容。"
 
 #: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-generated-page"
+msgstr "生成的页面由 Package 重建，不能重命名、移动或删除。"
+
+#: src/app/main/smallpen/edit_policy.cljs
 msgid "smallpen.design-system.blocked-position"
 msgstr "DS 展示位置由系统排列；请到源位置调整组件布局。"
 

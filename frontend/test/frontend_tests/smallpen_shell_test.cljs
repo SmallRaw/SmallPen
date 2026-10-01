@@ -142,6 +142,25 @@
     (t/is (= :structure (policy/commit-block-reason
                          file [{:type :del-obj :page-id page-id :id source-id}] propagation)))))
 
+(t/deftest gate-refuses-page-changes-on-generated-pages
+  (let [components-id #uuid "5e110000-0000-4000-8000-000000000004"
+        normal-id     #uuid "5e110000-0000-4000-8000-000000000005"
+        file          (-> (ds-file)
+                          (assoc-in [:data :pages-index components-id]
+                                    {:id components-id
+                                     :plugin-data {:smallpen {"components-page" true}}
+                                     :objects {}})
+                          (assoc-in [:data :pages-index normal-id]
+                                    {:id normal-id :objects {}}))
+        rename        (fn [id] {:type :mod-page :id id :name "Renamed"})]
+    (t/is (= :generated-page (policy/commit-block-reason file [(rename components-id)])))
+    (t/is (= :generated-page (policy/commit-block-reason file [(rename page-id)])))
+    (t/is (= :generated-page (policy/commit-block-reason
+                              file [{:type :del-page :id components-id}])))
+    (t/is (= :generated-page (policy/commit-block-reason
+                              file [{:type :mov-page :id components-id :index 0}])))
+    (t/is (nil? (policy/commit-block-reason file [(rename normal-id)])))))
+
 (t/deftest drawing-is-blocked-only-on-ds-pages
   (let [file-id (uuid/next)
         state   {:current-file-id file-id

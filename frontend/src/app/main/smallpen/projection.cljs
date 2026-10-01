@@ -852,6 +852,24 @@
                    :text-transform textTransform}])))
         typographies))
 
+(defn- penpot-token-value
+  "Penpot holds a shadow Token as a vector of shadows with string lengths;
+  the Package holds one DTCG shadow object or a list of them. Without this
+  Penpot cannot resolve the Token, and applying it does nothing."
+  [type value]
+  (if (and (= "shadow" type)
+           (or (map? value) (sequential? value)))
+    (mapv (fn [shadow]
+            (let [field #(some (fn [key] (lookup shadow key)) %)]
+              {:offset-x (str (or (field ["offsetX" "offset-x" "x"]) 0))
+               :offset-y (str (or (field ["offsetY" "offset-y" "y"]) 0))
+               :blur (str (or (field ["blur"]) 0))
+               :spread (str (or (field ["spread"]) 0))
+               :color (str (field ["color"]))
+               :inset (true? (field ["inset"]))}))
+          (if (map? value) [value] value))
+    value))
+
 (defn- project-token-library
   [snapshot {:keys [activeSetIds activeThemeIds sets themes]}]
   (let [set-names (into {} (map (juxt :id :name)) sets)
@@ -872,7 +890,7 @@
                                   :id (runtime-id snapshot :tokens id)
                                   :name name
                                   :type (keyword type)
-                                  :value value})]))
+                                  :value (penpot-token-value type value)})]))
                         tokens)}))
               sets)
         token-themes
@@ -928,7 +946,7 @@
                                       :id (runtime-id snapshot :tokens id)
                                       :name name
                                       :type (keyword type)
-                                      :value value})]))
+                                      :value (penpot-token-value type value)})]))
                             definitions)})]
       (-> tokens-lib
           (ctob/add-set token-set)
@@ -948,6 +966,36 @@
         (ctob/add-set token-set)
         (ctob/add-theme token-theme)
         (spts/activate-theme (ctob/get-id token-theme)))))
+
+(def ^:private binding-token-attributes
+  "Canonical Token bindings Penpot shows as an applied Token. Penpot applies
+  a stroke color Token to the first stroke only."
+  {"shadow" :shadow
+   "stroke" :stroke-color
+   "strokes.0" :stroke-color})
+
+(defn- token-names-by-id
+  [snapshot]
+  (into {}
+        (map (juxt :id :name))
+        (concat (mapcat :tokens (:sets (token-library snapshot)))
+                (snapshot-dtcg-token-definitions snapshot))))
+
+(defn- binding-applied-tokens
+  "Applied Token names for the bindings whose Token is in this Package's
+  token library. Bindings to other Packages stay resolved values only: the
+  Penpot token library holds no Token to name."
+  [snapshot token-bindings]
+  (let [package-id (get-in snapshot [:manifest :packageId])
+        names      (delay (token-names-by-id snapshot))]
+    (into {}
+          (keep (fn [[field reference]]
+                  (let [attribute (get binding-token-attributes (name field))]
+                    (when (and attribute
+                               (= package-id (lookup reference "packageId")))
+                      (some->> (get @names (lookup reference "assetId"))
+                               (vector attribute))))))
+          token-bindings)))
 
 (defn- linear-part
   [matrix]
@@ -1022,6 +1070,17 @@
                                                startingNodeId)}])))
         flows))
 
+(declare specimen-shadow)
+
+(defn- project-shadow
+  "A bound shadow Token resolves to DTCG shadow objects; Penpot shapes hold
+  native shadow records."
+  [value]
+  (let [records (if (map? value) [value] value)]
+    (if (some #(some? (lookup % "offsetX")) records)
+      (into [] (mapcat specimen-shadow) records)
+      value)))
+
 (defn- project-node
   [snapshot components node-path plugin-data-fn origins nodes parents root-ids node]
   (let [{:keys [appliedTokens backgroundBlur blend-mode blur children componentId
@@ -1036,8 +1095,8 @@
                 layout-item-z-index layout-justify-content layout-padding
                 layout-padding-type layout-wrap-type locked masked-group mediaRef name opacity
                 pathData proportionLock shadow sourceNodeId
-                show-content strokes text textBlocks textStyle touched type visible width
-                constraints-h constraints-v]} node
+                show-content strokes text textBlocks textStyle tokenBindings touched type
+                visible width constraints-h constraints-v]} node
         shape-id    (node-runtime-id snapshot node-path id)
         component-context
         (or (when componentId
@@ -1070,7 +1129,12 @@
         matrix      (:matrix geometry)
         turned?     (not (translation-only? matrix))
         transform   (when turned? (linear-part matrix))
-        [abs-x abs-y] (geometry-origin geometry (or width 0) (or height 0))]
+        [abs-x abs-y] (geometry-origin geometry (or width 0) (or height 0))
+        applied-tokens (merge (into {}
+                                    (map (fn [[attribute token-name]]
+                                           [(keyword attribute) token-name]))
+                                    appliedTokens)
+                              (binding-applied-tokens snapshot tokenBindings))]
     (cts/setup-shape
      (cond->
       {:id shape-id
@@ -1120,7 +1184,7 @@
        (assoc :blur blur)
 
        (some? shadow)
-       (assoc :shadow shadow)
+       (assoc :shadow (project-shadow shadow))
 
        (some? blend-mode)
        (assoc :blend-mode (keyword blend-mode))
@@ -1266,12 +1330,8 @@
        (and (true? proportionLock) (not (zero? height)))
        (assoc :proportion (/ width height))
 
-       (some? appliedTokens)
-       (assoc :applied-tokens
-              (into {}
-                    (map (fn [[attribute token-name]]
-                           [(keyword attribute) token-name]))
-                    appliedTokens))
+       (or (some? appliedTokens) (seq applied-tokens))
+       (assoc :applied-tokens applied-tokens)
 
         ;; A Component Set variant root is also typed COMPONENT but carries no
         ;; componentId; its caller supplies the component wiring instead.
@@ -2111,7 +2171,7 @@
                       :layout :flex
                       :layout-flex-dir :row
                       :layout-gap-type :fixed
-                      :layout-gap {:rowGap display :columnGap display}
+                      :layout-gap {:row-gap display :column-gap display}
                       :layout-padding-type :multiple
                       :layout-padding {:p1 12 :p2 8 :p3 12 :p4 8}
                       :parent-id uuid/zero

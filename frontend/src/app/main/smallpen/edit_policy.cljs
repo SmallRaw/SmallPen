@@ -15,6 +15,14 @@
   [page]
   (true? (get-in page [:plugin-data :smallpen "design-system-page"])))
 
+(defn generated-page?
+  "The Design System page and the native Components page are rebuilt from
+  the Package on every load; neither is a Package page to rename, move or
+  delete."
+  [page]
+  (or (design-system-page? page)
+      (true? (get-in page [:plugin-data :smallpen "components-page"]))))
+
 (defn current-page-locked?
   [state]
   (design-system-page?
@@ -68,7 +76,7 @@
       (and (= :mod-obj (:type change))
            (every? #(contains? derived (:attr %)) (:operations change)))))
 
-(defn- blocked-change
+(defn- blocked-shape-change
   [pages propagation? change]
   (when-let [page (let [page (change-page pages change)]
                     (when (design-system-page? page) page))]
@@ -84,6 +92,13 @@
                      (str/starts-with? (name (or % :none)) "layout")) attrs) :structure
           (and (some attrs [:x :y])
                (not (some attrs [:width :height]))) :position)))))
+
+(defn- blocked-change
+  [pages propagation? change]
+  (if (and (#{:mod-page :del-page :mov-page} (:type change))
+           (generated-page? (change-page pages change)))
+    :generated-page
+    (blocked-shape-change pages propagation? change)))
 
 (defn commit-block-reason
   "Gate BEFORE the local commit, undo stack and persistence buffer. Reject
@@ -172,4 +187,5 @@
   (case reason
     :decoration (tr "smallpen.design-system.blocked-decoration")
     :position (tr "smallpen.design-system.blocked-position")
+    :generated-page (tr "smallpen.design-system.blocked-generated-page")
     (tr "smallpen.design-system.blocked-structure")))
