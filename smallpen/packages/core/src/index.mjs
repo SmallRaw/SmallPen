@@ -22,7 +22,14 @@ export {
   parseContextEntries,
   resolveContext,
 } from "./contexts.mjs";
-export { projectComponentVariant, projectScenario, projectScreen } from "./design-projection.mjs";
+export {
+  applyNodeOverrides,
+  INSTANCE_OVERRIDE_FIELDS,
+  overrideTouchedGroups,
+  projectComponentVariant,
+  projectScenario,
+  projectScreen,
+} from "./design-projection.mjs";
 export { componentCombinationSnapshot } from "./component-samples.mjs";
 export {
   intentToOperations,

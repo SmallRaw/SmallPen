@@ -1,3 +1,5 @@
+import { compareStrings } from "./internal.mjs";
+
 const encoder = new TextEncoder();
 
 async function sha256(value) {
@@ -27,7 +29,7 @@ function normalizeCanonicalValue(value) {
     return Object.fromEntries(
       Object.entries(value)
         .filter(([, entryValue]) => entryValue !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compareStrings(left, right))
         .map(([key, entryValue]) => [key, normalizeCanonicalValue(entryValue)]),
     );
   }
@@ -45,7 +47,7 @@ export async function sha256Hex(value) {
 export async function hashCanonicalFiles(files) {
   let source = "";
   for (const [path, contents] of [...files.entries()].sort(([left], [right]) =>
-    left.localeCompare(right),
+    compareStrings(left, right),
   )) {
     source += `${path}\0${contents}\0`;
   }

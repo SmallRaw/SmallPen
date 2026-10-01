@@ -1,10 +1,7 @@
 import { fail } from "./errors.mjs";
+import { isRecord } from "./internal.mjs";
 
 const PROJECT_KINDS = ["application", "motion", "custom"];
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function slug(value, separator = "_") {
   const normalized = value

@@ -489,22 +489,16 @@ test("Effective Tokens reject ambiguous rules, incompatible overrides, and inval
     "memory://foundation.smallpen",
     foundationValues(),
   );
-  const ambiguous = await loadPackageFromValues(
-    "memory://ambiguous.smallpen",
-    ambiguousValues,
+  // Two equally specific rules that one Context selects together fail at
+  // load, not only when that Context is resolved.
+  await assert.rejects(
+    loadPackageFromValues("memory://ambiguous.smallpen", ambiguousValues),
+    (error) => error?.code === "ambiguous_token_context_rule",
   );
   const reference = {
     assetId: "tok_color_button",
     packageId: "pkg_foundation",
   };
-  assert.throws(
-    () =>
-      resolveEffectiveToken(ambiguous, reference, {
-        context: { axis_viewport: "mobile" },
-        foundation,
-      }),
-    (error) => error?.code === "ambiguous_token_context_rule",
-  );
 
   const incompatibleValues = productValues();
   incompatibleValues.get(

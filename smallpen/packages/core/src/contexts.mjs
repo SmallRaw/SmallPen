@@ -1,4 +1,10 @@
 import { fail } from "./errors.mjs";
+import {
+  compareStrings,
+  isRecord,
+  isReservedKey,
+  stableId as sharedStableId,
+} from "./internal.mjs";
 
 const CONTEXT_KINDS = new Set([
   "accessibility",
@@ -9,10 +15,6 @@ const CONTEXT_KINDS = new Set([
   "viewport",
 ]);
 
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function nonEmptyString(value, code, path) {
   if (typeof value !== "string" || value.length === 0) {
     fail(code, `${path} must be a non-empty string`, { path, value });
@@ -22,10 +24,7 @@ function nonEmptyString(value, code, path) {
 
 function stableId(value, prefix, code, path) {
   nonEmptyString(value, code, path);
-  if (!value.startsWith(prefix) || !/^[a-zA-Z0-9_-]+$/.test(value)) {
-    fail(code, `${path} must begin with ${prefix}`, { path, value });
-  }
-  return value;
+  return sharedStableId(value, prefix, code, path);
 }
 
 function stringRecord(value, code, path) {
@@ -34,6 +33,7 @@ function stringRecord(value, code, path) {
     if (
       typeof key !== "string" ||
       key.length === 0 ||
+      isReservedKey(key) ||
       typeof child !== "string" ||
       child.length === 0
     ) {
@@ -242,7 +242,7 @@ export function resolveContext(product, foundation, selection = {}) {
   }
   return Object.fromEntries(
     [...axes.values()]
-      .sort((left, right) => left.id.localeCompare(right.id))
+      .sort((left, right) => compareStrings(left.id, right.id))
       .map((axis) => [axis.id, selection[axis.id] ?? axis.defaultValue]),
   );
 }

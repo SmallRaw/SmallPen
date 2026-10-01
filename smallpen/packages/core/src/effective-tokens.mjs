@@ -1,5 +1,6 @@
 import { combineContextAxes, resolveContext } from "./contexts.mjs";
 import { fail } from "./errors.mjs";
+import { compareStrings } from "./internal.mjs";
 import { tokenAliasPath, tokenValueMatchesType } from "./tokens-domain.mjs";
 
 function contextualDefinition(token, context, axes) {
@@ -97,11 +98,37 @@ function tokenPathIndex(snapshot) {
   return result;
 }
 
-function tokenByPath(snapshot, path, byPath) {
-  return byPath.get(path) ??
-    [...snapshot.domain.tokens.values()].find(
-      (candidate) => candidate.path === path,
-    );
+// Lookups shared by every resolution in one call. listEffectiveTokens
+// resolves every visible token; rebuilding these per token made it
+// quadratic.
+function createResolutionCache() {
+  return {
+    firstByPath: new Map(),
+    overrides: new Map(),
+    pathIndexes: new Map(),
+    values: new Map(),
+  };
+}
+
+function cached(map, key, build) {
+  if (!map.has(key)) map.set(key, build());
+  return map.get(key);
+}
+
+function cachedPathIndex(snapshot, cache) {
+  return cached(cache.pathIndexes, snapshot, () => tokenPathIndex(snapshot));
+}
+
+function tokenByPath(snapshot, path, byPath, cache) {
+  if (byPath.has(path)) return byPath.get(path);
+  const firstByPath = cached(cache.firstByPath, snapshot, () => {
+    const index = new Map();
+    for (const candidate of snapshot.domain.tokens.values()) {
+      if (!index.has(candidate.path)) index.set(candidate.path, candidate);
+    }
+    return index;
+  });
+  return firstByPath.get(path);
 }
 
 function activeTargetToken(owner, token, byPath) {
@@ -110,59 +137,92 @@ function activeTargetToken(owner, token, byPath) {
     : token;
 }
 
-function contextualTokenValue(token, owner, context, axes, visiting, byPath) {
-  if (visiting.has(token.id)) {
-    fail("token_alias_cycle", `Token alias cycle includes ${token.path}`, {
-      path: token.path,
-      tokenId: token.id,
-    });
-  }
-  const definition = contextualDefinition(token, context, axes);
-  if (!definition.found) return { ...definition, value: undefined };
-  const alias = tokenAliasPath(definition.value);
-  let value = definition.value;
-  if (alias) {
-    const target = tokenByPath(owner, alias, byPath);
-    if (!target) {
-      fail("missing_token_alias", `Missing Token alias: ${alias}`, {
-        path: token.path,
-        tokenId: token.id,
+function copyResolution(result) {
+  return {
+    ...result,
+    rule: structuredClone(result.rule),
+    value: structuredClone(result.value),
+  };
+}
+
+// Follows the alias chain with a loop so a long chain cannot exhaust the
+// stack, and remembers each resolved link for the rest of the call.
+function contextualTokenValue(token, owner, context, axes, byPath, cache) {
+  const memoKey = (link) => `${owner.manifest.packageId}\0${link.id}`;
+  const chain = [];
+  const visiting = new Set();
+  let current = token;
+  let value;
+  for (;;) {
+    const memo = cache.values.get(memoKey(current));
+    if (memo) {
+      if (chain.length === 0) return copyResolution(memo);
+      value = memo.value;
+      break;
+    }
+    if (visiting.has(current.id)) {
+      fail("token_alias_cycle", `Token alias cycle includes ${current.path}`, {
+        path: current.path,
+        tokenId: current.id,
       });
     }
-    if (target.type !== token.type) {
+    visiting.add(current.id);
+    const definition = contextualDefinition(current, context, axes);
+    chain.push({ definition, link: current });
+    if (!definition.found) break;
+    const alias = tokenAliasPath(definition.value);
+    if (!alias) {
+      value = definition.value;
+      break;
+    }
+    const target = tokenByPath(owner, alias, byPath, cache);
+    if (!target) {
+      fail("missing_token_alias", `Missing Token alias: ${alias}`, {
+        path: current.path,
+        tokenId: current.id,
+      });
+    }
+    if (target.type !== current.type) {
       fail(
         "token_alias_type_mismatch",
         `Token alias type does not match ${target.path}`,
-        { path: token.path, tokenId: token.id },
+        { path: current.path, tokenId: current.id },
       );
     }
-    visiting.add(token.id);
-    value = contextualTokenValue(
-      target,
-      owner,
-      context,
-      axes,
-      visiting,
-      byPath,
-    ).value;
-    visiting.delete(token.id);
+    current = target;
   }
-  if (!tokenValueMatchesType(value, token.type)) {
-    fail(
-      "invalid_token_value",
-      "Value does not match Token type in the selected Context",
-      { path: token.path, tokenId: token.id, type: token.type },
-    );
+  let result;
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    const { definition, link } = chain[index];
+    if (!definition.found) {
+      result = { ...definition, value: undefined };
+      continue;
+    }
+    if (!tokenValueMatchesType(value, link.type)) {
+      fail(
+        "invalid_token_value",
+        "Value does not match Token type in the selected Context",
+        { path: link.path, tokenId: link.id, type: link.type },
+      );
+    }
+    result = { ...definition, value: structuredClone(value) };
+    cache.values.set(memoKey(link), result);
   }
-  return { ...definition, value: structuredClone(value) };
+  return copyResolution(result);
 }
 
-function overrideForReference(product, reference) {
-  const overrides = [...product.domain.tokens.values()].filter(
-    (token) =>
-      token.overrideOf?.packageId === reference.packageId &&
-      token.overrideOf.assetId === reference.assetId,
-  );
+function overrideForReference(product, reference, cache) {
+  const overridesByTarget = cached(cache.overrides, product, () => {
+    const index = new Map();
+    for (const token of product.domain.tokens.values()) {
+      if (!token.overrideOf) continue;
+      const key = `${token.overrideOf.packageId}\0${token.overrideOf.assetId}`;
+      index.set(key, [...(index.get(key) ?? []), token]);
+    }
+    return index;
+  });
+  const overrides =
+    overridesByTarget.get(`${reference.packageId}\0${reference.assetId}`) ?? [];
   if (overrides.length > 1) {
     fail(
       "duplicate_product_token_override",
@@ -181,7 +241,12 @@ function tokenOwner(product, foundation, libraries, reference) {
   );
 }
 
-function resolveInternal(product, reference, options = {}) {
+function resolveInternal(
+  product,
+  reference,
+  options = {},
+  cache = createResolutionCache(),
+) {
   if (
     !reference ||
     typeof reference.packageId !== "string" ||
@@ -192,7 +257,7 @@ function resolveInternal(product, reference, options = {}) {
   const foundation = options.foundation;
   const libraries = options.libraries ?? [];
   const owner = tokenOwner(product, foundation, libraries, reference);
-  const ownerTokensByPath = owner ? tokenPathIndex(owner) : new Map();
+  const ownerTokensByPath = owner ? cachedPathIndex(owner, cache) : new Map();
   const targetToken = owner
     ? activeTargetToken(
         owner,
@@ -217,7 +282,7 @@ function resolveInternal(product, reference, options = {}) {
   }
   const candidates = [];
   if (owner !== product) {
-    const override = overrideForReference(product, reference);
+    const override = overrideForReference(product, reference, cache);
     if (override) {
       if (override.type !== targetToken.type) {
         fail(
@@ -231,8 +296,8 @@ function resolveInternal(product, reference, options = {}) {
         product,
         context,
         axes,
-        new Set(),
-        tokenPathIndex(product),
+        cachedPathIndex(product, cache),
+        cache,
       );
       candidates.push({
         layer: "product",
@@ -280,8 +345,8 @@ function resolveInternal(product, reference, options = {}) {
     owner,
     context,
     axes,
-    new Set(),
     ownerTokensByPath,
+    cache,
   );
   candidates.push({
     layer:
@@ -342,10 +407,14 @@ export function explainEffectiveToken(product, reference, options = {}) {
 export function listEffectiveTokens(product, options = {}) {
   const foundation = options.foundation;
   const libraries = options.libraries ?? [];
+  // Validate the selection even when no Token would resolve it, so an unknown
+  // Axis fails here as it does for every other read.
+  resolveContext(product, foundation, options.context ?? {});
+  const cache = createResolutionCache();
   const visibleTargets = (snapshot, publicOnly) => {
     const entry = penpotTokenEntry(snapshot);
     const tokens = [
-      ...tokenPathIndex(snapshot).values(),
+      ...cachedPathIndex(snapshot, cache).values(),
       ...[...snapshot.domain.tokens.values()].filter(
         (token) => token.filePath !== entry,
       ),
@@ -368,10 +437,14 @@ export function listEffectiveTokens(product, options = {}) {
   ];
   return targets
     .sort((left, right) =>
-      `${left.packageId}/${left.assetId}`.localeCompare(
+      compareStrings(
+        `${left.packageId}/${left.assetId}`,
         `${right.packageId}/${right.assetId}`,
       ),
     )
-    .map((reference) => resolveEffectiveToken(product, reference, options))
+    .map(
+      (reference) =>
+        resolveInternal(product, reference, options, cache).resolution,
+    )
     .filter(Boolean);
 }

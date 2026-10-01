@@ -1,5 +1,6 @@
 import { createSemanticTree, diffSemanticTrees, projectDesignView, resolveDesignView } from "./design-read.mjs";
 import { fail } from "./errors.mjs";
+import { isRecord, MAX_NODE_DEPTH, ownValue } from "./internal.mjs";
 
 const SUPPORTED_FIGMA_NODE_TYPES = new Set([
   "COMPONENT",
@@ -43,10 +44,6 @@ const MERGEABLE_FIELDS = new Set([
 ]);
 
 const REQUIRED_MERGE_FIELDS = new Set(["height", "name", "text", "width", "x", "y"]);
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function stablePart(value) {
   return String(value ?? "unknown")
@@ -295,6 +292,22 @@ function primitiveOverrides(node, idByGuid, losses, stableNodeId) {
   return result;
 }
 
+// Clipboard parent links are untrusted: a parent cycle through a non-visual
+// node, or a very long chain, must fail typed instead of exhausting the stack.
+function enterFigmaNode(identity, depth, seen) {
+  if (seen.has(identity)) {
+    fail("invalid_figma_clipboard", `Figma node is reached twice: ${identity}`);
+  }
+  if (depth > MAX_NODE_DEPTH) {
+    fail(
+      "node_tree_too_deep",
+      `Figma node tree is deeper than ${MAX_NODE_DEPTH} levels at: ${identity}`,
+      { maxDepth: MAX_NODE_DEPTH },
+    );
+  }
+  seen.add(identity);
+}
+
 function createConverter(nodeChanges, packageId, losses, componentByNodeGuid) {
   const byGuid = new Map();
   const childrenByGuid = new Map();
@@ -388,14 +401,18 @@ function createConverter(nodeChanges, packageId, losses, componentByNodeGuid) {
 
   function tree(rootIdentity) {
     const nodes = {};
-    const visit = (identity) => {
+    const seen = new Set();
+    const visit = (identity, depth) => {
+      enterFigmaNode(identity, depth, seen);
       const converted = convert(identity);
       nodes[converted.id] = converted;
       for (const child of childrenByGuid.get(identity) ?? []) {
-        if (!NON_VISUAL_FIGMA_NODE_TYPES.has(byGuid.get(child)?.type)) visit(child);
+        if (!NON_VISUAL_FIGMA_NODE_TYPES.has(byGuid.get(child)?.type)) {
+          visit(child, depth + 1);
+        }
       }
     };
-    visit(rootIdentity);
+    visit(rootIdentity, 0);
     return nodes;
   }
 
@@ -503,16 +520,20 @@ export function createFigmaDraftValues({ importedAt, inputHash, meta, nodeChange
     fail("empty_figma_clipboard", "Figma clipboard has no visual top-level nodes");
   }
   const nodes = {};
-  const visit = (identity) => {
+  const seen = new Set();
+  const visit = (identity, depth) => {
     if (componentSetGuids.has(identity)) return;
+    enterFigmaNode(identity, depth, seen);
     const converted = converter.convert(identity, componentSetGuids);
     converted.children = converted.children.filter((childId) =>
       ![...componentSetGuids].some((candidate) => converter.idByGuid.get(candidate) === childId),
     );
     nodes[converted.id] = converted;
-    for (const child of converter.childrenByGuid.get(identity) ?? []) visit(child);
+    for (const child of converter.childrenByGuid.get(identity) ?? []) {
+      visit(child, depth + 1);
+    }
   };
-  for (const identity of topLevel) visit(identity);
+  for (const identity of topLevel) visit(identity, 0);
   const rootId = "node_import_root";
   const bounds = topLevel.map((identity) => nodes[converter.idByGuid.get(identity)]);
   const maximumX = Math.max(1, ...bounds.map((node) => node.x + node.width));
@@ -748,8 +769,11 @@ export function compileDraftMerge(canonical, draftValue, selections, options = {
     }
     const canonicalPresentation = presentation(canonical, selection);
     const draftPresentation = presentation(draft.snapshot, selection);
-    const canonicalNode = canonicalPresentation?.nodes[selection.nodeId];
-    const draftNode = draftPresentation?.nodes[selection.nodeId];
+    const canonicalNode = ownValue(
+      canonicalPresentation?.nodes,
+      selection.nodeId,
+    );
+    const draftNode = ownValue(draftPresentation?.nodes, selection.nodeId);
     if (!canonicalNode || !draftNode) {
       fail(
         "missing_draft_merge_node",

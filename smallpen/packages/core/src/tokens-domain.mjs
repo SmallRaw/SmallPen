@@ -1,15 +1,12 @@
 import { SMALLPEN_FORMAT_CAPABILITIES } from "./capabilities.mjs";
 import { fail } from "./errors.mjs";
+import { isRecord, isReservedKey } from "./internal.mjs";
 
 const TOKEN_TYPES = new Set([
   ...SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenTypes,
   "dimension",
 ]);
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function assetReference(value, path) {
   if (value === undefined) return undefined;
@@ -38,6 +35,7 @@ function stringRecord(value, path) {
   for (const [field, child] of Object.entries(value)) {
     if (
       field.length === 0 ||
+      isReservedKey(field) ||
       typeof child !== "string" ||
       child.length === 0
     ) {
@@ -235,6 +233,13 @@ function visitDtcgGroup(value, segments, inheritedType, filePath, state) {
     typeof value.$type === "string" ? value.$type : inheritedType;
   for (const [name, child] of Object.entries(value)) {
     if (name.startsWith("$")) continue;
+    if (isReservedKey(name)) {
+      fail(
+        "invalid_token_path",
+        `${filePath}:${[...segments, name].join(".")} uses a reserved name`,
+        { path: `${filePath}:${[...segments, name].join(".")}` },
+      );
+    }
     if (!isRecord(child)) {
       fail(
         "invalid_token_group",
@@ -318,57 +323,285 @@ function addPenpotLibraryTokens(library, filePath, state) {
         });
       }
       state.tokens.set(token.id, token);
-      // Aliases ("{group.token}") resolve by path. Penpot libraries allow the
-      // same token name in several sets, so the first occurrence wins rather
-      // than failing the whole library.
-      if (!state.byPath.has(token.path)) {
-        state.byPath.set(token.path, token);
+      // Penpot libraries allow the same token name in several sets.
+      claimTokenPath(state.byPath, token.path, token);
+    }
+  }
+}
+
+// Alias targets resolve by path and the first declaration of a path wins:
+// package entry order, then Token Set order. The Package loader and the token
+// importer (pruneUnresolvableTokens) share this rule.
+export function claimTokenPath(byPath, path, token) {
+  if (!byPath.has(path)) byPath.set(path, token);
+}
+
+// Follows the alias chain with a loop, so a long chain fails validation
+// instead of exhausting the stack.
+function resolveBaseToken(token, byPath) {
+  const chain = [];
+  const visiting = new Set();
+  let current = token;
+  let value;
+  for (;;) {
+    if (current.resolvedValue !== undefined) {
+      value = current.resolvedValue;
+      break;
+    }
+    if (current.rawValue === undefined) {
+      value = undefined;
+      break;
+    }
+    if (visiting.has(current.id)) {
+      fail("token_alias_cycle", `Token alias cycle includes ${current.path}`, {
+        path: current.path,
+        tokenId: current.id,
+      });
+    }
+    visiting.add(current.id);
+    chain.push(current);
+    const alias = tokenAliasPath(current.rawValue);
+    if (!alias) {
+      value = current.rawValue;
+      break;
+    }
+    const target = byPath.get(alias);
+    if (!target) {
+      fail("missing_token_alias", `Missing Token alias: ${alias}`, {
+        path: current.path,
+      });
+    }
+    if (target.type !== current.type) {
+      fail(
+        "token_alias_type_mismatch",
+        `Token alias type does not match ${target.path}`,
+        { path: current.path },
+      );
+    }
+    current = target;
+  }
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    const link = chain[index];
+    if (!tokenValueMatchesType(value, link.type)) {
+      fail(
+        "invalid_token_value",
+        `Value does not match Token type at ${link.path}`,
+        { path: link.path, tokenId: link.id, type: link.type },
+      );
+    }
+    link.resolvedValue = structuredClone(value);
+    value = link.resolvedValue;
+  }
+  return value;
+}
+
+function contextValuePath(token, index) {
+  return `${token.path}.contextValues[${index}]`;
+}
+
+function ruleSize(rule) {
+  return Object.keys(rule).length;
+}
+
+// Every axis of `inner` is selected with the same value by `outer`.
+function ruleWithin(inner, outer) {
+  return Object.entries(inner).every(
+    ([axisId, valueId]) => outer[axisId] === valueId,
+  );
+}
+
+function rulesCompatible(left, right) {
+  return Object.entries(left).every(
+    ([axisId, valueId]) =>
+      !Object.hasOwn(right, axisId) || right[axisId] === valueId,
+  );
+}
+
+// The same checks effective-tokens.mjs applies when it resolves a Context
+// value, made once at load for every rule: known Axes and values, and no two
+// equally specific rules that some Context selects together without a more
+// specific rule taking precedence. A Product also uses the Axes of its
+// Foundation, which load separately, so only a Foundation's Axes are checked
+// here; resolution checks a Product's rules against the combined Axes.
+function validateContextRules(token, manifest, contextAxes) {
+  const rules = token.contextValues.map(({ when }) => when);
+  const checkAxes = contextAxes !== undefined && manifest.role === "foundation";
+  for (const [index, rule] of checkAxes ? rules.entries() : []) {
+    for (const [axisId, valueId] of Object.entries(rule)) {
+      const axis = contextAxes.get(axisId);
+      if (!axis || !axis.values.some(({ id }) => id === valueId)) {
+        fail(
+          "invalid_token_context_rule",
+          "Token Context rule references an unknown Axis or value",
+          {
+            axisId,
+            path: `${contextValuePath(token, index)}.when.${axisId}`,
+            tokenId: token.id,
+            valueId,
+          },
+        );
+      }
+    }
+  }
+  for (const [leftIndex, left] of rules.entries()) {
+    for (const right of rules.slice(leftIndex + 1)) {
+      if (ruleSize(left) !== ruleSize(right) || !rulesCompatible(left, right)) {
+        continue;
+      }
+      const both = { ...left, ...right };
+      const resolved = rules.some(
+        (rule) => ruleSize(rule) > ruleSize(left) && ruleWithin(rule, both),
+      );
+      if (!resolved) {
+        fail(
+          "ambiguous_token_context_rule",
+          `Equally specific Token Context rules match ${token.path}`,
+          {
+            path: `${token.path}.contextValues`,
+            specificity: ruleSize(left),
+            tokenId: token.id,
+          },
+        );
       }
     }
   }
 }
 
-function resolveBaseToken(token, byPath, visiting) {
-  if (token.resolvedValue !== undefined) return token.resolvedValue;
-  if (token.rawValue === undefined) return undefined;
-  if (visiting.has(token.id)) {
-    fail("token_alias_cycle", `Token alias cycle includes ${token.path}`, {
-      path: token.path,
-      tokenId: token.id,
-    });
-  }
-  const alias = tokenAliasPath(token.rawValue);
-  let resolved = token.rawValue;
-  if (alias) {
-    const target = byPath.get(alias);
-    if (!target) {
-      fail("missing_token_alias", `Missing Token alias: ${alias}`, {
-        path: token.path,
-      });
-    }
-    if (target.type !== token.type) {
+// Context values follow the same alias rules as base values: the target must
+// exist and share the Token type.
+function validateContextValues(token, byPath) {
+  for (const [index, contextual] of token.contextValues.entries()) {
+    const path = `${contextValuePath(token, index)}.value`;
+    const alias = tokenAliasPath(contextual.value);
+    if (alias) {
+      const target = byPath.get(alias);
+      if (!target) {
+        fail("missing_token_alias", `Missing Token alias: ${alias}`, {
+          index,
+          path,
+          tokenId: token.id,
+        });
+      }
+      if (target.type !== token.type) {
+        fail(
+          "token_alias_type_mismatch",
+          `Token alias type does not match ${target.path}`,
+          { index, path, tokenId: token.id },
+        );
+      }
+    } else if (!tokenValueMatchesType(contextual.value, token.type)) {
       fail(
-        "token_alias_type_mismatch",
-        `Token alias type does not match ${target.path}`,
-        { path: token.path },
+        "invalid_token_context_value",
+        `Context value does not match Token type at ${token.path}`,
+        { index, path, tokenId: token.id, type: token.type },
       );
     }
-    visiting.add(token.id);
-    resolved = resolveBaseToken(target, byPath, visiting);
-    visiting.delete(token.id);
   }
-  if (!tokenValueMatchesType(resolved, token.type)) {
-    fail("invalid_token_value", `Value does not match Token type at ${token.path}`, {
-      path: token.path,
-      tokenId: token.id,
-      type: token.type,
-    });
-  }
-  token.resolvedValue = structuredClone(resolved);
-  return token.resolvedValue;
 }
 
-export function parseTokenEntries(manifest, entries) {
+const MAX_CONTEXT_ALIAS_STATES = 100000;
+
+function ruleKey(rule) {
+  return Object.keys(rule)
+    .sort()
+    .map((axisId) => `${axisId}=${rule[axisId]}`)
+    .join("&");
+}
+
+// A step from a token to an alias target is possible in a Context that
+// satisfies `rule` only when no rule of the token certainly wins over it:
+// a base value loses to any rule the Context selects, a Context value loses
+// to a more specific rule the Context selects.
+function aliasStepShadowed(token, step, rule) {
+  if (step.when === null) {
+    return token.contextValues.some(({ when }) => ruleWithin(when, rule));
+  }
+  return token.contextValues.some(
+    ({ when }) =>
+      ruleSize(when) > ruleSize(step.when) && ruleWithin(when, rule),
+  );
+}
+
+// Base-only cycles fail in resolveBaseToken. A cycle through a Context value
+// exists only in Contexts that select every rule on it, so the walk carries
+// the union of the rules it followed and reports a cycle only when that union
+// is consistent and every step on the cycle can be taken in it.
+function validateContextAliasCycles(tokens, byPath) {
+  const steps = new Map();
+  const starts = [];
+  for (const token of tokens.values()) {
+    const tokenSteps = [];
+    const baseTarget = byPath.get(tokenAliasPath(token.rawValue));
+    if (baseTarget) tokenSteps.push({ target: baseTarget, when: null });
+    for (const { value, when } of token.contextValues) {
+      const target = byPath.get(tokenAliasPath(value));
+      if (target) tokenSteps.push({ target, when });
+    }
+    steps.set(token.id, tokenSteps);
+    if (tokenSteps.some(({ when }) => when !== null)) starts.push(token);
+  }
+  const done = new Set();
+  let budget = MAX_CONTEXT_ALIAS_STATES;
+  for (const start of starts) {
+    const startKey = `${start.id}\0`;
+    if (done.has(startKey)) continue;
+    // Each frame: a state on the current path and the next step to try.
+    const path = [
+      { key: startKey, next: 0, rule: {}, step: null, token: start },
+    ];
+    const onPath = new Map([[startKey, 0]]);
+    while (path.length > 0) {
+      const frame = path.at(-1);
+      const tokenSteps = steps.get(frame.token.id);
+      if (frame.next >= tokenSteps.length) {
+        path.pop();
+        onPath.delete(frame.key);
+        done.add(frame.key);
+        continue;
+      }
+      const step = tokenSteps[frame.next];
+      frame.next += 1;
+      if (step.when !== null && !rulesCompatible(step.when, frame.rule)) {
+        continue;
+      }
+      const rule =
+        step.when === null ? frame.rule : { ...frame.rule, ...step.when };
+      if (aliasStepShadowed(frame.token, step, rule)) continue;
+      const key = `${step.target.id}\0${ruleKey(rule)}`;
+      if (onPath.has(key)) {
+        // Steps around the cycle and the tokens they leave from.
+        const first = onPath.get(key);
+        const cycle = [
+          ...path.slice(first + 1),
+          { step, token: step.target },
+        ];
+        const sources = path.slice(first);
+        const feasible = cycle.every(
+          (entry, index) =>
+            !aliasStepShadowed(sources[index].token, entry.step, rule),
+        );
+        if (feasible) {
+          fail(
+            "token_alias_cycle",
+            `Token alias cycle includes ${step.target.path}`,
+            { path: step.target.path, tokenId: step.target.id },
+          );
+        }
+        continue;
+      }
+      if (done.has(key)) continue;
+      budget -= 1;
+      // Resolution still detects cycles; stop proving at load past the bound.
+      if (budget < 0) return;
+      onPath.set(key, path.length);
+      path.push({ key, next: 0, rule, step, token: step.target });
+    }
+  }
+}
+
+// contextAxes: the Package's own Context Axes. Without them, rules are not
+// checked against Axes.
+export function parseTokenEntries(manifest, entries, contextAxes) {
   const state = { byPath: new Map(), tokens: new Map() };
   for (const entry of manifest.entries.tokens) {
     const value = entries[entry];
@@ -382,22 +615,10 @@ export function parseTokenEntries(manifest, entries) {
     }
   }
   for (const token of state.tokens.values()) {
-    for (const [index, contextual] of token.contextValues.entries()) {
-      if (!tokenValueMatchesType(contextual.value, token.type)) {
-        fail(
-          "invalid_token_context_value",
-          `Context value does not match Token type at ${token.path}`,
-          {
-            index,
-            path: `${token.path}.contextValues[${index}].value`,
-            tokenId: token.id,
-            type: token.type,
-          },
-        );
-      }
-    }
+    validateContextRules(token, manifest, contextAxes);
+    validateContextValues(token, state.byPath);
     if (token.rawValue !== undefined) {
-      resolveBaseToken(token, state.byPath, new Set());
+      resolveBaseToken(token, state.byPath);
     } else if (!token.overrideOf || token.contextValues.length === 0) {
       fail(
         "missing_token_value",
@@ -406,5 +627,6 @@ export function parseTokenEntries(manifest, entries) {
       );
     }
   }
+  validateContextAliasCycles(state.tokens, state.byPath);
   return state.tokens;
 }
