@@ -346,9 +346,11 @@ function resolveFont(state, style, nodeId, path) {
     const key = `${nodeId}:${id || family}`;
     if (!state.fontFallbacks.has(key)) {
       state.fontFallbacks.add(key);
+      const requestedFont = style.fontFamily ?? style.fontId ?? "unknown font";
       state.diagnostics.push({
         code: "font_render_fallback",
-        message: `Renderer substituted Source Sans Pro for ${style.fontFamily ?? style.fontId ?? "unknown font"}`,
+        details: { requestedFont, substituteFont: "Source Sans Pro" },
+        message: `Renderer substituted Source Sans Pro for ${requestedFont}`,
         nodeId,
         path,
       });
@@ -3114,16 +3116,22 @@ function renderNodeShadow(state, node, matrix, opacity, path, clips, geometry) {
       });
       continue;
     }
-    const offsetX = Number(shadow.offsetX ?? 0);
-    const offsetY = Number(shadow.offsetY ?? 0);
+    // Token shadows are DTCG objects; shadows edited in Penpot keep its
+    // kebab-case offsets and a {color, opacity} color.
+    const offsetX = Number(shadow.offsetX ?? shadow["offset-x"] ?? 0);
+    const offsetY = Number(shadow.offsetY ?? shadow["offset-y"] ?? 0);
     const blur = Number(shadow.blur ?? 0);
+    const paint = isRecordLike(shadow.color) ? shadow.color : undefined;
     const color = parseColor(
-      typeof shadow.color === "string" ? shadow.color : "#000000",
+      typeof shadow.color === "string"
+        ? shadow.color
+        : typeof paint?.color === "string" ? paint.color : "#000000",
       state.diagnostics,
       `${path}.shadow`,
     );
-    const shadowOpacity = Number.isFinite(Number(shadow.opacity))
-      ? clamp(Number(shadow.opacity), 0, 1)
+    const rawOpacity = shadow.opacity ?? paint?.opacity;
+    const shadowOpacity = Number.isFinite(Number(rawOpacity))
+      ? clamp(Number(rawOpacity), 0, 1)
       : 1;
     const offsetDeviceX =
       (matrix[0] * offsetX + matrix[2] * offsetY) * state.scale;

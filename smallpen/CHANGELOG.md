@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.1.0-alpha.4 (2026-10-01)
+## 0.1.0-alpha.4 (2026-10-02)
 
 Rebased onto upstream Penpot `develop` (8b2ec216e). This release is a
 review and hardening pass; the Package format is unchanged.
@@ -68,6 +68,43 @@ review and hardening pass; the Package format is unchanged.
   startup and focuses an already open Package.
 - CI pins actions to commits, publishes only from `develop` or tags, checks
   translations, and renders text and images in the release smoke test.
+
+### CLI for AI agents
+- New `smallpen schema [topic]` prints every operation, node, token,
+  component-set, instance, presentation, scenario and init answer format with
+  a working JSON example. Writes are checked against the same schemas, and a
+  test applies every example, so help and behaviour cannot drift apart.
+- Command help carries real JSON examples; top-level help has a worked
+  example from tokens to a dark render and says which Package each write
+  targets. `put-token` and `put-component-set` with an existing id replace it.
+- Errors name the missing field and its expected shape, list allowed values
+  and valid ids, and suggest near misses (`textAlign` → `textStyle.textAlign`).
+  Unknown fields are refused instead of ignored; a batch that changes nothing
+  returns `changed: false`.
+- `init` returns package, screen, presentation and root node ids and the
+  seeded tokens and components; answers accumulate with `--state`; labels and
+  output follow the host locale (Chinese only for `zh*`).
+- `page` and `flow` intents accept instance `overrides`; `--compact` and
+  `--inverse-out` shorten write replies; size advice only lists close token
+  matches; a missing font is reported once with the `import-font` command.
+- Instance override paths are checked against Foundation and Library
+  components too; `update-presentation` accepts `viewport`.
+- In a blind test, a fresh AI built the same small design system from help
+  alone in about 40 commands with no failed writes, against about 100 mostly
+  failed guesses before.
+
+### Tokens on strokes and shadows
+- Stroke colours bind to tokens (`stroke`, `strokes.N`) and follow the active
+  theme in Penpot, the CLI renderer and token advice. Applying or detaching a
+  colour token on a stroke in Penpot saves the binding.
+- Shadow tokens apply, survive reload and render with the right offset and
+  colour; bindings to a missing paint or a token of the wrong type fail at
+  write time.
+- Component variant previews apply their token bindings; generated
+  Components and Design System pages cannot be renamed, moved or deleted.
+- Penpot's per-side stroke widths, stroke-width and font-weight tokens, moving
+  a just-dropped copy, and flex layouts with `column-reverse` or centred
+  overflow now save and reload correctly.
 
 ## 0.1.0-alpha.3 and earlier
 

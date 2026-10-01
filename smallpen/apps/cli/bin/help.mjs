@@ -1,5 +1,8 @@
+import { workedExampleText } from "./schema.mjs";
+
 const COMMANDS = [
   ["version", "Print the CLI package version without opening a workspace"],
+  ["schema", "Print the JSON shape and a valid example of every write input"],
   ["init", "Persist a guided Brief/Proposal and create Foundation + Product"],
   ["validate", "Validate a package and its same-workspace Foundation"],
   ["inspect", "Inspect package identity, capabilities, and domain summary"],
@@ -43,6 +46,14 @@ const DESIGN_SELECTORS = `Design selectors:
   --context-profile ID        Named Context profile
   --context AXIS=VALUE        Repeatable finite Context selection`;
 
+const WRITE_REPLY = `Reply size:
+  The default reply includes inverseBatch (also repeated in guidance.undo), the
+  exact undo for the write; it can run to thousands of lines. --inverse-out FILE
+  saves inverseBatch to FILE (only when the batch commits) and returns
+  inverseBatchPath. --compact drops inverseBatch and guidance from the reply and
+  adds summary and inverseOperationCount; combine both to keep undo:
+  smallpen apply PACKAGE --batch FILE --inverse-out FILE.undo.json`;
+
 const VIEW_SELECTORS = `${DESIGN_SELECTORS}
   --format FORMAT             structure|semantic|wireframe|screenshot`;
 
@@ -54,6 +65,36 @@ const HELP = {
 Output:
   The installed CLI package version, or {name,version} with --json.
   No package path is required; design files are unchanged and no services start.`,
+  schema: `Usage:
+  smallpen schema [TOPIC] [--json]
+  smallpen schema operation TYPE [--json]
+
+Purpose:
+  Print the exact JSON that apply, token, page, flow, and init accept: fields,
+  types, allowed values, a valid example, and the inverse each operation
+  returns. No package is opened. Field lists come from the validators, and every
+  example is tested against a workspace made by smallpen init.
+
+Topics:
+  operations     every operation type, its purpose, Package, required fields
+  operation TYPE one operation in full (smallpen schema put-token also works)
+  batch          batch contract, Foundation vs Product, worked example
+  node           node fields, textStyle, tokenBindings
+  node-types     what each node type requires
+  token          Token definition, contextValues, bindings
+  token-types    the value each Token type accepts
+  component-set  Component Set, Axis roles (configuration, state), variants
+  instance       INSTANCE nodes and overrides
+  presentation   Presentation fields, size, and resizing
+  screen         Screen fields
+  scenario       Scenario fields and viewport
+  context        Context Axes and theme values (alias: theme)
+  init           every init question and a complete --answers file
+
+Examples:
+  smallpen schema operations
+  smallpen schema operation update-component-node
+  smallpen schema component-set`,
   init: `Usage:
   smallpen init <workspace-directory> [--state FILE] [--answers FILE]
                 [--answer QUESTION_ID=JSON]... [--confirm] [--locale LOCALE] [--json]
@@ -64,7 +105,13 @@ Purpose:
   Foundation and one Product; an existing target is never overwritten.
 
 Defaults and values:
-  --state defaults to <workspace-directory>.smallpen-init.json.
+  --state defaults to <workspace-directory>.smallpen-init.json. Answers build up
+  only when every call passes the same --state; a call without --state starts
+  from no answers (the reply then carries stateNotice).
+  --answers FILE answers every question at once: smallpen schema init prints all
+  questions and a complete file.
+  --locale defaults to the environment (LC_ALL, LC_MESSAGES, LANG): zh* selects
+  Chinese labels, anything else English.
   Project kinds: application|motion|custom. Foundation choice: create-new.
   --answer values are JSON (for example projectKind=\"application\").
 
@@ -79,7 +126,20 @@ Output:
   <JSON> with your schema-valid answer; if no recommendation is present, supply the
   project's own purpose, audience, or deliverable. status proposal returns the
   persisted Proposal and confirmation args. Only --confirm creates the packages;
-  status initialized returns both package paths.
+  status initialized returns both package paths plus every id the first writes
+  need: packages.{foundation,product}.{packageId,path,revision},
+  start.{screenId,presentationId,rootNode,scenarioIds,contextAxes}, and seeded
+  (the starter Tokens and Component Sets with ids and paths).
+
+Seeded content (from the answers):
+  Foundation: each initialTokens name becomes a Token tok_<path with _>, for
+  example color.brand -> tok_color_brand (#6750a4), spacing.md -> tok_spacing_md
+  (8), radius.md -> tok_radius_md (8). Each initialComponents name becomes a
+  Component Set cmp_<name> with one plain variant var_<name>_default, no axes
+  (Button -> cmp_button). platforms become Context Axis axis_platform, next to
+  your contextAxes. Product: Screen scr_<firstScreen> with Presentation
+  pres_<firstScreen>_<platform>, root FRAME node_<firstScreen>_root, and one
+  Scenario. put-token or put-component-set with a seeded id replaces it whole.
 
 Errors and next commands:
   Malformed --answer JSON identifies the question; schema-invalid values also return
@@ -136,7 +196,8 @@ ${VIEW_SELECTORS}
 
 Defaults:
   Base Presentation + default Context values + canonical initial state + structure.
-  All formats resolve the same selection.
+  All formats resolve the same selection. --locale defaults to the environment
+  (zh* selects Chinese labels, anything else English).
 
 Choose a format:
   wireframe  A scaled 2D ASCII canvas for fast spatial reasoning, followed by a
@@ -192,6 +253,13 @@ Purpose:
   execute the owner-scoped command returned by search-components.
   An HTTP(S) Library URL is also accepted and uses the normal Library cache.
 
+Shapes:
+  smallpen schema component-set   axes (role configuration|state) and variants
+  smallpen schema instance        place a variant on a Screen and override it
+  Edit a variant: {"type":"update-component-node","componentSetId":"cmp_button",
+    "variantId":"var_button_primary","nodeId":"node_button_label",
+    "changes":{"textStyle":{"textAlign":"center"}}}
+
 Next:
   Use a returned selection with read-view or inspect-view to review the design.`,
   compare: `Usage:
@@ -203,11 +271,11 @@ Values:
   smallpen compare product.smallpen --selector '{"presentationId":"pres_desktop"}' \\
     --selector '{"presentationId":"pres_mobile"}' --json`,
   tokens: `Usage:
-  smallpen tokens <product.smallpen> [--context AXIS=VALUE]... [--json]
+  smallpen tokens <product.smallpen> [--context AXIS=VALUE]... [--locale LOCALE] [--json]
 
 Purpose:
   List Effective Tokens using Product first, Context specificity within a layer,
-  then Foundation fallback.`,
+  then Foundation fallback. labels follow --locale or the environment.`,
   "search-tokens": `Usage:
   smallpen search-tokens <product.smallpen> (--color COLOR | --value JSON | --query TEXT | --type TYPE)
                          [--context AXIS=VALUE]... [--limit N] [--json]
@@ -258,6 +326,12 @@ Defaults and limits:
   not visual QA. Verify decoded bytes against renderHash (SHA-256), and use the
   accompanying revision and selection. On failure, never open a previous file.
 
+Fonts:
+  The renderer bundles Source Sans Pro and draws fonts imported with import-font.
+  Any other family renders in Source Sans Pro: diagnostics then carries one
+  font_render_fallback per missing family with its nodeIds, availableFonts, and
+  the import-font command in nextOperations.
+
 Wireframe:
   Use smallpen read-view <product.smallpen> --format wireframe --json.
   It returns a scaled 2D ASCII canvas and compact marker key. Use semanticTree
@@ -268,7 +342,7 @@ Wireframe:
 
 ${DESIGN_SELECTORS}
   --scale N                   Image scale; default: 1 (requires --include-image to render)
-  --locale LOCALE             Localized view labels; default: zh-TW
+  --locale LOCALE             Localized view labels; default: from the environment
 
 Purpose:
   Return one AI-readable view bundle.
@@ -408,7 +482,7 @@ Next:
   "import-tokens": `Usage:
   smallpen import-tokens <package.smallpen> --input TOKENS.json [--set-name NAME]
                          [--select SET/NAME]... [--apply] [--dry-run]
-                         [--batch-id ID] [--json]
+                         [--batch-id ID] [--compact] [--inverse-out FILE] [--json]
 
 Purpose:
   Import a DTCG token file (Penpot or Tokens Studio export, single-set, multi-set
@@ -454,7 +528,7 @@ Output:
   flow: `Usage:
   smallpen flow <product.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
                 [--explain] [--diff] [--warning-detail compact|full]
-                [--confirm-unmatched] [--json]
+                [--confirm-unmatched] [--compact] [--inverse-out FILE] [--json]
 
 Purpose:
   Compile and atomically apply a declarative flowchart intent. The intent contains
@@ -468,23 +542,59 @@ Intent example:
 Node types:
   FRAME|ELLIPSE|GROUP|PATH|RECTANGLE|TEXT. PATH nodes may carry pathData, points,
   strokes, and tokenBindings; arrowheads use stroke cap fields.
+  Node fields: smallpen schema node. Every intent node is added as a sibling
+  under parentId (default: the Presentation root); nest with a later intent.
+  INSTANCE nodes may carry overrides, as in smallpen page --help.
 
-  Output:
-  The normal atomic apply result. Follow with read-view or render to inspect it.`,
+Output:
+  The normal atomic apply result. Follow with read-view or render to inspect it.
+
+${WRITE_REPLY}`,
   page: `Usage:
   smallpen page <product.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
                 [--explain] [--diff] [--warning-detail compact|full]
-                [--confirm-unmatched] [--json]
+                [--confirm-unmatched] [--compact] [--inverse-out FILE] [--json]
 
 Purpose:
   Compile and atomically apply declarative page nodes. The intent uses the same
   screenId, optional presentationId/parentId, and nodes schema as flow. Use page
   for general UI nodes and flow for flowchart-oriented PATH/ELLIPSE nodes.
-  Warning output follows apply; see smallpen apply --help for the compact schema.`,
+  Warning output follows apply; see smallpen apply --help for the compact schema.
+  Pass the Product. Each node becomes one add-presentation-node, all siblings
+  under parentId (default: the Presentation root); x/y are relative to it.
+
+Instance overrides:
+  An INSTANCE intent node may carry overrides {"<sourceNodeId>:<field>": value}
+  (fields: fills, name, opacity, text, visible). Each becomes a
+  set-instance-override after the node in the same atomic batch, so a label
+  needs no second write; a wrong path or type rejects the whole intent.
+
+Intent example (a title and a Button Instance with its label):
+  {"screenId":"scr_home","nodes":[
+    {"id":"node_title","type":"TEXT","name":"Title","x":24,"y":48,"width":312,
+     "height":32,"children":[],"text":"Tasks","textStyle":{"fontSize":24}},
+    {"id":"node_add_button","type":"INSTANCE","name":"Add button","x":16,"y":576,
+     "width":328,"height":48,"children":[],"instance":{"component":
+     {"packageId":"pkg_acme_foundation","assetId":"cmp_button"},
+     "variant":{"axis_style":"primary"}},
+     "overrides":{"node_button_label:text":"Add task"}}]}
+
+Shapes:
+  smallpen schema node       fields, textStyle, tokenBindings
+  smallpen schema instance   INSTANCE nodes; search-components prints a ready intent
+
+${WRITE_REPLY}`,
   token: `Usage:
-  smallpen token <product.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
+  smallpen token <package.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
                  [--explain] [--diff] [--warning-detail compact|full]
-                 [--confirm-unmatched] [--json]
+                 [--confirm-unmatched] [--compact] [--inverse-out FILE] [--json]
+
+Which Package:
+  Pass the Foundation (<name>-foundation.smallpen) for put-token, set-token-value,
+  remove-token, and deprecate-token: shared Tokens live there. Pass the Product
+  (<name>.smallpen) for set-token-binding, clear-token-binding, and
+  set-active-token-themes, which change Product nodes and its Token Library.
+  smallpen schema operations lists the Package of every operation.
 
 Purpose:
   Apply declarative Token operations through the canonical atomic batch contract.
@@ -492,8 +602,31 @@ Purpose:
   set-active-token-themes, set-token-binding, clear-token-binding, remove-token,
   or deprecate-token. Theme selection uses themePaths such as Product/Dark.
   The current package revision is read immediately before applying the intent.
+  Write shared Tokens to the Foundation package; bind them from the Product.
+  put-token with an existing tokenId replaces that Token whole (no merge). init
+  seeds one Token per initialTokens answer (the recommended answers give
+  tok_color_brand, tok_spacing_md, tok_radius_md; the init reply lists them in
+  seeded.tokens); put-token with one of those ids redefines it.
   Rerunning with the same --batch-id and intent after success returns
-  alreadyApplied:true; see smallpen apply --help for replay rules.`,
+  alreadyApplied:true; see smallpen apply --help for replay rules.
+
+Intent example (a color with a dark value, and a typography Token):
+  {"operations":[
+    {"type":"put-token","filePath":"tokens/foundation.json","path":"color.surface",
+     "tokenId":"tok_color_surface","definition":{"$type":"color","$value":"#ffffff",
+     "$extensions":{"smallpen":{"id":"tok_color_surface","contextValues":
+     [{"when":{"axis_theme":"dark"},"value":"#1c1b1f"}]}}}},
+    {"type":"put-token","filePath":"tokens/foundation.json","path":"type.heading",
+     "tokenId":"tok_type_heading","definition":{"$type":"typography","$value":
+     {"fontFamily":"Inter","fontSize":24,"fontWeight":700},
+     "$extensions":{"smallpen":{"id":"tok_type_heading"}}}}]}
+
+Shapes:
+  smallpen schema token         definition, contextValues, bindable fields
+  smallpen schema token-types   the value each type accepts
+  smallpen schema operation set-token-value
+
+${WRITE_REPLY}`,
   impact: `Usage:
   smallpen impact <product.smallpen> (--token-id TOK | --path TOKEN.PATH) [--package-id PKG] [--json]
 
@@ -505,14 +638,28 @@ Purpose:
   disambiguate a Token ID or path that exists in both Packages.`,
   apply: `Usage:
   smallpen apply <package.smallpen> --batch BATCH.json [--dry-run] [--explain] [--diff]
-                 [--warning-detail compact|full] [--confirm-unmatched] [--json]
+                 [--warning-detail compact|full] [--confirm-unmatched]
+                 [--compact] [--inverse-out FILE] [--json]
 
 Batch contract:
   {"baseRevision":"...","batchId":"unique-id","operations":[...]}
+  baseRevision is package.revision from smallpen inspect PACKAGE --json.
   The whole candidate validates and commits atomically. Success returns revision,
-  affected stable IDs/files, and an exact inverseBatch for Undo/Redo.
+  affected stable IDs/files, an exact inverseBatch for Undo/Redo, and changed
+  (false, with noChange, when the batch leaves the Package as it was).
   Revisions are content hashes, not increasing counters: restoring the exact
   Canonical content restores its previous revision.
+
+Operations:
+  smallpen schema operations         every type, purpose, Package, required fields
+  smallpen schema operation TYPE     fields, allowed values, example, inverse
+  Unknown operation types and unknown fields are rejected, with a suggestion.
+  Tokens, Context Axes, and shared Component Sets go to the Foundation; Screens,
+  nodes, Instances, and Scenarios go to the Product.
+  Example: {"baseRevision":"<revision>","batchId":"resize-home-1","operations":[
+    {"type":"update-presentation-node","screenId":"scr_home",
+     "presentationId":"pres_home_mobile","nodeId":"node_home_root",
+     "changes":{"width":360,"height":640}}]}
 
 Component instance overrides:
   set-instance-override {screenId, presentationId?, nodeId, overridePath, value}
@@ -530,7 +677,10 @@ Token references on nodes:
 
 Raw-value confirmation policy:
   Writes that resolve to no Token return a non-blocking design_token_value_unmatched
-  warning; the write itself is not gated. --confirm-unmatched is an explicit,
+  warning; the write itself is not gated. Warnings are design advice, not
+  validity: validate does not repeat them, and warningSummary.note says so. Raw
+  width/height values are listed only when a Token resolves to them or lies within
+  10% (at least 2); the rest are counted in warningSummary.suppressed. --confirm-unmatched is an explicit,
   machine-readable acknowledgment: the response marks those warning groups with
   "confirmed": true. Omitting the flag changes nothing about the write.
 
@@ -542,7 +692,9 @@ Warning output:
   and summary contextScope, then sort by warningIndex to recover the original list.
   Select --warning-detail full before executing to emit the original flat list.
   Do not replay an already applied batch just to expand warnings: compact output
-  already contains every occurrence, and stale-revision checks still apply.
+  already contains every listed occurrence, and stale-revision checks still apply.
+
+${WRITE_REPLY}
 
 Errors and recovery:
   Committed batch identities are recorded beside the Package. Retrying the same
@@ -594,7 +746,9 @@ export function printHelp(command) {
     process.stdout.write(`SmallPen ${command}\n\n${HELP[command]}
 
 Common output and error contract:
-  --json emits stable English keys; localized labels remain additional data. Success
+  --json emits stable English keys; localized labels remain additional data and
+  follow --locale where offered, else LC_ALL, LC_MESSAGES, or LANG (zh* selects
+  Chinese, anything else English). Success
   exits 0. Errors exit 1 as {error:{code,message,details}} and include exact
   nextOperations when recovery requires refresh, replay, Repair, or confirmation.
   Unknown options are not part of the command contract shown above. Only options
@@ -610,8 +764,16 @@ Help / next:
   process.stdout.write(`SmallPen Canonical Package CLI
 
 Model:
-  One .smallpen directory is one Canonical Package. A Product references exactly one
-  same-workspace Foundation by permanent Package ID and relative path. Every CLI call
+  One .smallpen directory is one Canonical Package. init creates a Foundation
+  (<name>-foundation.smallpen: shared Tokens, Context Axes, shared Component Sets)
+  and a Product (<name>.smallpen: Screens, Presentations, Scenarios). Write Tokens
+  and components to the Foundation; write Screens and nodes to the Product, and
+  pass the Product to read-view, render, evidence, tokens, and search-*.
+  A Presentation renders at the size of its root node: resize it with
+  update-presentation-node; update-presentation {viewport} keeps the declared
+  size in step.
+  A Product references exactly one same-workspace Foundation by permanent Package
+  ID and relative path. Every CLI call
   receives its Package locator and complete selectors explicitly; there is no current
   selection, current page, or cross-call session state. Packages are never merged into
   a synthetic multi-root file. CLI, Desktop, renderer, and Agents share one resolver
@@ -649,6 +811,11 @@ Common workflow:
   smallpen import-draft ./workspace/import-1.smallpen --kind figma --input clipboard.html --json
   smallpen repair ./workspace/product.smallpen --json
 
+Worked example (tokens, component set, screen, instance override, render):
+${workedExampleText()}
+
+Every write input has a schema and a tested example: smallpen schema
+(operations, node, token, component-set, instance, presentation, batch, init).
 Run smallpen <command> --help for syntax, defaults, values, examples, outputs,
 errors, and relevant next commands.
 `);

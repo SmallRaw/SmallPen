@@ -53,6 +53,12 @@ const PENPOT_STROKE_FIELDS = new Set([
   "stroke-style",
   "stroke-width",
 ]);
+const PENPOT_STROKE_SIDE_FIELDS = [
+  "stroke-width-bottom",
+  "stroke-width-left",
+  "stroke-width-right",
+  "stroke-width-top",
+];
 const DEFAULT_TEXT_STYLE = {
   fontFamily: "sourcesanspro",
   fontId: "sourcesanspro",
@@ -408,6 +414,14 @@ function compileStrokes(value, snapshot) {
     }
     const unsupported = Object.entries(stroke)
       .filter(([field, fieldValue]) => {
+        // The width input writes every side along with stroke-width; only
+        // sides that differ from it are a per-side width.
+        if (
+          PENPOT_STROKE_SIDE_FIELDS.includes(field) &&
+          fieldValue === stroke["stroke-width"]
+        ) {
+          return false;
+        }
         return !PENPOT_STROKE_FIELDS.has(field) && fieldValue !== null;
       })
       .map(([field]) => field);
@@ -579,6 +593,14 @@ function mergeTextStyle(inherited, value, allowFills = false, snapshot) {
     if (TEXT_STRUCTURAL_FIELDS.has(field)) continue;
     if (field === "fills" && allowFills) continue;
     if (field === "typography-ref-file" || field === "typography-ref-id") {
+      continue;
+    }
+    // A font-weight Token merges its variant ({weight, style}) into the
+    // text node beside the font-weight and font-style it sets.
+    if (
+      (field === "weight" && fieldValue === value["font-weight"]) ||
+      (field === "style" && fieldValue === value["font-style"])
+    ) {
       continue;
     }
     const canonicalField = PENPOT_TEXT_STYLE_FIELDS.get(field);
@@ -931,11 +953,19 @@ function compileAttribute(operation, attr, value, node, snapshot) {
       if (Object.hasOwn(node, field)) operation.changes[field] = null;
       return;
     }
+    if (attr === "applied-tokens") {
+      compileAppliedTokenBindings(operation, {}, node, snapshot);
+    }
     operation.changes[PENPOT_NULL_FIELDS.get(attr) ?? attr] = null;
     return;
   }
   if (attr === "applied-tokens") {
-    operation.changes.appliedTokens = compileAppliedTokens(value);
+    const applied = compileAppliedTokens(value);
+    compileAppliedTokenBindings(operation, applied, node, snapshot);
+    // A stroke color Token alone is a binding, not a local applied name.
+    if (Object.keys(applied).length > 0 || node.appliedTokens !== undefined) {
+      operation.changes.appliedTokens = applied;
+    }
     return;
   }
   const cornerIndex = PENPOT_CORNER_ATTRIBUTES.get(attr);
@@ -1919,7 +1949,26 @@ function compileAppliedTokens(value) {
     fail("invalid_applied_tokens", "Penpot applied-tokens must be an object");
   }
   const applied = {};
-  for (const [rawAttribute, tokenName] of Object.entries(value)) {
+  let entries = Object.entries(value);
+  // A stroke width Token applies to every side at once; one Token on all
+  // four sides is the stroke-width binding.
+  const sides = entries.filter(([attribute]) =>
+    PENPOT_STROKE_SIDE_FIELDS.includes(attribute),
+  );
+  const sideTokens = new Set(sides.map(([, tokenName]) => tokenName));
+  if (
+    sides.length === PENPOT_STROKE_SIDE_FIELDS.length &&
+    sideTokens.size === 1 &&
+    [undefined, ...sideTokens].includes(value["stroke-width"])
+  ) {
+    entries = entries.filter(
+      ([attribute]) => !PENPOT_STROKE_SIDE_FIELDS.includes(attribute),
+    );
+    if (value["stroke-width"] === undefined) {
+      entries.push(["stroke-width", [...sideTokens][0]]);
+    }
+  }
+  for (const [rawAttribute, tokenName] of entries) {
     const attribute = normalizeType(rawAttribute);
     if (!APPLIED_TOKEN_ATTRIBUTES.has(attribute)) {
       fail(
@@ -1936,6 +1985,77 @@ function compileAppliedTokens(value) {
     applied[attribute] = tokenName;
   }
   return applied;
+}
+
+// Applied Token attributes that are canonical Token bindings. The Web
+// projection shows a shadow or stroke color binding to a Token of this
+// Package as that applied Token (projection.cljs binding-applied-tokens),
+// so applying one binds the field and removing it clears the binding.
+const APPLIED_TOKEN_BINDINGS = new Map([
+  ["shadow", ["shadow"]],
+  ["stroke-color", ["stroke", "strokes.0"]],
+]);
+
+// The Tokens the Web token library holds: the Form A sets (the active ones
+// first, so a name shared by Light and Dark finds the applied one), then the
+// DTCG token files.
+function webLibraryTokens(snapshot) {
+  const library = currentTokenLibrary(snapshot);
+  const activeSetIds = new Set(
+    library.activeThemeIds.length > 0
+      ? library.themes
+          .filter(({ id }) => library.activeThemeIds.includes(id))
+          .flatMap(({ setIds }) => setIds)
+      : library.activeSetIds,
+  );
+  const sets = [
+    ...library.sets.filter(({ id }) => activeSetIds.has(id)),
+    ...library.sets.filter(({ id }) => !activeSetIds.has(id)),
+  ];
+  const formA = new Set(sets.flatMap(({ tokens }) => tokens.map(({ id }) => id)));
+  return [
+    ...sets.flatMap(({ tokens }) => tokens.map(({ id, name }) => ({ id, name }))),
+    ...[...(snapshot.domain?.tokens?.values() ?? [])]
+      .filter(({ id }) => !formA.has(id))
+      .map(({ id, path }) => ({ id, name: path })),
+  ];
+}
+
+function compileAppliedTokenBindings(operation, applied, node, snapshot) {
+  const packageId = snapshot.manifest.packageId;
+  const current = node.tokenBindings ?? {};
+  const bindings = structuredClone(current);
+  let tokens;
+  const libraryTokens = () => (tokens ??= webLibraryTokens(snapshot));
+  for (const [attribute, fields] of APPLIED_TOKEN_BINDINGS) {
+    const tokenName = applied[attribute];
+    delete applied[attribute];
+    const shown = fields.filter(
+      (field) =>
+        bindings[field]?.packageId === packageId &&
+        libraryTokens().some(({ id }) => id === bindings[field].assetId),
+    );
+    const shownName = (field) =>
+      libraryTokens().find(({ id }) => id === bindings[field].assetId).name;
+    if (tokenName !== undefined && shown.some((field) => shownName(field) === tokenName)) {
+      continue;
+    }
+    for (const field of shown) delete bindings[field];
+    if (tokenName === undefined) continue;
+    const token = libraryTokens().find(({ name }) => name === tokenName);
+    if (!token) {
+      fail(
+        "missing_applied_token",
+        `Applied Token does not exist: ${tokenName}`,
+        { attribute, nodeId: node.id, tokenName },
+      );
+    }
+    bindings[fields[0]] = { assetId: token.id, packageId };
+  }
+  if (!sameJsonValue(bindings, current)) {
+    operation.changes.tokenBindings =
+      Object.keys(bindings).length > 0 ? bindings : null;
+  }
 }
 
 // Supported attributes canonicalAddedNode does not place itself.
@@ -2035,7 +2155,13 @@ function canonicalAddedNode(
     y: relative.y,
   };
   if (value["applied-tokens"] !== undefined && value["applied-tokens"] !== null) {
-    node.appliedTokens = compileAppliedTokens(value["applied-tokens"]);
+    const applied = compileAppliedTokens(value["applied-tokens"]);
+    const bound = { changes: {} };
+    compileAppliedTokenBindings(bound, applied, node, snapshot);
+    node.appliedTokens = applied;
+    if (bound.changes.tokenBindings) {
+      node.tokenBindings = bound.changes.tokenBindings;
+    }
   }
   if (value.interactions !== undefined && value.interactions !== null) {
     if (
@@ -2985,7 +3111,9 @@ function compileTokenRecord(state, runtimeId, attrs, previous = {}) {
   const name = attrs.name ?? previous.name;
   const type = normalizeType(attrs.type ?? previous.type);
   const description = attrs.description ?? previous.description ?? "";
-  const value = Object.hasOwn(attrs, "value") ? attrs.value : previous.value;
+  const value = Object.hasOwn(attrs, "value")
+    ? type === "shadow" ? canonicalShadowTokenValue(attrs.value) : attrs.value
+    : previous.value;
   if (
     typeof name !== "string" ||
     !TOKEN_NAME_PATTERN.test(name) ||
@@ -2996,6 +3124,31 @@ function compileTokenRecord(state, runtimeId, attrs, previous = {}) {
     fail("invalid_token", "Penpot Token attrs are incomplete or invalid");
   }
   return { description, id, name, type, value };
+}
+
+// Penpot holds a shadow Token as a list of shadows with kebab-case keys and
+// string lengths (projection.cljs penpot-token-value); the Package keeps
+// DTCG shadow objects, one object for a single shadow.
+function canonicalShadowTokenValue(value) {
+  const shadows = Array.isArray(value) ? value : [value];
+  if (!shadows.every((shadow) => isRecord(shadow) && Object.hasOwn(shadow, "offset-x"))) {
+    return value;
+  }
+  const length = (raw) => {
+    const number = Number(raw);
+    return typeof raw === "string" && raw.trim() !== "" && Number.isFinite(number)
+      ? number
+      : raw;
+  };
+  const canonical = shadows.map((shadow) => ({
+    blur: length(shadow.blur ?? 0),
+    color: shadow.color,
+    ...(shadow.inset === true ? { inset: true } : {}),
+    offsetX: length(shadow["offset-x"]),
+    offsetY: length(shadow["offset-y"] ?? 0),
+    spread: length(shadow.spread ?? 0),
+  }));
+  return canonical.length === 1 ? canonical[0] : canonical;
 }
 
 function compileTokenSetTokens(state, value, previousTokens = []) {
@@ -4490,10 +4643,32 @@ function projectedAbsolutePlacement(snapshot, page, nodes, nodeId, geometry) {
   }
   const baseline = canonicalTreePlacement(nodes, nodeId) ?? ROOT_PLACEMENT;
   const provided =
-    runtimeId === undefined ? undefined : geometry.values.get(String(runtimeId));
+    (runtimeId === undefined
+      ? undefined
+      : geometry.values.get(String(runtimeId))) ??
+    sessionGeometry(snapshot, page, nodeId, geometry);
   return provided
     ? penpotPlacement(provided, baseline, nodes[nodeId]?.type === "PATH")
     : baseline;
+}
+
+// The children of a copy dropped in this session keep the runtime ids
+// Penpot gave them (projectedRuntimeIds), not the ids the projection
+// derives, so their geometry arrives under those ids.
+function sessionGeometry(snapshot, page, nodeId, geometry) {
+  for (const [runtimeId, descriptor] of Object.entries(
+    snapshot.runtime.reverseNodes ?? {},
+  )) {
+    if (
+      descriptor.nodeId === nodeId &&
+      descriptor.screenId === page.screenId &&
+      descriptor.presentationId === page.presentationId &&
+      geometry.values.has(runtimeId)
+    ) {
+      return geometry.values.get(runtimeId);
+    }
+  }
+  return undefined;
 }
 
 // A Penpot edit sends only the absolute attributes it touched, but inside a
@@ -4934,8 +5109,9 @@ function tokenCellUpdate(snapshot, ref, change, operationsByToken) {
         if (ref.attribute !== "gap") {
           fail("design_system_unsupported_attribute", `Token Cell ${ref.path} does not bind spacing`, { attr });
         }
-        const rowGap = item.val?.rowGap;
-        const columnGap = item.val?.columnGap;
+        // Penpot writes row-gap/column-gap; older specimens held camelCase.
+        const rowGap = item.val?.["row-gap"] ?? item.val?.rowGap;
+        const columnGap = item.val?.["column-gap"] ?? item.val?.columnGap;
         if (!Number.isFinite(rowGap) || !Number.isFinite(columnGap)) {
           fail("invalid_penpot_layout", "Spacing Token Cell needs numeric gaps", { value: item.val });
         }
@@ -5387,7 +5563,8 @@ function componentNodeUpdate(
   for (const [field, reference] of Object.entries(sourceNode.tokenBindings ?? {})) {
     const targetField = field === "fill" || field.startsWith("fills.") ? "fills"
       : field === "typography" || ["fontFamily", "fontSize", "fontWeight"].includes(field) ? "textStyle"
-      : field === "strokeWidth" ? "strokes" : field;
+      : field === "strokeWidth" || field === "stroke" || field.startsWith("strokes.") ? "strokes"
+        : field;
     if (operation.unset.includes(targetField)) fail("component_binding_locked", `Cannot clear bound ${field}; edit its Token source`);
     if (!Object.hasOwn(compiledChanges, targetField)) continue;
     const resolved = resolveEffectiveToken(view, reference, { libraries: snapshot.libraries });
@@ -5409,6 +5586,13 @@ function componentNodeUpdate(
         fail("component_binding_source_locked", "Bound fill edits must preserve paint structure and opacity");
       }
       value = fill.color;
+    } else if (field === "stroke" || field.startsWith("strokes.")) {
+      const index = field === "stroke" ? 0 : Number(field.slice(8));
+      const stroke = value?.[index];
+      if (!Array.isArray(value) || value.length !== canonicalNode.strokes?.length || stroke?.type !== "solid" || (stroke.opacity ?? 1) !== 1) {
+        fail("component_binding_source_locked", "Bound stroke color edits must preserve paint structure and opacity");
+      }
+      value = stroke.color;
     } else if (field === "strokeWidth") {
       value = value?.[0]?.width;
       if (!Array.isArray(compiledChanges.strokes) || compiledChanges.strokes.some((stroke) => stroke.width !== value)) {
@@ -5454,7 +5638,14 @@ function componentNodeUpdate(
         continue;
       }
     } else if (field === "strokes") {
-      const remaining = compiledChanges.strokes.map((stroke, index) => ({ ...stroke, width: sourceNode.strokes?.[index]?.width }));
+      const bound = sourceNode.tokenBindings;
+      const remaining = compiledChanges.strokes.map((stroke, index) => ({
+        ...stroke,
+        ...(bound.strokeWidth ? { width: sourceNode.strokes?.[index]?.width } : {}),
+        ...(bound[`strokes.${index}`] || (index === 0 && bound.stroke)
+          ? { color: sourceNode.strokes?.[index]?.color, type: sourceNode.strokes?.[index]?.type }
+          : {}),
+      }));
       if (JSON.stringify(remaining) !== JSON.stringify(sourceNode.strokes)) {
         operation.changes.strokes = remaining;
         continue;
@@ -6152,6 +6343,17 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
       fail(
         "unsupported_penpot_change",
         `Phase 0 cannot compile Penpot change: ${String(change?.type)}`,
+      );
+    }
+    if (
+      ["del-page", "mod-page", "mov-page"].includes(type) &&
+      snapshot.runtime.componentsPage &&
+      String(change.id) === String(snapshot.runtime.componentsPage)
+    ) {
+      fail(
+        "generated_page_locked",
+        "The Components page is generated from the Package's Components; it cannot be renamed, moved or deleted",
+        { changeType: type },
       );
     }
     if (type === "add-page") {

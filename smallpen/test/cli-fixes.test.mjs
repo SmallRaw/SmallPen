@@ -822,9 +822,9 @@ test("explain and diff previews never write, in any combination (RV-003-C)", asy
       operations: [{
         definition: {
           $extensions: { smallpen: { id: "tok_rv003c", visibility: "public" } },
+          $type: "color",
+          $value: "#6750a4",
         },
-        $type: "color",
-        $value: "#6750a4",
         filePath: "tokens/rv003c.json",
         path: "color.rv003c",
         tokenId: "tok_rv003c",

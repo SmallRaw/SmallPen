@@ -1,3 +1,4 @@
+import { CONTEXT_AXIS_KINDS } from "./contexts.mjs";
 import { fail } from "./errors.mjs";
 import { isRecord } from "./internal.mjs";
 
@@ -34,9 +35,7 @@ function contextAxes(value) {
         axis.id.startsWith("axis_") &&
         /^[a-zA-Z0-9_-]+$/.test(axis.id) &&
         nonEmptyString(axis.name) &&
-        ["accessibility", "custom", "density", "locale", "theme", "viewport"].includes(
-          axis.kind,
-        ) &&
+        CONTEXT_AXIS_KINDS.includes(axis.kind) &&
         nonEmptyStrings(axis.values) &&
         new Set(axis.values).size === axis.values.length &&
         axis.values.includes(axis.defaultValue),
@@ -121,6 +120,22 @@ const QUESTION_DEFINITIONS = [
     ],
     schema: {
       items: {
+        properties: {
+          defaultValue: {
+            description: "One of values",
+            minLength: 1,
+            type: "string",
+          },
+          id: { pattern: "^axis_[a-zA-Z0-9_-]+$", type: "string" },
+          kind: { enum: CONTEXT_AXIS_KINDS, type: "string" },
+          name: { minLength: 1, type: "string" },
+          values: {
+            items: { minLength: 1, type: "string" },
+            minItems: 1,
+            type: "array",
+            uniqueItems: true,
+          },
+        },
         required: ["defaultValue", "id", "kind", "name", "values"],
         type: "object",
       },
@@ -305,3 +320,17 @@ export function createInitializationState(answersValue, options = {}) {
 export const INITIALIZATION_QUESTION_IDS = Object.freeze(
   QUESTION_DEFINITIONS.map(({ id }) => id),
 );
+
+// Every question with its schema, for `smallpen schema init`.
+export function initializationQuestions(locale = "en") {
+  const language = locale.toLowerCase().startsWith("zh") ? "zh-TW" : "en";
+  return QUESTION_DEFINITIONS.map((question) => ({
+    id: question.id,
+    label: question.label[language],
+    reason: question.reason,
+    ...(question.recommendation === undefined
+      ? {}
+      : { recommendation: structuredClone(question.recommendation) }),
+    schema: structuredClone(question.schema),
+  }));
+}

@@ -796,6 +796,36 @@ test("token specimen native stroke edit writes the width Cell, undo restores it"
   }
 });
 
+test("token specimen gap edit reads Penpot's row-gap / column-gap keys", async () => {
+  const { parent, snapshot } = await editorPackage();
+  try {
+    const ref = specimen(snapshot, SPACING_TOKEN_ID);
+    assert.equal(ref.attribute, "gap");
+    const compile = (val) =>
+      compilePenpotChanges(snapshot, {
+        changes: [
+          modObject(
+            ref.shape,
+            [{ type: "set", attr: "layout-gap", val }],
+            snapshot.runtime.designSystemPage,
+          ),
+        ],
+        commitId: "dse-gate-gap",
+      }).operations.find((operation) => operation.type === "set-token-value");
+    // The Penpot layout panel writes kebab-case gap keys.
+    const op = compile({ "row-gap": 12, "column-gap": 12 });
+    assert.equal(op.tokenId, SPACING_TOKEN_ID);
+    assert.equal(op.value, 12);
+    assert.equal(compile({ columnGap: 6, rowGap: 6 }).value, 6);
+    assert.throws(
+      () => compile({ "row-gap": 12, "column-gap": 4 }),
+      (error) => error.code === "design_system_unsupported_attribute",
+    );
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
 test("ambiguous stroke edits on a width Cell are rejected without writes", async () => {
   const { parent, snapshot } = await editorPackage();
   try {

@@ -492,7 +492,9 @@ test("bulk write warnings are compact, actionable-first, and losslessly expandab
   assert.equal(compactRead.code, 0, compactRead.stdout);
   const compact = JSON.parse(compactRead.stdout);
   assert.equal(compact.warningSummary?.detail, "compact");
-  assert.equal(compact.warningSummary.total, 36);
+  // Raw width/height with no near sizing Token are counted, not listed.
+  assert.equal(compact.warningSummary.total, 12);
+  assert.deepEqual(compact.warningSummary.suppressed.fields, { height: 12, width: 12 });
   assert.equal(compact.warnings[0].code, "design_token_not_used");
   assert.equal(compact.warnings[0].count, 12);
   const fullRead = await runCli([...base, "--warning-detail", "full"]);
@@ -506,7 +508,7 @@ test("bulk write warnings are compact, actionable-first, and losslessly expandab
       warning: { ...details, ...location, contextScope: compact.warningSummary.contextScope },
     }));
   }).sort((left, right) => left.warningIndex - right.warningIndex);
-  assert.deepEqual(expanded.map(({ warningIndex }) => warningIndex), Array.from({ length: 36 }, (_, index) => index));
+  assert.deepEqual(expanded.map(({ warningIndex }) => warningIndex), Array.from({ length: 12 }, (_, index) => index));
   assert.deepEqual(expanded.map(({ warning }) => warning), full.warnings);
   assert.ok(JSON.stringify({ warnings: compact.warnings, warningSummary: compact.warningSummary }).length < JSON.stringify(full.warnings).length * 0.65);
   const invalid = await runCli([...base, "--warning-detail", "none"]);

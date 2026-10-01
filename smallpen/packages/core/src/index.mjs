@@ -14,11 +14,13 @@ export {
   tokenInventoryRows,
 } from "./catalog.mjs";
 export {
+  AXIS_ROLES,
   findComponentVariant,
   parseComponentEntries,
 } from "./components-domain.mjs";
 export {
   combineContextAxes,
+  CONTEXT_AXIS_KINDS,
   parseContextEntries,
   resolveContext,
 } from "./contexts.mjs";
@@ -82,16 +84,24 @@ export { fail, SmallPenError } from "./errors.mjs";
 export {
   createInitializationState,
   INITIALIZATION_QUESTION_IDS,
+  initializationQuestions,
   parseInitializationAnswers,
 } from "./initialization.mjs";
 export {
+  CANONICAL_SCHEMA_RULES,
   listPackageEntries,
   loadPackageFromValues,
   prepareOperationBatch,
 } from "./package.mjs";
 export {
+  checkOperationShape,
+  OPERATION_SCHEMAS,
+  suggestField,
+} from "./operation-schema.mjs";
+export {
   applyEffectiveTokenBindings,
   projectEffectiveSnapshot,
+  TOKEN_BINDING_FIELD_TYPES,
 } from "./projection-values.mjs";
 export {
   parseDesignTarget,
@@ -100,10 +110,12 @@ export {
 export { parseScenarioEntries } from "./scenarios-domain.mjs";
 export {
   parseTokenEntries,
+  TOKEN_VALUE_SHAPES,
   tokenAliasPath,
   tokenValueMatchesType,
 } from "./tokens-domain.mjs";
 export {
+  designTokenAdviceForBatch,
   designTokenWarningsForBatch,
   searchEffectiveTokens,
 } from "./token-advice.mjs";

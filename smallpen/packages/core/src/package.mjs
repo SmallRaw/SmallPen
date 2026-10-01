@@ -24,6 +24,11 @@ import {
   ownValue,
   stableId,
 } from "./internal.mjs";
+import { checkOperationShape, suggestField } from "./operation-schema.mjs";
+import {
+  applyEffectiveTokenBindings,
+  hasTokenBindingTarget,
+} from "./projection-values.mjs";
 import { parseRequirementEntries } from "./requirements-domain.mjs";
 import { parseScenarioEntries } from "./scenarios-domain.mjs";
 import { parseTokenEntries } from "./tokens-domain.mjs";
@@ -114,10 +119,15 @@ const TOKEN_BINDING_FIELDS = new Set([
   "paddingRight",
   "paddingTop",
   "shadow",
+  "stroke",
   "strokeWidth",
   "typography",
   "width",
 ]);
+// Per-paint bindings: fills.N and strokes.N bind the color of one paint.
+const INDEXED_TOKEN_BINDING_FIELD = /^(?:fills|strokes)\.\d+$/;
+const BINDABLE_FIELDS =
+  SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenBindingFields.join(", ");
 const COMPONENT_TOUCHED_GROUPS = new Set([
   "blur-group",
   "constraints-group",
@@ -181,6 +191,48 @@ const FONT_WEIGHTS = new Set([
   100, 200, 300, 400, 500, 600, 700, 800, 900, 950,
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+// Common wrong names for node fields, mapped to the field that holds them.
+const NODE_FIELD_ALIASES = {
+  background: "fills",
+  borderRadius: "cornerRadius",
+  color: "fills",
+  fill: "fills",
+  hidden: "visible",
+  radius: "cornerRadius",
+  stroke: "strokes",
+};
+
+function failUnknownNodeField(operationType, field, allowed) {
+  const suggestion = TEXT_STYLE_FIELDS.has(field)
+    ? `textStyle.${field}`
+    : suggestField(field, allowed, NODE_FIELD_ALIASES);
+  fail(
+    "unsupported_node_change",
+    `${operationType} cannot change node field ${String(field)}.` +
+      `${suggestion ? ` Did you mean ${suggestion}?` : ""} Allowed fields: ` +
+      `${[...allowed].join(", ")}. See: smallpen schema node`,
+    {
+      allowedFields: [...allowed],
+      field,
+      ...(suggestion ? { suggestion } : {}),
+    },
+  );
+}
+
+function failMissingNode(presentation, nodeId) {
+  const nodeIds = Object.keys(presentation.nodes);
+  fail(
+    "missing_node",
+    `Node does not exist in Presentation ${presentation.id}: ${nodeId}. ` +
+      `Nodes: ${knownIds(nodeIds)}`,
+    { nodeId, nodeIds },
+  );
+}
+
+function knownIds(values) {
+  const ids = values.slice(0, 20);
+  return `${ids.join(", ") || "(none)"}${values.length > ids.length ? ", ..." : ""}`;
+}
 
 function requireRecord(value, code, message, details) {
   if (!isRecord(value)) fail(code, message, details);
@@ -200,7 +252,9 @@ function safeEntry(entry) {
   ) {
     fail(
       "invalid_entry_path",
-      `Invalid Canonical Package entry: ${String(entry)}`,
+      `Invalid Canonical Package entry: ${
+        entry === undefined ? "(missing)" : JSON.stringify(entry)
+      }; expected a relative path such as tokens/foundation.json`,
       { entry },
     );
   }
@@ -621,11 +675,16 @@ function validateTokenBindings(value, path) {
     `${path} must contain an object`,
   );
   for (const [field, reference] of Object.entries(bindings)) {
-    if (!TOKEN_BINDING_FIELDS.has(field) && !/^fills\.\d+$/.test(field)) {
-      fail("unsupported_token_binding", `${path}.${field} is unsupported`, {
-        field,
-        path: `${path}.${field}`,
-      });
+    if (!TOKEN_BINDING_FIELDS.has(field) && !INDEXED_TOKEN_BINDING_FIELD.test(field)) {
+      fail(
+        "unsupported_token_binding",
+        `${path}.${field} is unsupported. Bindable fields: ${BINDABLE_FIELDS}`,
+        {
+          allowedFields: [...SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenBindingFields],
+          field,
+          path: `${path}.${field}`,
+        },
+      );
     }
     validateAssetReference(reference, `${path}.${field}`, "tok_");
   }
@@ -937,7 +996,11 @@ function validateTextStyle(value, path) {
   );
   for (const [field, fieldValue] of Object.entries(style)) {
     if (!TEXT_STYLE_FIELDS.has(field)) {
-      fail("unsupported_text_style", `${path}.${field} is unsupported`);
+      fail(
+        "unsupported_text_style",
+        `${path}.${field} is unsupported. textStyle fields: ${[...TEXT_STYLE_FIELDS].join(", ")}`,
+        { allowedFields: [...TEXT_STYLE_FIELDS], field },
+      );
     }
     if (
       ["fontSize", "fontWeight", "letterSpacing", "lineHeight"].includes(field)
@@ -965,7 +1028,12 @@ function validateTextStyle(value, path) {
         fail("invalid_text_style", `${path}.${field} must be non-empty`);
       }
     } else if (!TEXT_STYLE_ENUMS[field]?.has(fieldValue)) {
-      fail("invalid_text_style", `${path}.${field} is not supported`);
+      fail(
+        "invalid_text_style",
+        `${path}.${field} ${JSON.stringify(fieldValue)} is not supported. ` +
+          `Values: ${[...TEXT_STYLE_ENUMS[field]].join(", ")}`,
+        { allowedValues: [...TEXT_STYLE_ENUMS[field]], field },
+      );
     }
   }
 }
@@ -1095,17 +1163,25 @@ function validatePaint(paint, path, additionalFields = new Set()) {
   );
   for (const field of additionalFields) supportedFields.add(field);
   if (!image && !gradient && paint.type !== "solid") {
-    fail("unsupported_fill_type", `${path}.type is unsupported`, {
-      path,
-      type: paint.type,
-    });
+    fail(
+      "unsupported_fill_type",
+      `${path}.type ${JSON.stringify(paint.type ?? null)} is unsupported. ` +
+        "Types: solid, linear-gradient, radial-gradient, image",
+      {
+        allowedValues: ["image", "linear-gradient", "radial-gradient", "solid"],
+        path,
+        type: paint.type,
+      },
+    );
   }
   for (const field of Object.keys(paint)) {
     if (!supportedFields.has(field)) {
-      fail("unsupported_fill_field", `${path}.${field} is unsupported`, {
-        field,
-        path,
-      });
+      fail(
+        "unsupported_fill_field",
+        `${path}.${field} is unsupported. ${paint.type} paint fields: ` +
+          `${[...supportedFields].join(", ")}`,
+        { allowedFields: [...supportedFields], field, path },
+      );
     }
   }
   if (image) {
@@ -1540,7 +1616,11 @@ function validateNodeChange(field, value, nodeId) {
     }
   } else if (field === "growType") {
     if (!TEXT_GROW_TYPES.has(value)) {
-      fail("invalid_text_grow_type", `${path} is not a supported grow type`);
+      fail(
+        "invalid_text_grow_type",
+        `${path} is not a supported grow type. Values: ${[...TEXT_GROW_TYPES].join(", ")}`,
+        { allowedValues: [...TEXT_GROW_TYPES] },
+      );
     }
   } else if (
     new Set([
@@ -1959,6 +2039,7 @@ function validateNodeAttributes(node, nodeId, nodePath) {
 }
 
 const TEXT_ATTRIBUTES = new Set(["growType", "text", "textBlocks", "textStyle"]);
+const COMPONENT_NODE_CHANGE_FIELDS = new Set([...NODE_CHANGE_FIELDS, "instance"]);
 
 // Variant nodes predate attribute validation: update-component-node stored
 // null for a cleared field, and text attributes on non-TEXT nodes are
@@ -2083,7 +2164,12 @@ function validatePresentation(screen, presentation, path) {
     if (node.id !== nodeId)
       fail("node_id_mismatch", `Node key and id differ: ${nodeId}`);
     if (!NODE_TYPES.has(node.type))
-      fail("unsupported_node_type", `Unsupported node type: ${node.type}`);
+      fail(
+        "unsupported_node_type",
+        `Unsupported node type ${JSON.stringify(node.type ?? null)} at ${nodeId}. ` +
+          `Types: ${[...NODE_TYPES].join(", ")}`,
+        { allowedValues: [...NODE_TYPES], nodeId, type: node.type },
+      );
     validateNodeName(node.name, `${path}.nodes.${nodeId}.name`);
     for (const field of ["x", "y", "width", "height"])
       finiteNumber(node[field], `${path}.nodes.${nodeId}.${field}`);
@@ -2151,7 +2237,11 @@ function validatePresentation(screen, presentation, path) {
     ) {
       fail(
         "invalid_component_node",
-        `${path}.nodes.${nodeId} must pair its component type and componentId`,
+        node.type === "INSTANCE"
+          ? `${path}.nodes.${nodeId} is an INSTANCE without instance: add ` +
+              "instance:{component:{packageId, assetId:cmp_...}, variant:{axisId: value}}. " +
+              "See: smallpen schema instance"
+          : `${path}.nodes.${nodeId} must pair its component type and componentId`,
       );
     }
     if (
@@ -3875,8 +3965,16 @@ function findScreenEntry(snapshot, screenId) {
   const entry = snapshot.manifest.entries.screens.find(
     (candidate) => snapshot.entries[candidate].id === screenId,
   );
-  if (!entry)
-    fail("missing_screen", `Screen is not owned by this package: ${screenId}`);
+  if (!entry) {
+    const screenIds = snapshot.manifest.entries.screens.map(
+      (candidate) => snapshot.entries[candidate].id,
+    );
+    fail(
+      "missing_screen",
+      `Screen is not owned by this package: ${screenId}. Screens: ${knownIds(screenIds)}`,
+      { screenId, screenIds },
+    );
+  }
   return entry;
 }
 
@@ -3891,9 +3989,12 @@ function findPresentationContext(snapshot, operation) {
     (candidate) => candidate.id === operation.presentationId,
   );
   if (!presentation) {
+    const presentationIds = screen.presentations.map(({ id }) => id);
     fail(
       "missing_presentation",
-      `Presentation is not owned by this Screen: ${operation.presentationId}`,
+      `Presentation is not owned by Screen ${operation.screenId}: ` +
+        `${operation.presentationId}. Presentations: ${knownIds(presentationIds)}`,
+      { presentationId: operation.presentationId, presentationIds },
     );
   }
   return { entry, presentation };
@@ -4043,7 +4144,10 @@ function applyUpdateComponent(snapshot, operation, inverseOperations) {
   ) {
     fail(
       "unsupported_component_change",
-      "Only Component name and path can be changed",
+      `update-component changes accept only name and path, got: ${
+        Object.keys(changes).join(", ") || "(none)"
+      }`,
+      { allowedFields: ["name", "path"] },
     );
   }
   const inverseChanges = {};
@@ -4357,6 +4461,15 @@ function applyMovePresentation(snapshot, operation, inverseOperations) {
   return { affectedIds: [presentation.id], entry };
 }
 
+const PRESENTATION_CHANGE_FIELDS = new Set([
+  "background",
+  "name",
+  "pixel-grid-color",
+  "pixel-grid-opacity",
+  "prototypeFlows",
+  "viewport",
+]);
+
 function applyUpdatePresentation(snapshot, operation, inverseOperations) {
   const { entry, presentation } = findPresentationContext(snapshot, operation);
   const changes = requireRecord(
@@ -4365,17 +4478,33 @@ function applyUpdatePresentation(snapshot, operation, inverseOperations) {
     "update-presentation changes must contain an object",
   );
   const fields = Object.keys(changes);
-  const supported = new Set([
-    "background",
-    "name",
-    "pixel-grid-color",
-    "pixel-grid-opacity",
-    "prototypeFlows",
-  ]);
-  if (fields.length === 0 || fields.some((field) => !supported.has(field))) {
+  if (fields.length === 0) {
     fail(
       "unsupported_presentation_change",
-      "Presentation changes contain an unsupported field",
+      `update-presentation changes must name at least one of: ${[
+        ...PRESENTATION_CHANGE_FIELDS,
+      ].join(", ")}`,
+      { allowedFields: [...PRESENTATION_CHANGE_FIELDS] },
+    );
+  }
+  for (const field of fields) {
+    if (PRESENTATION_CHANGE_FIELDS.has(field)) continue;
+    const suggestion = suggestField(field, PRESENTATION_CHANGE_FIELDS, {
+      height: "viewport",
+      size: "viewport",
+      width: "viewport",
+    });
+    fail(
+      "unsupported_presentation_change",
+      `update-presentation cannot change ${field}.` +
+        `${suggestion ? ` Did you mean ${suggestion}?` : ""} Allowed fields: ` +
+        `${[...PRESENTATION_CHANGE_FIELDS].join(", ")}. The rendered size is ` +
+        "the root node size: resize it with update-presentation-node",
+      {
+        allowedFields: [...PRESENTATION_CHANGE_FIELDS],
+        field,
+        ...(suggestion ? { suggestion } : {}),
+      },
     );
   }
   if (fields.includes("prototypeFlows") && fields.length !== 1) {
@@ -4407,6 +4536,12 @@ function applyUpdatePresentation(snapshot, operation, inverseOperations) {
       fail(
         "unsupported_presentation_change",
         "Presentation name must be non-empty",
+      );
+    }
+    if (fields.includes("viewport") && changes.viewport === null) {
+      fail(
+        "invalid_presentation_viewport",
+        "Presentation viewport is required: set {width, height}",
       );
     }
     for (const field of fields) {
@@ -4717,11 +4852,15 @@ function applyReorderPresentationChildren(
 function applyUpdatePresentationNode(snapshot, operation, inverseOperations) {
   const { entry, presentation } = findPresentationContext(snapshot, operation);
   const node = presentationNode(presentation, operation.nodeId);
-  if (!isRecord(node))
+  if (!isRecord(node)) {
+    const nodeIds = Object.keys(presentation.nodes);
     fail(
       "missing_node",
-      `Node is not owned by this Presentation: ${operation.nodeId}`,
+      `Node is not owned by Presentation ${presentation.id}: ${operation.nodeId}. ` +
+        `Nodes: ${knownIds(nodeIds)}`,
+      { nodeId: operation.nodeId, nodeIds },
     );
+  }
   const changes = requireRecord(
     operation.changes,
     "invalid_node_changes",
@@ -4729,11 +4868,7 @@ function applyUpdatePresentationNode(snapshot, operation, inverseOperations) {
   );
   for (const field of Object.keys(changes)) {
     if (!NODE_CHANGE_FIELDS.has(field)) {
-      fail(
-        "unsupported_node_change",
-        `Phase 0 cannot change node field: ${field}`,
-        { field },
-      );
+      failUnknownNodeField(operation.type, field, NODE_CHANGE_FIELDS);
     }
     if (
       (field === "text" ||
@@ -4744,7 +4879,8 @@ function applyUpdatePresentationNode(snapshot, operation, inverseOperations) {
     ) {
       fail(
         "unexpected_text_attribute",
-        `Only TEXT nodes can change ${field}: ${operation.nodeId}`,
+        `Only TEXT nodes can change ${field}: ${operation.nodeId} is ${node.type}`,
+        { field, nodeId: operation.nodeId, nodeType: node.type },
       );
     }
     if (field === "mediaRef" && node.type !== "IMAGE") {
@@ -4787,6 +4923,25 @@ function restoreEntryInverse(snapshot, kind, entry, inverseOperations) {
       index < 0 || !Object.hasOwn(snapshot.entries, entry)
         ? null
         : structuredClone(snapshot.entries[entry]),
+  });
+}
+
+// Each write to an entry adds a restore of the whole entry, so a batch of
+// many writes to one file repeated that file once per write. Of two
+// adjacent restores of one existing entry at one place, only the second
+// (the older content) decides the result: the first one is dropped.
+function compactInverseOperations(operations) {
+  return operations.filter((operation, index) => {
+    const next = operations[index + 1];
+    return !(
+      operation.type === "restore-canonical-entry" &&
+      next?.type === "restore-canonical-entry" &&
+      operation.kind === next.kind &&
+      operation.entry === next.entry &&
+      operation.index === next.index &&
+      operation.value !== null &&
+      next.value !== null
+    );
   });
 }
 
@@ -4948,7 +5103,15 @@ function componentSetRaw(snapshot, componentSetId) {
     );
     if (componentSet) return { componentSet, entry };
   }
-  fail("missing_component", `Component does not exist: ${componentSetId}`);
+  const componentSetIds = snapshot.manifest.entries.components.flatMap(
+    (entry) => (snapshot.entries[entry]?.componentSets ?? []).map(({ id }) => id),
+  );
+  fail(
+    "missing_component",
+    `Component Set does not exist in ${snapshot.manifest.packageId}: ` +
+      `${componentSetId}. Component Sets: ${knownIds(componentSetIds)}`,
+    { componentSetId, componentSetIds },
+  );
 }
 
 function componentSetAffectedIds(componentSet) {
@@ -5014,9 +5177,25 @@ function applyUpdateComponentNode(snapshot, operation, inverseOperations) {
   const variant = componentSet.variants.find(
     ({ id }) => id === operation.variantId,
   );
-  const node = ownValue(variant?.nodes, operation.nodeId);
-  if (!node)
-    fail("missing_node", `Variant Node does not exist: ${operation.nodeId}`);
+  if (!variant) {
+    const variantIds = componentSet.variants.map(({ id }) => id);
+    fail(
+      "missing_variant",
+      `Variant does not exist in ${componentSet.id}: ${operation.variantId}. ` +
+        `Variants: ${knownIds(variantIds)}`,
+      { variantId: operation.variantId, variantIds },
+    );
+  }
+  const node = ownValue(variant.nodes, operation.nodeId);
+  if (!node) {
+    const nodeIds = Object.keys(variant.nodes);
+    fail(
+      "missing_node",
+      `Variant Node does not exist in ${variant.id}: ${operation.nodeId}. ` +
+        `Nodes: ${knownIds(nodeIds)}`,
+      { nodeId: operation.nodeId, nodeIds },
+    );
+  }
   const changes = requireRecord(
     operation.changes,
     "invalid_node_changes",
@@ -5031,6 +5210,22 @@ function applyUpdateComponentNode(snapshot, operation, inverseOperations) {
         "unsupported_node_change",
         `update-component-node cannot change field: ${String(field)}`,
         { field },
+      );
+    }
+    // A variant node keeps the same attributes as a Presentation node, plus
+    // the instance of a nested component.
+    if (!COMPONENT_NODE_CHANGE_FIELDS.has(field)) {
+      failUnknownNodeField(
+        "update-component-node",
+        field,
+        COMPONENT_NODE_CHANGE_FIELDS,
+      );
+    }
+    if (TEXT_ATTRIBUTES.has(field) && node.type !== "TEXT") {
+      fail(
+        "unexpected_text_attribute",
+        `Only TEXT nodes can change ${field}: ${operation.nodeId} is ${node.type}`,
+        { field, nodeId: operation.nodeId, nodeType: node.type },
       );
     }
   }
@@ -5436,7 +5631,12 @@ function applySetTokenValue(snapshot, operation, inverseOperations) {
 function applyPutToken(snapshot, operation, inverseOperations) {
   safeEntry(operation.filePath);
   if (!isTokenName(operation.path)) {
-    fail("invalid_token_path", `Token path is invalid: ${operation.path}`);
+    fail(
+      "invalid_token_path",
+      `put-token path is invalid: ${JSON.stringify(operation.path)}; expected ` +
+        "dot-separated names of letters, digits, _ or -, for example color.surface",
+      { path: operation.path },
+    );
   }
   stableId(operation.tokenId, "tok_", "invalid_token_id", "operation.tokenId");
   const definition = requireRecord(
@@ -5448,6 +5648,21 @@ function applyPutToken(snapshot, operation, inverseOperations) {
     fail(
       "token_id_mismatch",
       "put-token tokenId must match definition.$extensions.smallpen.id",
+    );
+  }
+  // Without $value or contextValues the definition would load as an empty
+  // Token group and the write would silently create nothing.
+  if (
+    !Object.hasOwn(definition, "$value") &&
+    !Array.isArray(definition.$extensions.smallpen.contextValues)
+  ) {
+    fail(
+      "invalid_token_definition",
+      "put-token definition requires $value (and $type unless its group " +
+        'declares one), for example {"$type":"color","$value":"#ffffff",' +
+        `"$extensions":{"smallpen":{"id":"${operation.tokenId}"}}}. ` +
+        "See: smallpen schema token",
+      { field: "definition.$value" },
     );
   }
   const created = !snapshot.manifest.entries.tokens.includes(
@@ -5523,16 +5738,38 @@ function basePresentationContext(snapshot, operation) {
 function applySetTokenBinding(snapshot, operation, inverseOperations) {
   const { entry, presentation } = basePresentationContext(snapshot, operation);
   const node = presentationNode(presentation, operation.nodeId);
-  if (!node) fail("missing_node", `Node does not exist: ${operation.nodeId}`);
+  if (!node) failMissingNode(presentation, operation.nodeId);
   if (
     typeof operation.field !== "string" ||
     (!TOKEN_BINDING_FIELDS.has(operation.field) &&
-      !/^fills\.\d+$/.test(operation.field))
+      !INDEXED_TOKEN_BINDING_FIELD.test(operation.field))
   ) {
     fail(
       "unsupported_token_binding",
-      `Token binding field is unsupported: ${String(operation.field)}`,
-      { field: operation.field },
+      `Token binding field is unsupported: ${String(operation.field)}. ` +
+        `Bindable fields: ${BINDABLE_FIELDS}`,
+      {
+        allowedFields: [...SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenBindingFields],
+        field: operation.field,
+      },
+    );
+  }
+  // A binding the design cannot resolve would fail every later read.
+  // Tokens of another Package resolve only where that Package is loaded.
+  if (!hasTokenBindingTarget(node, operation.field)) {
+    fail(
+      "missing_token_binding_target",
+      `Token binding target is missing: ${operation.field}`,
+      { field: operation.field, nodeId: node.id },
+    );
+  }
+  if (
+    operation.binding?.packageId === snapshot.manifest.packageId &&
+    snapshot.domain?.tokens?.has(operation.binding.assetId)
+  ) {
+    applyEffectiveTokenBindings(
+      { ...node, tokenBindings: { [operation.field]: operation.binding } },
+      snapshot,
     );
   }
   restoreEntryInverse(snapshot, "screens", entry, inverseOperations);
@@ -5544,7 +5781,7 @@ function applySetTokenBinding(snapshot, operation, inverseOperations) {
 function applyClearTokenBinding(snapshot, operation, inverseOperations) {
   const { entry, presentation } = basePresentationContext(snapshot, operation);
   const node = presentationNode(presentation, operation.nodeId);
-  if (!node) fail("missing_node", `Node does not exist: ${operation.nodeId}`);
+  if (!node) failMissingNode(presentation, operation.nodeId);
   if (!Object.hasOwn(node.tokenBindings ?? {}, operation.field)) {
     fail(
       "missing_token_binding",
@@ -5559,8 +5796,15 @@ function applyClearTokenBinding(snapshot, operation, inverseOperations) {
 function applySelectInstanceVariant(snapshot, operation, inverseOperations) {
   const { entry, presentation } = basePresentationContext(snapshot, operation);
   const node = presentationNode(presentation, operation.nodeId);
-  if (!node?.instance)
-    fail("missing_instance", `Node is not an Instance: ${operation.nodeId}`);
+  if (!node) failMissingNode(presentation, operation.nodeId);
+  if (!node.instance) {
+    fail(
+      "missing_instance",
+      `Node is not a component Instance: ${operation.nodeId} is ${node.type}. ` +
+        "See: smallpen schema instance",
+      { nodeId: operation.nodeId, nodeType: node.type },
+    );
+  }
   restoreEntryInverse(snapshot, "screens", entry, inverseOperations);
   node.instance.variant = structuredClone(operation.selection);
   return { affectedIds: [node.id], entries: [entry] };
@@ -5568,6 +5812,10 @@ function applySelectInstanceVariant(snapshot, operation, inverseOperations) {
 
 // The Component Set a reference names, when this Package or an attached
 // Library holds it. Other owners are checked when the Instance projects.
+// The Foundation and linked Libraries a batch reads but never writes, keyed
+// by the batch's working snapshot (prepareOperationBatch options).
+const BATCH_DEPENDENCIES = new WeakMap();
+
 function knownComponentSet(snapshot, reference) {
   if (reference.packageId === snapshot.manifest.packageId) {
     // Earlier operations of the batch may have changed the Components; a
@@ -5582,8 +5830,13 @@ function knownComponentSet(snapshot, reference) {
       throw error;
     }
   }
-  return (snapshot.libraries ?? [])
-    .find((library) => library.manifest?.packageId === reference.packageId)
+  const dependencies = BATCH_DEPENDENCIES.get(snapshot);
+  return [
+    dependencies?.foundation,
+    ...(dependencies?.libraries ?? []),
+    ...(snapshot.libraries ?? []),
+  ]
+    .find((library) => library?.manifest?.packageId === reference.packageId)
     ?.domain?.componentSets?.get(reference.assetId);
 }
 
@@ -5613,8 +5866,15 @@ function overrideSourceNode(snapshot, instance, sourcePath, depth = 0) {
 function instanceOverrideContext(snapshot, operation) {
   const { entry, presentation } = basePresentationContext(snapshot, operation);
   const node = presentationNode(presentation, operation.nodeId);
-  if (!node?.instance)
-    fail("missing_instance", `Node is not an Instance: ${operation.nodeId}`);
+  if (!node) failMissingNode(presentation, operation.nodeId);
+  if (!node.instance) {
+    fail(
+      "missing_instance",
+      `Node is not a component Instance: ${operation.nodeId} is ${node.type}. ` +
+        "See: smallpen schema instance",
+      { nodeId: operation.nodeId, nodeType: node.type },
+    );
+  }
   const overridePath = operation.overridePath;
   const separator =
     typeof overridePath === "string" ? overridePath.indexOf(":") : -1;
@@ -5883,7 +6143,10 @@ function validateComponentAcyclicity(snapshot) {
   for (const componentId of graph.keys()) visit(componentId, []);
 }
 
-export async function prepareOperationBatch(before, batch) {
+// options.foundation and options.libraries let operations check what they
+// reference in those Packages (an Instance override path, for example).
+// Without them such references are taken as written.
+export async function prepareOperationBatch(before, batch, options = {}) {
   if (
     !isRecord(batch) ||
     typeof batch.batchId !== "string" ||
@@ -5933,14 +6196,21 @@ export async function prepareOperationBatch(before, batch) {
     entries: structuredClone(before.entries),
     manifest: structuredClone(before.manifest),
   };
+  BATCH_DEPENDENCIES.set(candidate, {
+    foundation: options.foundation,
+    libraries: options.libraries ?? [],
+  });
   const affectedIds = new Set();
   const changedFiles = new Set();
   const deletedFiles = new Set();
   const inverseOperations = [];
-  for (const operation of batch.operations) {
+  for (const [operationIndex, operation] of batch.operations.entries()) {
     if (!isRecord(operation)) {
-      fail("invalid_operation", "Canonical operation must contain an object");
+      fail("invalid_operation", "Canonical operation must contain an object", {
+        operationIndex,
+      });
     }
+    checkOperationShape(operation, operationIndex);
     let applied;
     switch (operation.type) {
       case "add-component":
@@ -6252,7 +6522,7 @@ export async function prepareOperationBatch(before, batch) {
   const inverseBatch = {
     baseRevision: validated.revision,
     batchId: `${batch.batchId}_inverse`,
-    operations: inverseOperations,
+    operations: compactInverseOperations(inverseOperations),
   };
   return {
     result: {
@@ -6279,3 +6549,21 @@ export async function prepareOperationBatch(before, batch) {
     snapshot: validated,
   };
 }
+
+// Node and Presentation rules enforced above, for `smallpen schema`.
+export const CANONICAL_SCHEMA_RULES = Object.freeze({
+  componentNodeChangeFields: Object.freeze([...COMPONENT_NODE_CHANGE_FIELDS]),
+  nodeChangeFields: Object.freeze([...NODE_CHANGE_FIELDS]),
+  nodeTypes: Object.freeze([...NODE_TYPES]),
+  presentationChangeFields: Object.freeze([...PRESENTATION_CHANGE_FIELDS]),
+  textGrowTypes: Object.freeze([...TEXT_GROW_TYPES]),
+  textStyleEnums: Object.freeze(
+    Object.fromEntries(
+      Object.entries(TEXT_STYLE_ENUMS).map(([field, values]) => [
+        field,
+        Object.freeze([...values]),
+      ]),
+    ),
+  ),
+  textStyleFields: Object.freeze([...TEXT_STYLE_FIELDS]),
+});
