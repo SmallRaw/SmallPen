@@ -10014,6 +10014,10 @@ msgid "smallpen.design-system.blocked-decoration"
 msgstr "This is a generated display frame and can't be edited. Select a token or component instead."
 
 #: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-generated-page"
+msgstr "Generated pages are rebuilt from the Package; they can't be renamed, moved or deleted."
+
+#: src/app/main/smallpen/edit_policy.cljs
 msgid "smallpen.design-system.blocked-position"
 msgstr "Positions on the Design System page are arranged automatically; adjust the layout at the source."
 

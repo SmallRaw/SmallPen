@@ -743,6 +743,129 @@
     (t/is (= {:fill "color.primary" :width "size.card"}
              (:applied-tokens rectangle)))))
 
+;; A stroke color binding to a Token of this Package shows as Penpot's
+;; stroke-color applied Token; a binding to another Package stays a value.
+(t/deftest project-snapshot-shows-stroke-color-bindings-as-applied-tokens
+  (let [token-entry
+        {:activeSetIds ["tset_core"]
+         :activeThemeIds []
+         :id "tlib_design"
+         :sets [{:description ""
+                 :id "tset_core"
+                 :name "core"
+                 :tokens [{:description ""
+                           :id "tok_color_border"
+                           :name "color.border"
+                           :type "color"
+                           :value "#64748b"}]}]
+         :themes []}
+        with-bindings
+        (fn [bindings]
+          (-> snapshot
+              (assoc-in [:manifest :entries :tokens] ["tokens/design.json"])
+              (assoc-in [:entries "tokens/design.json"] token-entry)
+              (assoc-in [:runtime :tokenSets "tset_core"] (str token-set-id))
+              (assoc-in [:runtime :tokens "tok_color_border"]
+                        (str color-token-id))
+              (assoc-in [:entries "screens/roundtrip.json"
+                         :presentations 0 :nodes :node_rectangle]
+                        {:appliedTokens {:fill "color.border"}
+                         :children []
+                         :fills [{:color "#7c3aed" :type "solid"}]
+                         :height 120
+                         :id "node_rectangle"
+                         :name "Editable Rectangle"
+                         :strokes [{:color "#64748b" :type "solid" :width 2}]
+                         :tokenBindings bindings
+                         :type "RECTANGLE"
+                         :width 240
+                         :x 80
+                         :y 96})))
+        rectangle
+        (fn [bindings]
+          (-> (projection/project-snapshot (with-bindings bindings)
+                                           {:file-id file-id
+                                            :project-id project-id})
+              (get-in [:file :data :pages-index page-id
+                       :objects rectangle-id])))]
+    (t/is (= {:fill "color.border" :stroke-color "color.border"}
+             (:applied-tokens
+              (rectangle {:stroke {:assetId "tok_color_border"
+                                   :packageId "pkg_roundtrip"}}))))
+    (t/is (= {:fill "color.border" :stroke-color "color.border"}
+             (:applied-tokens
+              (rectangle {(keyword "strokes.0")
+                          {:assetId "tok_color_border"
+                           :packageId "pkg_roundtrip"}}))))
+    (t/is (= {:fill "color.border"}
+             (:applied-tokens
+              (rectangle {:stroke {:assetId "tok_color_border"
+                                   :packageId "pkg_foundation"}}))))
+    (t/is (= {:fill "color.border"}
+             (:applied-tokens
+              (rectangle {(keyword "strokes.1")
+                          {:assetId "tok_color_border"
+                           :packageId "pkg_roundtrip"}}))))))
+
+;; Penpot resolves a shadow Token only in its own form (a vector of shadows
+;; with string lengths); a bound shadow resolves to the DTCG object, which a
+;; Penpot shape holds as a native shadow record.
+(t/deftest project-snapshot-projects-shadow-tokens-and-bound-shadows
+  (let [shadow-token-id #uuid "abababab-1111-4111-8111-111111111111"
+        dtcg-shadow     {:blur 4
+                         :color "rgba(0, 0, 0, 0.24)"
+                         :offsetX 0
+                         :offsetY 2
+                         :spread 0}
+        candidate
+        (-> snapshot
+            (assoc-in [:manifest :entries :tokens] ["tokens/design.json"])
+            (assoc-in [:entries "tokens/design.json"]
+                      {:activeSetIds ["tset_core"]
+                       :activeThemeIds []
+                       :id "tlib_design"
+                       :sets [{:description ""
+                               :id "tset_core"
+                               :name "core"
+                               :tokens [{:description ""
+                                         :id "tok_elevation"
+                                         :name "elevation-1"
+                                         :type "shadow"
+                                         :value dtcg-shadow}]}]
+                       :themes []})
+            (assoc-in [:runtime :tokenSets "tset_core"] (str token-set-id))
+            (assoc-in [:runtime :tokens "tok_elevation"] (str shadow-token-id))
+            (assoc-in [:entries "screens/roundtrip.json"
+                       :presentations 0 :nodes :node_rectangle]
+                      {:children []
+                       :fills [{:color "#7c3aed" :type "solid"}]
+                       :height 120
+                       :id "node_rectangle"
+                       :name "Editable Rectangle"
+                       :shadow dtcg-shadow
+                       :tokenBindings {:shadow {:assetId "tok_elevation"
+                                                :packageId "pkg_roundtrip"}}
+                       :type "RECTANGLE"
+                       :width 240
+                       :x 80
+                       :y 96}))
+        file       (:file (projection/project-snapshot
+                           candidate
+                           {:file-id file-id :project-id project-id}))
+        token      (ctob/get-token (get-in file [:data :tokens-lib])
+                                   token-set-id
+                                   shadow-token-id)
+        rectangle  (get-in file [:data :pages-index page-id
+                                 :objects rectangle-id])
+        [record]   (:shadow rectangle)]
+    (t/is (= [{:offset-x "0" :offset-y "2" :blur "4" :spread "0"
+               :color "rgba(0, 0, 0, 0.24)" :inset false}]
+             (:value token)))
+    (t/is (= {:shadow "elevation-1"} (:applied-tokens rectangle)))
+    (t/is (= 1 (count (:shadow rectangle))))
+    (t/is (ctss/valid-shadow? record))
+    (t/is (= 2 (:offset-y record)))))
+
 (t/deftest project-snapshot-materializes-dtcg-tokens-in-one-active-set
   (let [candidate
         (-> snapshot
