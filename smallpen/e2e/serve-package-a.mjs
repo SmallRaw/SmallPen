@@ -60,6 +60,6 @@ const bg = await serveLocalPackage({ packagePath, port: 0 });
 const web = await servePenpotFrontend({ backendUrl: bg.url, frontendRoot, port: 0 });
 const snapshot = await fetch(`${bg.url.replace(/\/+$/, "")}/v1/workspace`).then((r) => r.json());
 const url = new URL(web.url);
-url.hash = `#/design-system?file-id=${snapshot.runtime.file}`;
+url.search = `?screen=smallpen-design-system&file-id=${snapshot.runtime.file}`;
 console.log("REVIEW URL:", url.href);
 console.log("scratch copy:", packagePath, "(original package untouched)");

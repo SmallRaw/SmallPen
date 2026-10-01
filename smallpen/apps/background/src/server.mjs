@@ -16,13 +16,14 @@ import {
   createBlankPackage,
   createEvidence,
   importDraft,
+  localLibraryLocator,
   LocalWorkspaceSession,
   openPackage,
   openRemoteLibrary,
 } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 import { inspectImage } from "./media.mjs";
-import { prepareFontFiles } from "./font.mjs";
+import { fontVariantName, prepareFontFiles } from "./font.mjs";
 import { LocalApplicationState } from "./application-state.mjs";
 import { importLibraryUpload, MAX_LIBRARY_UPLOAD_BYTES } from "./library-upload.mjs";
 import { createWebWorkspaceSnapshot } from "./web-projection.mjs";
@@ -42,10 +43,36 @@ const MAX_MEDIA_BYTES = 50 * 1024 * 1024;
 const MAX_FONT_BYTES = 50 * 1024 * 1024;
 const MAX_UPLOAD_SESSIONS = 32;
 const UPLOAD_SESSION_MAX_AGE = 15 * 60 * 1000;
+const CLOSE_GRACE_MS = 1000;
 const LOCAL_TEAM_ID = "00000000-0000-4000-8000-000000000001";
+const LOOPBACK_NAMES = ["127.0.0.1", "localhost", "[::1]"];
 
 function loopbackHost(host) {
   return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
+// DNS rebinding guard: a foreign site that resolves its own name to 127.0.0.1
+// still sends that name as Host, so only loopback names for this port pass.
+function allowedHost(value, port) {
+  const host = String(value ?? "").toLowerCase();
+  return LOOPBACK_NAMES.some(
+    (name) => host === `${name}:${port}` || (port === 80 && host === name),
+  );
+}
+
+// The Background does not know which port the Web host picked, so CORS is
+// granted to any plain-http loopback origin and refused to everything else.
+function allowedOrigin(value) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "http:" &&
+      url.origin === value &&
+      LOOPBACK_NAMES.includes(url.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function originFor(host, port) {
@@ -92,7 +119,6 @@ function librarySummary(snapshot) {
 function writeJson(response, status, value) {
   const body = JSON.stringify(value);
   response.writeHead(status, {
-    "access-control-allow-origin": "*",
     "cache-control": "no-store",
     "content-length": Buffer.byteLength(body),
     "content-type": "application/json; charset=utf-8",
@@ -100,13 +126,15 @@ function writeJson(response, status, value) {
   response.end(body);
 }
 
+const ERROR_STATUS = {
+  file_not_found: 404,
+  stale_revision: 409,
+  unsupported_media_type: 415,
+};
+
 function writeError(response, error) {
   const status =
-    error instanceof SmallPenError && error.code === "stale_revision"
-      ? 409
-      : error instanceof SmallPenError && error.code === "file_not_found"
-        ? 404
-        : 422;
+    (error instanceof SmallPenError && ERROR_STATUS[error.code]) || 422;
   writeJson(response, status, {
     error: {
       code: error instanceof SmallPenError ? error.code : "internal_error",
@@ -163,7 +191,6 @@ function writeBinary(response, snapshot, descriptor, kind) {
     );
   }
   response.writeHead(200, {
-    "access-control-allow-origin": "*",
     "cache-control": "private, max-age=31536000, immutable",
     "content-length": body.byteLength,
     "content-type": descriptor.mimeType,
@@ -181,6 +208,18 @@ function writeBinary(response, snapshot, descriptor, kind) {
 }
 
 async function readJson(request) {
+  // A text/plain body is a CORS simple request; requiring JSON forces a
+  // preflight for any cross-origin caller.
+  const type = String(request.headers["content-type"] ?? "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+  if (type !== "application/json") {
+    throw new SmallPenError(
+      "unsupported_media_type",
+      "Request body must use application/json",
+    );
+  }
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
@@ -189,14 +228,24 @@ async function readJson(request) {
       throw new SmallPenError("request_too_large", "Request body is too large");
     chunks.push(chunk);
   }
+  let value;
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
     throw new SmallPenError(
       "invalid_json",
       "Request body must contain valid JSON",
     );
   }
+  // Every JSON route reads named fields; null or an array would surface as
+  // an internal TypeError instead of an explicit refusal.
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new SmallPenError(
+      "invalid_json",
+      "Request body must be a JSON object",
+    );
+  }
+  return value;
 }
 
 async function readBytes(
@@ -290,6 +339,11 @@ export async function serveLocalPackage({
   const designSystemMemo = { key: null, entries: [] };
   const sessionPath = `/${randomUUID()}`;
   let revisionNumber = 0;
+  // Per package: Penpot runtime ids of copy children that a commit turned
+  // into projected Instance children (compilePenpotChanges
+  // projectedRuntimeIds). The page keeps those ids until it reloads.
+  const projectedRuntimeIds = new Map();
+  let selectedPort;
 
   function packageSessionId(locator) {
     let id = packageIds.get(locator);
@@ -446,23 +500,39 @@ export async function serveLocalPackage({
   });
 
   const server = createServer(async (request, response) => {
-    response.setHeader(
-      "access-control-allow-headers",
-      "content-type,x-smallpen-draft-kind,x-smallpen-draft-output,x-smallpen-draft-package-id,x-smallpen-file,x-smallpen-media-name,x-smallpen-package",
-    );
-    response.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
-    response.setHeader("access-control-allow-origin", "*");
-    if (request.method === "OPTIONS") {
-      response.writeHead(204);
-      response.end();
-      return;
-    }
-
-    const url = new URL(
-      request.url ?? "/",
-      `http://${request.headers.host ?? "localhost"}`,
-    );
     try {
+      if (!allowedHost(request.headers.host, selectedPort)) {
+        writeJson(response, 403, {
+          error: { code: "forbidden_host", message: "Host is not allowed" },
+        });
+        return;
+      }
+      const requestOrigin = request.headers.origin;
+      if (requestOrigin !== undefined) {
+        if (!allowedOrigin(requestOrigin)) {
+          writeJson(response, 403, {
+            error: {
+              code: "forbidden_origin",
+              message: "Origin is not allowed",
+            },
+          });
+          return;
+        }
+        response.setHeader(
+          "access-control-allow-headers",
+          "content-type,x-smallpen-draft-kind,x-smallpen-draft-output,x-smallpen-draft-package-id,x-smallpen-file,x-smallpen-media-name,x-smallpen-package",
+        );
+        response.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+        response.setHeader("access-control-allow-origin", requestOrigin);
+      }
+      response.setHeader("vary", "origin");
+      if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+
+      const url = new URL(request.url ?? "/", "http://localhost");
       if (request.method === "GET" && url.pathname === "/health") {
         writeJson(response, 200, { status: "ok" });
         return;
@@ -727,7 +797,7 @@ export async function serveLocalPackage({
         const source = params.source;
         let library;
         if (source?.type === "local" && typeof source.path === "string") {
-          library = await openPackage(resolve(dirname(locator), source.path));
+          library = await openPackage(localLibraryLocator(locator, source));
         } else if (source?.type === "url" && typeof source.url === "string") {
           library = await openRemoteLibrary(source.url, {
             cacheRoot: libraryCacheRoot,
@@ -765,9 +835,7 @@ export async function serveLocalPackage({
             },
           ],
         });
-        if (source.type === "local") {
-          await workspace.open(library.locator);
-        }
+        // The commit opens a linked local Library in this session.
         const updated = workspace.describe(locator);
         writeJson(response, 200, {
           ...result,
@@ -998,6 +1066,29 @@ export async function serveLocalPackage({
         // pure dry run: the diff, warnings, and resulting library. With apply
         // the same selection is committed as one atomic Operation Batch.
         const params = await readJson(request);
+        // Optional for older callers. When present, a review prepared against
+        // an older revision must not be applied to newer Package content.
+        if (params.baseRevision !== undefined) {
+          if (
+            typeof params.baseRevision !== "string" ||
+            params.baseRevision.length === 0
+          ) {
+            throw new SmallPenError(
+              "invalid_base_revision",
+              "Token import baseRevision must be a non-empty string",
+            );
+          }
+          if (params.baseRevision !== description.snapshot.revision) {
+            throw new SmallPenError(
+              "stale_revision",
+              "Token import review is stale; reload the workspace before applying it",
+              {
+                actualRevision: description.snapshot.revision,
+                baseRevision: params.baseRevision,
+              },
+            );
+          }
+        }
         const result = importTokens(description.snapshot, params.document, {
           selection: Array.isArray(params.selection)
             ? params.selection
@@ -1238,7 +1329,8 @@ export async function serveLocalPackage({
             "Font Variant identity or uploads are invalid",
           );
         }
-        const input = {};
+        // Keys come from the request, so "__proto__" must stay a plain key.
+        const input = Object.create(null);
         const consumed = [];
         let totalSize = 0;
         for (const [mimeType, rawSessionId] of Object.entries(uploads)) {
@@ -1277,7 +1369,7 @@ export async function serveLocalPackage({
         }
         const files = prepareFontFiles(input);
         const id = `fvar_${randomUUID().replaceAll("-", "")}`;
-        const name = `${style === "italic" ? "Italic " : ""}${weight}`;
+        const name = fontVariantName(weight, style);
         const imported = await workspace.importFontVariant(locator, {
           family,
           files,
@@ -1354,9 +1446,17 @@ export async function serveLocalPackage({
           .split(";", 1)[0]
           .trim()
           .toLowerCase();
-        const rawName = String(
+        // Header values are Latin-1, so clients URI-encode the file name.
+        // Older clients sent it raw; keep those working when decoding fails.
+        const headerName = String(
           request.headers["x-smallpen-media-name"] ?? "",
-        ).trim();
+        );
+        let rawName;
+        try {
+          rawName = decodeURIComponent(headerName).trim();
+        } catch {
+          rawName = headerName.trim();
+        }
         if (rawName.length === 0 || rawName.length > 255) {
           throw new SmallPenError(
             "invalid_library_media",
@@ -1391,7 +1491,6 @@ export async function serveLocalPackage({
       }
       if (request.method === "GET" && route === "/v1/events") {
         response.writeHead(200, {
-          "access-control-allow-origin": "*",
           "cache-control": "no-cache",
           connection: "keep-alive",
           "content-type": "text/event-stream",
@@ -1432,12 +1531,24 @@ export async function serveLocalPackage({
           foundation,
           libraries,
         });
+        const sessionIds = projectedRuntimeIds.get(locator) ?? new Map();
+        for (const [runtimeId, descriptor] of sessionIds) {
+          projected.runtime.reverseNodes[runtimeId] ??= descriptor;
+        }
+        const added = new Map();
         const batch = compilePenpotChanges(
           { ...effective, runtime: projected.runtime },
           commit,
-          { libraries: [foundation, ...libraries].filter(Boolean) },
+          {
+            libraries: [foundation, ...libraries].filter(Boolean),
+            projectedRuntimeIds: added,
+          },
         );
         const result = await workspace.commit(locator, batch);
+        for (const [runtimeId, descriptor] of added) {
+          sessionIds.set(runtimeId, descriptor);
+        }
+        projectedRuntimeIds.set(locator, sessionIds);
         revisionNumber += 1;
         writeJson(response, 200, {
           ...result,
@@ -1455,7 +1566,18 @@ export async function serveLocalPackage({
         error: { code: "not_found", message: "Route not found" },
       });
     } catch (error) {
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
       writeError(response, error);
+    }
+  });
+  server.on("clientError", (_error, socket) => {
+    if (socket.writable) {
+      socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    } else {
+      socket.destroy();
     }
   });
 
@@ -1464,8 +1586,7 @@ export async function serveLocalPackage({
     server.listen(port, host, resolve);
   });
   const address = server.address();
-  const selectedPort =
-    typeof address === "object" && address ? address.port : port;
+  selectedPort = typeof address === "object" && address ? address.port : port;
 
   return {
     backend: initialBackend,
@@ -1477,9 +1598,20 @@ export async function serveLocalPackage({
       unsubscribe();
       for (const stream of eventStreams) stream.end();
       eventStreams.clear();
-      await new Promise((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()));
-      });
+      // A client that stalls mid-request would otherwise hold close() open
+      // until Node's request timeout. Commits already queued still finish:
+      // workspace.closeAll() waits for each Package's commit queue.
+      const force = setTimeout(
+        () => server.closeAllConnections(),
+        CLOSE_GRACE_MS,
+      );
+      try {
+        await new Promise((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+        });
+      } finally {
+        clearTimeout(force);
+      }
       await workspace.closeAll();
     },
   };

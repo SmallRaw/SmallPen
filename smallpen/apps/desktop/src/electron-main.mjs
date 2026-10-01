@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url";
 import {
   desktopAction,
   navigationAllowed,
+  packagePathArguments,
   windowPreferences,
+  workspaceFileId,
 } from "./electron-policy.mjs";
 
 const started = performance.now();
@@ -105,6 +107,17 @@ async function openPackage(rawPath, action = "open", home) {
   const operation = request(action, { locator }).then(async (result) => {
     if (!navigationAllowed(result.url, new URL(ready.url).origin))
       throw new Error("Invalid workspace URL from local host");
+    // Windows that entered a package from Recent have no locator binding, so
+    // match them by file identity before opening a second window.
+    const fileId = workspaceFileId(result.url);
+    for (const [window, binding] of windows) {
+      if (fileId && binding && workspaceFileId(binding.url) === fileId) {
+        windows.set(window, { ...binding, locator });
+        window.show();
+        window.focus();
+        return window;
+      }
+    }
     // Reuse only an unbound Home window. Never replace another package's session.
     if (home && windows.has(home) && !windows.get(home)) {
       windows.set(home, { locator, url: result.url });
@@ -198,16 +211,10 @@ function openWindow(url, binding) {
     "did-navigate-in-page",
     (_event, target, isMainFrame) => {
       if (!isMainFrame || !navigationAllowed(target, origin)) return;
-      const url = new URL(target);
-      if (!url.hash.startsWith("#/workspace?")) return;
-      const fileId = new URLSearchParams(url.hash.split("?")[1]).get("file-id");
+      const fileId = workspaceFileId(target);
       if (!fileId) return;
       const previous = windows.get(window);
-      const previousId =
-        previous &&
-        new URLSearchParams(new URL(previous.url).hash.split("?")[1]).get(
-          "file-id",
-        );
+      const previousId = previous && workspaceFileId(previous.url);
       if (previousId === fileId) return;
       windows.set(window, { url: target });
       if (previous) closePackage(previous.url);
@@ -272,10 +279,8 @@ app.on("open-file", (event, path) => {
   if (ready) void openPackage(path).catch(fail);
   else pendingPaths.push(path);
 });
-app.on("second-instance", (_event, argv) => {
-  const paths = argv.filter(
-    (arg) => !arg.startsWith("-") && arg.toLowerCase().endsWith(".smallpen"),
-  );
+app.on("second-instance", (_event, argv, workingDirectory) => {
+  const paths = packagePathArguments(argv, workingDirectory);
   if (!ready) pendingPaths.push(...paths);
   else if (paths.length) {
     for (const path of paths) void openPackage(path).catch(fail);
@@ -412,14 +417,19 @@ app
         },
       ]),
     );
-    pendingPaths.push(
-      ...args.filter(
-        (arg) =>
-          !arg.startsWith("-") && arg.toLowerCase().endsWith(".smallpen"),
-      ),
-    );
+    pendingPaths.push(...packagePathArguments(args, process.cwd()));
     let initial;
-    for (const path of pendingPaths) initial = await openPackage(path);
+    for (const path of pendingPaths) {
+      // One unreadable path must not quit the App: report it and keep going.
+      // Smoke runs still fail, because fail() ends them with an error report.
+      try {
+        initial = await openPackage(path);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        fail(new Error(`${path}: ${message}`));
+        if (smoke) return;
+      }
+    }
     if (!initial) initial = openWindow(ready.url);
     if (smoke) {
       if (args.includes("--smoke") && !pendingPaths.length)

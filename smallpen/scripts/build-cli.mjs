@@ -5,8 +5,10 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, parse, resolve } from "node:path";
@@ -15,6 +17,7 @@ import { copyRuntimeDependencies } from "./copy-runtime-dependencies.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const smallpenRoot = resolve(here, "..");
+const defaultOutput = join(smallpenRoot, "dist", "SmallPen-CLI");
 
 function option(args, name) {
   const index = args.indexOf(name);
@@ -30,10 +33,28 @@ async function copyModule(targetRoot, sourceRelative, targetRelative, children) 
   }
 }
 
+// The build replaces its output wholesale. Only the default dist folder is
+// ours to replace; any other existing content may be user data.
+async function assertReplaceable(output) {
+  if (output === defaultOutput) return;
+  let descriptor;
+  try {
+    descriptor = await stat(output);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  if (descriptor.isDirectory() && (await readdir(output)).length === 0) return;
+  throw new Error(
+    `Output already exists: ${output}. Move it or choose a new --output path.`,
+  );
+}
+
 async function build(output) {
   if (output === parse(output).root) {
     throw new Error("CLI output cannot be a filesystem root");
   }
+  await assertReplaceable(output);
   await mkdir(dirname(output), { recursive: true });
   const transaction = await mkdtemp(join(dirname(output), ".smallpen-cli-build-"));
   const candidate = join(transaction, basename(output));
@@ -87,9 +108,7 @@ exec node "$SMALLPEN_CLI_ROOT/app/apps/cli/bin/smallpen-check.cjs" "$@"
   }
 }
 
-const output = resolve(
-  option(process.argv.slice(2), "--output") ?? join(smallpenRoot, "dist", "SmallPen-CLI"),
-);
+const output = resolve(option(process.argv.slice(2), "--output") ?? defaultOutput);
 
 build(output)
   .then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`))

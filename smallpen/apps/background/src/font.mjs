@@ -1,4 +1,5 @@
 export {
+  fontVariantName,
   inspectFont,
   prepareFontFiles,
   sfntToWoff,

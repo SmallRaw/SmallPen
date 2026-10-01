@@ -247,7 +247,7 @@ async function main() {
 
     const missingPage = await browser.newPage();
     const missingUrl = new URL("/", web.origin);
-    missingUrl.hash = "#/workspace?file-id=11111111-1111-4111-8111-111111111111&page-id=22222222-2222-4222-8222-222222222222&layout=layers";
+    missingUrl.search = "?screen=workspace&file-id=11111111-1111-4111-8111-111111111111&page-id=22222222-2222-4222-8222-222222222222&layout=layers";
     await missingPage.goto(missingUrl.href, { waitUntil: "domcontentloaded" });
     await missingPage.waitForURL(/#\/smallpen$/, { timeout: 30_000 });
     await missingPage.close();

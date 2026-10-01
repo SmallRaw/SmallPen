@@ -302,3 +302,17 @@ test("CI reads the committed version without dispatch version overrides", async 
   assert.doesNotMatch(workflow, /inputs[.:]/);
   assert.match(workflow, /needs: \[test, cli, desktop\]/);
 });
+
+test("the release smoke renders text and a WebP image with the CLI", async (t) => {
+  const { smokeRender } = await import("../scripts/release.mjs");
+  const temp = await mkdtemp(join(tmpdir(), "smallpen-render-smoke-"));
+  t.after(() => rm(temp, { force: true, recursive: true }));
+  await smokeRender(
+    new URL("../apps/cli/bin/smallpen.mjs", import.meta.url).pathname,
+    temp,
+  );
+  const evidence = JSON.parse(await readFile(join(temp, "render-smoke.json"), "utf8"));
+  assert.ok(
+    evidence.semanticTree && JSON.stringify(evidence.semanticTree).includes("Smoke"),
+  );
+});

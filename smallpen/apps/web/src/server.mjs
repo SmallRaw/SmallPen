@@ -4,10 +4,16 @@ import { fileURLToPath } from "node:url";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 const MAX_CONTROL_BODY_BYTES = 16 * 1024;
-const MAX_GOOGLE_FONT_CSS_BYTES = 256 * 1024;
+const CLOSE_GRACE_MS = 1000;
+// Penpot asks for every variant of a family in one stylesheet, and CJK
+// families list each weight as ~100 unicode-range faces: Noto Sans TC with
+// nine weights is about 1.1 MB of CSS.
+const MAX_GOOGLE_FONT_CSS_BYTES = 4 * 1024 * 1024;
 const MAX_GOOGLE_FONT_FILE_BYTES = 16 * 1024 * 1024;
 const GOOGLE_FONT_CSS_URL = "https://fonts.googleapis.com/css";
 const GOOGLE_FONT_FILE_PREFIX = "https://fonts.gstatic.com/s/";
+const GOOGLE_FONT_FILE_ORIGIN = "https://fonts.gstatic.com";
+const LOOPBACK_NAMES = ["127.0.0.1", "localhost", "[::1]"];
 const SHADOW_MODULE_LOADED_CALL =
   "shadow.cljs.devtools.client.env.module_loaded(";
 const SAFE_SHADOW_MODULE_LOADED_CALL =
@@ -40,6 +46,39 @@ function loopbackHost(host) {
 function originFor(host, port) {
   const hostname = host.includes(":") ? `[${host}]` : host;
   return `http://${hostname}:${port}`;
+}
+
+class RequestError extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
+
+// DNS rebinding guard: a page on another site that resolves its own name to
+// 127.0.0.1 still sends that name as Host, so only loopback names that point
+// at this exact port are served.
+function allowedHost(value, port) {
+  const host = String(value ?? "").toLowerCase();
+  return LOOPBACK_NAMES.some(
+    (name) => host === `${name}:${port}` || (port === 80 && host === name),
+  );
+}
+
+// Browsers send Origin on cross-origin and state-changing requests. Only this
+// server's own loopback origin may drive the control routes.
+function allowedOrigin(value, port) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "http:" &&
+      url.origin === value &&
+      allowedHost(url.host, port)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function normalizeBackendUrl(value) {
@@ -77,12 +116,41 @@ function writeError(response, status, code, message) {
   writeJson(response, status, { error: { code, message } });
 }
 
+function mediaType(value) {
+  return String(value ?? "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+}
+
+async function readCapped(stream, maxBytes) {
+  const chunks = [];
+  let size = 0;
+  if (!stream) return Buffer.alloc(0);
+  const reader = stream.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return Buffer.concat(chunks, size);
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        return undefined;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function proxyGoogleFont(
   request,
   response,
   target,
   maxBytes,
   remoteFetch,
+  allowedType,
 ) {
   const upstream = await remoteFetch(target, {
     headers: {
@@ -99,6 +167,18 @@ async function proxyGoogleFont(
     );
     return;
   }
+  // Pass through only font and stylesheet bodies so the proxy can never
+  // serve a remote document on the SmallPen origin.
+  const contentType = upstream.headers.get("content-type") ?? "";
+  if (!allowedType(mediaType(contentType))) {
+    writeError(
+      response,
+      502,
+      "google_font_invalid_type",
+      "Google Fonts returned an unexpected content type",
+    );
+    return;
+  }
   const declaredLength = Number(upstream.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     writeError(
@@ -109,8 +189,10 @@ async function proxyGoogleFont(
     );
     return;
   }
-  const body = Buffer.from(await upstream.arrayBuffer());
-  if (body.length > maxBytes) {
+  // The declared length is absent for chunked and compressed responses, so
+  // the body is read with the cap rather than buffered whole.
+  const body = await readCapped(upstream.body, maxBytes);
+  if (!body) {
     writeError(
       response,
       502,
@@ -123,8 +205,8 @@ async function proxyGoogleFont(
     "cache-control":
       upstream.headers.get("cache-control") ?? "public, max-age=3600",
     "content-length": body.length,
-    "content-type":
-      upstream.headers.get("content-type") ?? "application/octet-stream",
+    "content-security-policy": "sandbox",
+    "content-type": contentType,
     "x-content-type-options": "nosniff",
   });
   response.end(request.method === "HEAD" ? undefined : body);
@@ -140,6 +222,7 @@ async function serveGoogleFont(request, response, url, remoteFetch) {
       target,
       MAX_GOOGLE_FONT_CSS_BYTES,
       remoteFetch,
+      (type) => type === "text/css",
     );
     return true;
   }
@@ -154,7 +237,16 @@ async function serveGoogleFont(request, response, url, remoteFetch) {
     writeError(response, 404, "not_found", "Google Font path is invalid");
     return true;
   }
+  // An absolute or scheme-relative suffix replaces the base URL, so the
+  // resolved target must still sit under the fixed font file prefix.
   const target = new URL(suffix, GOOGLE_FONT_FILE_PREFIX);
+  if (
+    target.origin !== GOOGLE_FONT_FILE_ORIGIN ||
+    !target.href.startsWith(GOOGLE_FONT_FILE_PREFIX)
+  ) {
+    writeError(response, 404, "not_found", "Google Font path is invalid");
+    return true;
+  }
   target.search = url.search;
   await proxyGoogleFont(
     request,
@@ -162,42 +254,75 @@ async function serveGoogleFont(request, response, url, remoteFetch) {
     target,
     MAX_GOOGLE_FONT_FILE_BYTES,
     remoteFetch,
+    (type) => type.startsWith("font/"),
   );
   return true;
 }
 
 async function readJson(request) {
-  if (
-    !String(request.headers["content-type"] ?? "").startsWith(
-      "application/json",
-    )
-  ) {
-    throw new Error("Request body must use application/json");
+  // A text/plain body is a CORS simple request; requiring JSON forces a
+  // preflight for any cross-origin caller.
+  if (mediaType(request.headers["content-type"]) !== "application/json") {
+    throw new RequestError(
+      415,
+      "unsupported_media_type",
+      "Request body must use application/json",
+    );
   }
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
     if (size > MAX_CONTROL_BODY_BYTES) {
-      throw new Error("Request body is too large");
+      throw new RequestError(
+        413,
+        "request_too_large",
+        "Request body is too large",
+      );
     }
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  let value;
+  try {
+    value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new RequestError(
+      400,
+      "invalid_json",
+      "Request body must contain valid JSON",
+    );
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new RequestError(
+      400,
+      "invalid_json",
+      "Request body must be a JSON object",
+    );
+  }
+  return value;
 }
 
 async function fetchJson(url, options) {
   const response = await fetch(url, options);
   const value = await response.json();
   if (!response.ok) {
-    throw new Error(
-      value?.error?.message ?? `Background request failed (${response.status})`,
-    );
+    const message =
+      value?.error?.message ?? `Background request failed (${response.status})`;
+    // A refusal of the caller's input keeps its status and code; only an
+    // unreachable or failing Background is reported as a gateway error.
+    if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      typeof value?.error?.code === "string"
+    ) {
+      throw new RequestError(response.status, value.error.code, message);
+    }
+    throw new Error(message);
   }
   return value;
 }
 
-function workspaceHash(snapshot) {
+function workspaceSearch(snapshot) {
   const screen = snapshot.manifest.entries.screens
     .map((entry) => snapshot.entries[entry])
     .find((entry) => entry.id === snapshot.manifest.defaultScreenId);
@@ -205,16 +330,17 @@ function workspaceHash(snapshot) {
     ? snapshot.runtime.pages[screen.id]?.[screen.basePresentationId]
     : undefined;
   const route = new URLSearchParams({
+    screen: "workspace",
     "file-id": snapshot.runtime.file,
   });
   if (pageId) route.set("page-id", pageId);
   route.set("layout", "layers");
-  return `#/workspace?${route}`;
+  return `?${route}`;
 }
 
 function workspaceUrl(origin, snapshot) {
   const url = new URL("/", origin);
-  url.hash = workspaceHash(snapshot);
+  url.search = workspaceSearch(snapshot);
   return url.href;
 }
 
@@ -370,12 +496,20 @@ function parseUrl(value) {
   }
 }
 
+// Workspace URLs carry the route in the query (see workspaceSearch); the hash
+// form is the legacy route older builds still emit.
 function workspaceFileId(value, origin) {
   const workspace = parseUrl(value);
   if (workspace?.origin !== origin) return undefined;
-  const match = /^#\/workspace\?(.*)$/.exec(workspace.hash);
-  if (!match) return undefined;
-  const fileId = new URLSearchParams(match[1]).get("file-id");
+  let query;
+  if (workspace.searchParams.get("screen") === "workspace") {
+    query = workspace.searchParams;
+  } else {
+    const match = /^#\/workspace\?(.*)$/.exec(workspace.hash);
+    if (!match) return undefined;
+    query = new URLSearchParams(match[1]);
+  }
+  const fileId = query.get("file-id");
   return /^[a-f0-9-]{36}$/.test(fileId ?? "") ? fileId : undefined;
 }
 
@@ -421,12 +555,23 @@ export async function servePenpotFrontend({
     }
   }
   let origin;
+  let selectedPort;
   const server = createServer(async (request, response) => {
-    const url = new URL(
-      request.url ?? "/",
-      origin ?? `http://${request.headers.host ?? "127.0.0.1"}`,
-    );
     try {
+      if (!allowedHost(request.headers.host, selectedPort)) {
+        writeError(response, 403, "forbidden_host", "Host is not allowed");
+        return;
+      }
+      if (
+        request.method !== "GET" &&
+        request.method !== "HEAD" &&
+        request.headers.origin !== undefined &&
+        !allowedOrigin(request.headers.origin, selectedPort)
+      ) {
+        writeError(response, 403, "forbidden_origin", "Origin is not allowed");
+        return;
+      }
+      const url = new URL(request.url ?? "/", origin);
       if (request.method === "GET" && url.pathname === "/health") {
         writeJson(response, 200, { status: "ok", ui: "penpot" });
         return;
@@ -538,6 +683,14 @@ export async function servePenpotFrontend({
       }
       writeError(response, 404, "not_found", "Route not found");
     } catch (error) {
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      if (error instanceof RequestError) {
+        writeError(response, error.status, error.code, error.message);
+        return;
+      }
       writeError(
         response,
         502,
@@ -546,14 +699,20 @@ export async function servePenpotFrontend({
       );
     }
   });
+  server.on("clientError", (_error, socket) => {
+    if (socket.writable) {
+      socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    } else {
+      socket.destroy();
+    }
+  });
 
   await new Promise((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(port, host, resolveListen);
   });
   const address = server.address();
-  const selectedPort =
-    typeof address === "object" && address ? address.port : port;
+  selectedPort = typeof address === "object" && address ? address.port : port;
   origin = originFor(host, selectedPort);
 
   return {
@@ -567,9 +726,19 @@ export async function servePenpotFrontend({
       ? workspaceUrl(origin, initialWorkspace)
       : undefined,
     async close() {
-      await new Promise((resolveClose, reject) => {
-        server.close((error) => (error ? reject(error) : resolveClose()));
-      });
+      // A client that stalls mid-request would otherwise hold close() open
+      // until Node's request timeout.
+      const force = setTimeout(
+        () => server.closeAllConnections(),
+        CLOSE_GRACE_MS,
+      );
+      try {
+        await new Promise((resolveClose, reject) => {
+          server.close((error) => (error ? reject(error) : resolveClose()));
+        });
+      } finally {
+        clearTimeout(force);
+      }
     },
   };
 }

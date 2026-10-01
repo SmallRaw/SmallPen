@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 export const windowPreferences = Object.freeze({
   sandbox: true,
   contextIsolation: true,
@@ -39,6 +41,39 @@ export function desktopAction(raw, source, origin) {
     )
       return undefined;
     return ["open", "create"].includes(url.hostname) ? url.hostname : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Package paths from a command line. A second instance reports the directory
+// it started in, so relative paths resolve against that, not our own cwd.
+export function packagePathArguments(argv, workingDirectory) {
+  return argv
+    .filter(
+      (arg) =>
+        typeof arg === "string" &&
+        !arg.startsWith("-") &&
+        arg.toLowerCase().endsWith(".smallpen"),
+    )
+    .map((arg) =>
+      workingDirectory ? resolve(workingDirectory, arg) : resolve(arg),
+    );
+}
+
+export function workspaceFileId(raw) {
+  try {
+    const url = new URL(raw);
+    let query;
+    if (url.searchParams.get("screen") === "workspace") {
+      query = url.searchParams;
+    } else if (url.hash.startsWith("#/workspace?")) {
+      // Legacy hash route, still emitted by older SmallPen builds.
+      query = new URLSearchParams(url.hash.slice("#/workspace?".length));
+    } else {
+      return undefined;
+    }
+    return query.get("file-id") || undefined;
   } catch {
     return undefined;
   }

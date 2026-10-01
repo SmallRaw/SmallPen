@@ -42,7 +42,7 @@ function workspaceLocation(snapshot) {
   if (workspace.pageId) route.set("page-id", workspace.pageId);
   route.set("layout", "layers");
   return {
-    penpotPath: `#/workspace?${route}`,
+    penpotPath: `?screen=workspace&${route}`,
     workspace,
   };
 }
@@ -74,8 +74,18 @@ async function main(args) {
     status: "ready",
   });
   const close = async () => {
-    await service.close();
-    process.exit(0);
+    // A failed close must still end the process, with a failing status.
+    let code = 0;
+    try {
+      await service.close();
+    } catch (error) {
+      code = 1;
+      process.stderr.write(
+        `${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    } finally {
+      process.exit(code);
+    }
   };
   process.once("SIGINT", close);
   process.once("SIGTERM", close);

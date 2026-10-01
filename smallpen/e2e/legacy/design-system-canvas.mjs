@@ -78,7 +78,7 @@ try {
   });
 
   const url = new URL(web.url);
-  url.hash = `#/design-system?file-id=${fileId}`;
+  url.search = `?screen=smallpen-design-system&file-id=${fileId}`;
   await page.goto(url.href, { waitUntil: "domcontentloaded" });
 
   // DSC-009: the canvas surface mounts on the system page route.

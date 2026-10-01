@@ -356,7 +356,7 @@ try {
   const snapshot = await (await fetch(endpoint("/v1/workspace"))).json();
   const fileId = snapshot.runtime.file;
   const url = new URL(web.url);
-  url.hash = `#/design-system?file-id=${fileId}`;
+  url.search = `?screen=smallpen-design-system&file-id=${fileId}`;
   await writeFile(join(dir, "run-identity.json"), JSON.stringify({
     label,
     startedAt: new Date().toISOString(),

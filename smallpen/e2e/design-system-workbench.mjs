@@ -60,7 +60,7 @@ try {
   pageRef = page;
 
   const workbenchUrl = new URL(web.url);
-  workbenchUrl.hash = `#/design-system?file-id=${fileId}`;
+  workbenchUrl.search = `?screen=smallpen-design-system&file-id=${fileId}`;
   await page.goto(workbenchUrl.href, { waitUntil: "domcontentloaded" });
 
   await page.getByTestId("smallpen-workbench").waitFor({ timeout: 30_000 });

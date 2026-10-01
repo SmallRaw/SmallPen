@@ -16,8 +16,10 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       channel: ${{ steps.release.outputs.channel }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
       - name: Read and validate committed version
@@ -34,6 +36,14 @@ jobs:
         working-directory: smallpen
       - run: npm test
         working-directory: smallpen
+      # The i18n gate needs only frontend dev dependencies, no build.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: corepack pnpm install --frozen-lockfile --ignore-scripts
+      - name: Check SmallPen i18n
+        run: node frontend/scripts/check-smallpen-i18n.js
   cli:
     name: CLI (${{ matrix.os }})
     needs: test
@@ -47,8 +57,10 @@ jobs:
         shell: bash
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
       - name: Prepare package metadata
@@ -72,7 +84,7 @@ jobs:
           node ./dist/SmallPen-CLI/app/apps/cli/bin/smallpen-check.cjs --help
           cp dist/npm/manifest.json dist/SmallPen-CLI/release.json
           tar -czf dist/SmallPen-CLI.tar.gz -C dist SmallPen-CLI
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: runner.os == 'Linux'
         with:
           name: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
@@ -80,7 +92,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           overwrite: true
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: runner.os == 'Linux'
         with:
           name: SmallPen-CLI-${{ needs.test.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
@@ -94,12 +106,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Build frontend once
         env:
           BUILD_WASM: "yes"
         run: ./manage.sh build-frontend-bundle
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
           path: bundles/frontend/
@@ -123,8 +137,10 @@ jobs:
         shell: bash
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
       - name: Prepare package metadata
@@ -134,7 +150,7 @@ jobs:
         run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
       - run: npm ci --ignore-scripts
         working-directory: smallpen
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
           path: frontend/resources/public
@@ -152,7 +168,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent SmallPen.app SmallPen-macOS-arm64-unsigned.zip
           shasum -a 256 SmallPen-macOS-arm64-unsigned.zip > SHA256SUMS
           printf '%s\n' "$GITHUB_SHA" > SOURCE_COMMIT
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: runner.os == 'macOS'
         with:
           name: SmallPen-macOS-arm64-${{ needs.test.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
@@ -172,7 +188,7 @@ jobs:
           $digest = (Get-FileHash SmallPen-Windows-x64.zip -Algorithm SHA256).Hash.ToLower()
           "$digest  SmallPen-Windows-x64.zip" | Set-Content SHA256SUMS
           $env:GITHUB_SHA | Set-Content SOURCE_COMMIT
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: runner.os == 'Windows'
         with:
           name: SmallPen-Windows-x64-${{ needs.test.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
@@ -190,7 +206,7 @@ jobs:
         run: node smallpen/e2e/desktop-smoke.mjs
       - name: Upload desktop test evidence
         if: ${{ failure() && steps.smoke.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: SmallPen-Desktop-test-${{ matrix.platform }}-${{ github.sha }}-${{ github.run_id }}
           path: ${{ runner.temp }}/smallpen-desktop-evidence/
@@ -200,6 +216,8 @@ jobs:
   publish:
     name: Publish
     needs: [test, cli, desktop]
+    # Manual dispatch may run on any branch; only develop or a tag publishes.
+    if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: npm
@@ -207,11 +225,13 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
           path: smallpen/dist/npm

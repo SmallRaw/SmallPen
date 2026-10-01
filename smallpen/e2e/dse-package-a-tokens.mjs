@@ -697,7 +697,7 @@ try {
   const snapshot = await workspace();
   const fileId = snapshot.runtime.file;
   const url = new URL(web.url);
-  url.hash = `#/design-system?file-id=${fileId}`;
+  url.search = `?screen=smallpen-design-system&file-id=${fileId}`;
   await writeFile(
     join(dir, "run-identity.json"),
     JSON.stringify(

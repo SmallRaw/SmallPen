@@ -97,7 +97,7 @@ test(
     });
     const ready = JSON.parse(line);
     assert.equal(ready.status, "ready", errors);
-    assert.equal(new URL(ready.web).hash, "#/smallpen");
+    assert.equal(new URL(ready.web).search, "?screen=smallpen-home");
     assert.equal((await fetch(new URL("/health", ready.web))).status, 200);
     child.stdin.end();
     const [code] = await closed;

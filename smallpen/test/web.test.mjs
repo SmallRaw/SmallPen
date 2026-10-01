@@ -72,7 +72,9 @@ test("Web serves Penpot frontend assets and opens the SmallPen local Home route"
   assert.equal(workspaceUrl.hash, "");
 
   const editorUrl = new URL(web.workspaceUrl);
-  const editorQuery = new URLSearchParams(editorUrl.hash.split("?")[1]);
+  assert.equal(editorUrl.hash, "");
+  const editorQuery = editorUrl.searchParams;
+  assert.equal(editorQuery.get("screen"), "workspace");
   assert.match(editorQuery.get("file-id"), /^[a-f0-9-]{36}$/);
   assert.match(editorQuery.get("page-id"), /^[a-f0-9-]{36}$/);
   assert.equal(editorQuery.get("layout"), "layers");
@@ -204,13 +206,11 @@ test("opening another package returns another Penpot workspace URL", async (cont
   const openedUrl = new URL(opened.url);
   assert.equal(openedUrl.origin, web.origin);
   assert.equal(openedUrl.pathname, "/");
-  assert.equal(openedUrl.search, "");
+  assert.equal(openedUrl.hash, "");
   assert.doesNotMatch(opened.url, /smallpen-backend|smallpen-package/);
-  assert.match(openedUrl.hash, /^#\/workspace\?/);
-  const initialQuery = new URLSearchParams(
-    new URL(web.workspaceUrl).hash.split("?")[1],
-  );
-  const openedQuery = new URLSearchParams(openedUrl.hash.split("?")[1]);
+  assert.equal(openedUrl.searchParams.get("screen"), "workspace");
+  const initialQuery = new URL(web.workspaceUrl).searchParams;
+  const openedQuery = openedUrl.searchParams;
   assert.notEqual(openedQuery.get("file-id"), initialQuery.get("file-id"));
   assert.equal(openedQuery.get("team-id"), null);
   assert.equal(openedQuery.get("layout"), "layers");
@@ -276,4 +276,38 @@ test("Web refuses static symlinks that escape the frontend root", async (context
   });
 
   assert.equal((await fetch(`${web.origin}/leak.txt`)).status, 404);
+});
+
+test("the Desktop closes a workspace by the URL the Web host returned", async (context) => {
+  const parent = await mkdtemp(join(tmpdir(), "smallpen-penpot-close-"));
+  const first = await copyFixture(parent, "first");
+  const second = await copyFixture(parent, "second", "pkg_second_close");
+  const frontendRoot = await createPenpotFrontend(parent);
+  const background = await serveLocalPackage({ packagePath: first, port: 0 });
+  const web = await servePenpotFrontend({
+    backendUrl: background.url,
+    frontendRoot,
+    port: 0,
+  });
+  context.after(async () => {
+    await web.close();
+    await background.close();
+    await rm(parent, { force: true, recursive: true });
+  });
+
+  const opened = await fetch(`${web.origin}/desktop/open-package`, {
+    body: JSON.stringify({ locator: second }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  assert.equal(opened.status, 201);
+  // electron-main.mjs sends only the window URL, never a fileId.
+  const closed = await fetch(`${web.origin}/desktop/close-package`, {
+    body: JSON.stringify({ url: (await opened.json()).url }),
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  assert.equal(closed.status, 200);
+  const packages = await (await fetch(`${background.url}/v1/packages`)).json();
+  assert.equal(packages.packages.length, 1);
 });
