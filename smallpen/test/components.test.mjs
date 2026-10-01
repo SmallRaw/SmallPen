@@ -491,7 +491,7 @@ test("an external Penpot instance tree retains its Library and source links", as
   assert.deepEqual(nodes[copyChildId].touched, []);
 });
 
-test("an external Component Set instance retains the selected variant", async () => {
+test("an external Component Set copy is written as a domain Instance of the selected variant", async () => {
   const snapshot = await loadPackageFromValues(
     "memory://external-component-set-consumer.smallpen",
     await fixtureValues(),
@@ -565,12 +565,28 @@ test("an external Component Set instance retains the selected variant", async ()
       instanceId
     ];
 
-  assert.deepEqual(root.componentId, {
-    assetId: componentId,
-    packageId: "pkg_shared_component_sets",
+  // The copy child is the projection of the Instance, not a node of its own.
+  assert.deepEqual(root, {
+    children: [],
+    height: 80,
+    id: instanceId,
+    instance: {
+      component: {
+        assetId: componentId,
+        packageId: "pkg_shared_component_sets",
+      },
+      variant: {},
+    },
+    name: "Shared Button variant",
+    type: "INSTANCE",
+    width: 160,
+    x: 560,
+    y: 220,
   });
-  assert.equal(root.componentVariantId, variantId);
-  assert.equal(root.sourceNodeId, masterId);
+  assert.deepEqual(
+    batch.operations.map(({ type }) => type),
+    ["add-presentation-node"],
+  );
 });
 
 function componentCreationCommit(snapshot) {

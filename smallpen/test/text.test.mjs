@@ -329,3 +329,93 @@ test("mixed text styles become explicit text blocks and runs", async () => {
   );
   assert.equal(reversed.snapshot.revision, snapshot.revision);
 });
+
+test("text typed into a shape created in the same commit is saved", async () => {
+  // Typing quickly into a new text box makes Penpot send ONE commit: add-obj
+  // without content, then a mod-obj with the content (and here a move).
+  const snapshot = await loadPackageFromValues(
+    "memory://quick-text.smallpen",
+    await fixtureValues(),
+  );
+  const runtimeId = "bbbbbbbb-4444-4444-8444-444444444444";
+  const nodeId = "node_bbbbbbbb444444448444444444444444";
+  const pageId = snapshot.runtime.pages.scr_roundtrip.pres_desktop;
+  const parentId =
+    snapshot.runtime.nodes.scr_roundtrip.pres_desktop.node_canvas;
+  const batch = compilePenpotChanges(snapshot, {
+    changes: [
+      {
+        id: runtimeId,
+        obj: {
+          "grow-type": "fixed",
+          height: 50,
+          id: runtimeId,
+          name: "Text",
+          "parent-id": parentId,
+          type: "text",
+          width: 200,
+          x: 380,
+          y: 300,
+        },
+        "page-id": pageId,
+        "parent-id": parentId,
+        type: "add-obj",
+      },
+      {
+        id: runtimeId,
+        operations: [
+          { attr: "content", type: "set", val: textContent(["Hello"]) },
+          { attr: "name", type: "set", val: "Hello" },
+          { attr: "x", type: "set", val: 390 },
+        ],
+        "page-id": pageId,
+        type: "mod-obj",
+      },
+    ],
+    commitId: "quick-text",
+  });
+  const added = await prepareOperationBatch(snapshot, batch);
+  const node =
+    added.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes[
+      nodeId
+    ];
+  assert.equal(node.type, "TEXT");
+  assert.equal(node.text, "Hello");
+  assert.equal(node.name, "Hello");
+  assert.equal(node.x, 390);
+  const reversed = await prepareOperationBatch(
+    added.snapshot,
+    added.result.inverseBatch,
+  );
+  assert.equal(reversed.snapshot.revision, snapshot.revision);
+});
+
+test("the recorded quick-typing Penpot commit saves its text", async () => {
+  const snapshot = await loadPackageFromValues(
+    "memory://quick-text-recorded.smallpen",
+    await fixtureValues(),
+  );
+  // Recorded from the workspace; its page and board ids are remapped.
+  const recorded = (
+    await readFile(join(here, "fixtures", "penpot-quick-text-commit.json"), "utf8")
+  )
+    .replaceAll(
+      "d942cb6f-ffc6-52ba-a563-605e0810d1ef",
+      snapshot.runtime.pages.scr_roundtrip.pres_desktop,
+    )
+    .replaceAll(
+      "07a3abf1-5e40-50f6-9f87-05ec221d1e6a",
+      snapshot.runtime.nodes.scr_roundtrip.pres_desktop.node_canvas,
+    );
+  const { snapshot: saved } = await prepareOperationBatch(
+    snapshot,
+    compilePenpotChanges(snapshot, JSON.parse(recorded)),
+  );
+  const node =
+    saved.entries["screens/roundtrip.json"].presentations[0].nodes
+      .node_b85335c7618580fe8008b8fc70fcfb6c;
+  assert.equal(node.type, "TEXT");
+  assert.equal(node.text, "Hello 世界");
+  assert.equal(node.name, "Hello 世界");
+  assert.deepEqual([node.x, node.y, node.width, node.height], [380, 300, 200, 50]);
+});

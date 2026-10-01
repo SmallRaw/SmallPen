@@ -34,6 +34,38 @@ export async function initWebpDecoder() {
   await loadDecoder();
 }
 
+// Reads the canvas size from the RIFF header without decoding, so callers can
+// apply size limits before libwebp allocates pixels. Returns undefined when
+// the header is not recognized (the decoder then reports the error).
+export function webpDimensions(bytes) {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const tag = (offset) => String.fromCharCode(...view.subarray(offset, offset + 4));
+  if (view.length < 30 || tag(0) !== "RIFF" || tag(8) !== "WEBP") {
+    return undefined;
+  }
+  const chunk = tag(12);
+  if (chunk === "VP8 ") {
+    return {
+      height: (view[28] | (view[29] << 8)) & 0x3fff,
+      width: (view[26] | (view[27] << 8)) & 0x3fff,
+    };
+  }
+  if (chunk === "VP8L") {
+    const bits = view[21] | (view[22] << 8) | (view[23] << 16) | (view[24] << 24);
+    return {
+      height: ((bits >>> 14) & 0x3fff) + 1,
+      width: (bits & 0x3fff) + 1,
+    };
+  }
+  if (chunk === "VP8X") {
+    return {
+      height: (view[27] | (view[28] << 8) | (view[29] << 16)) + 1,
+      width: (view[24] | (view[25] << 8) | (view[26] << 16)) + 1,
+    };
+  }
+  return undefined;
+}
+
 // Synchronous decode of a complete WebP image to RGBA pixels. Requires a
 // prior initWebpDecoder(); the renderer initializes it once per projection.
 export function decodeWebpSync(bytes, diagnostics, path) {

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  lstat,
   mkdir,
   mkdtemp,
   rename,
@@ -11,6 +10,7 @@ import { basename, dirname, join, resolve } from "node:path";
 
 import { canonicalJSON, SmallPenError } from "@smallpen/core";
 
+import { pathExists } from "./fs-utils.mjs";
 import { openPackage } from "./local-package.mjs";
 import { openWorkspace } from "./workspace.mjs";
 
@@ -317,16 +317,6 @@ async function writeFiles(packagePath, files) {
     const output = join(packagePath, entry);
     await mkdir(dirname(output), { recursive: true });
     await writeFile(output, canonicalJSON(value), "utf8");
-  }
-}
-
-async function pathExists(path) {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if (error?.code === "ENOENT") return false;
-    throw error;
   }
 }
 

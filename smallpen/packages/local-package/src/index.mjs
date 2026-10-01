@@ -3,7 +3,11 @@ export {
   LocalWorkspaceSession,
   reconcilePackageViewState,
 } from "./local-workspace-session.mjs";
-export { openWorkspace, resolveWorkspace } from "./workspace.mjs";
+export {
+  localLibraryLocator,
+  openWorkspace,
+  resolveWorkspace,
+} from "./workspace.mjs";
 export {
   defaultLibraryCacheRoot,
   openRemoteLibrary,
@@ -28,6 +32,7 @@ export {
 } from "./local-package.mjs";
 export { detectMediaType, inspectMedia } from "./media-inspect.mjs";
 export {
+  fontVariantName,
   inspectFont,
   prepareFontFiles,
   sfntToWoff,

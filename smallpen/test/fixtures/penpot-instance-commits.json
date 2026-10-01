@@ -1,0 +1,1558 @@
+{
+  "_comment": "Penpot commits recorded in the browser against test/fixtures/design-system.smallpen. The Penpot file id depends on where the Package is opened; __FILE__ stands for snapshot.runtime.file.",
+  "deleteInstance": {
+    "baseRevision": "0ccc304a60df9c2a63616544576307483e6a548d0760d1da82ff498b85ceb699",
+    "changes": [
+      {
+        "type": "del-obj",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "id": "d4e1ce6e-78af-596e-ae78-c429375c4cf7",
+        "ignore-touched": true
+      },
+      {
+        "type": "del-obj",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "id": "a6c1f9fb-bd4f-5557-a114-0bc77b1c6f61"
+      }
+    ],
+    "commitId": "4efbe91f-0ab0-80f5-8008-b913124960da"
+  },
+  "undoDeleteInstance": {
+    "baseRevision": "35e38a2401943a0aec52daa7d7644ebcf664a7cd5f5ba6fc53c0c7f51d9e34ed",
+    "changes": [
+      {
+        "type": "add-obj",
+        "id": "a06aa39b-1d6a-5c3d-8aed-a25c57e260af",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "frame-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "index": 2,
+        "obj": {
+          "touched": [
+            "fill-group"
+          ],
+          "proportion-lock": false,
+          "width": 200,
+          "height": 120,
+          "flip-x": null,
+          "fills": [
+            {
+              "fill-color": "#ff0000",
+              "fill-opacity": 1
+            }
+          ],
+          "r1": 8,
+          "strokes": [],
+          "points": [
+            {
+              "x": 200,
+              "y": 40
+            },
+            {
+              "x": 400,
+              "y": 40
+            },
+            {
+              "x": 400,
+              "y": 160
+            },
+            {
+              "x": 200,
+              "y": 160
+            }
+          ],
+          "plugin-data": {
+            "smallpen": {
+              "node-id": "node_card_instance_idle",
+              "presentation-id": "pres_desktop",
+              "screen-id": "scr_design_system"
+            }
+          },
+          "x": 200,
+          "id": "a06aa39b-1d6a-5c3d-8aed-a25c57e260af",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": 200,
+            "y": 40,
+            "width": 200,
+            "height": 120,
+            "x1": 200,
+            "y1": 40,
+            "x2": 400,
+            "y2": 160
+          },
+          "component-root": true,
+          "frame-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+          "name": "Card instance / idle",
+          "shapes": [],
+          "r2": 8,
+          "rotation": 0,
+          "hide-fill-on-export": false,
+          "interactions": [],
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "frame",
+          "r3": 8,
+          "y": 40,
+          "component-file": "__FILE__",
+          "component-id": "909426b2-6c14-5f5a-a093-c103c1788977",
+          "proportion": 1,
+          "shape-ref": "1da02028-b945-5380-8cf4-c1d16b6b374b",
+          "flip-y": null,
+          "r4": 8,
+          "parent-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853"
+        }
+      },
+      {
+        "type": "mov-objects",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "shapes": [
+          "a06aa39b-1d6a-5c3d-8aed-a25c57e260af"
+        ],
+        "after-shape": "22af985c-b230-5e54-a442-0148a4c5cdc9",
+        "index": 0,
+        "ignore-touched": true
+      },
+      {
+        "type": "add-obj",
+        "id": "04876245-fbba-5998-a5d6-ca946d2f08fe",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "a06aa39b-1d6a-5c3d-8aed-a25c57e260af",
+        "frame-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "index": 0,
+        "obj": {
+          "width": 80,
+          "height": 20,
+          "flip-x": null,
+          "points": [
+            {
+              "x": 212,
+              "y": 48
+            },
+            {
+              "x": 292,
+              "y": 48
+            },
+            {
+              "x": 292,
+              "y": 68
+            },
+            {
+              "x": 212,
+              "y": 68
+            }
+          ],
+          "plugin-data": {
+            "smallpen": {
+              "node-id": "node_card_instance_idle__node_card_idle_label",
+              "presentation-id": "pres_desktop",
+              "screen-id": "scr_design_system"
+            }
+          },
+          "grow-type": "fixed",
+          "x": 212,
+          "id": "04876245-fbba-5998-a5d6-ca946d2f08fe",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": 212,
+            "y": 48,
+            "width": 80,
+            "height": 20,
+            "x1": 212,
+            "y1": 48,
+            "x2": 292,
+            "y2": 68
+          },
+          "frame-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+          "name": "Label",
+          "content": {
+            "type": "root",
+            "vertical-align": "top",
+            "children": [
+              {
+                "type": "paragraph-set",
+                "children": [
+                  {
+                    "type": "paragraph",
+                    "line-height": "1.2",
+                    "text-align": "left",
+                    "text-direction": "ltr",
+                    "children": [
+                      {
+                        "line-height": "1.2",
+                        "font-family": "Inter",
+                        "fills": [
+                          {
+                            "fill-opacity": 1,
+                            "fill-color": "#1b1b1f"
+                          }
+                        ],
+                        "text-transform": "none",
+                        "text": "Card",
+                        "font-weight": "400",
+                        "text-decoration": "none",
+                        "font-size": "14",
+                        "letter-spacing": "0",
+                        "font-style": "normal",
+                        "font-id": "gfont-inter",
+                        "font-variant-id": "400"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "rotation": 0,
+          "interactions": [],
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "text",
+          "y": 48,
+          "shape-ref": "99aafa49-22f6-5669-a9c2-f8699529a7b3",
+          "position-data": [
+            {
+              "y1": -1,
+              "width": 31.703125,
+              "x1": 0,
+              "font-family": "Inter",
+              "height": 17,
+              "fills": [
+                {
+                  "fill-opacity": 1,
+                  "fill-color": "#1b1b1f"
+                }
+              ],
+              "text-transform": "none",
+              "x": 212,
+              "direction": "ltr",
+              "text": "Card",
+              "font-weight": "400",
+              "text-decoration": "none",
+              "font-size": "14px",
+              "y": 64,
+              "x2": 31.703125,
+              "letter-spacing": "normal",
+              "y2": 16,
+              "font-style": "normal"
+            }
+          ],
+          "flip-y": null,
+          "parent-id": "a06aa39b-1d6a-5c3d-8aed-a25c57e260af"
+        }
+      },
+      {
+        "type": "mov-objects",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "a06aa39b-1d6a-5c3d-8aed-a25c57e260af",
+        "shapes": [
+          "04876245-fbba-5998-a5d6-ca946d2f08fe"
+        ],
+        "after-shape": null,
+        "index": 0,
+        "ignore-touched": true
+      }
+    ],
+    "commitId": "cbdb298f-0486-80e2-8008-b913710e943e"
+  },
+  "dropInstance": {
+    "baseRevision": "0ccc304a60df9c2a63616544576307483e6a548d0760d1da82ff498b85ceb699",
+    "changes": [
+      {
+        "type": "add-obj",
+        "id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "00000000-0000-0000-0000-000000000000",
+        "frame-id": "00000000-0000-0000-0000-000000000000",
+        "index": null,
+        "ignore-touched": true,
+        "obj": {
+          "proportion-lock": false,
+          "width": 200,
+          "height": 120,
+          "flip-x": null,
+          "fills": [
+            {
+              "fill-opacity": 1,
+              "fill-color": "#e7e0ec"
+            }
+          ],
+          "r1": 8,
+          "strokes": [],
+          "points": [
+            {
+              "x": -238,
+              "y": 176
+            },
+            {
+              "x": -38,
+              "y": 176
+            },
+            {
+              "x": -38,
+              "y": 296
+            },
+            {
+              "x": -238,
+              "y": 296
+            }
+          ],
+          "plugin-data": {
+            "smallpen": {
+              "component-id": "cmp_card_set",
+              "node-id": "node_card_pressed_root",
+              "variant-id": "var_card_pressed",
+              "layout-offset": "472 0"
+            }
+          },
+          "x": -238,
+          "id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -238,
+            "y": 176,
+            "width": 200,
+            "height": 120,
+            "x1": -238,
+            "y1": 176,
+            "x2": -38,
+            "y2": 296
+          },
+          "component-root": true,
+          "frame-id": "00000000-0000-0000-0000-000000000000",
+          "name": "Card / pressed",
+          "shapes": [
+            "d9fdcec0-4170-80ce-8008-b913d61daf16"
+          ],
+          "r2": 8,
+          "rotation": 0,
+          "hide-fill-on-export": false,
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "frame",
+          "r3": 8,
+          "y": 176,
+          "component-file": "__FILE__",
+          "component-id": "7f359220-79de-5516-9ace-8b15e59ebcc7",
+          "proportion": 1,
+          "shape-ref": "7a8065da-aff6-5462-a975-8cfac6116e3a",
+          "flip-y": null,
+          "r4": 8,
+          "parent-id": "00000000-0000-0000-0000-000000000000"
+        }
+      },
+      {
+        "type": "add-obj",
+        "id": "d9fdcec0-4170-80ce-8008-b913d61daf16",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "frame-id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "index": null,
+        "ignore-touched": true,
+        "obj": {
+          "width": 80,
+          "height": 20,
+          "flip-x": null,
+          "points": [
+            {
+              "x": -226,
+              "y": 184
+            },
+            {
+              "x": -146,
+              "y": 184
+            },
+            {
+              "x": -146,
+              "y": 204
+            },
+            {
+              "x": -226,
+              "y": 204
+            }
+          ],
+          "plugin-data": {
+            "smallpen": {
+              "component-id": "cmp_card_set",
+              "node-id": "node_card_pressed_label",
+              "variant-id": "var_card_pressed",
+              "layout-offset": "472 0"
+            }
+          },
+          "grow-type": "fixed",
+          "x": -226,
+          "id": "d9fdcec0-4170-80ce-8008-b913d61daf16",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -226,
+            "y": 184,
+            "width": 80,
+            "height": 20,
+            "x1": -226,
+            "y1": 184,
+            "x2": -146,
+            "y2": 204
+          },
+          "frame-id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+          "name": "Label",
+          "content": {
+            "type": "root",
+            "vertical-align": "top",
+            "children": [
+              {
+                "type": "paragraph-set",
+                "children": [
+                  {
+                    "type": "paragraph",
+                    "line-height": "1.2",
+                    "text-align": "left",
+                    "text-direction": "ltr",
+                    "children": [
+                      {
+                        "line-height": "1.2",
+                        "font-family": "Inter",
+                        "fills": [
+                          {
+                            "fill-opacity": 1,
+                            "fill-color": "#1b1b1f"
+                          }
+                        ],
+                        "text-transform": "none",
+                        "text": "Card",
+                        "font-weight": "400",
+                        "text-decoration": "none",
+                        "font-size": "14",
+                        "letter-spacing": "0",
+                        "font-style": "normal",
+                        "font-id": "gfont-inter",
+                        "font-variant-id": "400"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "rotation": 0,
+          "interactions": [],
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "text",
+          "y": 184,
+          "shape-ref": "d76b579a-e26f-5c8b-9880-5c24711976b8",
+          "flip-y": null,
+          "parent-id": "d9fdcec0-4170-80ce-8008-b913d61daf15"
+        }
+      },
+      {
+        "type": "mod-obj",
+        "id": "d9fdcec0-4170-80ce-8008-b913d61daf16",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "position-data",
+            "val": [
+              {
+                "y1": -1,
+                "width": 31.703125,
+                "x1": 0,
+                "font-family": "Inter",
+                "height": 17,
+                "fills": [
+                  {
+                    "fill-opacity": 1,
+                    "fill-color": "#1b1b1f"
+                  }
+                ],
+                "text-transform": "none",
+                "x": -226,
+                "direction": "ltr",
+                "text": "Card",
+                "font-weight": "400",
+                "text-decoration": "none",
+                "font-size": "14px",
+                "y": 200,
+                "x2": 31.703125,
+                "letter-spacing": "normal",
+                "y2": 16,
+                "font-style": "normal"
+              }
+            ],
+            "ignore-geometry": false,
+            "ignore-touched": false
+          }
+        ],
+        "smallpen-layout-offset": {
+          "x": 472,
+          "y": 0
+        }
+      },
+      {
+        "type": "mod-obj",
+        "id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 250,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": -20,
+                "y": 250
+              },
+              {
+                "x": 180,
+                "y": 250
+              },
+              {
+                "x": 180,
+                "y": 370
+              },
+              {
+                "x": -20,
+                "y": 370
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "x",
+            "val": -20,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": -20,
+              "y": 250,
+              "width": 200,
+              "height": 120,
+              "x1": -20,
+              "y1": 250,
+              "x2": 180,
+              "y2": 370
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ],
+        "smallpen-layout-offset": {
+          "x": 472,
+          "y": 0
+        }
+      },
+      {
+        "type": "mod-obj",
+        "id": "d9fdcec0-4170-80ce-8008-b913d61daf16",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 258,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": -8,
+                "y": 258
+              },
+              {
+                "x": 72,
+                "y": 258
+              },
+              {
+                "x": 72,
+                "y": 278
+              },
+              {
+                "x": -8,
+                "y": 278
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "position-data",
+            "val": [
+              {
+                "y1": -1,
+                "width": 31.703125,
+                "x1": 0,
+                "font-family": "Inter",
+                "height": 17,
+                "fills": [
+                  {
+                    "fill-opacity": 1,
+                    "fill-color": "#1b1b1f"
+                  }
+                ],
+                "text-transform": "none",
+                "x": -8,
+                "direction": "ltr",
+                "text": "Card",
+                "font-weight": "400",
+                "text-decoration": "none",
+                "font-size": "14px",
+                "y": 274,
+                "x2": 31.703125,
+                "letter-spacing": "normal",
+                "y2": 16,
+                "font-style": "normal"
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "x",
+            "val": -8,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": -8,
+              "y": 258,
+              "width": 80,
+              "height": 20,
+              "x1": -8,
+              "y1": 258,
+              "x2": 72,
+              "y2": 278
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ],
+        "smallpen-layout-offset": {
+          "x": 472,
+          "y": 0
+        }
+      },
+      {
+        "type": "mod-obj",
+        "id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "hide-in-viewer",
+            "val": true,
+            "ignore-geometry": false,
+            "ignore-touched": false
+          }
+        ],
+        "smallpen-layout-offset": {
+          "x": 472,
+          "y": 0
+        }
+      },
+      {
+        "type": "mov-objects",
+        "parent-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "shapes": [
+          "d9fdcec0-4170-80ce-8008-b913d61daf15"
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "constraints-v",
+            "val": "top",
+            "ignore-geometry": false,
+            "ignore-touched": true
+          },
+          {
+            "type": "set",
+            "attr": "constraints-h",
+            "val": "left",
+            "ignore-geometry": false,
+            "ignore-touched": true
+          }
+        ],
+        "smallpen-layout-offset": {
+          "x": 472,
+          "y": 0
+        }
+      }
+    ],
+    "commitId": "d9fdcec0-4170-80ce-8008-b913d6217f1b"
+  },
+  "undoDeleteDropped": {
+    "baseRevision": "0ccc304a60df9c2a63616544576307483e6a548d0760d1da82ff498b85ceb699",
+    "changes": [
+      {
+        "type": "add-obj",
+        "id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "frame-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "index": 5,
+        "obj": {
+          "proportion-lock": false,
+          "width": 200,
+          "constraints-h": "left",
+          "height": 120,
+          "flip-x": null,
+          "fills": [
+            {
+              "fill-opacity": 1,
+              "fill-color": "#e7e0ec"
+            }
+          ],
+          "r1": 8,
+          "strokes": [],
+          "points": [
+            {
+              "x": -20,
+              "y": 250
+            },
+            {
+              "x": 180,
+              "y": 250
+            },
+            {
+              "x": 180,
+              "y": 370
+            },
+            {
+              "x": -20,
+              "y": 370
+            }
+          ],
+          "plugin-data": {
+            "smallpen": {
+              "component-id": "cmp_card_set",
+              "node-id": "node_card_pressed_root",
+              "variant-id": "var_card_pressed",
+              "layout-offset": "472 0"
+            }
+          },
+          "x": -20,
+          "id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -20,
+            "y": 250,
+            "width": 200,
+            "height": 120,
+            "x1": -20,
+            "y1": 250,
+            "x2": 180,
+            "y2": 370
+          },
+          "component-root": true,
+          "frame-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+          "name": "Card / pressed",
+          "constraints-v": "top",
+          "shapes": [],
+          "r2": 8,
+          "rotation": 0,
+          "hide-fill-on-export": false,
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "frame",
+          "r3": 8,
+          "y": 250,
+          "component-file": "__FILE__",
+          "component-id": "7f359220-79de-5516-9ace-8b15e59ebcc7",
+          "proportion": 1,
+          "shape-ref": "7a8065da-aff6-5462-a975-8cfac6116e3a",
+          "hide-in-viewer": true,
+          "flip-y": null,
+          "r4": 8,
+          "parent-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853"
+        }
+      },
+      {
+        "type": "mov-objects",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "shapes": [
+          "d9fdcec0-4170-80ce-8008-b913d61daf15"
+        ],
+        "after-shape": "1db693df-2ac8-5171-80b4-26504061d922",
+        "index": 0,
+        "ignore-touched": true
+      },
+      {
+        "type": "add-obj",
+        "id": "d9fdcec0-4170-80ce-8008-b913d61daf16",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "frame-id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "index": 0,
+        "obj": {
+          "width": 80,
+          "height": 20,
+          "flip-x": null,
+          "points": [
+            {
+              "x": -8,
+              "y": 258
+            },
+            {
+              "x": 72,
+              "y": 258
+            },
+            {
+              "x": 72,
+              "y": 278
+            },
+            {
+              "x": -8,
+              "y": 278
+            }
+          ],
+          "plugin-data": {
+            "smallpen": {
+              "component-id": "cmp_card_set",
+              "node-id": "node_card_pressed_label",
+              "variant-id": "var_card_pressed",
+              "layout-offset": "472 0"
+            }
+          },
+          "grow-type": "fixed",
+          "x": -8,
+          "id": "d9fdcec0-4170-80ce-8008-b913d61daf16",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -8,
+            "y": 258,
+            "width": 80,
+            "height": 20,
+            "x1": -8,
+            "y1": 258,
+            "x2": 72,
+            "y2": 278
+          },
+          "frame-id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+          "name": "Label",
+          "content": {
+            "type": "root",
+            "vertical-align": "top",
+            "children": [
+              {
+                "type": "paragraph-set",
+                "children": [
+                  {
+                    "type": "paragraph",
+                    "line-height": "1.2",
+                    "text-align": "left",
+                    "text-direction": "ltr",
+                    "children": [
+                      {
+                        "line-height": "1.2",
+                        "font-family": "Inter",
+                        "fills": [
+                          {
+                            "fill-opacity": 1,
+                            "fill-color": "#1b1b1f"
+                          }
+                        ],
+                        "text-transform": "none",
+                        "text": "Card",
+                        "font-weight": "400",
+                        "text-decoration": "none",
+                        "font-size": "14",
+                        "letter-spacing": "0",
+                        "font-style": "normal",
+                        "font-id": "gfont-inter",
+                        "font-variant-id": "400"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "rotation": 0,
+          "interactions": [],
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "text",
+          "y": 258,
+          "shape-ref": "d76b579a-e26f-5c8b-9880-5c24711976b8",
+          "position-data": [
+            {
+              "y1": -1,
+              "width": 31.703125,
+              "x1": 0,
+              "font-family": "Inter",
+              "height": 17,
+              "fills": [
+                {
+                  "fill-opacity": 1,
+                  "fill-color": "#1b1b1f"
+                }
+              ],
+              "text-transform": "none",
+              "x": -8,
+              "direction": "ltr",
+              "text": "Card",
+              "font-weight": "400",
+              "text-decoration": "none",
+              "font-size": "14px",
+              "y": 274,
+              "x2": 31.703125,
+              "letter-spacing": "normal",
+              "y2": 16,
+              "font-style": "normal"
+            }
+          ],
+          "flip-y": null,
+          "parent-id": "d9fdcec0-4170-80ce-8008-b913d61daf15"
+        }
+      },
+      {
+        "type": "mov-objects",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "d9fdcec0-4170-80ce-8008-b913d61daf15",
+        "shapes": [
+          "d9fdcec0-4170-80ce-8008-b913d61daf16"
+        ],
+        "after-shape": null,
+        "index": 0,
+        "ignore-touched": true
+      }
+    ],
+    "commitId": "d9fdcec0-4170-80ce-8008-b913ddad0522"
+  },
+  "mainEdit": {
+    "baseRevision": "0ccc304a60df9c2a63616544576307483e6a548d0760d1da82ff498b85ceb699",
+    "changes": [
+      {
+        "type": "mod-obj",
+        "id": "1da02028-b945-5380-8cf4-c1d16b6b374b",
+        "page-id": "8f7d3b0e-336f-5948-ba7b-c65ce8bbfdaa",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "fills",
+            "val": [
+              {
+                "fill-color": "#00ff00",
+                "fill-opacity": 1
+              }
+            ],
+            "ignore-geometry": false,
+            "ignore-touched": false
+          }
+        ],
+        "smallpen-layout-offset": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "main-instance-id": "1da02028-b945-5380-8cf4-c1d16b6b374b",
+        "path": "Card",
+        "id": "909426b2-6c14-5f5a-a093-c103c1788977",
+        "objects": null,
+        "name": "State=idle",
+        "main-instance-page": "8f7d3b0e-336f-5948-ba7b-c65ce8bbfdaa",
+        "modified-at": "2026-10-01T12:09:47.924Z",
+        "type": "mod-component",
+        "annotation": null
+      },
+      {
+        "type": "mod-obj",
+        "id": "a06aa39b-1d6a-5c3d-8aed-a25c57e260af",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "name",
+            "val": "Card / idle",
+            "ignore-touched": true
+          },
+          {
+            "type": "set",
+            "attr": "fills",
+            "val": [
+              {
+                "fill-color": "#00ff00",
+                "fill-opacity": 1
+              }
+            ],
+            "ignore-touched": true
+          }
+        ],
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b"
+      },
+      {
+        "type": "reg-objects",
+        "shapes": [
+          "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+          "00000000-0000-0000-0000-000000000000"
+        ],
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b"
+      }
+    ],
+    "commitId": "cbd27565-bfe3-80ee-8008-b91bd3a16529"
+  },
+  "freshDrop": {
+    "baseRevision": "0ccc304a60df9c2a63616544576307483e6a548d0760d1da82ff498b85ceb699",
+    "changes": [
+      {
+        "type": "add-obj",
+        "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "00000000-0000-0000-0000-000000000000",
+        "frame-id": "00000000-0000-0000-0000-000000000000",
+        "index": null,
+        "ignore-touched": true,
+        "obj": {
+          "proportion-lock": false,
+          "width": 200,
+          "height": 120,
+          "flip-x": null,
+          "fills": [
+            {
+              "fill-opacity": 1,
+              "fill-color": "#e7e0ec"
+            }
+          ],
+          "r1": 8,
+          "strokes": [],
+          "points": [
+            {
+              "x": -238,
+              "y": 176
+            },
+            {
+              "x": -38,
+              "y": 176
+            },
+            {
+              "x": -38,
+              "y": 296
+            },
+            {
+              "x": -238,
+              "y": 296
+            }
+          ],
+          "plugin-data": {},
+          "x": -238,
+          "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -238,
+            "y": 176,
+            "width": 200,
+            "height": 120,
+            "x1": -238,
+            "y1": 176,
+            "x2": -38,
+            "y2": 296
+          },
+          "component-root": true,
+          "frame-id": "00000000-0000-0000-0000-000000000000",
+          "name": "Card / pressed",
+          "shapes": [
+            "07f88dd9-7f39-80a0-8008-b91c38c77cd8"
+          ],
+          "r2": 8,
+          "rotation": 0,
+          "hide-fill-on-export": false,
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "frame",
+          "r3": 8,
+          "y": 176,
+          "component-file": "__FILE__",
+          "component-id": "7f359220-79de-5516-9ace-8b15e59ebcc7",
+          "proportion": 1,
+          "shape-ref": "7a8065da-aff6-5462-a975-8cfac6116e3a",
+          "flip-y": null,
+          "r4": 8,
+          "parent-id": "00000000-0000-0000-0000-000000000000"
+        }
+      },
+      {
+        "type": "add-obj",
+        "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd8",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7",
+        "frame-id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7",
+        "index": null,
+        "ignore-touched": true,
+        "obj": {
+          "width": 80,
+          "height": 20,
+          "flip-x": null,
+          "points": [
+            {
+              "x": -226,
+              "y": 184
+            },
+            {
+              "x": -146,
+              "y": 184
+            },
+            {
+              "x": -146,
+              "y": 204
+            },
+            {
+              "x": -226,
+              "y": 204
+            }
+          ],
+          "plugin-data": {},
+          "grow-type": "fixed",
+          "x": -226,
+          "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd8",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -226,
+            "y": 184,
+            "width": 80,
+            "height": 20,
+            "x1": -226,
+            "y1": 184,
+            "x2": -146,
+            "y2": 204
+          },
+          "frame-id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7",
+          "name": "Label",
+          "content": {
+            "type": "root",
+            "vertical-align": "top",
+            "children": [
+              {
+                "type": "paragraph-set",
+                "children": [
+                  {
+                    "type": "paragraph",
+                    "line-height": "1.2",
+                    "text-align": "left",
+                    "text-direction": "ltr",
+                    "children": [
+                      {
+                        "line-height": "1.2",
+                        "font-family": "Inter",
+                        "fills": [
+                          {
+                            "fill-opacity": 1,
+                            "fill-color": "#1b1b1f"
+                          }
+                        ],
+                        "text-transform": "none",
+                        "text": "Card",
+                        "font-weight": "400",
+                        "text-decoration": "none",
+                        "font-size": "14",
+                        "letter-spacing": "0",
+                        "font-style": "normal",
+                        "font-id": "gfont-inter",
+                        "font-variant-id": "400"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "rotation": 0,
+          "interactions": [],
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "text",
+          "y": 184,
+          "shape-ref": "d76b579a-e26f-5c8b-9880-5c24711976b8",
+          "flip-y": null,
+          "parent-id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7"
+        }
+      },
+      {
+        "type": "mod-obj",
+        "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd8",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "position-data",
+            "val": [
+              {
+                "y1": -1,
+                "width": 31.703125,
+                "x1": 0,
+                "font-family": "Inter",
+                "height": 17,
+                "fills": [
+                  {
+                    "fill-opacity": 1,
+                    "fill-color": "#1b1b1f"
+                  }
+                ],
+                "text-transform": "none",
+                "x": -226,
+                "direction": "ltr",
+                "text": "Card",
+                "font-weight": "400",
+                "text-decoration": "none",
+                "font-size": "14px",
+                "y": 200,
+                "x2": 31.703125,
+                "letter-spacing": "normal",
+                "y2": 16,
+                "font-style": "normal"
+              }
+            ],
+            "ignore-geometry": false,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 250,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": -20,
+                "y": 250
+              },
+              {
+                "x": 180,
+                "y": 250
+              },
+              {
+                "x": 180,
+                "y": 370
+              },
+              {
+                "x": -20,
+                "y": 370
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "x",
+            "val": -20,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": -20,
+              "y": 250,
+              "width": 200,
+              "height": 120,
+              "x1": -20,
+              "y1": 250,
+              "x2": 180,
+              "y2": 370
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd8",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 258,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": -8,
+                "y": 258
+              },
+              {
+                "x": 72,
+                "y": 258
+              },
+              {
+                "x": 72,
+                "y": 278
+              },
+              {
+                "x": -8,
+                "y": 278
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "position-data",
+            "val": [
+              {
+                "y1": -1,
+                "width": 31.703125,
+                "x1": 0,
+                "font-family": "Inter",
+                "height": 17,
+                "fills": [
+                  {
+                    "fill-opacity": 1,
+                    "fill-color": "#1b1b1f"
+                  }
+                ],
+                "text-transform": "none",
+                "x": -8,
+                "direction": "ltr",
+                "text": "Card",
+                "font-weight": "400",
+                "text-decoration": "none",
+                "font-size": "14px",
+                "y": 274,
+                "x2": 31.703125,
+                "letter-spacing": "normal",
+                "y2": 16,
+                "font-style": "normal"
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "x",
+            "val": -8,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": -8,
+              "y": 258,
+              "width": 80,
+              "height": 20,
+              "x1": -8,
+              "y1": 258,
+              "x2": 72,
+              "y2": 278
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "hide-in-viewer",
+            "val": true,
+            "ignore-geometry": false,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mov-objects",
+        "parent-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "shapes": [
+          "07f88dd9-7f39-80a0-8008-b91c38c77cd7"
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "constraints-v",
+            "val": "top",
+            "ignore-geometry": false,
+            "ignore-touched": true
+          },
+          {
+            "type": "set",
+            "attr": "constraints-h",
+            "val": "left",
+            "ignore-geometry": false,
+            "ignore-touched": true
+          }
+        ]
+      }
+    ],
+    "commitId": "07f88dd9-7f39-80a0-8008-b91c38cac0a3"
+  },
+  "freshDropDelete": {
+    "baseRevision": "85891353559c1116b92acf18212ed6110e55825cf1764ed250ee6da25d79fede",
+    "changes": [
+      {
+        "type": "del-obj",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd8",
+        "ignore-touched": true
+      },
+      {
+        "type": "del-obj",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "id": "07f88dd9-7f39-80a0-8008-b91c38c77cd7"
+      }
+    ],
+    "commitId": "07f88dd9-7f39-80a0-8008-b91c3d48779a"
+  }
+}

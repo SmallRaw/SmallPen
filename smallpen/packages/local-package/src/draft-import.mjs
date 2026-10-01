@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  lstat,
   mkdir,
   mkdtemp,
   rename,
@@ -21,6 +20,7 @@ import {
   SmallPenError,
 } from "@smallpen/core";
 
+import { pathExists } from "./fs-utils.mjs";
 import {
   ByteBuffer,
   compileSchema,
@@ -168,16 +168,6 @@ function inspectSvg(bytes) {
     fail("invalid_draft_media", "Draft SVG dimensions are invalid");
   }
   return { height, width };
-}
-
-async function pathExists(path) {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if (error?.code === "ENOENT") return false;
-    throw error;
-  }
 }
 
 export async function writeDraftPackage(outputValue, values) {

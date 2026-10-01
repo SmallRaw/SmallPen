@@ -5,8 +5,13 @@
 let int32 = /* @__PURE__ */ new Int32Array(1);
 let float32 = new Float32Array(int32.buffer);
 const textDecoder = new TextDecoder();
+// Struct fields carry no tag, so a struct with no fields, or a tree of struct
+// fields, decodes to objects without consuming any bytes. Every decoded struct,
+// message, and array element counts against this budget instead.
+const MAX_DECODED_VALUES = 5e6;
 var ByteBuffer = class {
 	_data;
+	_decodedValues = 0;
 	_index;
 	length;
 	constructor(data) {
@@ -32,20 +37,36 @@ var ByteBuffer = class {
 	toUint8Array() {
 		return this._data.subarray(0, this.length);
 	}
+	// SmallPen hardening: clipboard payloads are untrusted, so every read is
+	// bounds-checked and declared lengths may not exceed the remaining bytes.
+	_require(count) {
+		if (this._index + count > this.length) throw new Error("Kiwi message ends before the declared data");
+	}
+	countDecodedValues(count) {
+		this._decodedValues += count;
+		if (this._decodedValues > MAX_DECODED_VALUES) throw new Error("Kiwi message decodes to too many values");
+	}
+	readArrayLength() {
+		const length = this.readVarUint();
+		if (length > this.length - this._index) throw new Error("Kiwi array length exceeds the message");
+		return length;
+	}
 	readByte() {
+		this._require(1);
 		return this._data[this._index++];
 	}
 	readByteArray() {
-		const length = this.readVarUint();
+		const length = this.readArrayLength();
 		const start = this._index;
 		this._index = start + length;
 		return this._data.slice(start, start + length);
 	}
 	skipByteArray() {
-		const length = this.readVarUint();
+		const length = this.readArrayLength();
 		this._index += length;
 	}
 	readVarFloat() {
+		this._require(1);
 		const index = this._index;
 		const data = this._data;
 		const first = data[index];
@@ -53,6 +74,7 @@ var ByteBuffer = class {
 			this._index = index + 1;
 			return 0;
 		}
+		this._require(4);
 		let bits = first | data[index + 1] << 8 | data[index + 2] << 16 | data[index + 3] << 24;
 		this._index = index + 4;
 		bits = bits << 23 | bits >>> 9;
@@ -60,35 +82,12 @@ var ByteBuffer = class {
 		return float32[0];
 	}
 	readVarUint() {
-		const data = this._data;
-		let i = this._index;
-		let b = data[i++];
-		let value = b & 127;
-		if (b < 128) {
-			this._index = i;
-			return value;
+		let value = 0;
+		for (let shift = 0; shift < 35; shift += 7) {
+			const b = this.readByte();
+			value |= (b & 127) << shift;
+			if (b < 128) return shift === 28 ? value >>> 0 : value;
 		}
-		b = data[i++];
-		value |= (b & 127) << 7;
-		if (b < 128) {
-			this._index = i;
-			return value;
-		}
-		b = data[i++];
-		value |= (b & 127) << 14;
-		if (b < 128) {
-			this._index = i;
-			return value;
-		}
-		b = data[i++];
-		value |= (b & 127) << 21;
-		if (b < 128) {
-			this._index = i;
-			return value;
-		}
-		b = data[i++];
-		value |= (b & 127) << 28;
-		this._index = i;
 		return value >>> 0;
 	}
 	readVarInt() {
@@ -126,8 +125,8 @@ var ByteBuffer = class {
 	findStringTerminator(start) {
 		const data = this._data;
 		let index = start;
-		while (index < data.length && data[index] !== 0) index++;
-		if (index >= data.length) throw new Error("Unterminated string in Kiwi message");
+		while (index < this.length && data[index] !== 0) index++;
+		if (index >= this.length) throw new Error("Unterminated string in Kiwi message");
 		return index;
 	}
 	_growBy(amount) {
@@ -244,6 +243,7 @@ function compileDecode(definition, definitions) {
 	lines.push("  if (!(bb instanceof this.ByteBuffer)) {");
 	lines.push("    bb = new this.ByteBuffer(bb);");
 	lines.push("  }");
+	lines.push("  bb.countDecodedValues(1);");
 	lines.push("");
 	if (definition.kind === "MESSAGE") {
 		lines.push("  while (true) {");
@@ -293,12 +293,14 @@ function compileDecode(definition, definitions) {
 			if (field.isDeprecated) {
 				if (field.type === "byte") lines.push(indent + "bb.readByteArray();");
 				else {
-					lines.push(indent + "var length = bb.readVarUint();");
+					lines.push(indent + "var length = bb.readArrayLength();");
+					lines.push(indent + "bb.countDecodedValues(length);");
 					lines.push(indent + "while (length-- > 0) " + code + ";");
 				}
 			} else if (field.type === "byte") lines.push(indent + "result[" + quote(field.name) + "] = bb.readByteArray();");
 			else {
-				lines.push(indent + "var length = bb.readVarUint();");
+				lines.push(indent + "var length = bb.readArrayLength();");
+				lines.push(indent + "bb.countDecodedValues(length);");
 				lines.push(indent + "var values = result[" + quote(field.name) + "] = Array(length);");
 				lines.push(indent + "for (var i = 0; i < length; i++) values[i] = " + code + ";");
 			}
@@ -450,12 +452,12 @@ let kinds = [
 ];
 function decodeBinarySchema(buffer) {
 	let bb = buffer instanceof ByteBuffer ? buffer : new ByteBuffer(buffer);
-	let definitionCount = bb.readVarUint();
+	let definitionCount = bb.readArrayLength();
 	let definitions = [];
 	for (let i = 0; i < definitionCount; i++) {
 		let definitionName = bb.readString();
 		let kind = bb.readByte();
-		let fieldCount = bb.readVarUint();
+		let fieldCount = bb.readArrayLength();
 		let fields = [];
 		for (let j = 0; j < fieldCount; j++) {
 			let fieldName = bb.readString();

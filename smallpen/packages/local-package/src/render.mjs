@@ -11,7 +11,7 @@ import {
   SmallPenError,
 } from "@smallpen/core";
 
-import { initWebpDecoder, decodeWebpSync } from "./webp-decode.mjs";
+import { decodeWebpSync, initWebpDecoder, webpDimensions } from "./webp-decode.mjs";
 
 const MAX_DIMENSION = 8192;
 const MAX_PIXELS = 32 * 1024 * 1024;
@@ -59,8 +59,27 @@ function parseHexColor(value) {
   ];
 }
 
+const parsedColors = new WeakMap();
+
+// Paints are sampled per pixel, so each color is parsed, and an unsupported
+// one reported, once per diagnostics list rather than once per pixel.
 function parseColor(value, diagnostics, path) {
   if (typeof value !== "string") return [255, 0, 255, 255];
+  let cache = parsedColors.get(diagnostics);
+  if (!cache) {
+    cache = new Map();
+    parsedColors.set(diagnostics, cache);
+  }
+  const key = `${path}\0${value}`;
+  let color = cache.get(key);
+  if (!color) {
+    color = parseColorValue(value, diagnostics, path);
+    cache.set(key, color);
+  }
+  return [...color];
+}
+
+function parseColorValue(value, diagnostics, path) {
   const source = value.trim().toLowerCase();
   if (source.startsWith("#")) {
     const parsed = parseHexColor(source);
@@ -995,10 +1014,11 @@ function lineGlyphs(
   baseline,
   size,
   letterSpacing,
-  outlines = true,
+  onGlyph,
   missing,
+  start,
 ) {
-  const glyphs = [...text].map((character) => {
+  const resolveGlyph = (character) => {
     if (WHITESPACE.test(character)) {
       // Whitespace never draws ink, even when the font lacks the codepoint.
       return {
@@ -1026,41 +1046,46 @@ function lineGlyphs(
       };
     }
     return { font, glyph };
-  });
-  const result = [];
-  let cursor = x;
-  for (let index = 0; index < glyphs.length; index += 1) {
-    const { advanceWidth, font: glyphFont, glyph, missing: isMissing, whitespace } = glyphs[index];
-    if (index > 0 && glyphs[index - 1].font === glyphFont) {
+  };
+  // `start` continues a previous result, so a line can be measured run by run.
+  let cursor = start?.cursor ?? x;
+  let previous = start?.previous;
+  for (const character of text) {
+    const entry = resolveGlyph(character);
+    const { advanceWidth, font: glyphFont, glyph, missing: isMissing, whitespace } = entry;
+    if (previous?.font === glyphFont) {
       cursor +=
-        (glyphFont.getKerningValue(glyphs[index - 1].glyph, glyph) * size) /
+        (glyphFont.getKerningValue(previous.glyph, glyph) * size) /
         glyphFont.unitsPerEm;
     }
-    if (outlines && !isMissing && !whitespace) {
-      const contours = flattenPath(glyph.getPath(cursor, baseline, size));
-      if (contours.length > 0) result.push({ bounds: contourBounds(contours), contours });
-    }
+    if (onGlyph && !isMissing && !whitespace) onGlyph(glyph, cursor);
     cursor +=
       ((advanceWidth ?? glyph.advanceWidth ?? glyphFont.unitsPerEm) * size) /
         glyphFont.unitsPerEm +
       letterSpacing;
+    previous = entry;
   }
-  return { glyphs: result, width: Math.max(0, cursor - x - letterSpacing) };
+  return { cursor, previous, width: Math.max(0, cursor - x - letterSpacing) };
 }
 
+// `measure(run, previous)` returns the width of the line so far plus `run`,
+// continuing from the result for the line so far.
 function wrapTextLines(source, width, measure) {
   const lines = [];
   for (const paragraph of source.split("\n")) {
     let line = "";
+    let measured;
     // Preserve spaces and tabs, allowing a break after each (break-spaces).
     // Runs without these break opportunities keep their existing overflow.
     for (const run of paragraph.split(/(?<=[ \t])/u)) {
-      const candidate = line + run;
-      if (line && measure(candidate) > width) {
+      const candidate = measure(run, measured);
+      if (line && candidate.width > width) {
         lines.push(line);
         line = run;
+        measured = measure(run);
       } else {
-        line = candidate;
+        line += run;
+        measured = candidate;
       }
     }
     lines.push(line);
@@ -1122,6 +1147,68 @@ function renderGlyph(
       }
     }
   }
+}
+
+const glyphUnitBoxes = new WeakMap();
+
+// Outlines are flattened only for glyphs whose exact curve bounds can reach
+// both the node box and the canvas, and are dropped right after drawing, so
+// long text costs memory per visible glyph rather than per character.
+function renderGlyphOutline(
+  state,
+  node,
+  matrix,
+  inverseMatrix,
+  glyph,
+  x,
+  baseline,
+  size,
+  color,
+  opacity,
+  clips,
+) {
+  let box = glyphUnitBoxes.get(glyph);
+  if (!box) {
+    box = glyph.getBoundingBox();
+    glyphUnitBoxes.set(glyph, box);
+  }
+  // Same scale as Glyph.getPath; one unit of margin absorbs rounding.
+  const scale = (1 / (glyph.path.unitsPerEm || 1000)) * size;
+  const local = {
+    bottom: baseline - box.y1 * scale + 1,
+    left: x + box.x1 * scale - 1,
+    right: x + box.x2 * scale + 1,
+    top: baseline - box.y2 * scale - 1,
+  };
+  if (
+    local.right < 0 ||
+    local.bottom < 0 ||
+    local.left > node.width ||
+    local.top > node.height
+  ) {
+    return;
+  }
+  const device = transformedRectangleBounds(matrix, local);
+  if (
+    device.right * state.scale < 0 ||
+    device.bottom * state.scale < 0 ||
+    device.left * state.scale > state.width ||
+    device.top * state.scale > state.height
+  ) {
+    return;
+  }
+  const contours = flattenPath(glyph.getPath(x, baseline, size));
+  if (contours.length === 0) return;
+  renderGlyph(
+    state,
+    node,
+    matrix,
+    inverseMatrix,
+    { bounds: contourBounds(contours), contours },
+    color,
+    opacity,
+    clips,
+  );
 }
 
 function renderTextDecoration(
@@ -1239,6 +1326,28 @@ function richLineLayout(characters) {
   return { placed, width: Math.max(0, width) };
 }
 
+// Continues richLineLayout's width sum, so wrapping a word costs its own
+// length instead of re-laying out the whole line.
+function extendRichLineWidth(width, previous, characters) {
+  for (const character of characters) {
+    if (previous) {
+      width += previous.run.spacing;
+      if (
+        previous.font === character.font &&
+        previous.run.size === character.run.size
+      ) {
+        width +=
+          (character.font.getKerningValue(previous.glyph, character.glyph) *
+            character.run.size) /
+          character.font.unitsPerEm;
+      }
+    }
+    width += character.advance;
+    previous = character;
+  }
+  return width;
+}
+
 function richTextLines(state, node, path, missing) {
   const lines = [];
   for (const block of node.textBlocks) {
@@ -1328,18 +1437,21 @@ function richTextLines(state, node, path, missing) {
     };
     for (const paragraph of paragraphs) {
       let line = [];
+      let lineWidth = 0;
       let word = [];
       const appendWord = () => {
-        const candidate = line.concat(word);
+        const candidateWidth = extendRichLineWidth(lineWidth, line.at(-1), word);
         if (
           line.length &&
           node.growType !== "auto-width" &&
-          richLineLayout(candidate).width > node.width
+          Math.max(0, candidateWidth) > node.width
         ) {
           finish(line);
           line = word;
+          lineWidth = extendRichLineWidth(0, undefined, word);
         } else {
-          line = candidate;
+          for (const character of word) line.push(character);
+          lineWidth = candidateWidth;
         }
         word = [];
       };
@@ -1386,21 +1498,19 @@ function renderRichText(state, node, matrix, opacity, path, clips) {
         pushRichSpan(spans, run, character.x, character.x + character.advance);
         continue;
       }
-      const contours = flattenPath(
-        character.glyph.getPath(x + character.x, baseline, run.size),
+      renderGlyphOutline(
+        state,
+        node,
+        matrix,
+        inverseMatrix,
+        character.glyph,
+        x + character.x,
+        baseline,
+        run.size,
+        run.color,
+        opacity,
+        clips,
       );
-      if (contours.length) {
-        renderGlyph(
-          state,
-          node,
-          matrix,
-          inverseMatrix,
-          { bounds: contourBounds(contours), contours },
-          run.color,
-          opacity,
-          clips,
-        );
-      }
       pushRichSpan(spans, run, character.x, character.x + character.advance);
     }
     for (const span of spans) {
@@ -1473,7 +1583,7 @@ function renderText(state, node, matrix, opacity, path, clips) {
       : wrapTextLines(
           source,
           node.width,
-          (text) =>
+          (text, previous) =>
             lineGlyphs(
               font,
               state.fonts.symbols,
@@ -1482,8 +1592,10 @@ function renderText(state, node, matrix, opacity, path, clips) {
               0,
               fontSize,
               letterSpacing,
-              false,
-            ).width,
+              undefined,
+              undefined,
+              previous,
+            ),
         );
   if (node.growType === "auto-height") {
     const blockHeight = lines.length * lineHeight;
@@ -1520,7 +1632,6 @@ function renderText(state, node, matrix, opacity, path, clips) {
       0,
       fontSize,
       letterSpacing,
-      false,
     );
     const x =
       style.textAlign === "center"
@@ -1530,7 +1641,7 @@ function renderText(state, node, matrix, opacity, path, clips) {
           : 0;
     const baseline =
       verticalOffset + index * lineHeight + (lineHeight - fontSize) / 2 + ascender;
-    const placed = lineGlyphs(
+    lineGlyphs(
       font,
       state.fonts.symbols,
       lines[index],
@@ -1538,12 +1649,22 @@ function renderText(state, node, matrix, opacity, path, clips) {
       baseline,
       fontSize,
       letterSpacing,
-      true,
+      (glyph, glyphX) =>
+        renderGlyphOutline(
+          state,
+          node,
+          matrix,
+          inverseMatrix,
+          glyph,
+          glyphX,
+          baseline,
+          fontSize,
+          textColor,
+          opacity,
+          clips,
+        ),
       missing,
     );
-    for (const glyph of placed.glyphs) {
-      renderGlyph(state, node, matrix, inverseMatrix, glyph, textColor, opacity, clips);
-    }
     renderTextDecoration(
       state,
       node,
@@ -1633,6 +1754,14 @@ function paintColor(
       value * (1 - amount) + rightColor[index] * amount,
     ),
   );
+}
+
+function paintVaries(paint, state) {
+  if (paint.type === "solid" || paint.type === "image") return false;
+  const colorKey = paint.colorRef
+    ? assetReferenceKey(paint.colorRef, state.productPackageId)
+    : undefined;
+  return !(colorKey && state.colors.has(colorKey));
 }
 
 function svgAttributes(source) {
@@ -1795,6 +1924,29 @@ function pushDecodeDiagnostic(diagnostics, path, name, detail) {
   });
 }
 
+// Every raster decoder checks declared dimensions against the same limits
+// before allocating pixel buffers.
+function rasterSizeAllowed(width, height) {
+  return (
+    Number.isInteger(width) &&
+    Number.isInteger(height) &&
+    width > 0 &&
+    height > 0 &&
+    width <= MAX_DIMENSION &&
+    height <= MAX_DIMENSION &&
+    width * height <= MAX_PIXELS
+  );
+}
+
+function pushSizeDiagnostic(diagnostics, path, name, width, height) {
+  pushDecodeDiagnostic(
+    diagnostics,
+    path,
+    name,
+    `image size ${width}x${height} exceeds the renderer limits (${MAX_DIMENSION}px per side, ${MAX_PIXELS} pixels)`,
+  );
+}
+
 function decodePng(bytes, diagnostics, path, name) {
   const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -1841,15 +1993,12 @@ function decodePng(bytes, diagnostics, path, name) {
     }
     offset += 12 + length;
   }
-  if (
-    !header ||
-    idat.length === 0 ||
-    header.width <= 0 ||
-    header.height <= 0 ||
-    header.width > MAX_DIMENSION ||
-    header.height > MAX_DIMENSION
-  ) {
+  if (!header || idat.length === 0 || header.width <= 0 || header.height <= 0) {
     pushDecodeDiagnostic(diagnostics, path, name, "missing or invalid PNG header");
+    return undefined;
+  }
+  if (!rasterSizeAllowed(header.width, header.height)) {
+    pushSizeDiagnostic(diagnostics, path, name, header.width, header.height);
     return undefined;
   }
   if (
@@ -1868,14 +2017,25 @@ function decodePng(bytes, diagnostics, path, name) {
     return undefined;
   }
   const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[header.colorType];
+  const stride = header.width * channels;
   let raw;
   try {
-    raw = inflateSync(Buffer.concat(idat));
-  } catch {
-    pushDecodeDiagnostic(diagnostics, path, name, "corrupt PNG pixel data");
+    // Bound the output to the declared image size so a small compressed
+    // stream cannot expand without limit.
+    raw = inflateSync(Buffer.concat(idat), {
+      maxOutputLength: (stride + 1) * header.height,
+    });
+  } catch (error) {
+    pushDecodeDiagnostic(
+      diagnostics,
+      path,
+      name,
+      error?.code === "ERR_BUFFER_TOO_LARGE"
+        ? "PNG pixel data is larger than its declared size"
+        : "corrupt PNG pixel data",
+    );
     return undefined;
   }
-  const stride = header.width * channels;
   if (raw.length < (stride + 1) * header.height) {
     pushDecodeDiagnostic(diagnostics, path, name, "truncated PNG pixel data");
     return undefined;
@@ -1968,6 +2128,10 @@ function decodeGif(bytes, diagnostics, path, name) {
   const data = new DataView(view.buffer, view.byteOffset, view.byteLength);
   const width = data.getUint16(6, true);
   const height = data.getUint16(8, true);
+  if (!rasterSizeAllowed(width, height)) {
+    pushSizeDiagnostic(diagnostics, path, name, width, height);
+    return undefined;
+  }
   const packed = view[10];
   let offset = 13;
   let globalTable;
@@ -2005,10 +2169,18 @@ function decodeGif(bytes, diagnostics, path, name) {
       pushDecodeDiagnostic(diagnostics, path, name, "corrupt GIF block structure");
       return undefined;
     }
+    if (offset + 9 > view.length) {
+      pushDecodeDiagnostic(diagnostics, path, name, "truncated GIF image descriptor");
+      return undefined;
+    }
     const frameX = data.getUint16(offset, true);
     const frameY = data.getUint16(offset + 2, true);
     const frameWidth = data.getUint16(offset + 4, true);
     const frameHeight = data.getUint16(offset + 6, true);
+    if (!rasterSizeAllowed(frameWidth, frameHeight)) {
+      pushSizeDiagnostic(diagnostics, path, name, frameWidth, frameHeight);
+      return undefined;
+    }
     const framePacked = view[offset + 8];
     offset += 9;
     let table = globalTable;
@@ -2227,7 +2399,12 @@ function decodeJpeg(bytes, diagnostics, path, name) {
         });
         cursor += 3;
       }
-      if (frame.width <= 0 || frame.height <= 0) frame = undefined;
+      if (frame.width <= 0 || frame.height <= 0) {
+        frame = undefined;
+      } else if (!rasterSizeAllowed(frame.width, frame.height)) {
+        pushSizeDiagnostic(diagnostics, path, name, frame.width, frame.height);
+        return undefined;
+      }
     } else if (marker === 0xc2 || marker === 0xc3 || (marker >= 0xc5 && marker <= 0xcf)) {
       pushDecodeDiagnostic(
         diagnostics,
@@ -2646,11 +2823,18 @@ function decodeMediaBytes(media, bytes, diagnostics, path) {
         kind: "raster",
         value: decodeJpeg(bytes, diagnostics, path, media.name),
       };
-    case "image/webp":
+    case "image/webp": {
+      // libwebp allocates the full canvas; check the header first.
+      const size = webpDimensions(bytes);
+      if (size && !rasterSizeAllowed(size.width, size.height)) {
+        pushSizeDiagnostic(diagnostics, path, media.name, size.width, size.height);
+        return { kind: "raster", value: undefined };
+      }
       return {
         kind: "raster",
         value: decodeWebpSync(bytes, diagnostics, path, media.name),
       };
+    }
     default:
       diagnostics.push({
         code: "media_decode_unsupported",
@@ -3167,6 +3351,30 @@ function childClips(state, nodes, node, matrix, clips) {
   return clips;
 }
 
+function inkBounds(state, margin) {
+  let left = state.width;
+  let right = 0;
+  let top = state.height;
+  let bottom = 0;
+  for (let pixelY = 0; pixelY < state.height; pixelY += 1) {
+    const row = pixelY * state.width;
+    for (let pixelX = 0; pixelX < state.width; pixelX += 1) {
+      if (state.pixels[(row + pixelX) * 4 + 3] === 0) continue;
+      if (pixelX < left) left = pixelX;
+      if (pixelX >= right) right = pixelX + 1;
+      if (pixelY < top) top = pixelY;
+      bottom = pixelY + 1;
+    }
+  }
+  if (right <= left) return undefined;
+  return {
+    bottom: Math.min(state.height, bottom + margin),
+    left: Math.max(0, left - margin),
+    right: Math.min(state.width, right + margin),
+    top: Math.max(0, top - margin),
+  };
+}
+
 function renderTree(state, nodes, nodeId, parentMatrix, parentOpacity, stack, clips) {
   if (stack.has(nodeId)) throw new SmallPenError("node_cycle", `Render cycle includes ${nodeId}`);
   const node = nodes[nodeId];
@@ -3204,28 +3412,38 @@ function renderTree(state, nodes, nodeId, parentMatrix, parentOpacity, stack, cl
     stack.delete(nodeId);
     for (const entry of scratch.diagnostics) state.diagnostics.push(entry);
     if (scratch.missingGlyphs) mergeMissingGlyphs(state, scratch.missingGlyphs);
+    // Blur and composite only around the subtree's ink: three box passes
+    // spread it at most three radii, and transparent pixels blend to no-ops.
+    const region = inkBounds(
+      scratch,
+      3 * Math.round(layerBlurRadius * state.scale) + 1,
+    );
+    if (!region) return;
     blurRgbaRegion(
       scratch.pixels,
       state.width,
       state.height,
-      0,
-      0,
-      state.width,
-      state.height,
+      region.left,
+      region.top,
+      region.right,
+      region.bottom,
       layerBlurRadius * state.scale,
     );
-    for (let index = 0; index < state.pixels.length; index += 4) {
-      blend(
-        state.pixels,
-        index,
-        [
-          scratch.pixels[index],
-          scratch.pixels[index + 1],
-          scratch.pixels[index + 2],
-          scratch.pixels[index + 3],
-        ],
-        1,
-      );
+    for (let pixelY = region.top; pixelY < region.bottom; pixelY += 1) {
+      for (let pixelX = region.left; pixelX < region.right; pixelX += 1) {
+        const index = (pixelY * state.width + pixelX) * 4;
+        blend(
+          state.pixels,
+          index,
+          [
+            scratch.pixels[index],
+            scratch.pixels[index + 1],
+            scratch.pixels[index + 2],
+            scratch.pixels[index + 3],
+          ],
+          1,
+        );
+      }
     }
     return;
   }
@@ -3294,6 +3512,20 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
         path,
       });
     }
+    // Only gradients vary per pixel; resolve any other paint once.
+    const uniformColor =
+      raster || media?.image || paintVaries(fill, state)
+        ? undefined
+        : paintColor(
+            fill,
+            0,
+            0,
+            node,
+            state.colors,
+            state.diagnostics,
+            path,
+            state.productPackageId,
+          );
     for (let pixelY = bounds.top; pixelY < bounds.bottom; pixelY += 1) {
       for (let pixelX = bounds.left; pixelX < bounds.right; pixelX += 1) {
         const canvasX = (pixelX + 0.5) / state.scale;
@@ -3313,16 +3545,18 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
           ? rasterSample(raster, local.x, local.y, node)
           : media?.image
             ? svgSample(media.image, local.x, local.y, node)
-            : paintColor(
-                fill,
-                local.x,
-                local.y,
-                node,
-                state.colors,
-                state.diagnostics,
-                path,
-                state.productPackageId,
-              );
+            : uniformColor
+              ? [...uniformColor]
+              : paintColor(
+                  fill,
+                  local.x,
+                  local.y,
+                  node,
+                  state.colors,
+                  state.diagnostics,
+                  path,
+                  state.productPackageId,
+                );
         if (fill.type === "image" && !media?.image && !raster) {
           const band = (Math.floor(local.x / 8) + Math.floor(local.y / 8)) % 2;
           color[0] -= band * 18;
@@ -3360,6 +3594,12 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
           width,
         )
       : undefined;
+    const markerStartOutline = markerStart?.segments.length
+      ? makeGeometry(markerStart.segments)
+      : undefined;
+    const markerEndOutline = markerEnd?.segments.length
+      ? makeGeometry(markerEnd.segments)
+      : undefined;
     for (let pixelY = bounds.top; pixelY < bounds.bottom; pixelY += 1) {
       for (let pixelX = bounds.left; pixelX < bounds.right; pixelX += 1) {
         const canvasX = (pixelX + 0.5) / state.scale;
@@ -3394,9 +3634,9 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
         if (!covered && markerStart) {
           covered =
             windingNumber(markerStart.contours, local.x, local.y) !== 0 ||
-            (markerStart.segments.length > 0 &&
+            (markerStartOutline !== undefined &&
               pathStrokeContains(
-                makeGeometry(markerStart.segments),
+                markerStartOutline,
                 local.x,
                 local.y,
                 width,
@@ -3405,9 +3645,9 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
         if (!covered && markerEnd) {
           covered =
             windingNumber(markerEnd.contours, local.x, local.y) !== 0 ||
-            (markerEnd.segments.length > 0 &&
+            (markerEndOutline !== undefined &&
               pathStrokeContains(
-                makeGeometry(markerEnd.segments),
+                markerEndOutline,
                 local.x,
                 local.y,
                 width,
