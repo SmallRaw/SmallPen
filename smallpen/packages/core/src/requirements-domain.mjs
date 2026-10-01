@@ -1,19 +1,5 @@
 import { fail } from "./errors.mjs";
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function stableId(value, prefix, code, path) {
-  if (
-    typeof value !== "string" ||
-    !value.startsWith(prefix) ||
-    !/^[a-zA-Z0-9_-]+$/.test(value)
-  ) {
-    fail(code, `${path} must begin with ${prefix}`, { path, value });
-  }
-  return value;
-}
+import { isRecord, ownValue, stableId } from "./internal.mjs";
 
 function nonEmpty(value, code, path) {
   if (typeof value !== "string" || value.length === 0) {
@@ -71,7 +57,7 @@ export function parseDesignTarget(value, path) {
     interaction: ["interactionId", "int_"],
     scenario: ["scenarioId", "scn_"],
   };
-  const descriptor = idFields[value.kind];
+  const descriptor = ownValue(idFields, value.kind);
   if (!descriptor || Object.keys(value).length !== 2) {
     fail("invalid_design_target", `${path}.kind is unsupported`, {
       kind: value.kind,

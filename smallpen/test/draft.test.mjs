@@ -244,6 +244,37 @@ test("native Figma clipboard markers decode their embedded Kiwi schema", async (
   assert.equal(decoded.nodeChanges[0].size.x, 320);
 });
 
+test("hostile Figma parent links fail typed instead of exhausting the stack", () => {
+  const frame = (localID, parent, type = "FRAME") => ({
+    guid: guid(1, localID),
+    name: `Node ${localID}`,
+    ...(parent === undefined
+      ? {}
+      : { parentIndex: { guid: guid(1, parent) } }),
+    size: { x: 10, y: 10 },
+    transform: matrix(0, 0),
+    type,
+  });
+  const create = (nodeChanges) =>
+    createFigmaDraftValues({
+      importedAt,
+      inputHash: "a".repeat(64),
+      meta: {},
+      nodeChanges,
+      packageId: "pkg_figma_draft",
+    });
+  // The top-level frame's non-visual parent hangs below its own child.
+  assert.throws(
+    () => create([frame(1, 0), frame(2, 1), frame(0, 2, "CANVAS")]),
+    { code: "invalid_figma_clipboard" },
+  );
+  const chain = [frame(0)];
+  for (let index = 1; index < 20000; index += 1) {
+    chain.push(frame(index, index - 1));
+  }
+  assert.throws(() => create(chain), { code: "node_tree_too_deep" });
+});
+
 const onePixelPng = new Uint8Array(
   Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",

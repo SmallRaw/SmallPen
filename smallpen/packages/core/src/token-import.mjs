@@ -1,6 +1,17 @@
+import { canonicalJSON } from "./canonical.mjs";
 import { SMALLPEN_FORMAT_CAPABILITIES } from "./capabilities.mjs";
 import { fail } from "./errors.mjs";
-import { tokenAliasPath, tokenValueMatchesType } from "./tokens-domain.mjs";
+import {
+  assertValueDepth,
+  compareStrings,
+  isRecord,
+  isTokenName,
+} from "./internal.mjs";
+import {
+  claimTokenPath,
+  tokenAliasPath,
+  tokenValueMatchesType,
+} from "./tokens-domain.mjs";
 
 // Import a DTCG token document (Penpot / Tokens Studio export, single-set,
 // multi-set, or legacy value/type form) into the Penpot-shaped Token Library
@@ -14,8 +25,6 @@ import { tokenAliasPath, tokenValueMatchesType } from "./tokens-domain.mjs";
 const TOKEN_TYPES = new Set(
   SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenTypes,
 );
-// Same rule as validateTokenLibrary in package.mjs.
-const TOKEN_NAME_PATTERN = /^[a-zA-Z0-9_-][a-zA-Z0-9$_-]*(\.[a-zA-Z0-9$_-]+)*$/;
 
 // DTCG / Tokens Studio "$type" → SmallPen (Penpot-internal) type. Mirrors
 // dtcg-token-type->token-type in common/src/app/common/types/token.cljc,
@@ -47,16 +56,51 @@ const DTCG_TYPE_TO_TOKEN_TYPE = new Map([
   ["typography", "typography"],
 ]);
 
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 export function normalizeTokenType(type) {
   if (typeof type !== "string") return undefined;
   if (DTCG_TYPE_TO_TOKEN_TYPE.has(type)) return DTCG_TYPE_TO_TOKEN_TYPE.get(type);
   // SmallPen's own type names (already Penpot-internal) pass through.
   if (TOKEN_TYPES.has(type)) return type;
   return undefined;
+}
+
+const LENGTH_TOKEN_TYPES = new Set([
+  "border-radius",
+  "dimension",
+  "dimensions",
+  "font-size",
+  "letter-spacing",
+  "sizing",
+  "spacing",
+  "stroke-width",
+]);
+const NUMBER_TOKEN_TYPES = new Set([
+  ...LENGTH_TOKEN_TYPES,
+  "number",
+  "opacity",
+  "rotation",
+]);
+
+// Penpot stores and exports numeric values as strings ("8", "16px") and
+// accepts 3- and 4-digit hex colors. The Package loader requires numbers and
+// 6- or 8-digit hex, so convert the forms that lose nothing; px is Penpot's
+// unit for lengths. Everything else is kept and judged by the loader rules.
+function normalizeTokenValue(type, value) {
+  if (typeof value !== "string") return value;
+  if (NUMBER_TOKEN_TYPES.has(type)) {
+    const match = /^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))(px)?\s*$/.exec(value);
+    if (match && (match[2] === undefined || LENGTH_TOKEN_TYPES.has(type))) {
+      return Number(match[1]);
+    }
+    return value;
+  }
+  if (type === "color") {
+    const match = /^#([0-9a-f]{3,4})$/i.exec(value.trim());
+    if (match) {
+      return `#${[...match[1]].map((digit) => digit + digit).join("")}`;
+    }
+  }
+  return value;
 }
 
 function isDtcgLeaf(node) {
@@ -77,6 +121,7 @@ function isLegacyLeaf(node) {
 // DTCG Format Module.
 function flattenSet(tree, setName, warnings) {
   const tokens = [];
+  const names = new Set();
   const walk = (node, segments, inheritedType) => {
     const groupType =
       typeof node.$type === "string" ? node.$type : inheritedType;
@@ -100,16 +145,40 @@ function flattenSet(tree, setName, warnings) {
           });
           continue;
         }
-        if (!TOKEN_NAME_PATTERN.test(name)) {
+        if (!isTokenName(name)) {
           warnings.push({ code: "invalid_token_name", name, set: setName });
           continue;
+        }
+        // "a.b" as one key and as a nested group name the same token. The
+        // first wins, as it does for alias targets (claimTokenPath).
+        if (names.has(name)) {
+          warnings.push({ code: "duplicate_token_name", name, set: setName });
+          continue;
+        }
+        names.add(name);
+        // A token cannot also be a group; Penpot ignores such children too.
+        const ignored = Object.entries(child)
+          .filter(
+            ([childKey, value]) =>
+              !childKey.startsWith("$") &&
+              !(!dtcg && ["description", "type", "value"].includes(childKey)) &&
+              isRecord(value),
+          )
+          .map(([childKey]) => childKey);
+        if (ignored.length > 0) {
+          warnings.push({
+            children: ignored,
+            code: "token_children_ignored",
+            name,
+            set: setName,
+          });
         }
         tokens.push({
           description:
             typeof rawDescription === "string" ? rawDescription : "",
           name,
           type,
-          value: structuredClone(rawValue),
+          value: normalizeTokenValue(type, structuredClone(rawValue)),
         });
         continue;
       }
@@ -130,6 +199,8 @@ export function parseTokenDocument(documentValue, options = {}) {
   if (!isRecord(documentValue)) {
     fail("invalid_token_document", "Token import requires a JSON object");
   }
+  // The walks below recurse; bound them before they start.
+  assertValueDepth(documentValue, "token document");
   const warnings = [];
   const multiSet =
     Object.hasOwn(documentValue, "$themes") ||
@@ -138,6 +209,12 @@ export function parseTokenDocument(documentValue, options = {}) {
   if (multiSet) {
     sets = Object.entries(documentValue)
       .filter(([key, value]) => !key.startsWith("$") && isRecord(value))
+      .filter(([name]) => {
+        // validateTokenLibrary rejects these names; skip the set instead.
+        if (name.length > 0 && name.trim() === name) return true;
+        warnings.push({ code: "invalid_token_set_name", set: name });
+        return false;
+      })
       .map(([name, tree]) => ({ name, tokens: flattenSet(tree, name, warnings) }));
   } else {
     const name =
@@ -175,12 +252,52 @@ export function parseTokenDocument(documentValue, options = {}) {
             .map(([name]) => name)
         : [],
     }))
-    .filter((theme) => theme.name.length > 0);
+    .filter((theme) => theme.name.length > 0)
+    .filter((theme, index, all) => {
+      const path = themePath(theme.group, theme.name);
+      if (
+        all.findIndex((other) => themePath(other.group, other.name) === path) ===
+        index
+      ) {
+        return true;
+      }
+      warnings.push({ code: "duplicate_token_theme", theme: path });
+      return false;
+    });
+  // References to sets or themes the document does not define are dropped
+  // when the library is built; say so here.
+  const setNames = new Set(sets.map((set) => set.name));
+  for (const theme of themes) {
+    for (const name of theme.setNames) {
+      if (!setNames.has(name)) {
+        warnings.push({
+          code: "missing_theme_set",
+          set: name,
+          theme: themePath(theme.group, theme.name),
+        });
+      }
+    }
+  }
   const strings = (value) =>
     Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+  const activeSets = strings(metadata.activeSets);
+  const activeThemes = strings(metadata.activeThemes);
+  for (const name of activeSets) {
+    if (!setNames.has(name)) {
+      warnings.push({ code: "missing_active_set", set: name });
+    }
+  }
+  const themePaths = new Set(
+    themes.map((theme) => themePath(theme.group, theme.name)),
+  );
+  for (const path of activeThemes) {
+    if (!themePaths.has(path)) {
+      warnings.push({ code: "missing_active_theme", theme: path });
+    }
+  }
   const parsed = {
-    activeSets: strings(metadata.activeSets),
-    activeThemes: strings(metadata.activeThemes),
+    activeSets,
+    activeThemes,
     sets,
     themes,
     warnings,
@@ -241,6 +358,44 @@ export function buildTokenLibrary(parsed, previous = null, options = {}) {
   const setIds = new Map();
   const tokenIds = new Map();
   const themeIds = new Map();
+  // Every prior id stays reserved, also for rows the document dropped: an
+  // unselected removal keeps such a row, so a fresh slug must never take its
+  // id (applyTokenSelection).
+  for (const set of previous?.sets ?? []) {
+    usedSetIds.add(set.id);
+    for (const token of set.tokens) usedTokenIds.add(token.id);
+  }
+  for (const theme of previous?.themes ?? []) usedThemeIds.add(theme.id);
+  // A token that only moved to another set keeps its id, so bindings to it
+  // survive: its name left exactly one prior row and arrives in exactly one
+  // new row.
+  const parsedKeys = new Set(
+    parsed.sets.flatMap((set) =>
+      set.tokens.map((token) => `${set.name}\0${token.name}`),
+    ),
+  );
+  const leftByName = new Map();
+  for (const [key, token] of prior.tokens) {
+    if (parsedKeys.has(key)) continue;
+    leftByName.set(token.name, [...(leftByName.get(token.name) ?? []), token]);
+  }
+  const arrivedByName = new Map();
+  for (const set of parsed.sets) {
+    for (const token of set.tokens) {
+      const key = `${set.name}\0${token.name}`;
+      if (prior.tokens.has(key)) continue;
+      arrivedByName.set(token.name, [
+        ...(arrivedByName.get(token.name) ?? []),
+        key,
+      ]);
+    }
+  }
+  for (const [name, keys] of arrivedByName) {
+    const left = leftByName.get(name) ?? [];
+    if (keys.length === 1 && left.length === 1) {
+      tokenIds.set(keys[0], left[0].id);
+    }
+  }
   for (const set of parsed.sets) {
     const priorSet = prior.sets.get(set.name);
     if (priorSet) {
@@ -336,18 +491,34 @@ export function buildTokenLibrary(parsed, previous = null, options = {}) {
 // rules here so every token left in the library is one the loader accepts, and
 // report each dropped token instead of failing the import. Dropping a token can
 // orphan an alias that pointed at it, so repeat until nothing changes.
-export function pruneUnresolvableTokens(library) {
+//
+// options.externalTokens: tokens of the package's other token files, as
+// { name, type, value, precedesLibrary }, with value already resolved. Aliases
+// resolve against them exactly as the loader does (claimTokenPath): a file
+// before the library wins a shared path; a DTCG path after it may not also be
+// a library token name.
+export function pruneUnresolvableTokens(library, options = {}) {
   const warnings = [];
   const pruned = structuredClone(library);
+  const external = options.externalTokens ?? [];
+  const laterPaths = new Set(
+    external
+      .filter(({ precedesLibrary }) => !precedesLibrary)
+      .map(({ name }) => name),
+  );
   for (;;) {
     const byName = new Map();
+    for (const token of external) {
+      if (token.precedesLibrary) claimTokenPath(byName, token.name, token);
+    }
     for (const set of pruned.sets) {
-      for (const token of set.tokens) byName.set(token.name, token);
+      for (const token of set.tokens) claimTokenPath(byName, token.name, token);
     }
     const reject = (set, token, code, details = {}) => {
       warnings.push({ code, name: token.name, set: set.name, ...details });
     };
     const problem = (set, token) => {
+      if (laterPaths.has(token.name)) return ["duplicate_token_path", {}];
       const visiting = new Set();
       let current = token;
       let alias = tokenAliasPath(current.value);
@@ -392,8 +563,10 @@ function tokenView(setName, token) {
   };
 }
 
+// The Package stores values with sorted keys, so compare canonically: an
+// object value whose keys arrive in another order is not a change.
 function sameJson(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return canonicalJSON(left) === canonicalJSON(right);
 }
 
 function sameToken(left, right) {
@@ -488,7 +661,7 @@ export function diffTokenLibraries(before, after) {
     if (!afterThemes.has(path)) themes.removed.push(themeView(theme));
   }
   const byKey = (items, key) =>
-    items.sort((left, right) => key(left).localeCompare(key(right)));
+    items.sort((left, right) => compareStrings(key(left), key(right)));
   byKey(tokens.added, (token) => `${token.set}/${token.name}`);
   byKey(tokens.changed, (token) => `${token.set}/${token.name}`);
   byKey(tokens.removed, (token) => `${token.set}/${token.name}`);
@@ -525,7 +698,14 @@ function selectionKey(item) {
 // Keep only the selected token rows of a diff: an unselected change keeps its
 // previous value, an unselected addition is dropped, an unselected removal is
 // kept. Sets and themes always follow the imported document.
-export function applyTokenSelection(before, after, diff, selection) {
+// options.reservedTokenIds: ids owned outside the library (other token files).
+export function applyTokenSelection(
+  before,
+  after,
+  diff,
+  selection,
+  options = {},
+) {
   const selected = new Set(selection.map(selectionKey));
   const beforeSets = new Map((before?.sets ?? []).map((set) => [set.name, set]));
   const library = structuredClone(after);
@@ -558,11 +738,28 @@ export function applyTokenSelection(before, after, diff, selection) {
     const set = setsByName.get(added.set);
     set.tokens = set.tokens.filter((token) => token.name !== added.name);
   }
+  const restored = [];
   for (const removed of diff.tokens.removed) {
     if (selected.has(`${removed.set}/${removed.name}`)) continue;
-    ensureSet(removed.set).tokens.push(
-      structuredClone(priorToken(removed.set, removed.name)),
-    );
+    const token = structuredClone(priorToken(removed.set, removed.name));
+    ensureSet(removed.set).tokens.push(token);
+    restored.push(token);
+  }
+  // A kept row owns its prior id. A moved copy that inherited the id (see
+  // buildTokenLibrary) takes a fresh one instead.
+  const usedIds = new Set([
+    ...(options.reservedTokenIds ?? []),
+    ...(before?.sets ?? []).flatMap((set) => set.tokens.map(({ id }) => id)),
+    ...library.sets.flatMap((set) => set.tokens.map(({ id }) => id)),
+  ]);
+  const restoredTokens = new Set(restored);
+  const restoredIds = new Set(restored.map(({ id }) => id));
+  for (const set of library.sets) {
+    for (const other of set.tokens) {
+      if (restoredIds.has(other.id) && !restoredTokens.has(other)) {
+        other.id = claimUnique(slugId("tok_", other.name), usedIds);
+      }
+    }
   }
   return library;
 }
@@ -588,13 +785,34 @@ export function importTokens(snapshot, documentValue, options = {}) {
   const reservedTokenIds = [...snapshot.domain.tokens.keys()].filter(
     (id) => !previousIds.has(id),
   );
+  // The replaced library keeps its entry; a new one is appended.
+  const libraryEntry = snapshot.manifest.entries.tokens.find(
+    (entry) => snapshot.entries[entry] === previous,
+  );
+  const tokenEntries = snapshot.manifest.entries.tokens;
+  const libraryIndex = libraryEntry
+    ? tokenEntries.indexOf(libraryEntry)
+    : tokenEntries.length;
+  const externalTokens = [...snapshot.domain.tokens.values()]
+    .filter((token) => token.filePath !== libraryEntry)
+    .map((token) => ({
+      name: token.path,
+      precedesLibrary: tokenEntries.indexOf(token.filePath) < libraryIndex,
+      type: token.type,
+      value: structuredClone(token.resolvedValue),
+    }));
   const built = pruneUnresolvableTokens(
     buildTokenLibrary(parsed, previous, { reservedTokenIds }),
+    { externalTokens },
   );
   let library = built.library;
+  // Fail the review exactly as the apply would.
+  assertValueDepth([{ library }], "operations");
   let diff = diffTokenLibraries(previous, library);
   if (Array.isArray(options.selection)) {
-    library = applyTokenSelection(previous, library, diff, options.selection);
+    library = applyTokenSelection(previous, library, diff, options.selection, {
+      reservedTokenIds,
+    });
     diff = diffTokenLibraries(previous, library);
   }
   return {

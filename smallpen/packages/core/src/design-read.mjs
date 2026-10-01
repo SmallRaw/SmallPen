@@ -1,6 +1,7 @@
 import { resolveContext } from "./contexts.mjs";
 import { projectScenario, projectScreen } from "./design-projection.mjs";
 import { fail } from "./errors.mjs";
+import { compareStrings, ownValue } from "./internal.mjs";
 
 const VIEW_FORMATS = ["structure", "semantic", "wireframe", "screenshot"];
 const DESIGN_SELECTOR_FIELDS = new Set([
@@ -221,7 +222,7 @@ function selectionArguments(selection, options = {}) {
       ? {}
       : {
           context: Object.entries(selection.context)
-            .sort(([left], [right]) => left.localeCompare(right))
+            .sort(([left], [right]) => compareStrings(left, right))
             .map(([axis, value]) => `${axis}=${value}`),
         }),
     format: selection.viewFormat,
@@ -274,7 +275,7 @@ export function createDiscoveryGuide(product, resolved, options = {}) {
   const axes = new Map(options.foundation?.domain.contextAxes ?? []);
   for (const [id, axis] of product.domain.contextAxes) axes.set(id, axis);
   for (const axis of [...axes.values()].sort((left, right) =>
-    left.id.localeCompare(right.id),
+    compareStrings(left.id, right.id),
   )) {
     for (const value of axis.values) {
       if (resolved.selection.context[axis.id] === value.id) continue;
@@ -290,7 +291,7 @@ export function createDiscoveryGuide(product, resolved, options = {}) {
               ...resolved.selection.context,
               [axis.id]: value.id,
             })
-              .sort(([left], [right]) => left.localeCompare(right))
+              .sort(([left], [right]) => compareStrings(left, right))
               .map(([contextAxis, contextValue]) =>
                 `${contextAxis}=${contextValue}`,
               ),
@@ -304,7 +305,7 @@ export function createDiscoveryGuide(product, resolved, options = {}) {
     }
   }
   for (const profile of [...workspaceProfiles(product, options.foundation).values()].sort(
-    (left, right) => left.id.localeCompare(right.id),
+    (left, right) => compareStrings(left.id, right.id),
   )) {
     entries.push(
       discoveryEntry(
@@ -326,7 +327,7 @@ export function createDiscoveryGuide(product, resolved, options = {}) {
         candidate.target.kind === "screen" &&
         candidate.target.screen.assetId === resolved.screen?.id,
     )
-    .sort((left, right) => left.id.localeCompare(right.id))) {
+    .sort((left, right) => compareStrings(left.id, right.id))) {
     if (scenario.id === resolved.selection.scenarioId) continue;
     entries.push(
       discoveryEntry(
@@ -457,7 +458,7 @@ function semanticBounds(matrix, node) {
 
 function semanticNode(nodes, nodeId, parentMatrix, ancestors) {
   if (ancestors.has(nodeId)) fail("node_cycle", `Projection cycle includes ${nodeId}`);
-  const node = nodes[nodeId];
+  const node = ownValue(nodes, nodeId);
   if (!node) fail("missing_node", `Projected Node is missing: ${nodeId}`);
   const matrix = multiplyMatrix(parentMatrix, semanticNodeMatrix(node));
   const bounds = semanticBounds(matrix, node);
@@ -736,7 +737,7 @@ function semanticValues(value, path, result) {
     );
   } else if (value && typeof value === "object") {
     for (const [name, child] of Object.entries(value).sort(([left], [right]) =>
-      left.localeCompare(right),
+      compareStrings(left, right),
     )) {
       if (
         name === "revision" ||

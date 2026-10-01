@@ -538,3 +538,131 @@ test("an alias inside an imported Penpot-shaped library resolves when the packag
   assert.equal(link.rawValue, "{colors.base}");
   assert.equal(link.resolvedValue, "#336699", "Form A aliases resolve like DTCG aliases");
 });
+
+async function applyImport(snapshot, result, batchId) {
+  return prepareOperationBatch(snapshot, {
+    baseRevision: snapshot.revision,
+    batchId,
+    operations: result.operations,
+  });
+}
+
+test("Penpot's string numbers and short hex colors import as loader values", async () => {
+  const snapshot = await snapshotWith(previousLibrary);
+  // Penpot exports every numeric value as a string (common test fixture
+  // tokens-default-team-only.json) and accepts 3- and 4-digit hex colors.
+  const result = importTokens(snapshot, {
+    $metadata: { activeSets: ["dark"], activeThemes: [], tokenSetOrder: ["dark"] },
+    $themes: [],
+    dark: {
+      color: { $type: "color", short: { $value: "#fA0" }, alpha: { $value: "#f008" } },
+      opacity: { $type: "opacity", half: { $value: "0.5" }, percent: { $value: "50%" } },
+      rotation: { $type: "rotation", px: { $value: "45px" } },
+      small: { $description: "", $type: "borderRadius", $value: "8" },
+      spacing: { $type: "spacing", px: { $value: "16px" }, rem: { $value: "1rem" } },
+    },
+  });
+  const values = Object.fromEntries(
+    result.library.sets[0].tokens.map((token) => [token.name, token.value]),
+  );
+  assert.deepEqual(values, {
+    "color.alpha": "#ff000088",
+    "color.short": "#ffAA00",
+    "opacity.half": 0.5,
+    small: 8,
+    "spacing.px": 16,
+  });
+  assert.deepEqual(
+    result.warnings.map(({ code, name }) => [code, name]),
+    [
+      ["invalid_token_value", "opacity.percent"],
+      ["invalid_token_value", "rotation.px"],
+      ["invalid_token_value", "spacing.rem"],
+    ],
+    "units that change the meaning are reported, not converted",
+  );
+  const applied = await applyImport(snapshot, result, "import_tokens_numbers");
+  const again = importTokens(applied.snapshot, {
+    dark: { small: { $type: "borderRadius", $value: "8" } },
+    $metadata: { tokenSetOrder: ["dark"] },
+  });
+  assert.equal(again.diff.summary.tokensChanged, 0);
+});
+
+test("constructs the library would reject are reported in review, so apply succeeds", async () => {
+  const snapshot = await snapshotWith(previousLibrary);
+  const result = importTokens(snapshot, {
+    $metadata: {
+      activeSets: ["core", "gone"],
+      activeThemes: ["mode/light", "mode/missing"],
+      tokenSetOrder: ["core"],
+    },
+    $themes: [
+      { group: "mode", name: "light", selectedTokenSets: { core: "enabled", absent: "enabled" } },
+      { group: "mode", name: "light", selectedTokenSets: {} },
+    ],
+    " core": { a: { $type: "color", $value: "#000000" } },
+    "": { a: { $type: "color", $value: "#000000" } },
+    core: {
+      "a.b": { $type: "color", $value: "#111111" },
+      a: {
+        b: { $type: "color", $value: "#222222" },
+        c: { $type: "color", $value: "#333333", nested: { $type: "color", $value: "#444444" } },
+      },
+    },
+  });
+  assert.deepEqual(
+    result.warnings.map(({ code }) => code).sort(),
+    [
+      "duplicate_token_name",
+      "duplicate_token_theme",
+      "invalid_token_set_name",
+      "invalid_token_set_name",
+      "missing_active_set",
+      "missing_active_theme",
+      "missing_theme_set",
+      "token_children_ignored",
+    ],
+  );
+  assert.deepEqual(
+    result.library.sets.map((set) => [set.name, set.tokens.map(({ name, value }) => [name, value])]),
+    [["core", [["a.b", "#111111"], ["a.c", "#333333"]]]],
+    "the first declaration of a name wins, as for alias targets",
+  );
+  assert.equal(result.diff.summary.tokensAdded, 2);
+  const applied = await applyImport(snapshot, result, "import_tokens_rejectable");
+  assert.equal(applied.snapshot.entries["tokens/tokens.json"].themes.length, 1);
+});
+
+test("re-importing object values in another key order is a no-op", async () => {
+  const snapshot = await snapshotWith(previousLibrary);
+  const document = {
+    $metadata: { tokenSetOrder: ["core"] },
+    core: {
+      shadow: {
+        $type: "boxShadow",
+        $value: [{ x: 5, y: 5, spread: 3, color: "#000000", blur: 5 }],
+      },
+    },
+  };
+  const first = importTokens(snapshot, document);
+  const applied = await applyImport(snapshot, first, "import_tokens_order");
+  const again = importTokens(applied.snapshot, document);
+  assert.deepEqual(again.diff.tokens.changed, []);
+});
+
+test("a token document nested too deeply fails typed before any recursive walk", async () => {
+  const snapshot = await snapshotWith(previousLibrary);
+  let groups = { $type: "color", $value: "#000000" };
+  for (let depth = 0; depth < 50000; depth += 1) groups = { a: groups };
+  assert.throws(() => importTokens(snapshot, groups), {
+    code: "package_value_too_deep",
+  });
+  let value = 0;
+  for (let depth = 0; depth < 250; depth += 1) value = [value];
+  assert.throws(
+    () => importTokens(snapshot, { deep: { $type: "boxShadow", $value: value } }),
+    { code: "package_value_too_deep" },
+    "a value the apply would reject fails the review the same way",
+  );
+});

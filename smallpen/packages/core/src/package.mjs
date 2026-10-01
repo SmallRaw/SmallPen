@@ -5,11 +5,25 @@ import {
   stableRuntimeUuid,
 } from "./canonical.mjs";
 import { SMALLPEN_FORMAT_CAPABILITIES } from "./capabilities.mjs";
-import { parseComponentEntries } from "./components-domain.mjs";
+import {
+  findComponentVariant,
+  parseComponentEntries,
+} from "./components-domain.mjs";
 import { createComponentSamples } from "./component-samples.mjs";
 import { parseContextEntries } from "./contexts.mjs";
 import { validateDesignReferences } from "./design-validation.mjs";
-import { fail } from "./errors.mjs";
+import { fail, SmallPenError } from "./errors.mjs";
+import {
+  assertValueDepth,
+  compareStrings,
+  isRecord,
+  isReservedKey,
+  isTokenName,
+  MAX_NODE_DEPTH,
+  OVERRIDE_FIELDS,
+  ownValue,
+  stableId,
+} from "./internal.mjs";
 import { parseRequirementEntries } from "./requirements-domain.mjs";
 import { parseScenarioEntries } from "./scenarios-domain.mjs";
 import { parseTokenEntries } from "./tokens-domain.mjs";
@@ -84,7 +98,6 @@ const TOKEN_TYPES = new Set(
 const APPLIED_TOKEN_ATTRIBUTES = new Set(
   SMALLPEN_FORMAT_CAPABILITIES.webProjection.appliedTokenAttributes,
 );
-const TOKEN_NAME_PATTERN = /^[a-zA-Z0-9_-][a-zA-Z0-9$_-]*(\.[a-zA-Z0-9$_-]+)*$/;
 const TOKEN_BINDING_FIELDS = new Set([
   "backgroundBlur",
   "blur",
@@ -169,14 +182,12 @@ const FONT_WEIGHTS = new Set([
 ]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function requireRecord(value, code, message, details) {
   if (!isRecord(value)) fail(code, message, details);
   return value;
 }
+
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
 
 function safeEntry(entry) {
   if (
@@ -205,18 +216,31 @@ function safeEntry(entry) {
       { entry },
     );
   }
+  // Entries become property keys and file names on every platform. Reject
+  // prototype keys, Windows drive/stream separators, characters Windows
+  // forbids, names it strips or reserves for devices.
+  if (
+    segments.some(
+      (segment) =>
+        isReservedKey(segment) ||
+        /[\x00-\x1f:<>"|?*]/.test(segment) ||
+        /[. ]$/.test(segment) ||
+        WINDOWS_DEVICE_NAME.test(segment),
+    )
+  ) {
+    fail(
+      "invalid_entry_path",
+      `Canonical Package entry is not portable: ${entry}`,
+      { entry },
+    );
+  }
   return entry;
 }
 
-function stableId(value, prefix, code, path) {
-  if (
-    typeof value !== "string" ||
-    !value.startsWith(prefix) ||
-    !/^[a-zA-Z0-9_-]+$/.test(value)
-  ) {
-    fail(code, `${path} must begin with ${prefix}`, { path, value });
-  }
-  return value;
+// Entries that differ only by case or Unicode normalization name one file on
+// macOS and Windows file systems.
+function portableEntryKey(entry) {
+  return entry.normalize("NFC").toLowerCase();
 }
 
 function validateDraftMetadata(value) {
@@ -480,6 +504,7 @@ function validateManifest(value) {
     "Manifest entries must contain an object",
   );
   const seen = new Set();
+  const portable = new Map();
   for (const kind of ENTRY_KINDS) {
     if (!Array.isArray(entries[kind])) {
       fail(
@@ -492,6 +517,15 @@ function validateManifest(value) {
       if (seen.has(entry))
         fail("duplicate_entry", `Canonical entry is indexed twice: ${entry}`);
       seen.add(entry);
+      const key = portableEntryKey(entry);
+      if (portable.has(key)) {
+        fail(
+          "entry_case_collision",
+          `Canonical entries differ only by case: ${portable.get(key)} and ${entry}`,
+          { entries: [portable.get(key), entry] },
+        );
+      }
+      portable.set(key, entry);
     }
   }
   return manifest;
@@ -548,7 +582,7 @@ function validateAppliedTokens(value, path) {
         `${path}.${attribute} is unsupported`,
       );
     }
-    if (typeof tokenName !== "string" || !TOKEN_NAME_PATTERN.test(tokenName)) {
+    if (!isTokenName(tokenName)) {
       fail("invalid_token_name", `${path}.${attribute} is not a token name`);
     }
   }
@@ -641,6 +675,12 @@ function validateDomainInstance(value, path) {
         fail(
           "invalid_component_override",
           `${path}.overrides has an empty path`,
+        );
+      }
+      if (overridePath.split(":").some(isReservedKey)) {
+        fail(
+          "invalid_component_override",
+          `${path}.overrides.${overridePath} uses a reserved key`,
         );
       }
       if (Array.isArray(override)) {
@@ -750,10 +790,7 @@ function validateTokenLibrary(value, entry) {
       if (tokenIds.has(token.id)) {
         fail("duplicate_token_id", `Duplicate Token id: ${token.id}`);
       }
-      if (
-        typeof token.name !== "string" ||
-        !TOKEN_NAME_PATTERN.test(token.name)
-      ) {
+      if (!isTokenName(token.name)) {
         fail("invalid_token_name", `${tokenPath}.name is invalid`);
       }
       if (names.has(token.name)) {
@@ -1673,7 +1710,7 @@ function validateInteractionAction(actionValue, path, nodes) {
     if (
       Object.keys(action).length !== 3 ||
       typeof action.nodeId !== "string" ||
-      !nodes[action.nodeId] ||
+      !isRecord(ownValue(nodes, action.nodeId)) ||
       typeof action.visible !== "boolean"
     ) {
       fail("invalid_interaction_action", `${path} set-visibility is invalid`);
@@ -1735,7 +1772,7 @@ function validateInteractions(value, path, nodes) {
       "invalid_node_id",
       `${interactionPath}.sourceNodeId`,
     );
-    if (!nodes[interaction.sourceNodeId]) {
+    if (!isRecord(ownValue(nodes, interaction.sourceNodeId))) {
       fail(
         "missing_interaction_source",
         `${interactionPath}.sourceNodeId does not exist`,
@@ -1821,8 +1858,7 @@ function validatePrototypeFlows(value, path, nodes) {
       `${flowPath}.startingNodeId`,
     );
     if (
-      !nodes[flow.startingNodeId] ||
-      nodes[flow.startingNodeId].type !== "FRAME"
+      ownValue(nodes, flow.startingNodeId)?.type !== "FRAME"
     ) {
       fail(
         "invalid_prototype_flow_start",
@@ -1830,6 +1866,111 @@ function validatePrototypeFlows(value, path, nodes) {
       );
     }
   }
+}
+
+// Visual and text attributes shared by Presentation nodes and Component
+// Variant nodes; both feed the same projection and renderer.
+function validateNodeAttributes(node, nodeId, nodePath) {
+  if (node.opacity !== undefined) {
+    finiteNumber(node.opacity, `${nodePath}.opacity`);
+    if (node.opacity < 0 || node.opacity > 1) {
+      fail(
+        "invalid_opacity",
+        `Node opacity must be between 0 and 1: ${nodeId}`,
+      );
+    }
+  }
+  if (node.rotation !== undefined) {
+    finiteNumber(node.rotation, `${nodePath}.rotation`);
+    if (node.rotation < 0 || node.rotation >= 360) {
+      fail(
+        "invalid_node_rotation",
+        `Node rotation must be between 0 and 360: ${nodeId}`,
+      );
+    }
+  }
+  for (const field of ["flipX", "flipY"]) {
+    if (node[field] !== undefined && typeof node[field] !== "boolean") {
+      fail("invalid_node_flip", `${nodePath}.${field} must be boolean`);
+    }
+  }
+  if (node.visible !== undefined) {
+    validateNodeVisibility(node.visible, `${nodePath}.visible`);
+  }
+  for (const field of ["locked", "proportionLock"]) {
+    if (node[field] !== undefined && typeof node[field] !== "boolean") {
+      fail("invalid_node_boolean", `${nodePath}.${field} must be boolean`);
+    }
+  }
+  for (const field of [
+    "blend-mode",
+    "grids",
+    "hide-fill-on-export",
+    "hide-in-viewer",
+    "masked-group",
+    "show-content",
+  ]) {
+    if (node[field] !== undefined) {
+      validateNodeChange(field, node[field], nodeId);
+    }
+  }
+  if (node.cornerRadius !== undefined) {
+    validateCornerRadius(node.cornerRadius, `${nodePath}.cornerRadius`);
+  }
+  if (node.fills !== undefined) {
+    validateFills(node.fills, `${nodePath}.fills`);
+  }
+  if (node.strokes !== undefined) {
+    validateStrokes(node.strokes, `${nodePath}.strokes`);
+  }
+  if (node.appliedTokens !== undefined) {
+    validateAppliedTokens(node.appliedTokens, `${nodePath}.appliedTokens`);
+  }
+  if (node.touched !== undefined) {
+    validateTouched(node.touched, `${nodePath}.touched`);
+  }
+  if (node.type === "TEXT") {
+    if (typeof node.text !== "string") {
+      fail("invalid_text_content", `${nodePath}.text must be a string`);
+    }
+    if (node.growType !== undefined && !TEXT_GROW_TYPES.has(node.growType)) {
+      fail(
+        "invalid_text_grow_type",
+        `${nodePath}.growType is not supported`,
+      );
+    }
+    if (node.textStyle !== undefined) {
+      validateTextStyle(node.textStyle, `${nodePath}.textStyle`);
+    }
+    if (node.textBlocks !== undefined) {
+      validateTextBlocks(node.textBlocks, node.text, `${nodePath}.textBlocks`);
+    }
+  } else if (
+    node.text !== undefined ||
+    node.textBlocks !== undefined ||
+    node.growType !== undefined ||
+    node.textStyle !== undefined
+  ) {
+    fail(
+      "unexpected_text_attribute",
+      `Only TEXT nodes can contain text attributes: ${nodeId}`,
+    );
+  }
+}
+
+const TEXT_ATTRIBUTES = new Set(["growType", "text", "textBlocks", "textStyle"]);
+
+// Variant nodes predate attribute validation: update-component-node stored
+// null for a cleared field, and text attributes on non-TEXT nodes are
+// ignored by projection. Validate only what projection and render read.
+function validateVariantNodeAttributes(node, nodeId, nodePath) {
+  const read = Object.fromEntries(
+    Object.entries(node).filter(
+      ([field, value]) =>
+        value !== null && (node.type === "TEXT" || !TEXT_ATTRIBUTES.has(field)),
+    ),
+  );
+  validateNodeAttributes(read, nodeId, nodePath);
 }
 
 function validatePresentation(screen, presentation, path) {
@@ -1923,7 +2064,7 @@ function validatePresentation(screen, presentation, path) {
     }
   }
   for (const rootId of rootIds) {
-    if (typeof rootId !== "string" || !isRecord(nodes[rootId])) {
+    if (!isRecord(ownValue(nodes, rootId))) {
       fail(
         "missing_root_node",
         `Presentation root node does not exist: ${String(rootId)}`,
@@ -1946,81 +2087,12 @@ function validatePresentation(screen, presentation, path) {
     validateNodeName(node.name, `${path}.nodes.${nodeId}.name`);
     for (const field of ["x", "y", "width", "height"])
       finiteNumber(node[field], `${path}.nodes.${nodeId}.${field}`);
-    if (node.opacity !== undefined) {
-      finiteNumber(node.opacity, `${path}.nodes.${nodeId}.opacity`);
-      if (node.opacity < 0 || node.opacity > 1) {
-        fail(
-          "invalid_opacity",
-          `Node opacity must be between 0 and 1: ${nodeId}`,
-        );
-      }
-    }
-    if (node.rotation !== undefined) {
-      finiteNumber(node.rotation, `${path}.nodes.${nodeId}.rotation`);
-      if (node.rotation < 0 || node.rotation >= 360) {
-        fail(
-          "invalid_node_rotation",
-          `Node rotation must be between 0 and 360: ${nodeId}`,
-        );
-      }
-    }
-    for (const field of ["flipX", "flipY"]) {
-      if (node[field] !== undefined && typeof node[field] !== "boolean") {
-        fail(
-          "invalid_node_flip",
-          `${path}.nodes.${nodeId}.${field} must be boolean`,
-        );
-      }
-    }
-    if (node.visible !== undefined) {
-      validateNodeVisibility(node.visible, `${path}.nodes.${nodeId}.visible`);
-    }
-    for (const field of ["locked", "proportionLock"]) {
-      if (node[field] !== undefined && typeof node[field] !== "boolean") {
-        fail(
-          "invalid_node_boolean",
-          `${path}.nodes.${nodeId}.${field} must be boolean`,
-        );
-      }
-    }
-    for (const field of [
-      "blend-mode",
-      "grids",
-      "hide-fill-on-export",
-      "hide-in-viewer",
-      "masked-group",
-      "show-content",
-    ]) {
-      if (node[field] !== undefined) {
-        validateNodeChange(field, node[field], nodeId);
-      }
-    }
-    if (node.cornerRadius !== undefined) {
-      validateCornerRadius(
-        node.cornerRadius,
-        `${path}.nodes.${nodeId}.cornerRadius`,
-      );
-    }
-    if (node.fills !== undefined) {
-      validateFills(node.fills, `${path}.nodes.${nodeId}.fills`);
-    }
-    if (node.strokes !== undefined) {
-      validateStrokes(node.strokes, `${path}.nodes.${nodeId}.strokes`);
-    }
-    if (node.appliedTokens !== undefined) {
-      validateAppliedTokens(
-        node.appliedTokens,
-        `${path}.nodes.${nodeId}.appliedTokens`,
-      );
-    }
+    validateNodeAttributes(node, nodeId, `${path}.nodes.${nodeId}`);
     if (node.tokenBindings !== undefined) {
       validateTokenBindings(
         node.tokenBindings,
         `${path}.nodes.${nodeId}.tokenBindings`,
       );
-    }
-    if (node.touched !== undefined) {
-      validateTouched(node.touched, `${path}.nodes.${nodeId}.touched`);
     }
     for (const [field, prefix] of [
       ["componentId", "cmp_"],
@@ -2098,40 +2170,6 @@ function validatePresentation(screen, presentation, path) {
         `${path}.nodes.${nodeId} must pair IMAGE type and mediaRef`,
       );
     }
-    if (node.type === "TEXT") {
-      if (typeof node.text !== "string") {
-        fail(
-          "invalid_text_content",
-          `${path}.nodes.${nodeId}.text must be a string`,
-        );
-      }
-      if (node.growType !== undefined && !TEXT_GROW_TYPES.has(node.growType)) {
-        fail(
-          "invalid_text_grow_type",
-          `${path}.nodes.${nodeId}.growType is not supported`,
-        );
-      }
-      if (node.textStyle !== undefined) {
-        validateTextStyle(node.textStyle, `${path}.nodes.${nodeId}.textStyle`);
-      }
-      if (node.textBlocks !== undefined) {
-        validateTextBlocks(
-          node.textBlocks,
-          node.text,
-          `${path}.nodes.${nodeId}.textBlocks`,
-        );
-      }
-    } else if (
-      node.text !== undefined ||
-      node.textBlocks !== undefined ||
-      node.growType !== undefined ||
-      node.textStyle !== undefined
-    ) {
-      fail(
-        "unexpected_text_attribute",
-        `Only TEXT nodes can contain text attributes: ${nodeId}`,
-      );
-    }
     if (node.children !== undefined && !Array.isArray(node.children)) {
       fail(
         "invalid_node_children",
@@ -2139,7 +2177,7 @@ function validatePresentation(screen, presentation, path) {
       );
     }
     for (const childId of node.children ?? []) {
-      if (!isRecord(nodes[childId]))
+      if (!isRecord(ownValue(nodes, childId)))
         fail("missing_child_node", `Node child does not exist: ${childId}`);
       if (parents.has(childId))
         fail(
@@ -2158,18 +2196,28 @@ function validatePresentation(screen, presentation, path) {
     }
   }
 
-  const visiting = new Set();
+  // Every node has at most one parent and roots have none, so a walk from the
+  // roots meets a node twice only through a cycle.
   const visited = new Set();
-  function visit(nodeId) {
-    if (visiting.has(nodeId))
-      fail("node_cycle", `Node tree contains a cycle at: ${nodeId}`);
-    if (visited.has(nodeId)) return;
-    visiting.add(nodeId);
-    for (const childId of nodes[nodeId].children ?? []) visit(childId);
-    visiting.delete(nodeId);
-    visited.add(nodeId);
+  for (const rootId of rootIds) {
+    const stack = [[rootId, 1]];
+    while (stack.length > 0) {
+      const [nodeId, depth] = stack.pop();
+      if (visited.has(nodeId))
+        fail("node_cycle", `Node tree contains a cycle at: ${nodeId}`);
+      if (depth > MAX_NODE_DEPTH) {
+        fail(
+          "node_tree_too_deep",
+          `Node tree is deeper than ${MAX_NODE_DEPTH} levels at: ${nodeId}`,
+          { maxDepth: MAX_NODE_DEPTH, nodeId },
+        );
+      }
+      visited.add(nodeId);
+      for (const childId of nodes[nodeId].children ?? []) {
+        stack.push([childId, depth + 1]);
+      }
+    }
   }
-  for (const rootId of rootIds) visit(rootId);
   if (visited.size !== Object.keys(nodes).length) {
     fail(
       "orphan_node",
@@ -2222,7 +2270,7 @@ function validateComponentReferences(manifest, entries) {
       component.screenId,
       component.presentationId,
     );
-    const main = presentation?.nodes[component.mainNodeId];
+    const main = ownValue(presentation?.nodes, component.mainNodeId);
     if (
       !main ||
       main.type !== "COMPONENT" ||
@@ -2515,6 +2563,13 @@ function validateAssetReferences(manifest, entries) {
   }
 }
 
+// Blob copies this module made and hashed, keyed to their verified path.
+// Snapshot blobs are immutable, so a write that passes the same object back
+// at the same content-addressed path reuses it without copying or hashing it
+// again. Bytes supplied by callers are never in this map and are always
+// hashed.
+const verifiedBlobPaths = new WeakMap();
+
 async function validateBlobValues(manifest, entries, values) {
   const blobs = new Map();
   const hashes = new Map();
@@ -2547,6 +2602,11 @@ async function validateBlobValues(manifest, entries, values) {
         `Invalid content-addressed Media blob: ${path}`,
       );
     }
+    if (verifiedBlobPaths.get(value) === path) {
+      hashes.set(path, path.slice("blobs/".length));
+      blobs.set(path, value);
+      continue;
+    }
     const digest = await sha256Hex(value);
     if (path !== `blobs/${digest}`) {
       const kind = blobKinds.get(path) ?? "Binary";
@@ -2557,7 +2617,9 @@ async function validateBlobValues(manifest, entries, values) {
       );
     }
     hashes.set(path, digest);
-    blobs.set(path, new Uint8Array(value));
+    const copy = new Uint8Array(value);
+    verifiedBlobPaths.set(copy, path);
+    blobs.set(path, copy);
   }
   for (const { descriptor, id, kind } of descriptors) {
     const prefix = kind.toLowerCase();
@@ -2686,7 +2748,7 @@ function validateScreen(value, entry) {
         fail("invalid_counterpart_endpoint", `${endpointPath} is invalid`);
       }
       const presentation = presentations.get(endpoint.presentationId);
-      if (!presentation?.nodes[endpoint.nodeId]) {
+      if (!isRecord(ownValue(presentation?.nodes, endpoint.nodeId))) {
         fail(
           "missing_counterpart_endpoint",
           `${endpointPath} does not identify a Presentation node`,
@@ -3693,6 +3755,7 @@ async function createRuntime(manifest, entries, domain, locator) {
 }
 
 export function listPackageEntries(manifestValue) {
+  assertValueDepth(manifestValue, "manifest.json");
   const manifest = validateManifest(structuredClone(manifestValue));
   return {
     entries: ENTRY_KINDS.flatMap((kind) => manifest.entries[kind]),
@@ -3725,6 +3788,7 @@ export async function loadPackageFromValues(locator, values) {
           entry,
         });
       }
+      assertValueDepth(values.get(entry), entry);
       const value = structuredClone(values.get(entry));
       if (kind === "assets") {
         validateAssetLibrary(value, entry);
@@ -3756,6 +3820,17 @@ export async function loadPackageFromValues(locator, values) {
   }
   const contexts = parseContextEntries(manifest, entries);
   const components = parseComponentEntries(manifest, entries);
+  for (const componentSet of components.componentSets.values()) {
+    for (const variant of componentSet.variants) {
+      for (const [nodeId, node] of Object.entries(variant.nodes)) {
+        validateVariantNodeAttributes(
+          node,
+          nodeId,
+          `${componentSet.id}.variants.${variant.id}.nodes.${nodeId}`,
+        );
+      }
+    }
+  }
   const requirements = parseRequirementEntries(manifest, entries);
   const domain = {
     annotations: requirements.annotations,
@@ -3766,7 +3841,7 @@ export async function loadPackageFromValues(locator, values) {
     locatedComponents: components.locatedComponents,
     requirements: requirements.requirements,
     scenarios: parseScenarioEntries(manifest, entries),
-    tokens: parseTokenEntries(manifest, entries),
+    tokens: parseTokenEntries(manifest, entries, contexts.axes),
   };
   validateComponentReferences(manifest, entries);
   validateDesignReferences(manifest, entries, domain);
@@ -3865,7 +3940,7 @@ function applyAddComponent(snapshot, operation, inverseOperations) {
       screenId: component.screenId,
     },
   );
-  const main = presentation.nodes[component.mainNodeId];
+  const main = presentationNode(presentation, component.mainNodeId);
   if (!isRecord(main)) {
     fail(
       "missing_component_main",
@@ -3924,7 +3999,7 @@ function applyDeleteComponent(snapshot, operation, inverseOperations) {
       screenId: component.screenId,
     },
   );
-  const main = presentation.nodes[component.mainNodeId];
+  const main = presentationNode(presentation, component.mainNodeId);
   if (
     !isRecord(main) ||
     main.type !== "COMPONENT" ||
@@ -4033,12 +4108,14 @@ function applyReplaceTokenLibrary(snapshot, operation, inverseOperations) {
     if (!previousEntry) {
       fail("missing_token_library", "Token Library does not exist");
     }
-    snapshot.manifest.entries.tokens = snapshot.manifest.entries.tokens.filter(
-      (candidate) => candidate !== previousEntry,
-    );
+    const index = snapshot.manifest.entries.tokens.indexOf(previousEntry);
+    snapshot.manifest.entries.tokens.splice(index, 1);
     delete snapshot.entries[previousEntry];
+    // Token entry order decides which declaration of a path wins, so the
+    // inverse puts the library back at its index.
     inverseOperations.unshift({
       entry: previousEntry,
+      index,
       library: previous,
       type: "replace-token-library",
     });
@@ -4048,7 +4125,13 @@ function applyReplaceTokenLibrary(snapshot, operation, inverseOperations) {
       entries: ["manifest.json"],
     };
   }
-  if (!previousEntry) snapshot.manifest.entries.tokens.push(entry);
+  if (!previousEntry) {
+    snapshot.manifest.entries.tokens.splice(
+      insertionIndex(operation.index, snapshot.manifest.entries.tokens.length),
+      0,
+      entry,
+    );
+  }
   snapshot.entries[entry] = library;
   inverseOperations.unshift({
     ...(previousEntry ? {} : { entry }),
@@ -4198,10 +4281,14 @@ function applyAddPresentation(snapshot, operation, inverseOperations) {
   }
   const index = insertionIndex(operation.index, screen.presentations.length);
   screen.presentations.splice(index, 0, presentation);
+  const previousBasePresentationId = screen.basePresentationId;
   if (operation.basePresentationId !== undefined) {
     screen.basePresentationId = operation.basePresentationId;
   }
   inverseOperations.unshift({
+    ...(screen.basePresentationId === previousBasePresentationId
+      ? {}
+      : { basePresentationId: previousBasePresentationId }),
     presentationId: presentation.id,
     screenId: operation.screenId,
     type: "delete-presentation",
@@ -4228,7 +4315,10 @@ function applyDeletePresentation(snapshot, operation, inverseOperations) {
   }
   const [presentation] = screen.presentations.splice(index, 1);
   const previousBasePresentationId = screen.basePresentationId;
-  if (previousBasePresentationId === presentation.id) {
+  if (operation.basePresentationId !== undefined) {
+    // Inverse of add-presentation: restore the Base Presentation it replaced.
+    screen.basePresentationId = operation.basePresentationId;
+  } else if (previousBasePresentationId === presentation.id) {
     screen.basePresentationId = screen.presentations[0].id;
   }
   inverseOperations.unshift({
@@ -4336,20 +4426,32 @@ function applyUpdatePresentation(snapshot, operation, inverseOperations) {
   return { affectedIds, entry };
 }
 
-function findNodePosition(presentation, nodeId) {
-  const rootIndex = presentationRootIds(presentation).indexOf(nodeId);
-  if (rootIndex >= 0) return { index: rootIndex, parentId: null };
-  for (const node of Object.values(presentation.nodes)) {
-    const index = node.children?.indexOf(nodeId) ?? -1;
-    if (index >= 0) return { index, parentId: node.id };
+// Parent and sibling position of every node, built once per operation so
+// subtree work stays linear in the number of nodes.
+function nodePositionIndex(presentation) {
+  const positions = new Map();
+  for (const [index, rootId] of presentationRootIds(presentation).entries()) {
+    positions.set(rootId, { index, parentId: null });
   }
-  return undefined;
+  for (const node of Object.values(presentation.nodes)) {
+    for (const [index, childId] of (node.children ?? []).entries()) {
+      if (!positions.has(childId)) {
+        positions.set(childId, { index, parentId: node.id });
+      }
+    }
+  }
+  return positions;
+}
+
+function presentationNode(presentation, nodeId) {
+  const node = ownValue(presentation.nodes, nodeId);
+  return isRecord(node) ? node : undefined;
 }
 
 function childIdsForParent(presentation, parentId) {
   if (parentId === null) return presentationRootIds(presentation);
-  const parent = presentation.nodes[parentId];
-  if (!isRecord(parent)) {
+  const parent = presentationNode(presentation, parentId);
+  if (!parent) {
     fail(
       "missing_parent_node",
       `Parent node does not exist: ${String(parentId)}`,
@@ -4363,7 +4465,7 @@ function setChildIdsForParent(presentation, parentId, childIds) {
     setPresentationRootIds(presentation, childIds);
     return;
   }
-  presentation.nodes[parentId].children = [...childIds];
+  presentationNode(presentation, parentId).children = [...childIds];
 }
 
 function insertionIndex(index, length) {
@@ -4385,12 +4487,12 @@ function applyAddPresentationNode(snapshot, operation, inverseOperations) {
     "add-presentation-node node must contain an object",
   );
   stableId(node.id, "node_", "invalid_node_id", "operation.node.id");
-  if (presentation.nodes[node.id]) {
+  if (Object.hasOwn(presentation.nodes, node.id)) {
     fail("duplicate_node", `Presentation node already exists: ${node.id}`);
   }
   if (
     operation.parentId !== null &&
-    !isRecord(presentation.nodes[operation.parentId])
+    !presentationNode(presentation, operation.parentId)
   ) {
     fail(
       "missing_parent_node",
@@ -4413,21 +4515,48 @@ function applyAddPresentationNode(snapshot, operation, inverseOperations) {
   return { affectedIds: [node.id], entry };
 }
 
-function collectSubtree(presentation, nodeId, result = []) {
-  const node = presentation.nodes[nodeId];
-  if (!isRecord(node)) {
-    fail("missing_node", `Presentation node does not exist: ${nodeId}`);
-  }
-  result.push(nodeId);
-  for (const childId of node.children ?? []) {
-    collectSubtree(presentation, childId, result);
+// Pre-order ids of a subtree: parents come before their children, which is
+// the order the inverse batch re-adds them in.
+function collectSubtree(presentation, nodeId) {
+  const result = [];
+  const seen = new Set();
+  const stack = [nodeId];
+  while (stack.length > 0) {
+    const currentId = stack.pop();
+    const node = presentationNode(presentation, currentId);
+    if (!node) {
+      fail("missing_node", `Presentation node does not exist: ${currentId}`);
+    }
+    if (seen.has(currentId)) {
+      fail("node_cycle", `Node tree contains a cycle at: ${currentId}`);
+    }
+    seen.add(currentId);
+    result.push(currentId);
+    const children = node.children ?? [];
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push(children[index]);
+    }
   }
   return result;
 }
 
+function isNodeAncestor(positions, ancestorId, nodeId) {
+  const seen = new Set();
+  let currentId = positions.get(nodeId)?.parentId ?? null;
+  while (currentId !== null && !seen.has(currentId)) {
+    if (currentId === ancestorId) return true;
+    seen.add(currentId);
+    currentId = positions.get(currentId)?.parentId ?? null;
+  }
+  return false;
+}
+
 function applyDeletePresentationNode(snapshot, operation, inverseOperations) {
   const { entry, presentation } = findPresentationContext(snapshot, operation);
-  const position = findNodePosition(presentation, operation.nodeId);
+  const positions = nodePositionIndex(presentation);
+  const position = presentationNode(presentation, operation.nodeId)
+    ? positions.get(operation.nodeId)
+    : undefined;
   if (!position) {
     fail(
       "missing_node",
@@ -4436,7 +4565,7 @@ function applyDeletePresentationNode(snapshot, operation, inverseOperations) {
   }
   const subtreeIds = collectSubtree(presentation, operation.nodeId);
   const restores = subtreeIds.map((nodeId) => {
-    const restorePosition = findNodePosition(presentation, nodeId);
+    const restorePosition = positions.get(nodeId);
     return {
       index: restorePosition.index,
       node: structuredClone(presentation.nodes[nodeId]),
@@ -4471,24 +4600,25 @@ function applyMovePresentationNodes(snapshot, operation, inverseOperations) {
   }
   if (
     operation.parentId !== null &&
-    !isRecord(presentation.nodes[operation.parentId])
+    !presentationNode(presentation, operation.parentId)
   ) {
     fail(
       "missing_parent_node",
       `Parent node does not exist: ${String(operation.parentId)}`,
     );
   }
+  const positions = nodePositionIndex(presentation);
   const originals = operation.nodeIds.map((nodeId) => {
-    const node = presentation.nodes[nodeId];
-    if (!isRecord(node))
+    if (!presentationNode(presentation, nodeId))
       fail("missing_node", `Presentation node does not exist: ${nodeId}`);
     if (
       operation.parentId !== null &&
-      collectSubtree(presentation, nodeId, []).includes(operation.parentId)
+      (operation.parentId === nodeId ||
+        isNodeAncestor(positions, nodeId, operation.parentId))
     ) {
       fail("node_cycle", `Node cannot move into its own subtree: ${nodeId}`);
     }
-    const original = findNodePosition(presentation, nodeId);
+    const original = positions.get(nodeId);
     if (!original) {
       fail("missing_node", `Presentation node does not exist: ${nodeId}`);
     }
@@ -4503,7 +4633,7 @@ function applyMovePresentationNodes(snapshot, operation, inverseOperations) {
     for (const candidate of operation.nodeIds) {
       if (
         nodeId !== candidate &&
-        collectSubtree(presentation, nodeId, []).includes(candidate)
+        isNodeAncestor(positions, nodeId, candidate)
       ) {
         fail(
           "overlapping_node_move",
@@ -4530,7 +4660,8 @@ function applyMovePresentationNodes(snapshot, operation, inverseOperations) {
   const inverseMoves = [...originals]
     .sort((left, right) => {
       return (
-        String(left.parentId ?? "").localeCompare(
+        compareStrings(
+          String(left.parentId ?? ""),
           String(right.parentId ?? ""),
         ) || left.index - right.index
       );
@@ -4585,7 +4716,7 @@ function applyReorderPresentationChildren(
 
 function applyUpdatePresentationNode(snapshot, operation, inverseOperations) {
   const { entry, presentation } = findPresentationContext(snapshot, operation);
-  const node = presentation.nodes[operation.nodeId];
+  const node = presentationNode(presentation, operation.nodeId);
   if (!isRecord(node))
     fail(
       "missing_node",
@@ -4883,7 +5014,7 @@ function applyUpdateComponentNode(snapshot, operation, inverseOperations) {
   const variant = componentSet.variants.find(
     ({ id }) => id === operation.variantId,
   );
-  const node = variant?.nodes[operation.nodeId];
+  const node = ownValue(variant?.nodes, operation.nodeId);
   if (!node)
     fail("missing_node", `Variant Node does not exist: ${operation.nodeId}`);
   const changes = requireRecord(
@@ -4894,10 +5025,21 @@ function applyUpdateComponentNode(snapshot, operation, inverseOperations) {
   if (!Array.isArray(operation.unset ?? [])) {
     fail("invalid_node_unset", "update-component-node unset must be an array");
   }
+  for (const field of [...Object.keys(changes), ...(operation.unset ?? [])]) {
+    if (typeof field !== "string" || isReservedKey(field)) {
+      fail(
+        "unsupported_node_change",
+        `update-component-node cannot change field: ${String(field)}`,
+        { field },
+      );
+    }
+  }
   restoreEntryInverse(snapshot, "components", entry, inverseOperations);
   for (const field of operation.unset ?? []) delete node[field];
+  // null clears a field, as in update-presentation-node.
   for (const [field, value] of Object.entries(changes)) {
-    node[field] = structuredClone(value);
+    if (value === null) delete node[field];
+    else node[field] = structuredClone(value);
   }
   return {
     affectedIds: [componentSet.id, variant.id, node.id],
@@ -5261,8 +5403,10 @@ function dtcgTokenLocation(snapshot, tokenIdOrPath, byPath = false) {
   }
   let parent = root;
   const segments = token.path.split(".");
-  for (const segment of segments.slice(0, -1)) parent = parent?.[segment];
-  const definition = parent?.[segments.at(-1)];
+  for (const segment of segments.slice(0, -1)) {
+    parent = ownValue(parent, segment);
+  }
+  const definition = ownValue(parent, segments.at(-1));
   if (!isRecord(definition)) {
     fail("missing_token_path", `Token path does not exist: ${token.path}`);
   }
@@ -5291,10 +5435,7 @@ function applySetTokenValue(snapshot, operation, inverseOperations) {
 
 function applyPutToken(snapshot, operation, inverseOperations) {
   safeEntry(operation.filePath);
-  if (
-    typeof operation.path !== "string" ||
-    !TOKEN_NAME_PATTERN.test(operation.path)
-  ) {
+  if (!isTokenName(operation.path)) {
     fail("invalid_token_path", `Token path is invalid: ${operation.path}`);
   }
   stableId(operation.tokenId, "tok_", "invalid_token_id", "operation.tokenId");
@@ -5325,7 +5466,7 @@ function applyPutToken(snapshot, operation, inverseOperations) {
   let parent = snapshot.entries[operation.filePath];
   const segments = operation.path.split(".");
   for (const segment of segments.slice(0, -1)) {
-    if (parent[segment] === undefined) parent[segment] = {};
+    if (!Object.hasOwn(parent, segment)) parent[segment] = {};
     if (!isRecord(parent[segment])) {
       fail("invalid_token_path", `Token group is not an object: ${segment}`);
     }
@@ -5381,8 +5522,19 @@ function basePresentationContext(snapshot, operation) {
 
 function applySetTokenBinding(snapshot, operation, inverseOperations) {
   const { entry, presentation } = basePresentationContext(snapshot, operation);
-  const node = presentation.nodes[operation.nodeId];
+  const node = presentationNode(presentation, operation.nodeId);
   if (!node) fail("missing_node", `Node does not exist: ${operation.nodeId}`);
+  if (
+    typeof operation.field !== "string" ||
+    (!TOKEN_BINDING_FIELDS.has(operation.field) &&
+      !/^fills\.\d+$/.test(operation.field))
+  ) {
+    fail(
+      "unsupported_token_binding",
+      `Token binding field is unsupported: ${String(operation.field)}`,
+      { field: operation.field },
+    );
+  }
   restoreEntryInverse(snapshot, "screens", entry, inverseOperations);
   node.tokenBindings ??= {};
   node.tokenBindings[operation.field] = structuredClone(operation.binding);
@@ -5391,7 +5543,7 @@ function applySetTokenBinding(snapshot, operation, inverseOperations) {
 
 function applyClearTokenBinding(snapshot, operation, inverseOperations) {
   const { entry, presentation } = basePresentationContext(snapshot, operation);
-  const node = presentation.nodes[operation.nodeId];
+  const node = presentationNode(presentation, operation.nodeId);
   if (!node) fail("missing_node", `Node does not exist: ${operation.nodeId}`);
   if (!Object.hasOwn(node.tokenBindings ?? {}, operation.field)) {
     fail(
@@ -5406,11 +5558,168 @@ function applyClearTokenBinding(snapshot, operation, inverseOperations) {
 
 function applySelectInstanceVariant(snapshot, operation, inverseOperations) {
   const { entry, presentation } = basePresentationContext(snapshot, operation);
-  const node = presentation.nodes[operation.nodeId];
+  const node = presentationNode(presentation, operation.nodeId);
   if (!node?.instance)
     fail("missing_instance", `Node is not an Instance: ${operation.nodeId}`);
   restoreEntryInverse(snapshot, "screens", entry, inverseOperations);
   node.instance.variant = structuredClone(operation.selection);
+  return { affectedIds: [node.id], entries: [entry] };
+}
+
+// The Component Set a reference names, when this Package or an attached
+// Library holds it. Other owners are checked when the Instance projects.
+function knownComponentSet(snapshot, reference) {
+  if (reference.packageId === snapshot.manifest.packageId) {
+    // Earlier operations of the batch may have changed the Components; a
+    // candidate that does not parse yet fails its own validation later.
+    try {
+      return parseComponentEntries(
+        snapshot.manifest,
+        snapshot.entries,
+      ).componentSets.get(reference.assetId);
+    } catch (error) {
+      if (error instanceof SmallPenError) return undefined;
+      throw error;
+    }
+  }
+  return (snapshot.libraries ?? [])
+    .find((library) => library.manifest?.packageId === reference.packageId)
+    ?.domain?.componentSets?.get(reference.assetId);
+}
+
+// The source node an override path names inside an Instance: a node of the
+// selected variant, or `<nested>__<path>` inside a nested Instance, as the
+// projection derives its ids. Undefined when the owner is not loaded here.
+function overrideSourceNode(snapshot, instance, sourcePath, depth = 0) {
+  const componentSet = knownComponentSet(snapshot, instance.component);
+  if (!componentSet || depth >= MAX_NODE_DEPTH) return undefined;
+  const variant = findComponentVariant(componentSet, instance.variant).variant;
+  if (!variant) return undefined;
+  const node = ownValue(variant.nodes, sourcePath);
+  if (node) return node;
+  for (const nested of Object.values(variant.nodes)) {
+    if (nested.instance && sourcePath.startsWith(`${nested.id}__`)) {
+      return overrideSourceNode(
+        snapshot,
+        nested.instance,
+        sourcePath.slice(nested.id.length + 2),
+        depth + 1,
+      );
+    }
+  }
+  return null;
+}
+
+function instanceOverrideContext(snapshot, operation) {
+  const { entry, presentation } = basePresentationContext(snapshot, operation);
+  const node = presentationNode(presentation, operation.nodeId);
+  if (!node?.instance)
+    fail("missing_instance", `Node is not an Instance: ${operation.nodeId}`);
+  const overridePath = operation.overridePath;
+  const separator =
+    typeof overridePath === "string" ? overridePath.indexOf(":") : -1;
+  if (separator <= 0 || separator === overridePath.length - 1) {
+    fail(
+      "invalid_component_override_path",
+      `Component override path is invalid: ${String(overridePath)}`,
+      { overridePath },
+    );
+  }
+  const sourcePath = overridePath.slice(0, separator);
+  const field = overridePath.slice(separator + 1);
+  if (overridePath.split(":").some(isReservedKey)) {
+    fail(
+      "invalid_component_override",
+      `Component override path uses a reserved key: ${overridePath}`,
+      { overridePath },
+    );
+  }
+  if (!OVERRIDE_FIELDS.has(field)) {
+    fail(
+      "unsupported_component_override",
+      `Component override field is unsupported: ${field}`,
+      { field, overridePath },
+    );
+  }
+  return { entry, field, node, overridePath, sourcePath };
+}
+
+function overrideTarget(operation, node, overridePath) {
+  return {
+    nodeId: node.id,
+    overridePath,
+    ...(operation.presentationId === undefined
+      ? {}
+      : { presentationId: operation.presentationId }),
+    screenId: operation.screenId,
+  };
+}
+
+function applySetInstanceOverride(snapshot, operation, inverseOperations) {
+  const { entry, field, node, overridePath, sourcePath } =
+    instanceOverrideContext(snapshot, operation);
+  if (operation.value === null || operation.value === undefined) {
+    fail(
+      "invalid_component_override",
+      `Component override value is missing: ${overridePath}`,
+      { overridePath },
+    );
+  }
+  validateNodeChange(field, operation.value, `${node.id}.${overridePath}`);
+  const source = overrideSourceNode(snapshot, node.instance, sourcePath);
+  if (source === null) {
+    fail(
+      "missing_component_override_target",
+      `Component override target is missing: ${overridePath}`,
+      { instanceId: node.id, overridePath },
+    );
+  }
+  if (field === "text" && source !== undefined && source.type !== "TEXT") {
+    fail(
+      "component_override_type_mismatch",
+      `Text override target is not TEXT: ${sourcePath}`,
+      { instanceId: node.id, overridePath },
+    );
+  }
+  const overrides = node.instance.overrides ?? {};
+  inverseOperations.unshift({
+    ...overrideTarget(operation, node, overridePath),
+    ...(Object.hasOwn(overrides, overridePath)
+      ? {
+          type: "set-instance-override",
+          value: structuredClone(overrides[overridePath]),
+        }
+      : { type: "clear-instance-override" }),
+  });
+  node.instance.overrides = {
+    ...overrides,
+    [overridePath]: structuredClone(operation.value),
+  };
+  return { affectedIds: [node.id], entries: [entry] };
+}
+
+function applyClearInstanceOverride(snapshot, operation, inverseOperations) {
+  const { entry, node, overridePath } = instanceOverrideContext(
+    snapshot,
+    operation,
+  );
+  const overrides = node.instance.overrides ?? {};
+  if (!Object.hasOwn(overrides, overridePath)) {
+    fail(
+      "missing_component_override",
+      `Component override does not exist: ${overridePath}`,
+      { instanceId: node.id, overridePath },
+    );
+  }
+  inverseOperations.unshift({
+    ...overrideTarget(operation, node, overridePath),
+    type: "set-instance-override",
+    value: structuredClone(overrides[overridePath]),
+  });
+  delete overrides[overridePath];
+  // An Instance without overrides stores none, so clearing the last one
+  // restores the bytes (and revision) it had before the first was set.
+  if (Object.keys(overrides).length === 0) delete node.instance.overrides;
   return { affectedIds: [node.id], entries: [entry] };
 }
 
@@ -5431,10 +5740,23 @@ function rawReferenceLocation(snapshot, referencePath) {
   while ((match = expression.exec(source))) {
     segments.push(match[1] ?? Number(match[2]));
   }
+  if (segments.some(isReservedKey)) {
+    fail(
+      "unsupported_repair_path",
+      `Repair path uses a reserved key: ${referencePath}`,
+    );
+  }
   let parent = snapshot.entries[entry];
-  for (const segment of segments.slice(0, -1)) parent = parent?.[segment];
+  for (const segment of segments.slice(0, -1)) {
+    parent = ownValue(parent, segment);
+  }
   const key = segments.at(-1);
-  if (!parent || key === undefined || !Object.hasOwn(parent, key)) {
+  if (
+    parent === null ||
+    typeof parent !== "object" ||
+    key === undefined ||
+    !Object.hasOwn(parent, key)
+  ) {
     fail(
       "missing_repair_reference",
       `Repair reference is missing: ${referencePath}`,
@@ -5479,18 +5801,20 @@ function applyRepairReference(snapshot, operation, inverseOperations) {
     operation.referencePath.includes(".nodes.")
   ) {
     const removedIds = [];
-    const removeNode = (nodeId) => {
-      const node = location.parent[nodeId];
-      if (!node) return;
-      for (const childId of node.children ?? []) removeNode(childId);
+    const pending = [location.parent[location.key].id];
+    while (pending.length > 0) {
+      const nodeId = pending.pop();
+      const node = ownValue(location.parent, nodeId);
+      if (!node) continue;
+      pending.push(...(node.children ?? []));
       delete location.parent[nodeId];
       removedIds.push(nodeId);
-    };
-    removeNode(location.parent[location.key].id);
+    }
+    const removed = new Set(removedIds);
     for (const node of Object.values(location.parent)) {
       if (Array.isArray(node?.children)) {
         node.children = node.children.filter(
-          (childId) => !removedIds.includes(childId),
+          (childId) => !removed.has(childId),
         );
       }
     }
@@ -5559,7 +5883,8 @@ function validateComponentAcyclicity(snapshot) {
   for (const componentId of graph.keys()) visit(componentId, []);
 }
 
-export async function prepareOperationBatch(before, batch) {  if (
+export async function prepareOperationBatch(before, batch) {
+  if (
     !isRecord(batch) ||
     typeof batch.batchId !== "string" ||
     batch.batchId.length === 0 ||
@@ -5571,6 +5896,7 @@ export async function prepareOperationBatch(before, batch) {  if (
       "Operation Batch batchId must be a stable 1-192 character identity",
     );
   }
+  assertValueDepth(batch.operations, "operations");
   if (batch.baseRevision !== before.revision) {
     fail(
       "stale_revision",
@@ -5600,7 +5926,13 @@ export async function prepareOperationBatch(before, batch) {  if (
   if (!Array.isArray(batch.operations))
     fail("invalid_batch", "Operation Batch operations must be an array");
 
-  const candidate = structuredClone(before);
+  // Operations change only the manifest and entries. Blobs are immutable and
+  // domain is read-only here, so they are shared rather than cloned.
+  const candidate = {
+    ...before,
+    entries: structuredClone(before.entries),
+    manifest: structuredClone(before.manifest),
+  };
   const affectedIds = new Set();
   const changedFiles = new Set();
   const deletedFiles = new Set();
@@ -5619,6 +5951,13 @@ export async function prepareOperationBatch(before, batch) {  if (
         break;
       case "add-presentation-node":
         applied = applyAddPresentationNode(
+          candidate,
+          operation,
+          inverseOperations,
+        );
+        break;
+      case "clear-instance-override":
+        applied = applyClearInstanceOverride(
           candidate,
           operation,
           inverseOperations,
@@ -5800,6 +6139,13 @@ export async function prepareOperationBatch(before, batch) {  if (
         break;
       case "set-active-token-themes":
         applied = applySetActiveTokenThemes(
+          candidate,
+          operation,
+          inverseOperations,
+        );
+        break;
+      case "set-instance-override":
+        applied = applySetInstanceOverride(
           candidate,
           operation,
           inverseOperations,

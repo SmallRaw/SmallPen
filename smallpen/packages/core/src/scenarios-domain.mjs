@@ -1,19 +1,5 @@
 import { fail } from "./errors.mjs";
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function stableId(value, prefix, code, path) {
-  if (
-    typeof value !== "string" ||
-    !value.startsWith(prefix) ||
-    !/^[a-zA-Z0-9_-]+$/.test(value)
-  ) {
-    fail(code, `${path} must begin with ${prefix}`, { path, value });
-  }
-  return value;
-}
+import { isRecord, OVERRIDE_FIELDS, stableId } from "./internal.mjs";
 
 function nonEmpty(value, code, path) {
   if (typeof value !== "string" || value.length === 0) {
@@ -113,6 +99,19 @@ function parseOverrideValue(value, path) {
   fail("invalid_scenario_override", `${path} is unsupported`, { path });
 }
 
+// "<node id>:<field>": a node of the projected variant and a field that
+// Instance overrides may also write.
+function validOverridePath(overridePath) {
+  const separator = overridePath.indexOf(":");
+  const nodeId = overridePath.slice(0, separator);
+  return (
+    separator > 0 &&
+    nodeId.startsWith("node_") &&
+    /^[a-zA-Z0-9_-]+$/.test(nodeId) &&
+    OVERRIDE_FIELDS.has(overridePath.slice(separator + 1))
+  );
+}
+
 function parseAction(value, path) {
   if (!isRecord(value) || typeof value.type !== "string") {
     fail("invalid_scenario_action", `${path} must contain an object`);
@@ -149,7 +148,7 @@ function parseAction(value, path) {
     value.type === "set-override" &&
     Object.keys(value).length === 3 &&
     typeof value.overridePath === "string" &&
-    value.overridePath.length > 0
+    validOverridePath(value.overridePath)
   ) {
     return {
       overridePath: value.overridePath,

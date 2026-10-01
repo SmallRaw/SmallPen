@@ -1,6 +1,12 @@
+import { canonicalJSON } from "./canonical.mjs";
 import { findComponentVariant } from "./components-domain.mjs";
 import { resolveContext } from "./contexts.mjs";
 import { fail } from "./errors.mjs";
+import {
+  OVERRIDE_FIELDS,
+  overrideTouchedGroups,
+  ownValue,
+} from "./internal.mjs";
 import { applyEffectiveTokenBindings } from "./projection-values.mjs";
 
 function screenById(snapshot, screenId) {
@@ -128,7 +134,94 @@ function prefixedNodeId(instanceId, sourceNodeId) {
   return `${instanceId}__${sourceNodeId}`;
 }
 
+// The plain text a TEXT node's rich blocks spell, one paragraph per block.
+function textBlocksText(blocks) {
+  return blocks
+    .map((block) => (block.runs ?? []).map((run) => run.text).join(""))
+    .join("\n");
+}
+
+// Applies one Instance override field to a projected node, in place. A text
+// override replaces the plain text; rich blocks that no longer spell it fold
+// into the style of their first run, since the override carries no runs.
+function applyOverrideField(node, field, value) {
+  if (
+    field === "text" &&
+    node.textBlocks?.length &&
+    textBlocksText(node.textBlocks) !== value
+  ) {
+    const block = node.textBlocks[0];
+    const run = block.runs?.[0] ?? {};
+    const textStyle = {
+      ...(node.textStyle ?? {}),
+      ...(block.textStyle ?? {}),
+      ...(run.textStyle ?? {}),
+    };
+    if (Object.keys(textStyle).length > 0) node.textStyle = textStyle;
+    if (run.fills) node.fills = structuredClone(run.fills);
+    delete node.textBlocks;
+  }
+  node[field] = structuredClone(value);
+}
+
+// Instance override fields and their touched groups, for writers that turn
+// Penpot copy edits into overrides.
+export { OVERRIDE_FIELDS as INSTANCE_OVERRIDE_FIELDS, overrideTouchedGroups };
+
+// Applies a node's Instance overrides ({field: value}) the way projection
+// does: text first, so an explicit fills override wins over the fills a
+// folded text run carries, and the touched groups Penpot keeps for them.
+export function applyNodeOverrides(node, overrides) {
+  const fields = Object.keys(overrides).sort((left, right) =>
+    left === "text" ? -1 : right === "text" ? 1 : left < right ? -1 : 1,
+  );
+  if (fields.length === 0) return node;
+  const touched = new Set(node.touched ?? []);
+  for (const field of fields) {
+    // A text override with another paragraph count changes the structure.
+    if (
+      field === "text" &&
+      String(node.text ?? "").split("\n").length !==
+        String(overrides.text).split("\n").length
+    ) {
+      touched.add("text-content-structure");
+    }
+    applyOverrideField(node, field, overrides[field]);
+    for (const group of overrideTouchedGroups(field, node.type)) {
+      touched.add(group);
+    }
+  }
+  node.touched = [...touched].sort();
+  return node;
+}
+
+const ROOT_FIELD_DEFAULTS = new Map([
+  ["opacity", 1],
+  ["visible", true],
+]);
+
+// An Instance node's own name, fills, opacity or visibility override its
+// source root. Penpot must see those as touched, or its component sync and
+// "Reset overrides" write the source value back over them.
+function rootOverrideTouched(root, instance, sourceRoot) {
+  const touched = new Set(root.touched ?? []);
+  for (const field of ["fills", "name", "opacity", "visible"]) {
+    if (!Object.hasOwn(instance, field)) continue;
+    const fallback = ROOT_FIELD_DEFAULTS.get(field);
+    if (
+      canonicalJSON(instance[field] ?? fallback ?? null) !==
+      canonicalJSON(sourceRoot[field] ?? fallback ?? null)
+    ) {
+      for (const group of overrideTouchedGroups(field, sourceRoot.type)) {
+        touched.add(group);
+      }
+    }
+  }
+  if (touched.size > 0) root.touched = [...touched].sort();
+}
+
 function applyInstanceOverrides(nodes, instance) {
+  const byNode = new Map();
   for (const [overridePath, value] of Object.entries(
     instance.instance.overrides ?? {},
   )) {
@@ -146,7 +239,7 @@ function applyInstanceOverrides(nodes, instance) {
       sourceNodeId === instance.sourceNodeId
         ? instance.id
         : prefixedNodeId(instance.id, sourceNodeId);
-    const node = nodes[nodeId];
+    const node = ownValue(nodes, nodeId);
     if (!node) {
       fail(
         "missing_component_override_target",
@@ -154,7 +247,7 @@ function applyInstanceOverrides(nodes, instance) {
         { instanceId: instance.id, overridePath },
       );
     }
-    if (!new Set(["fills", "name", "opacity", "text", "visible"]).has(field)) {
+    if (!OVERRIDE_FIELDS.has(field)) {
       fail(
         "unsupported_component_override",
         `Component override field is unsupported: ${field}`,
@@ -168,8 +261,10 @@ function applyInstanceOverrides(nodes, instance) {
         { instanceId: instance.id, overridePath },
       );
     }
-    node[field] = structuredClone(value);
+    if (!byNode.has(node)) byNode.set(node, {});
+    byNode.get(node)[field] = value;
   }
+  for (const [node, overrides] of byNode) applyNodeOverrides(node, overrides);
 }
 
 function instantiateComponent(instanceValue, product, options, stack) {
@@ -268,6 +363,15 @@ function instantiateComponent(instanceValue, product, options, stack) {
   };
   visit(match.variant.rootId);
   const root = result[instance.id];
+  rootOverrideTouched(
+    root,
+    instance,
+    applyEffectiveTokenBindings(sourceNodes[match.variant.rootId], product, {
+      context: options.context,
+      foundation: options.foundation,
+      libraries: options.libraries,
+    }),
+  );
   root.sourceNodeId = match.variant.rootId;
   root.componentId = target.componentSet.id;
   root.componentOwnerPackageId = target.owner.manifest.packageId;
@@ -573,13 +677,21 @@ function projectComponentScenario(product, scenario, options) {
     const separator = action.overridePath.indexOf(":");
     const nodeId = action.overridePath.slice(0, separator);
     const field = action.overridePath.slice(separator + 1);
-    if (separator <= 0 || !nodes[nodeId] || !field) {
+    const node = ownValue(nodes, nodeId);
+    if (separator <= 0 || !node) {
       fail(
         "missing_component_override_target",
         `Scenario override target is missing: ${action.overridePath}`,
       );
     }
-    nodes[nodeId][field] = structuredClone(action.value);
+    if (!OVERRIDE_FIELDS.has(field)) {
+      fail(
+        "unsupported_component_override",
+        `Component override field is unsupported: ${field}`,
+        { field, overridePath: action.overridePath },
+      );
+    }
+    node[field] = structuredClone(action.value);
   }
   return {
     context: options.context,
@@ -594,7 +706,7 @@ function projectComponentScenario(product, scenario, options) {
 function applyScenarioActions(projection, scenario) {
   for (const action of scenario.actions) {
     if (action.type === "set-state" || action.type === "set-override") continue;
-    const node = projection.nodes[action.nodeId];
+    const node = ownValue(projection.nodes, action.nodeId);
     if (!node) {
       fail("missing_scenario_node", `Scenario Node is missing: ${action.nodeId}`);
     }

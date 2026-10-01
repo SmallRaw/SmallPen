@@ -1,4 +1,11 @@
 import { fail } from "./errors.mjs";
+import {
+  compareStrings,
+  isRecord,
+  MAX_NODE_DEPTH,
+  ownValue,
+  stableId,
+} from "./internal.mjs";
 
 const NODE_TYPES = new Set([
   "COMPONENT",
@@ -9,21 +16,6 @@ const NODE_TYPES = new Set([
   "RECTANGLE",
   "TEXT",
 ]);
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function stableId(value, prefix, code, path) {
-  if (
-    typeof value !== "string" ||
-    !value.startsWith(prefix) ||
-    !/^[a-zA-Z0-9_-]+$/.test(value)
-  ) {
-    fail(code, `${path} must begin with ${prefix}`, { path, value });
-  }
-  return value;
-}
 
 function nonEmpty(value, code, path) {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -120,7 +112,7 @@ function validateNodeTree(nodesValue, rootId, path) {
     fail("invalid_variant_nodes", `${path}.nodes must contain an object`);
   }
   stableId(rootId, "node_", "invalid_node_id", `${path}.rootId`);
-  if (!nodesValue[rootId]) {
+  if (!isRecord(ownValue(nodesValue, rootId))) {
     fail("missing_root_node", `${path}.rootId does not exist`, { rootId });
   }
   const nodes = {};
@@ -129,7 +121,7 @@ function validateNodeTree(nodesValue, rootId, path) {
     const node = validateNode(nodeValue, nodeId, `${path}.nodes.${nodeId}`);
     nodes[nodeId] = node;
     for (const childId of node.children) {
-      if (!nodesValue[childId]) {
+      if (!isRecord(ownValue(nodesValue, childId))) {
         fail("missing_child_node", `Node child does not exist: ${childId}`);
       }
       if (parents.has(childId)) {
@@ -141,17 +133,22 @@ function validateNodeTree(nodesValue, rootId, path) {
   if (parents.has(rootId)) {
     fail("root_node_has_parent", `Variant root has a parent: ${rootId}`);
   }
-  const visiting = new Set();
+  // Single parents and a parentless root: a node met twice means a cycle.
   const visited = new Set();
-  const visit = (nodeId) => {
-    if (visiting.has(nodeId)) fail("node_cycle", `Node cycle includes ${nodeId}`);
-    if (visited.has(nodeId)) return;
-    visiting.add(nodeId);
-    for (const childId of nodes[nodeId].children) visit(childId);
-    visiting.delete(nodeId);
+  const stack = [[rootId, 1]];
+  while (stack.length > 0) {
+    const [nodeId, depth] = stack.pop();
+    if (visited.has(nodeId)) fail("node_cycle", `Node cycle includes ${nodeId}`);
+    if (depth > MAX_NODE_DEPTH) {
+      fail(
+        "node_tree_too_deep",
+        `${path} is deeper than ${MAX_NODE_DEPTH} levels at ${nodeId}`,
+        { maxDepth: MAX_NODE_DEPTH, nodeId },
+      );
+    }
     visited.add(nodeId);
-  };
-  visit(rootId);
+    for (const childId of nodes[nodeId].children) stack.push([childId, depth + 1]);
+  }
   if (visited.size !== Object.keys(nodes).length) {
     fail("orphan_node", `${path} contains nodes outside its root tree`);
   }
@@ -185,7 +182,7 @@ function parseAxis(value, path) {
 
 function selectionKey(selection) {
   return Object.entries(selection)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareStrings(left, right))
     .map(([key, value]) => `${key}=${value}`)
     .join("&");
 }
