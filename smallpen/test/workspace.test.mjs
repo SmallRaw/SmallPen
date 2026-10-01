@@ -3,6 +3,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   realpath,
   symlink,
@@ -13,6 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { listPackageEntries } from "@smallpen/core";
 import {
   applyOperationBatch,
   openWorkspace,
@@ -464,4 +466,84 @@ test("a reference to an undeclared Package enters Repair", async () => {
     resolution.conflicts[0].path,
     "screens/roundtrip.json.presentations[0].nodes.node_rectangle.tokenBindings.fill",
   );
+});
+
+test("a Library server cannot chain new Libraries without end", async () => {
+  const root = await mkdtemp(join(tmpdir(), "smallpen-library-chain-"));
+  const baseManifest = JSON.parse(
+    await readFile(join(fixture, "manifest.json"), "utf8"),
+  );
+  const entries = new Map();
+  for (const entry of listPackageEntries(baseManifest).entries) {
+    entries.set(entry, await readFile(join(fixture, entry), "utf8"));
+  }
+  const link = (index) => ({
+    packageId: `pkg_chain_${index}`,
+    source: { type: "url", url: `https://chain.example/lib/${index}/` },
+  });
+  let manifests = 0;
+  const fetchImpl = async (url) => {
+    const [, index, entry] = /^\/lib\/(\d+)\/(.*)$/.exec(new URL(url).pathname);
+    if (entry !== "manifest.json") return new Response(entries.get(entry));
+    manifests += 1;
+    return new Response(
+      JSON.stringify({
+        ...baseManifest,
+        libraries: [link(Number(index) + 1)],
+        name: `Chain ${index}`,
+        packageId: `pkg_chain_${index}`,
+      }),
+    );
+  };
+  const productPath = join(root, "chain.smallpen");
+  await cp(fixture, productPath, { recursive: true });
+  await writeJson(join(productPath, "manifest.json"), {
+    ...baseManifest,
+    libraries: [link(1)],
+  });
+  const cacheRoot = join(root, "cache");
+
+  const resolved = await resolveWorkspace(productPath, {
+    fetchImpl,
+    libraryCacheRoot: cacheRoot,
+  });
+  assert.equal(resolved.status, "repair");
+  assert.ok(
+    resolved.conflicts.some(({ code }) => code === "library_limit_exceeded"),
+  );
+  assert.ok(manifests <= 256);
+  assert.ok((await readdir(cacheRoot)).length <= 256);
+});
+
+test("opening a non-Package path never creates a lock beside it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "smallpen-lock-litter-"));
+  await mkdir(join(root, "private"));
+  await writeFile(join(root, "private", "notes.txt"), "data");
+  for (const path of [join(root, "private"), join(root, "private", "notes.txt")]) {
+    await assert.rejects(
+      openWorkspace(path),
+      (error) => error?.code === "invalid_package_path",
+    );
+  }
+  assert.deepEqual(await readdir(root), ["private"]);
+  assert.deepEqual(await readdir(join(root, "private")), ["notes.txt"]);
+});
+
+test("a Package with thousands of Library links resolves a bounded number", async () => {
+  const root = await mkdtemp(join(tmpdir(), "smallpen-library-fanout-"));
+  const productPath = join(root, "fanout.smallpen");
+  await cp(fixture, productPath, { recursive: true });
+  const manifest = JSON.parse(
+    await readFile(join(productPath, "manifest.json"), "utf8"),
+  );
+  manifest.libraries = Array.from({ length: 1000 }, (_, index) => ({
+    packageId: `pkg_missing_${index}`,
+    source: { path: `missing-${index}.smallpen`, type: "local" },
+  }));
+  await writeJson(join(productPath, "manifest.json"), manifest);
+
+  const resolved = await resolveWorkspace(productPath);
+  assert.equal(resolved.status, "repair");
+  assert.equal(resolved.conflicts.length, 257);
+  assert.equal(resolved.conflicts.at(-1).code, "library_limit_exceeded");
 });

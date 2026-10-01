@@ -1,7 +1,10 @@
 import {
   applyEffectiveTokenBindings,
+  applyNodeOverrides,
   componentCombinationSnapshot,
   fail,
+  INSTANCE_OVERRIDE_FIELDS,
+  overrideTouchedGroups,
   projectScreen,
   resolveEffectiveToken,
   SMALLPEN_FORMAT_CAPABILITIES,
@@ -760,11 +763,11 @@ function compilePlainTextContent(
 
 // Penpot PATH shapes carry :content as a segment vector
 // ({command: "move-to"|"line-to"|"curve-to"|"close-path", params: {...}}) in
-// page-absolute coordinates. The canonical package format stores path
-// geometry as the pathData string LOCAL to the node origin
-// (packages/local-package/src/render.mjs), so compile it and subtract the
-// shape's absolute origin.
-function compilePathContent(value, origin = { x: 0, y: 0 }) {
+// page-absolute coordinates, already turned by the shape's transform. The
+// canonical package format stores path geometry as the pathData string LOCAL
+// to the node box (packages/local-package/src/render.mjs), so map every point
+// through the inverse of the node's absolute matrix.
+function compilePathContent(value, inverse = [1, 0, 0, 1, 0, 0]) {
   if (typeof value === "string") return value;
   if (!Array.isArray(value)) {
     fail(
@@ -791,14 +794,22 @@ function compilePathContent(value, origin = { x: 0, y: 0 }) {
           { value: segment },
         );
       }
-      return coordinate - origin[key.slice(-1)];
+      return coordinate;
+    };
+    const point = (prefix = "") => {
+      const local = matrixPoint(
+        inverse,
+        number(`${prefix}x`),
+        number(`${prefix}y`),
+      );
+      return `${canonicalNumber(local.x)},${canonicalNumber(local.y)}`;
     };
     if (command === "move-to") {
-      pathData += `M${number("x")},${number("y")}`;
+      pathData += `M${point()}`;
     } else if (command === "line-to") {
-      pathData += `L${number("x")},${number("y")}`;
+      pathData += `L${point()}`;
     } else if (command === "curve-to") {
-      pathData += `C${number("c1x")},${number("c1y")},${number("c2x")},${number("c2y")},${number("x")},${number("y")}`;
+      pathData += `C${point("c1")},${point("c2")},${point()}`;
     } else if (command === "close-path") {
       pathData += "Z";
     } else {
@@ -841,29 +852,55 @@ function compileTextContent(operation, value, node, snapshot) {
   }
 }
 
+function projectedSnapshotNodes(snapshot, descriptor) {
+  const dependencyIds = new Set(
+    (snapshot.manifest.dependencies ?? []).map(({ packageId }) => packageId),
+  );
+  const foundation = (snapshot.libraries ?? []).find(({ manifest }) =>
+    dependencyIds.has(manifest.packageId),
+  );
+  const libraries = (snapshot.libraries ?? []).filter(
+    (candidate) => candidate !== foundation,
+  );
+  return projectScreen(snapshot, descriptor.screenId, {
+    context: snapshot.projection?.context,
+    foundation,
+    libraries,
+    presentationId: descriptor.presentationId,
+  }).nodes;
+}
+
 function projectedNode(snapshot, descriptor, projections) {
   const key = `${descriptor.screenId}\0${descriptor.presentationId}`;
   let nodes = projections.get(key);
   if (!nodes) {
-    const dependencyIds = new Set(
-      (snapshot.manifest.dependencies ?? []).map(({ packageId }) => packageId),
-    );
-    const foundation = (snapshot.libraries ?? []).find(({ manifest }) =>
-      dependencyIds.has(manifest.packageId),
-    );
-    const libraries = (snapshot.libraries ?? []).filter(
-      (candidate) => candidate !== foundation,
-    );
-    nodes = projectScreen(snapshot, descriptor.screenId, {
-      context: snapshot.projection?.context,
-      foundation,
-      libraries,
-      presentationId: descriptor.presentationId,
-    }).nodes;
+    nodes = projectedSnapshotNodes(snapshot, descriptor);
     projections.set(key, nodes);
   }
   return nodes[descriptor.nodeId];
 }
+
+// What a cleared (nil) Penpot attribute means: flags read as false, corners
+// and turns as zero.
+const PENPOT_NULL_DEFAULTS = new Map([
+  ["blocked", false],
+  ["flip-x", false],
+  ["flip-y", false],
+  ["hidden", false],
+  ["proportion-lock", false],
+  ["r1", 0],
+  ["r2", 0],
+  ["r3", 0],
+  ["r4", 0],
+  ["rotation", 0],
+]);
+// Every Penpot shape keeps these; a nil one is rejected by its validator.
+const PENPOT_REQUIRED_ATTRIBUTES = new Set(["height", "name", "width"]);
+// Cleared Penpot attributes whose canonical field has another name.
+const PENPOT_NULL_FIELDS = new Map([
+  ["applied-tokens", "appliedTokens"],
+  ["background-blur", "backgroundBlur"],
+]);
 
 function cornerRadii(value) {
   if (typeof value === "number") return [value, value, value, value];
@@ -872,11 +909,29 @@ function cornerRadii(value) {
 }
 
 function compileAttribute(operation, attr, value, node, snapshot) {
-  if (value === null) {
-    // Penpot inverse/undo edits clear attributes with an explicit null; the
-    // update-presentation-node contract treats null as "remove the field"
-    // (same convention the layout attributes already rely on).
-    operation.changes[attr] = null;
+  if (value === null && !PENPOT_REQUIRED_ATTRIBUTES.has(attr)) {
+    // Penpot inverse/undo edits clear attributes with an explicit null
+    // (changes_builder `update-shapes` sets an attr the shape lacked back to
+    // nil, and Penpot dissocs it). Flags and corners fall back to their
+    // Penpot default; any other attr removes its canonical field, which the
+    // update-presentation-node contract spells as null.
+    if (PENPOT_NULL_DEFAULTS.has(attr)) {
+      compileAttribute(
+        operation,
+        attr,
+        PENPOT_NULL_DEFAULTS.get(attr),
+        node,
+        snapshot,
+      );
+      return;
+    }
+    if (attr === "grow-type" || attr === "metadata") {
+      // A shape that cannot grow or hold media has nothing to clear.
+      const field = attr === "grow-type" ? "growType" : "mediaRef";
+      if (Object.hasOwn(node, field)) operation.changes[field] = null;
+      return;
+    }
+    operation.changes[PENPOT_NULL_FIELDS.get(attr) ?? attr] = null;
     return;
   }
   if (attr === "applied-tokens") {
@@ -1286,7 +1341,7 @@ function nodeDescriptor(snapshot, runtimeId, page, allowNew = false) {
   }
   if (allowNew && page) {
     return {
-      nodeId: runtimeNodeId(value),
+      nodeId: snapshot.addedNodeIds?.get(value) ?? runtimeNodeId(value),
       presentationId: page.presentationId,
       screenId: page.screenId,
     };
@@ -1308,13 +1363,65 @@ function parentDescriptor(snapshot, runtimeId, page) {
   return nodeDescriptor(snapshot, runtimeId, page, true);
 }
 
-function presentationNodes(snapshot, page) {
+function snapshotPresentation(snapshot, page) {
   const screenEntry = snapshot.manifest.entries.screens.find(
     (entry) => snapshot.entries[entry].id === page.screenId,
   );
   return snapshot.entries[screenEntry]?.presentations.find(
     (presentation) => presentation.id === page.presentationId,
-  )?.nodes;
+  );
+}
+
+// Children of a component instance exist only in the projection (the web
+// runtime maps their derived ids too). Penpot keeps copies structurally
+// locked; a change that still adds, removes or reorders their tree would be
+// an instance override no canonical operation can write.
+function requireCanonicalStructure(snapshot, runtimeId, descriptor) {
+  if (
+    descriptor.nodeId === null ||
+    snapshot.runtime.reverseNodes?.[String(runtimeId)] === undefined ||
+    presentationNodes(snapshot, descriptor)?.[descriptor.nodeId]
+  ) {
+    return;
+  }
+  fail(
+    "component_instance_override_unsupported",
+    "Edit the Component source before changing the structure of this projected child",
+    { instanceNodeId: descriptor.nodeId },
+  );
+}
+
+// Canonical nodes (not projected instance children) that a commit deletes.
+function deletedCanonicalNodeIds(snapshot, changes) {
+  const deleted = new Set();
+  for (const change of changes) {
+    if (normalizeType(change?.type) !== "del-obj") continue;
+    const descriptor = snapshot.runtime.reverseNodes?.[String(change.id)];
+    if (descriptor && presentationNodes(snapshot, descriptor)?.[descriptor.nodeId]) {
+      deleted.add(descriptor.nodeId);
+    }
+  }
+  return deleted;
+}
+
+// A projected instance child whose owning instance node (the leading
+// "<instanceId>__" segment of its composed id) is deleted in the same commit.
+function deletedWithOwnerInstance(snapshot, descriptor, deletedNodeIds) {
+  if (
+    descriptor.nodeId === null ||
+    snapshot.runtime.reverseNodes === undefined ||
+    presentationNodes(snapshot, descriptor)?.[descriptor.nodeId]
+  ) {
+    return false;
+  }
+  for (const nodeId of deletedNodeIds) {
+    if (descriptor.nodeId.startsWith(`${nodeId}__`)) return true;
+  }
+  return false;
+}
+
+function presentationNodes(snapshot, page) {
+  return snapshotPresentation(snapshot, page)?.nodes;
 }
 
 function canonicalParentId(nodes, nodeId) {
@@ -1324,29 +1431,317 @@ function canonicalParentId(nodes, nodeId) {
   return null;
 }
 
-function canonicalAbsoluteOrigin(snapshot, page, nodeId) {
-  const nodes = presentationNodes(snapshot, page);
-  let currentId = nodeId;
-  let x = 0;
-  let y = 0;
+// Canonical node geometry is parent-relative: a node's x/y, rotation and
+// flips apply inside its parent's FULL transform, the matrix local-package
+// render.mjs `nodeTransform` builds and composes down the tree. Penpot shapes
+// are page-absolute: a selrect (x/y/width/height) turned by a linear
+// :transform about its center, with :rotation/:flip-x/:flip-y as page-level
+// values. A "placement" is that absolute Penpot geometry plus its matrix; the
+// frontend projection (projection.cljs `absolute-origins`) composes the same
+// chain in the other direction. Matrices are [a, b, c, d, e, f]:
+// x' = a*x + c*y + e, y' = b*x + d*y + f.
+const QUARTER_TURNS = new Map([
+  [0, [1, 0]],
+  [90, [0, 1]],
+  [180, [-1, 0]],
+  [270, [0, -1]],
+]);
+const ROOT_PLACEMENT = Object.freeze({
+  flipX: false,
+  flipY: false,
+  height: 0,
+  linear: [1, 0, 0, 1],
+  matrix: [1, 0, 0, 1, 0, 0],
+  rotation: 0,
+  width: 0,
+  x: 0,
+  y: 0,
+});
+const PLACEMENT_ATTRIBUTES = new Set([
+  "flip-x",
+  "flip-y",
+  "height",
+  "rotation",
+  "selrect",
+  "transform",
+  "width",
+  "x",
+  "y",
+]);
+
+function multiplyMatrix(left, right) {
+  return [
+    left[0] * right[0] + left[2] * right[1],
+    left[1] * right[0] + left[3] * right[1],
+    left[0] * right[2] + left[2] * right[3],
+    left[1] * right[2] + left[3] * right[3],
+    left[0] * right[4] + left[2] * right[5] + left[4],
+    left[1] * right[4] + left[3] * right[5] + left[5],
+  ];
+}
+
+function invertMatrix(matrix) {
+  const determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) {
+    fail("invalid_node_transform", "Node transform cannot be inverted", {
+      matrix,
+    });
+  }
+  return [
+    matrix[3] / determinant,
+    -matrix[1] / determinant,
+    -matrix[2] / determinant,
+    matrix[0] / determinant,
+    (matrix[2] * matrix[5] - matrix[3] * matrix[4]) / determinant,
+    (matrix[1] * matrix[4] - matrix[0] * matrix[5]) / determinant,
+  ];
+}
+
+function matrixPoint(matrix, x, y) {
+  return {
+    x: matrix[0] * x + matrix[2] * y + matrix[4],
+    y: matrix[1] * x + matrix[3] * y + matrix[5],
+  };
+}
+
+function translationOnly(matrix) {
+  return (
+    matrix[0] === 1 && matrix[1] === 0 && matrix[2] === 0 && matrix[3] === 1
+  );
+}
+
+function normalizedRotation(value) {
+  const rotation = canonicalNumber((((value % 360) + 360) % 360));
+  return rotation === 360 ? 0 : rotation;
+}
+
+// R(rotation)·diag(flipX ? -1 : 1, flipY ? -1 : 1), exact on quarter turns.
+function rotationLinear(rotation, flipX, flipY) {
+  const turn = ((rotation % 360) + 360) % 360;
+  const angle = (turn * Math.PI) / 180;
+  const [cos, sin] = QUARTER_TURNS.get(turn) ?? [
+    Math.cos(angle),
+    Math.sin(angle),
+  ];
+  const horizontal = flipX ? -1 : 1;
+  const vertical = flipY ? -1 : 1;
+  return [cos * horizontal, sin * horizontal, -sin * vertical, cos * vertical];
+}
+
+// A width x height box at (x, y) turned by `linear` about its center: the
+// canonical nodeTransform and Penpot's selrect + :transform alike.
+function boxMatrix(x, y, width, height, linear) {
+  if (translationOnly(linear)) return [1, 0, 0, 1, x, y];
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  return multiplyMatrix(
+    [1, 0, 0, 1, x + halfWidth, y + halfHeight],
+    multiplyMatrix([...linear, 0, 0], [1, 0, 0, 1, -halfWidth, -halfHeight]),
+  );
+}
+
+function canonicalNodeMatrix(node) {
+  return boxMatrix(
+    node.x ?? 0,
+    node.y ?? 0,
+    node.width ?? 0,
+    node.height ?? 0,
+    rotationLinear(node.rotation ?? 0, node.flipX === true, node.flipY === true),
+  );
+}
+
+function placementFromMatrix(matrix, width, height, rotation, flipX, flipY) {
+  let { 4: x, 5: y } = matrix;
+  if (!translationOnly(matrix)) {
+    const center = matrixPoint(matrix, width / 2, height / 2);
+    x = center.x - width / 2;
+    y = center.y - height / 2;
+  }
+  return {
+    flipX,
+    flipY,
+    height,
+    linear: matrix.slice(0, 4),
+    matrix,
+    rotation: ((rotation % 360) + 360) % 360,
+    width,
+    x,
+    y,
+  };
+}
+
+// Compose a canonical node into its parent's absolute placement. A mirrored
+// parent turns its children the other way: diag(-1, 1)·R(t) = R(-t)·diag(-1, 1).
+function childPlacement(parent, node) {
+  const rotation = node.rotation ?? 0;
+  return placementFromMatrix(
+    multiplyMatrix(parent.matrix, canonicalNodeMatrix(node)),
+    node.width ?? 0,
+    node.height ?? 0,
+    parent.flipX !== parent.flipY
+      ? parent.rotation - rotation
+      : parent.rotation + rotation,
+    parent.flipX !== (node.flipX === true),
+    parent.flipY !== (node.flipY === true),
+  );
+}
+
+function canonicalParentIndex(nodes) {
+  const parents = new Map();
+  for (const node of Object.values(nodes ?? {})) {
+    for (const childId of node.children ?? []) parents.set(childId, node.id);
+  }
+  return parents;
+}
+
+// The absolute placement of a canonical node: its ancestors' transforms
+// composed from the root down.
+function canonicalTreePlacement(nodes, nodeId, origin = ROOT_PLACEMENT) {
+  if (!nodes?.[nodeId]) return null;
+  const parents = canonicalParentIndex(nodes);
+  const chain = [];
   const visited = new Set();
-  while (currentId !== null && currentId !== undefined) {
+  for (
+    let currentId = nodeId;
+    currentId !== undefined;
+    currentId = parents.get(currentId)
+  ) {
     if (visited.has(currentId)) {
-      fail("node_cycle", `Canonical node hierarchy contains a cycle: ${currentId}`);
+      fail(
+        "node_cycle",
+        `Canonical node hierarchy contains a cycle: ${currentId}`,
+      );
     }
     visited.add(currentId);
-    const node = nodes?.[currentId];
+    const node = nodes[currentId];
     if (!node) return null;
-    x += node.x ?? 0;
-    y += node.y ?? 0;
-    currentId = canonicalParentId(nodes, currentId);
+    chain.unshift(node);
   }
-  return { x, y };
+  return chain.reduce(childPlacement, origin);
+}
+
+function canonicalAbsolutePlacement(snapshot, page, nodeId) {
+  return canonicalTreePlacement(presentationNodes(snapshot, page), nodeId);
+}
+
+function finiteRect(value) {
+  return isRecord(value) &&
+    ["x", "y", "width", "height"].every((key) => Number.isFinite(value[key]))
+    ? value
+    : undefined;
+}
+
+function penpotLinear(transform) {
+  if (!isRecord(transform)) return undefined;
+  const linear = ["a", "b", "c", "d"].map((key) => transform[key]);
+  if (linear.some((value) => !Number.isFinite(value))) return undefined;
+  const determinant = linear[0] * linear[3] - linear[1] * linear[2];
+  return Math.abs(determinant) < 1e-9 ? undefined : linear;
+}
+
+function isPenpotPath(type) {
+  return ["path", "bool"].includes(normalizeType(type));
+}
+
+// Penpot's absolute placement once `values` (a whole Penpot object, or the
+// merged set operations of a commit) override `baseline`. Penpot moves a path
+// by rewriting :content and :selrect only, so a path's box is its selrect.
+// The matrix comes from :transform when it is a real matrix; Penpot's
+// :rotation and flips are display values that drift from it after mirrored
+// rotations, so they only rebuild the matrix when no :transform is sent.
+function penpotPlacement(values, baseline, path = false) {
+  const selrect = path ? finiteRect(values.selrect) : undefined;
+  const box = (key) =>
+    selrect?.[key] ??
+    (Number.isFinite(values[key]) ? values[key] : baseline[key]);
+  const flip = (key, fallback) =>
+    values[key] === undefined ? fallback : values[key] === true;
+  const flipX = flip("flip-x", baseline.flipX);
+  const flipY = flip("flip-y", baseline.flipY);
+  const rotation =
+    values.rotation === undefined
+      ? baseline.rotation
+      : Number.isFinite(values.rotation)
+        ? values.rotation
+        : 0;
+  const turned =
+    values.rotation !== undefined ||
+    values["flip-x"] !== undefined ||
+    values["flip-y"] !== undefined;
+  const linear =
+    penpotLinear(values.transform) ??
+    (turned ? rotationLinear(rotation, flipX, flipY) : baseline.linear);
+  const placement = {
+    flipX,
+    flipY,
+    height: box("height"),
+    linear,
+    rotation: ((rotation % 360) + 360) % 360,
+    width: box("width"),
+    x: box("x"),
+    y: box("y"),
+  };
+  placement.matrix = boxMatrix(
+    placement.x,
+    placement.y,
+    placement.width,
+    placement.height,
+    linear,
+  );
+  return placement;
+}
+
+// Express an absolute placement in its parent's frame: the canonical x/y,
+// rotation and flips that compose back to it. A mirror is either flip plus
+// some turn, so `preferred` flip pairs win when they fit the determinant.
+function relativePlacement(parent, placement, preferred = []) {
+  const local = multiplyMatrix(invertMatrix(parent.matrix), placement.matrix);
+  const { height, width } = placement;
+  let { 4: x, 5: y } = local;
+  if (!translationOnly(local)) {
+    const center = matrixPoint(local, width / 2, height / 2);
+    x = center.x - width / 2;
+    y = center.y - height / 2;
+  }
+  const mirrored = local[0] * local[3] - local[1] * local[2] < 0;
+  const flips = [...preferred, { flipX: mirrored, flipY: false }].find(
+    (candidate) => (candidate.flipX !== candidate.flipY) === mirrored,
+  );
+  // linear = R(t)·diag(sx, sy), so the first column of R(t) is sx·(a, b).
+  const horizontal = flips.flipX ? -1 : 1;
+  return {
+    flipX: flips.flipX,
+    flipY: flips.flipY,
+    rotation: normalizedRotation(
+      (Math.atan2(local[1] * horizontal, local[0] * horizontal) * 180) /
+        Math.PI,
+    ),
+    x: canonicalNumber(x),
+    y: canonicalNumber(y),
+  };
+}
+
+// The flips Penpot itself reports, re-expressed against the parent.
+function penpotRelativeFlips(parent, placement) {
+  return {
+    flipX: placement.flipX !== parent.flipX,
+    flipY: placement.flipY !== parent.flipY,
+  };
+}
+
+// The matrix that maps a node's local geometry (canonical pathData) to the
+// page once `relative` is stored on it.
+function relativeNodeMatrix(parent, relative, width, height) {
+  return multiplyMatrix(
+    parent.matrix,
+    canonicalNodeMatrix({ ...relative, height, width }),
+  );
 }
 
 function penpotGeometryContext(changes) {
+  const added = new Map();
   const parents = new Map();
-  const positions = new Map();
+  const values = new Map();
   for (const change of changes) {
     const type = normalizeType(change?.type);
     if (type === "add-obj" && isRecord(change.obj)) {
@@ -1360,18 +1755,20 @@ function penpotGeometryContext(changes) {
             "00000000-0000-0000-0000-000000000000",
         ),
       );
-      positions.set(runtimeId, { x: change.obj.x, y: change.obj.y });
+      added.set(runtimeId, change.obj);
     } else if (type === "mod-obj" && Array.isArray(change.operations)) {
-      const position = positions.get(String(change.id)) ?? {};
+      const runtimeId = String(change.id);
+      const provided = values.get(runtimeId) ?? {};
       for (const operation of change.operations) {
         const attr = normalizeType(operation?.attr);
-        if ((attr === "x" || attr === "y") && Number.isFinite(operation.val)) {
-          position[attr] = operation.val;
+        if (
+          normalizeType(operation?.type) === "set" &&
+          PLACEMENT_ATTRIBUTES.has(attr)
+        ) {
+          provided[attr] = operation.val;
         }
       }
-      if (Object.keys(position).length > 0) {
-        positions.set(String(change.id), position);
-      }
+      if (Object.keys(provided).length > 0) values.set(runtimeId, provided);
     } else if (type === "mov-objects" && Array.isArray(change.shapes)) {
       const parentRuntimeId = String(
         change["parent-id"] ?? change.parentId,
@@ -1381,7 +1778,7 @@ function penpotGeometryContext(changes) {
       }
     }
   }
-  return { parents, positions };
+  return { added, parents, values };
 }
 
 function runtimeParentId(snapshot, page, runtimeId, geometry) {
@@ -1396,25 +1793,37 @@ function runtimeParentId(snapshot, page, runtimeId, geometry) {
   ];
 }
 
-function runtimeAbsoluteOrigin(snapshot, page, runtimeId, geometry) {
+// The placement Penpot holds for a shape once the commit applies: the
+// canonical composition, overridden by whatever geometry the commit sends.
+function runtimeAbsolutePlacement(snapshot, page, runtimeId, geometry) {
   if (
     runtimeId === undefined ||
     runtimeId === null ||
     String(runtimeId) === "00000000-0000-0000-0000-000000000000"
   ) {
-    return { x: 0, y: 0 };
+    return ROOT_PLACEMENT;
   }
-  const provided = geometry.positions.get(String(runtimeId));
+  const added = geometry.added.get(String(runtimeId));
+  if (added) {
+    // A later mod-obj in the same commit moves the new shape again.
+    const path = isPenpotPath(added.type);
+    const created = penpotPlacement(added, ROOT_PLACEMENT, path);
+    const provided = geometry.values.get(String(runtimeId));
+    return provided ? penpotPlacement(provided, created, path) : created;
+  }
   const descriptor = nodeDescriptor(snapshot, runtimeId, page, true);
-  const canonical = canonicalAbsoluteOrigin(snapshot, page, descriptor.nodeId);
-  return {
-    x: provided?.x ?? canonical?.x ?? 0,
-    y: provided?.y ?? canonical?.y ?? 0,
-  };
+  const node = presentationNodes(snapshot, page)?.[descriptor.nodeId];
+  const baseline =
+    canonicalAbsolutePlacement(snapshot, page, descriptor.nodeId) ??
+    ROOT_PLACEMENT;
+  const provided = geometry.values.get(String(runtimeId));
+  return provided
+    ? penpotPlacement(provided, baseline, node?.type === "PATH")
+    : baseline;
 }
 
-function parentAbsoluteOrigin(snapshot, page, runtimeId, geometry) {
-  return runtimeAbsoluteOrigin(
+function parentAbsolutePlacement(snapshot, page, runtimeId, geometry) {
+  return runtimeAbsolutePlacement(
     snapshot,
     page,
     runtimeParentId(snapshot, page, runtimeId, geometry),
@@ -1529,12 +1938,42 @@ function compileAppliedTokens(value) {
   return applied;
 }
 
+// Supported attributes canonicalAddedNode does not place itself.
+const PENPOT_ADDED_ATTRIBUTES = PENPOT_WRITE.attributes.filter(
+  (attr) =>
+    ![
+      "applied-tokens",
+      "content",
+      "fills",
+      "flip-x",
+      "flip-y",
+      "grow-type",
+      "height",
+      "hidden",
+      "interactions",
+      "metadata",
+      "name",
+      "opacity",
+      "pathData",
+      "r1",
+      "r2",
+      "r3",
+      "r4",
+      "rotation",
+      "strokes",
+      "touched",
+      "width",
+      "x",
+      "y",
+    ].includes(attr),
+);
+
 function canonicalAddedNode(
   snapshot,
   value,
   page,
   runtimeId = value?.id,
-  parentOrigin = { x: 0, y: 0 },
+  parentPlacement = ROOT_PLACEMENT,
   movedChildIds = null,
 ) {
   if (!isRecord(value)) {
@@ -1554,6 +1993,28 @@ function canonicalAddedNode(
     : instanceRoot && shapeRef !== undefined && shapeRef !== null
       ? "INSTANCE"
       : baseType;
+  if (
+    value.rotation !== undefined &&
+    value.rotation !== null &&
+    (typeof value.rotation !== "number" || !Number.isFinite(value.rotation))
+  ) {
+    fail("invalid_node_rotation", "Penpot rotation must be finite");
+  }
+  const path = type === "PATH";
+  if (!(path && finiteRect(value.selrect))) {
+    for (const axis of ["x", "y"]) {
+      if (!Number.isFinite(value[axis])) {
+        fail("invalid_node_number", `Penpot ${axis} must be a finite number`, {
+          attr: axis,
+          value: value[axis],
+        });
+      }
+    }
+  }
+  const placement = penpotPlacement(value, ROOT_PLACEMENT, path);
+  const relative = relativePlacement(parentPlacement, placement, [
+    penpotRelativeFlips(parentPlacement, placement),
+  ]);
   const node = {
     // Children a same-commit mov-objects re-parents must not ride on the
     // parent node: the move attaches them, and keeping the reference would
@@ -1565,18 +2026,18 @@ function canonicalAddedNode(
       .map((childRuntimeId) => {
         return nodeDescriptor(snapshot, childRuntimeId, page, true).nodeId;
       }),
-    height: value.height,
+    height: path && finiteRect(value.selrect) ? placement.height : value.height,
     id: descriptor.nodeId,
     name: value.name,
     type,
-    width: value.width,
-    x: canonicalNumber(value.x - parentOrigin.x),
-    y: canonicalNumber(value.y - parentOrigin.y),
+    width: path && finiteRect(value.selrect) ? placement.width : value.width,
+    x: relative.x,
+    y: relative.y,
   };
-  if (value["applied-tokens"] !== undefined) {
+  if (value["applied-tokens"] !== undefined && value["applied-tokens"] !== null) {
     node.appliedTokens = compileAppliedTokens(value["applied-tokens"]);
   }
-  if (value.interactions !== undefined) {
+  if (value.interactions !== undefined && value.interactions !== null) {
     if (
       !Array.isArray(value.interactions) ||
       value.interactions.some((interaction) => !isRecord(interaction))
@@ -1659,42 +2120,60 @@ function canonicalAddedNode(
       value.r4 ?? 0,
     ];
   }
-  if (value.opacity !== undefined) node.opacity = value.opacity;
-  if (value.rotation !== undefined && value.rotation !== null) {
-    if (
-      typeof value.rotation !== "number" ||
-      !Number.isFinite(value.rotation)
-    ) {
-      fail("invalid_node_rotation", "Penpot rotation must be finite");
-    }
-    const rotation = ((value.rotation % 360) + 360) % 360;
-    if (rotation !== 0) node.rotation = rotation;
+  if (value.opacity !== undefined && value.opacity !== null) {
+    node.opacity = value.opacity;
   }
-  if (value["flip-x"] === true) node.flipX = true;
-  if (value["flip-y"] === true) node.flipY = true;
+  // An undo restoring a deleted shape, a duplicate or a paste sends the whole
+  // Penpot object: keep every other supported attribute it carries. Penpot
+  // defaults stay implicit, as for a shape drawn from scratch.
+  const carried = { changes: {} };
+  for (const attr of PENPOT_ADDED_ATTRIBUTES) {
+    const attrValue = value[attr];
+    if (
+      attrValue === undefined ||
+      attrValue === null ||
+      attrValue === false ||
+      normalizeType(attrValue) === "normal" ||
+      (Array.isArray(attrValue) && attrValue.length === 0)
+    ) {
+      continue;
+    }
+    compileAttribute(carried, attr, attrValue, node, snapshot);
+  }
+  for (const [field, fieldValue] of Object.entries(carried.changes)) {
+    if (fieldValue !== null) node[field] = fieldValue;
+  }
+  if (relative.rotation !== 0) node.rotation = relative.rotation;
+  if (relative.flipX) node.flipX = true;
+  if (relative.flipY) node.flipY = true;
   if (Array.isArray(value.strokes) && value.strokes.length > 0) {
     node.strokes = compileStrokes(value.strokes, snapshot);
   }
   if (value.hidden !== undefined) node.visible = !value.hidden;
   if (type === "PATH") {
-    for (const [source, target] of [
-      ["path-data", "pathData"],
-      ["points", "points"],
-    ]) {
-      if (value[source] !== undefined)
-        node[target] = structuredClone(value[source]);
+    // Penpot :points are the transformed box corners, derived from the box
+    // and the transform; the canonical node keeps only its own geometry.
+    if (value["path-data"] !== undefined) {
+      node.pathData = structuredClone(value["path-data"]);
     }
     if (value["content"] !== undefined) {
-      node.pathData = compilePathContent(value["content"], {
-        x: value.x ?? 0,
-        y: value.y ?? 0,
-      });
+      node.pathData = compilePathContent(
+        value["content"],
+        invertMatrix(
+          relativeNodeMatrix(
+            parentPlacement,
+            relative,
+            node.width,
+            node.height,
+          ),
+        ),
+      );
     }
   }
   return node;
 }
 
-function compileAddedNode(snapshot, change, geometry, movedChildIds) {
+function compileAddedNode(snapshot, change, geometry, movedChildIds, domain) {
   const page = pageDescriptor(snapshot, change);
   const value = change.obj;
   if (!isRecord(value)) {
@@ -1706,27 +2185,384 @@ function compileAddedNode(snapshot, change, geometry, movedChildIds) {
     change["parent-id"] ?? change.parentId ?? value["parent-id"],
     page,
   );
-  const parentOrigin = parentAbsoluteOrigin(
+  const parentPlacement = parentAbsolutePlacement(
     snapshot,
     page,
     runtimeId,
     geometry,
   );
+  const root = domain?.roots.get(String(runtimeId));
+  const node = root
+    ? canonicalDomainInstance(
+        snapshot,
+        change,
+        page,
+        root,
+        parentPlacement,
+        domain,
+      )
+    : canonicalAddedNode(
+        snapshot,
+        value,
+        page,
+        runtimeId,
+        parentPlacement,
+        movedChildIds,
+      );
   return {
     index: change.index,
-    node: canonicalAddedNode(
-      snapshot,
-      value,
-      page,
-      runtimeId,
-      parentOrigin,
-      movedChildIds,
-    ),
+    node: requireCanonicalNodeFields(node),
     parentId: parent.nodeId,
     presentationId: page.presentationId,
     screenId: page.screenId,
     type: "add-presentation-node",
   };
+}
+
+// The fields a canonical node may hold. Penpot attributes are compiled to
+// these names; a raw Penpot attribute reaching a node is a compiler bug.
+const CANONICAL_NODE_FIELDS = new Set([
+  ...SMALLPEN_FORMAT_CAPABILITIES.canonicalWrite.nodeFields,
+  "children",
+  "componentId",
+  "componentVariantId",
+  "id",
+  "instance",
+  "sourceNodeId",
+  "type",
+]);
+
+function requireCanonicalNodeFields(node) {
+  const fields = Object.keys(node).filter(
+    (field) => !CANONICAL_NODE_FIELDS.has(field),
+  );
+  if (fields.length > 0) {
+    fail(
+      "non_canonical_node_field",
+      "Penpot node compiled to fields the Package does not define",
+      { fields, nodeId: node.id },
+    );
+  }
+  return node;
+}
+
+// Penpot attributes of a domain Instance root that override its source, and
+// the root field each one is stored as.
+const DOMAIN_ROOT_OVERRIDE_FIELDS = new Map([
+  ["fills", "fills"],
+  ["hidden", "visible"],
+  ["name", "name"],
+  ["opacity", "opacity"],
+]);
+
+// What a new domain Instance root keeps from a mod-obj in the commit that
+// creates it: placement, render bookkeeping, and the fields an Instance node
+// holds over its source. Penpot's relocation defaults (constraints,
+// hide-in-viewer on a board moved into a board) are not edits of the copy.
+const DOMAIN_INSTANCE_ROOT_ATTRIBUTES = new Set([
+  ...PLACEMENT_ATTRIBUTES,
+  ...PENPOT_DERIVED_ATTRIBUTES,
+  "fills",
+  "hidden",
+  "interactions",
+  "name",
+  "opacity",
+]);
+
+// The canonical Component Set variant a Penpot copy root instantiates, or
+// null when the copy is not one (a located component, a plain shape).
+function domainInstanceSource(snapshot, value) {
+  if (
+    value["component-root"] !== true ||
+    value["main-instance"] === true ||
+    value["component-id"] === undefined ||
+    value["component-id"] === null ||
+    value["shape-ref"] === undefined ||
+    value["shape-ref"] === null
+  ) {
+    return null;
+  }
+  const { descriptor, owner } = referencedComponentDescriptor(
+    snapshot,
+    value["component-id"],
+    value["component-file"],
+  );
+  if (descriptor.variantId === undefined) return null;
+  for (const entry of owner.manifest.entries.components) {
+    const sets = owner.entries[entry]?.componentSets;
+    const set = Array.isArray(sets)
+      ? sets.find(({ id }) => id === descriptor.componentId)
+      : undefined;
+    const variant = set?.variants?.find(({ id }) => id === descriptor.variantId);
+    if (variant) {
+      return {
+        component: { assetId: set.id, packageId: owner.manifest.packageId },
+        owner,
+        set,
+        variant,
+      };
+    }
+  }
+  return null;
+}
+
+// Copies of canonical Component Set variants this commit adds (a variant
+// dropped from Assets, an undo restoring a deleted Instance). Each copy root
+// becomes a domain `instance` node; the copy's children are that node's
+// projection, so they are tracked here and never written as nodes. An undo
+// restores the root under its old runtime id: the node id its plugin data
+// names is reused when that id is still free, so the restored Instance gets
+// its own id back.
+function domainInstanceAdds(snapshot, changes) {
+  const roots = new Map();
+  const children = new Map();
+  const nodeIds = new Map();
+  const generatedPages = new Set(
+    [snapshot.runtime?.componentsPage, snapshot.runtime?.designSystemPage]
+      .filter((pageId) => pageId !== undefined)
+      .map(String),
+  );
+  for (const change of changes) {
+    if (normalizeType(change?.type) !== "add-obj" || !isRecord(change.obj)) {
+      continue;
+    }
+    const value = change.obj;
+    const runtimeId = String(change.id ?? value.id);
+    const parentId = String(
+      change["parent-id"] ?? change.parentId ?? value["parent-id"],
+    );
+    const rootId = roots.has(parentId)
+      ? parentId
+      : children.get(parentId)?.rootId;
+    if (rootId !== undefined) {
+      if (value["shape-ref"] === undefined || value["shape-ref"] === null) {
+        fail(
+          "component_instance_override_unsupported",
+          "Edit the Component source before adding shapes to an Instance",
+          { instanceNodeId: roots.get(rootId).nodeId },
+        );
+      }
+      children.set(runtimeId, { rootId, value });
+      continue;
+    }
+    const pageId = String(change.pageId ?? change["page-id"] ?? "");
+    const page = snapshot.runtime?.reversePages?.[pageId];
+    if (
+      !page ||
+      generatedPages.has(pageId) ||
+      snapshot.runtime.reverseNodes?.[runtimeId] !== undefined
+    ) {
+      continue;
+    }
+    const source = domainInstanceSource(snapshot, value);
+    if (!source) continue;
+    const plugin = value["plugin-data"]?.smallpen;
+    const pluginNodeId =
+      isRecord(plugin) &&
+      plugin["screen-id"] === page.screenId &&
+      plugin["presentation-id"] === page.presentationId &&
+      typeof plugin["node-id"] === "string" &&
+      /^node_[a-zA-Z0-9_-]+$/.test(plugin["node-id"]) &&
+      !plugin["node-id"].includes("__")
+        ? plugin["node-id"]
+        : undefined;
+    const taken = new Set(nodeIds.values());
+    const nodeId =
+      pluginNodeId !== undefined &&
+      !taken.has(pluginNodeId) &&
+      !Object.hasOwn(presentationNodes(snapshot, page) ?? {}, pluginNodeId)
+        ? pluginNodeId
+        : runtimeNodeId(runtimeId);
+    nodeIds.set(runtimeId, nodeId);
+    roots.set(runtimeId, { ...source, nodeId, pluginNodeId });
+  }
+  return { childNodeIds: new Map(), children, nodeIds, roots };
+}
+
+// Drops the changes that address the projected children of a new domain
+// Instance, and the root attributes DOMAIN_INSTANCE_ROOT_ATTRIBUTES leaves
+// out.
+function withoutProjectedCopyChanges(changes, domain) {
+  if (domain.roots.size === 0) return changes;
+  const result = [];
+  for (const change of changes) {
+    const type = normalizeType(change?.type);
+    const runtimeId = String(change?.id);
+    if (
+      (type === "add-obj" || type === "mod-obj") &&
+      domain.children.has(runtimeId)
+    ) {
+      continue;
+    }
+    if (type === "mov-objects" && Array.isArray(change.shapes)) {
+      const shapes = change.shapes.filter(
+        (shape) => !domain.children.has(String(shape)),
+      );
+      if (shapes.length === change.shapes.length) result.push(change);
+      else if (shapes.length > 0) result.push({ ...change, shapes });
+      continue;
+    }
+    if (
+      type === "mod-obj" &&
+      domain.roots.has(runtimeId) &&
+      Array.isArray(change.operations)
+    ) {
+      const operations = change.operations.filter((item) => {
+        if (!isRecord(item)) return true;
+        const itemType = normalizeType(item.type);
+        if (itemType === "set-touched") return false;
+        return (
+          itemType !== "set" ||
+          DOMAIN_INSTANCE_ROOT_ATTRIBUTES.has(normalizeType(item.attr))
+        );
+      });
+      if (operations.length > 0) result.push({ ...change, operations });
+      continue;
+    }
+    result.push(change);
+  }
+  return result;
+}
+
+// The presentation projected with `node` (a domain Instance without
+// overrides) added: what the Instance draws from its source alone.
+function domainInstanceProjection(snapshot, page, node) {
+  const entry = snapshot.manifest.entries.screens.find(
+    (candidate) => snapshot.entries[candidate].id === page.screenId,
+  );
+  const screen = structuredClone(snapshot.entries[entry]);
+  screen.presentations.find(({ id }) => id === page.presentationId).nodes[
+    node.id
+  ] = structuredClone(node);
+  return projectedSnapshotNodes(
+    { ...snapshot, entries: { ...snapshot.entries, [entry]: screen } },
+    page,
+  );
+}
+
+// The override path of a copy child: the variant node its shape-ref names
+// (projected variant ids included, for nested Instances), else the source
+// part of the composed id its plugin data carries.
+function domainInstanceSourcePath(root, value) {
+  const shapeRef = String(value["shape-ref"]);
+  const ids =
+    root.owner.runtime.componentNodes?.[root.set.id]?.[root.variant.id] ?? {};
+  for (const [nodeId, runtimeId] of Object.entries(ids)) {
+    if (String(runtimeId) === shapeRef) return nodeId;
+  }
+  const pluginNodeId = value["plugin-data"]?.smallpen?.["node-id"];
+  if (
+    root.pluginNodeId !== undefined &&
+    typeof pluginNodeId === "string" &&
+    pluginNodeId.startsWith(`${root.pluginNodeId}__`)
+  ) {
+    return pluginNodeId.slice(root.pluginNodeId.length + 2);
+  }
+  fail(
+    "component_instance_override_unsupported",
+    "A copy child does not map to a node of its Component variant",
+    { instanceNodeId: root.nodeId },
+  );
+}
+
+function overrideFieldValue(field, node) {
+  if (field === "text" && node.text === undefined && node.textBlocks) {
+    return node.textBlocks
+      .map((block) => (block.runs ?? []).map((run) => run.text).join(""))
+      .join("\n");
+  }
+  return overrideValue(field, node[field], node);
+}
+
+// A Penpot copy root of a canonical Component Set variant as a domain
+// Instance node: placement, name, the variant it selects, and what the copy
+// holds over its source. The root keeps differing override fields as its own
+// fields (as an edit of the root does); children become `instance.overrides`.
+// Only INSTANCE_OVERRIDE_FIELDS are compared: the copy's other attributes are
+// what the source projects.
+function canonicalDomainInstance(
+  snapshot,
+  change,
+  page,
+  root,
+  parentPlacement,
+  domain,
+) {
+  const runtimeId = String(change.id ?? change.obj.id);
+  // A domain Instance keeps no touched groups: its overrides say what the
+  // copy changes, and the projection derives the groups from them.
+  const located = canonicalAddedNode(
+    snapshot,
+    { ...change.obj, touched: undefined },
+    page,
+    runtimeId,
+    parentPlacement,
+  );
+  const node = {
+    children: [],
+    height: located.height,
+    id: located.id,
+    instance: {
+      component: structuredClone(root.component),
+      variant: structuredClone(root.variant.selection),
+    },
+    name: located.name,
+    type: "INSTANCE",
+    width: located.width,
+    x: located.x,
+    y: located.y,
+  };
+  for (const field of ["flipX", "flipY", "rotation"]) {
+    if (located[field] !== undefined) node[field] = located[field];
+  }
+  if (located.interactions?.length > 0) {
+    node.interactions = located.interactions;
+  }
+  const projected = domainInstanceProjection(snapshot, page, node);
+  const differs = (field, base, value) =>
+    !(field === "text" && base.type !== "TEXT") &&
+    !sameChildField(
+      field,
+      overrideFieldValue(field, base),
+      overrideFieldValue(field, value),
+    );
+  for (const field of INSTANCE_OVERRIDE_FIELDS) {
+    if (field === "name") continue;
+    if (differs(field, projected[node.id], located)) {
+      node[field] = overrideFieldValue(field, located);
+    }
+  }
+  const overrides = {};
+  for (const [childRuntimeId, child] of domain.children) {
+    if (child.rootId !== runtimeId) continue;
+    const sourcePath = domainInstanceSourcePath(root, child.value);
+    domain.childNodeIds.set(childRuntimeId, {
+      nodeId: `${node.id}__${sourcePath}`,
+      presentationId: page.presentationId,
+      screenId: page.screenId,
+    });
+    const base = projected[`${node.id}__${sourcePath}`];
+    if (!base) {
+      fail(
+        "component_instance_override_unsupported",
+        "A copy child is not part of its Component variant projection",
+        { instanceNodeId: node.id, sourcePath },
+      );
+    }
+    const value = canonicalAddedNode(
+      snapshot,
+      { ...child.value, touched: undefined },
+      page,
+      childRuntimeId,
+    );
+    for (const field of INSTANCE_OVERRIDE_FIELDS) {
+      if (differs(field, base, value)) {
+        overrides[`${sourcePath}:${field}`] = overrideFieldValue(field, value);
+      }
+    }
+  }
+  if (Object.keys(overrides).length > 0) node.instance.overrides = overrides;
+  return node;
 }
 
 function screenDescriptor(snapshot, screenId) {
@@ -2846,22 +3682,28 @@ function compileAddedPresentation(snapshot, change) {
         "Penpot page must contain its root object",
       );
     }
-    const absoluteOrigins = new Map(
-      Object.entries(objects).map(([objectId, value]) => [
-        String(objectId),
-        { x: value?.x ?? 0, y: value?.y ?? 0 },
-      ]),
+    const placements = new Map(
+      Object.entries(objects)
+        .filter(
+          ([objectId, value]) =>
+            objectId !== "00000000-0000-0000-0000-000000000000" &&
+            isRecord(value),
+        )
+        .map(([objectId, value]) => [
+          String(objectId),
+          penpotPlacement(value, ROOT_PLACEMENT, isPenpotPath(value.type)),
+        ]),
     );
     for (const [objectId, value] of Object.entries(objects)) {
       if (objectId === "00000000-0000-0000-0000-000000000000") continue;
-      const parentOrigin =
-        absoluteOrigins.get(String(value["parent-id"])) ?? { x: 0, y: 0 };
+      const parentPlacement =
+        placements.get(String(value?.["parent-id"])) ?? ROOT_PLACEMENT;
       const node = canonicalAddedNode(
         snapshot,
         value,
         descriptor,
         objectId,
-        parentOrigin,
+        parentPlacement,
       );
       presentation.nodes[node.id] = node;
     }
@@ -2914,6 +3756,7 @@ function resolveCanonicalPresentationName(snapshot, descriptor, change) {
 
 function compileUpdatedPresentation(snapshot, change) {
   const descriptor = pageDescriptorById(snapshot, change.id);
+  const original = change;
   change = resolveCanonicalPresentationName(snapshot, descriptor, change);
   const changedAttributes = [
     "background",
@@ -2924,6 +3767,13 @@ function compileUpdatedPresentation(snapshot, change) {
   const unsupported = changedAttributes.filter(
     (attribute) => !PENPOT_PAGE_ATTRIBUTES.has(attribute),
   );
+  // A canvas color Token link has no canonical home. Clearing it (every
+  // plain color change and the detach action send background-token nil)
+  // changes nothing; applying one cannot be stored.
+  const backgroundToken = change["background-token"];
+  if (backgroundToken !== undefined && backgroundToken !== null) {
+    unsupported.push("background-token");
+  }
   if (unsupported.length > 0) {
     fail(
       "unsupported_penpot_page_attribute",
@@ -2932,6 +3782,10 @@ function compileUpdatedPresentation(snapshot, change) {
     );
   }
   if (changedAttributes.length === 0) {
+    // Only a cleared Token link or the name it already has.
+    if (["background-token", "name"].some((key) => Object.hasOwn(original, key))) {
+      return null;
+    }
     fail(
       "invalid_penpot_page_change",
       "Penpot mod-page must contain at least one supported attribute",
@@ -2943,9 +3797,11 @@ function compileUpdatedPresentation(snapshot, change) {
   ) {
     fail("invalid_penpot_page_change", "Penpot page name must be non-empty");
   }
+  // nil clears an attribute (an undo back to the default background).
   for (const attribute of ["background", "pixel-grid-color"]) {
     if (
       Object.hasOwn(change, attribute) &&
+      change[attribute] !== null &&
       typeof change[attribute] !== "string"
     ) {
       fail(
@@ -2956,6 +3812,7 @@ function compileUpdatedPresentation(snapshot, change) {
   }
   if (
     Object.hasOwn(change, "pixel-grid-opacity") &&
+    change["pixel-grid-opacity"] !== null &&
     (typeof change["pixel-grid-opacity"] !== "number" ||
       !Number.isFinite(change["pixel-grid-opacity"]) ||
       change["pixel-grid-opacity"] < 0 ||
@@ -3093,6 +3950,8 @@ function compileNodeUpdate(
   updateStatesByNode,
   projections,
   geometry,
+  addedNodes = new Map(),
+  rootTouched = new Map(),
 ) {
   const page =
     change.pageId !== undefined || change["page-id"] !== undefined
@@ -3112,31 +3971,63 @@ function compileNodeUpdate(
   const presentation = snapshot.entries[screenEntry].presentations.find(
     (value) => value.id === descriptor.presentationId,
   );
-  const canonicalNode = presentation.nodes[descriptor.nodeId];
+  // A shape created earlier in this commit (Penpot sends add-obj, then the
+  // typed text or other edits as a mod-obj in the same commit) is not in the
+  // snapshot yet: edit the node its add-presentation-node creates.
+  const canonicalNode =
+    presentation.nodes[descriptor.nodeId] ?? addedNodes.get(key);
   const node =
     canonicalNode ?? projectedNode(snapshot, descriptor, projections) ?? {};
   const projectedOnly = canonicalNode === undefined && node.type !== undefined;
+  const domainRoot = canonicalNode?.instance !== undefined;
   const coordinatePage = {
     presentationId: descriptor.presentationId,
     screenId: descriptor.screenId,
   };
-  const parentOrigin = parentAbsoluteOrigin(
-    snapshot,
-    coordinatePage,
-    change.id,
-    geometry,
-  );
-  // Penpot path content is page-absolute; canonical pathData is local to the
-  // node origin. When the same change moves x/y, normalize the content with
-  // the FINAL runtime position or the move is applied twice.
-  let runtimeOriginX = parentOrigin.x + (node.x ?? 0);
-  let runtimeOriginY = parentOrigin.y + (node.y ?? 0);
-  for (const item of change.operations) {
-    if (!isRecord(item) || normalizeType(item.type) !== "set") continue;
-    const itemAttr = normalizeType(item.attr);
-    if (itemAttr === "x" && Number.isFinite(item.val)) runtimeOriginX = item.val;
-    if (itemAttr === "y" && Number.isFinite(item.val)) runtimeOriginY = item.val;
-  }
+  // Penpot geometry is page-absolute; canonical geometry is relative to the
+  // parent's full transform. Re-express the shape's FINAL placement (every
+  // geometry set in this commit applied) against its FINAL parent, so a
+  // move, turn or reparent in the same commit is applied exactly once.
+  // A projected-only node (a component instance child) sits in the
+  // projected tree, not the canonical one.
+  const projectedNodes = projectedOnly
+    ? projectedPresentationNodes(snapshot, descriptor, projections)
+    : null;
+  const projectedParentId = projectedOnly
+    ? canonicalParentIndex(projectedNodes).get(descriptor.nodeId)
+    : undefined;
+  const parentPlacement = projectedOnly
+    ? projectedParentId === undefined
+      ? ROOT_PLACEMENT
+      : projectedAbsolutePlacement(
+          snapshot,
+          coordinatePage,
+          projectedNodes,
+          projectedParentId,
+          geometry,
+        )
+    : parentAbsolutePlacement(snapshot, coordinatePage, change.id, geometry);
+  const placement = projectedOnly
+    ? projectedAbsolutePlacement(
+        snapshot,
+        coordinatePage,
+        projectedNodes,
+        descriptor.nodeId,
+        geometry,
+      )
+    : runtimeAbsolutePlacement(snapshot, coordinatePage, change.id, geometry);
+  const relative = relativePlacement(parentPlacement, placement, [
+    penpotRelativeFlips(parentPlacement, placement),
+    { flipX: node.flipX === true, flipY: node.flipY === true },
+  ]);
+  const relativeValues = {
+    "flip-x": relative.flipX,
+    "flip-y": relative.flipY,
+    rotation: relative.rotation,
+    x: relative.x,
+    y: relative.y,
+  };
+  let placed = geometry.values.has(String(change.id));
   let operation = operationsByNode.get(key);
   if (!operation) {
     operation = {
@@ -3160,6 +4051,19 @@ function compileNodeUpdate(
     };
     updateStatesByNode.set(key, updateState);
   }
+  // A projected-only node is a component instance child: its edits become
+  // Instance overrides once every change of the commit is known.
+  if (projectedOnly) {
+    updateState.instanceChild ??= {
+      changes: {},
+      descriptor,
+      editedFields: new Set(),
+      node,
+      syncedFields: new Set(),
+      touched: undefined,
+    };
+  }
+  const instanceChild = updateState.instanceChild;
   for (const item of change.operations) {
     if (!isRecord(item)) {
       fail(
@@ -3173,6 +4077,49 @@ function compileNodeUpdate(
         "unsupported_penpot_operation",
         `Phase 0 cannot compile Penpot operation: ${String(item?.type)}`,
       );
+    }
+    if (itemType === "set-remote-synced") {
+      // Penpot's mark for copies synced from a remote library. SmallPen
+      // copies always project from their source, so it has nothing to keep.
+      continue;
+    }
+    if (itemType === "set-touched" && instanceChild) {
+      // The groups Penpot keeps touched from here on; a nil set is a reset.
+      instanceChild.touched = Array.isArray(item.touched) ? item.touched : [];
+      instanceChild.editedFields.clear();
+      continue;
+    }
+    if (itemType === "set-touched" && domainRoot) {
+      // A domain Instance stores no touched groups; the projection derives
+      // them from the fields the Instance holds over its source.
+      continue;
+    }
+    if (
+      domainRoot &&
+      itemType === "set" &&
+      item["ignore-touched"] === true &&
+      !PLACEMENT_ATTRIBUTES.has(normalizeType(item.attr)) &&
+      !PENPOT_DERIVED_ATTRIBUTES.has(normalizeType(item.attr))
+    ) {
+      // Penpot writes copies with ignore-touched in two cases. A component
+      // sync re-applies the source to an untouched copy: the Instance
+      // projects its source already, so pinning the value would stop later
+      // source edits from reaching it. An undo or Reset overrides also sets
+      // the copy's touched groups in the same commit: a field whose group is
+      // no longer touched goes back to its source.
+      const touched = rootTouched.get(String(change.id));
+      if (touched === undefined) continue;
+      const field = DOMAIN_ROOT_OVERRIDE_FIELDS.get(normalizeType(item.attr));
+      if (
+        field !== undefined &&
+        field !== "name" &&
+        !overrideTouchedGroups(field, node.type).some((group) =>
+          touched.has(group),
+        )
+      ) {
+        if (Object.hasOwn(node, field)) operation.changes[field] = null;
+        continue;
+      }
     }
     if (itemType === "set-touched") {
       if (item.touched === null || item.touched === undefined) {
@@ -3188,25 +4135,9 @@ function compileNodeUpdate(
       continue;
     }
     if (!PENPOT_ATTRIBUTES.has(attr)) {
-      if (process.env.SMALLPEN_ADAPTER_DEBUG) {
-        console.error("[dbg] unsupported attr", attr, new Error().stack?.split("\n").slice(2, 5).join(" | "));
-      }
       fail(
         "unsupported_penpot_attribute",
         `Phase 0 cannot compile Penpot attribute: ${String(attr)}`,
-      );
-    }
-    if (projectedOnly && attr === "content") {
-      const compiled = compilePlainTextContent(item.val, { snapshot });
-      if (compiled.text === node.text) continue;
-      fail(
-        "component_instance_override_unsupported",
-        "Edit the Component source or add an explicit instance text override before changing this projected child",
-        {
-          instanceNodeId: descriptor.nodeId,
-          projectedText: node.text,
-          requestedText: compiled.text,
-        },
       );
     }
     updateState.changesGeometry ||= PENPOT_GEOMETRY_ATTRIBUTES.has(attr);
@@ -3214,21 +4145,35 @@ function compileNodeUpdate(
     updateState.changesText ||= attr === "content";
     updateState.changesTransform ||=
       attr === "flip-x" || attr === "flip-y" || attr === "rotation";
+    // Invalid values pass through so compileAttribute rejects them. A nil
+    // flip or turn (an undo restoring an unset attr) is already folded into
+    // the placement as false / 0, like Penpot's own dissoc.
     const itemValue =
-      attr === "x"
-        ? item.val - parentOrigin.x
-        : attr === "y"
-          ? item.val - parentOrigin.y
-          : item.val;
+      Object.hasOwn(relativeValues, attr) &&
+      (item.val === null ||
+        (attr.startsWith("flip-")
+          ? typeof item.val === "boolean"
+          : Number.isFinite(item.val)))
+        ? relativeValues[attr]
+        : item.val;
     if (attr === "content" && node.type === "PATH") {
-      // Penpot path content is page-absolute; canonical pathData is local to
-      // the node origin (runtime x = parentOrigin + canonical x).
-      operation.changes.pathData = compilePathContent(itemValue, {
-        x: runtimeOriginX,
-        y: runtimeOriginY,
-      });
+      // Penpot path content is page-absolute and already turned; canonical
+      // pathData is local to the node box it is stored with.
+      placed = true;
+      operation.changes.pathData = compilePathContent(
+        itemValue,
+        invertMatrix(
+          relativeNodeMatrix(
+            parentPlacement,
+            relative,
+            placement.width,
+            placement.height,
+          ),
+        ),
+      );
       continue;
     }
+    const before = instanceChild ? { ...operation.changes } : undefined;
     compileAttribute(
       operation,
       attr,
@@ -3238,6 +4183,344 @@ function compileNodeUpdate(
         ...operation.changes,
       },
       snapshot,
+    );
+    if (instanceChild) {
+      // A user edit touches what it changes; syncs, undos, resets and text
+      // layout write with ignore-touched and leave touched to set-touched.
+      const fields =
+        item["ignore-touched"] === true
+          ? instanceChild.syncedFields
+          : instanceChild.editedFields;
+      for (const field of Object.keys(operation.changes)) {
+        if (!sameJsonValue(before[field], operation.changes[field])) {
+          fields.add(field);
+        }
+      }
+    }
+  }
+  if (placed && canonicalNode !== undefined) {
+    compileImpliedPlacement(operation, canonicalNode, relative, {
+      height: placement.height,
+      width: placement.width,
+    });
+  }
+  if (projectedOnly) {
+    // update-presentation-node cannot write a projected child; its changes
+    // wait for compileInstanceOverrides.
+    delete operation.changes.touched;
+    Object.assign(instanceChild.changes, operation.changes);
+    operation.changes = {};
+  }
+}
+
+// The canonical Instance node a projected child id derives from: the
+// longest canonical Instance id it extends with `__` (design-projection
+// `prefixedNodeId`), and the override source path that remains.
+function owningInstance(snapshot, descriptor) {
+  let owner;
+  for (const candidate of Object.values(
+    presentationNodes(snapshot, descriptor) ?? {},
+  )) {
+    if (
+      candidate.instance &&
+      descriptor.nodeId.startsWith(`${candidate.id}__`) &&
+      (owner === undefined || candidate.id.length > owner.id.length)
+    ) {
+      owner = candidate;
+    }
+  }
+  if (!owner) {
+    fail(
+      "component_instance_override_unsupported",
+      "This projected child does not belong to a canonical Instance",
+      { instanceNodeId: descriptor.nodeId },
+    );
+  }
+  return { owner, sourcePath: descriptor.nodeId.slice(owner.id.length + 2) };
+}
+
+// The projected nodes of a presentation as they would be without any
+// override of the given Instance: what Penpot's main component holds.
+function unoverriddenNodes(snapshot, descriptor, owner, cache) {
+  const key = `${descriptor.screenId}\0${descriptor.presentationId}\0${owner.id}`;
+  if (!cache.has(key)) {
+    const entry = snapshot.manifest.entries.screens.find(
+      (candidate) => snapshot.entries[candidate].id === descriptor.screenId,
+    );
+    const screen = structuredClone(snapshot.entries[entry]);
+    const presentation = screen.presentations.find(
+      ({ id }) => id === descriptor.presentationId,
+    );
+    delete presentation.nodes[owner.id].instance.overrides;
+    cache.set(
+      key,
+      projectedSnapshotNodes(
+        { ...snapshot, entries: { ...snapshot.entries, [entry]: screen } },
+        descriptor,
+      ),
+    );
+  }
+  return cache.get(key);
+}
+
+const TEXT_CONTENT_GROUPS = [
+  "text-content-attribute",
+  "text-content-structure",
+  "text-content-text",
+];
+
+// Whether Penpot's touched groups keep `field` overridden. A content group
+// without any text sub-group (older Penpot) covers text and fills alike; a
+// structure change is a change of the text.
+function overrideTouched(field, nodeType, touched) {
+  const [group, part] = overrideTouchedGroups(field, nodeType);
+  if (!touched.has(group)) return false;
+  if (part === undefined) return true;
+  if (!TEXT_CONTENT_GROUPS.some((candidate) => touched.has(candidate))) {
+    return true;
+  }
+  return (
+    touched.has(part) ||
+    (field === "text" && touched.has("text-content-structure"))
+  );
+}
+
+// Compiled text styles leave out Penpot defaults that a source may spell.
+function sameChildField(field, current, value) {
+  if (field !== "textStyle") return sameNodeField(field, current, value);
+  return sameJsonValue(
+    textStyleOverrides({ ...DEFAULT_TEXT_STYLE, ...(current ?? {}) }),
+    textStyleOverrides({ ...DEFAULT_TEXT_STYLE, ...(value ?? {}) }),
+  );
+}
+
+// Overrides the format can hold for a node, with the value Penpot leaves when
+// it clears one.
+function overrideValue(field, value, node) {
+  if (value !== null && value !== undefined) return value;
+  if (field === "fills") {
+    return node.type === "TEXT" ? structuredClone(DEFAULT_TEXT_FILLS) : [];
+  }
+  return NODE_FIELD_DEFAULTS.get(field);
+}
+
+// Turns the accumulated edits of each projected instance child into
+// set-/clear-instance-override operations on its canonical Instance. Penpot
+// marks what a copy overrides with touched groups: a user edit touches the
+// groups it changes, set-touched replaces them (nil on Reset overrides), and
+// every changed value must then be what the source plus the remaining
+// overrides project. Anything else (geometry, strokes, rich text runs) has
+// no override in the format and fails explicitly.
+function compileInstanceOverrides(snapshot, updateStatesByNode, operations) {
+  const cache = new Map();
+  for (const { instanceChild: child } of updateStatesByNode.values()) {
+    if (!child) continue;
+    const { descriptor, editedFields, node } = child;
+    // Without set-touched in the commit, ignore-touched writes are Penpot's
+    // component sync of an untouched copy: the projection derives them from
+    // the source, so they are not overrides. An undo or Reset overrides
+    // always sets the touched groups along with its values.
+    const changes =
+      child.touched === undefined
+        ? Object.fromEntries(
+            Object.entries(child.changes).filter(
+              ([field]) =>
+                editedFields.has(field) || !child.syncedFields.has(field),
+            ),
+          )
+        : child.changes;
+    const changedFields = Object.keys(changes).filter(
+      (field) => !sameChildField(field, node[field], changes[field]),
+    );
+    if (changedFields.length === 0 && child.touched === undefined) continue;
+    const { owner, sourcePath } = owningInstance(snapshot, descriptor);
+    const current = {};
+    for (const [overridePath, value] of Object.entries(
+      owner.instance.overrides ?? {},
+    )) {
+      if (overridePath.startsWith(`${sourcePath}:`)) {
+        current[overridePath.slice(sourcePath.length + 1)] = value;
+      }
+    }
+    const touched = new Set(
+      child.touched ??
+        Object.keys(current).flatMap((field) =>
+          overrideTouchedGroups(field, node.type),
+        ),
+    );
+    const edited = new Set(
+      [...editedFields].filter(
+        (field) =>
+          INSTANCE_OVERRIDE_FIELDS.has(field) && changedFields.includes(field),
+      ),
+    );
+    for (const field of edited) {
+      for (const group of overrideTouchedGroups(field, node.type)) {
+        touched.add(group);
+      }
+    }
+    const base = unoverriddenNodes(snapshot, descriptor, owner, cache)[
+      descriptor.nodeId
+    ];
+    const next = {};
+    for (const field of INSTANCE_OVERRIDE_FIELDS) {
+      if (!overrideTouched(field, node.type, touched)) continue;
+      if (Object.hasOwn(changes, field)) {
+        // A touched group can cover more than one field (a TEXT node's
+        // content holds text and fills). An undo or sync that writes the
+        // source value back leaves no override; a user edit always does.
+        if (
+          edited.has(field) ||
+          !sameChildField(field, base[field], changes[field])
+        ) {
+          next[field] = overrideValue(field, changes[field], node);
+        }
+      } else if (Object.hasOwn(current, field)) {
+        next[field] = current[field];
+      }
+    }
+    const expected = applyNodeOverrides(structuredClone(base), next);
+    // An auto-sized text grows or shrinks with its override; Penpot reports
+    // that measured box without touching it. The source box stays canonical
+    // and the projection hands it back for Penpot to measure again.
+    const measured =
+      node.type === "TEXT" &&
+      (node.growType === "auto-width" || node.growType === "auto-height");
+    const fields = Object.keys(changes).filter(
+      (field) =>
+        !sameChildField(field, expected[field], changes[field]) &&
+        !(
+          measured &&
+          PENPOT_GEOMETRY_ATTRIBUTES.has(field) &&
+          child.syncedFields.has(field) &&
+          !editedFields.has(field)
+        ),
+    );
+    if (fields.length > 0) {
+      fail(
+        "component_instance_override_unsupported",
+        "Edit the Component source before changing these fields of a projected child; Instance overrides hold only fills, name, opacity, text and visibility",
+        { fields, instanceNodeId: descriptor.nodeId },
+      );
+    }
+    const target = {
+      nodeId: owner.id,
+      presentationId: descriptor.presentationId,
+      screenId: descriptor.screenId,
+    };
+    for (const field of INSTANCE_OVERRIDE_FIELDS) {
+      const overridePath = `${sourcePath}:${field}`;
+      if (Object.hasOwn(next, field)) {
+        if (
+          !Object.hasOwn(current, field) ||
+          !sameJsonValue(current[field], next[field])
+        ) {
+          operations.push({
+            ...target,
+            overridePath,
+            type: "set-instance-override",
+            value: next[field],
+          });
+        }
+      } else if (Object.hasOwn(current, field)) {
+        operations.push({
+          ...target,
+          overridePath,
+          type: "clear-instance-override",
+        });
+      }
+    }
+  }
+}
+
+// Canonical node field defaults: an absent field and its default value are
+// the same node.
+const NODE_FIELD_DEFAULTS = new Map([
+  ["flipX", false],
+  ["flipY", false],
+  ["locked", false],
+  ["opacity", 1],
+  ["proportionLock", false],
+  ["rotation", 0],
+  ["visible", true],
+]);
+
+function sameJsonValue(left, right) {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => sameJsonValue(item, right[index]))
+    );
+  }
+  if (isRecord(left) || isRecord(right)) {
+    if (!isRecord(left) || !isRecord(right)) return false;
+    const keys = Object.keys(left).filter((key) => left[key] !== undefined);
+    return (
+      keys.length ===
+        Object.keys(right).filter((key) => right[key] !== undefined).length &&
+      keys.every((key) => sameJsonValue(left[key], right[key]))
+    );
+  }
+  return left === right;
+}
+
+function sameNodeField(field, current, value) {
+  const fallback = NODE_FIELD_DEFAULTS.get(field);
+  return sameJsonValue(
+    current === undefined || current === null ? fallback : current,
+    value === null ? fallback : value,
+  );
+}
+
+function projectedPresentationNodes(snapshot, descriptor, projections) {
+  projectedNode(snapshot, descriptor, projections);
+  return projections.get(`${descriptor.screenId}\0${descriptor.presentationId}`);
+}
+
+// The placement Penpot holds for a node of the projected tree once the
+// commit applies: canonical nodes as runtimeAbsolutePlacement sees them,
+// derived instance children composed through the projection.
+function projectedAbsolutePlacement(snapshot, page, nodes, nodeId, geometry) {
+  const runtimeId =
+    snapshot.runtime.nodes?.[page.screenId]?.[page.presentationId]?.[nodeId];
+  if (presentationNodes(snapshot, page)?.[nodeId] && runtimeId !== undefined) {
+    return runtimeAbsolutePlacement(snapshot, page, runtimeId, geometry);
+  }
+  const baseline = canonicalTreePlacement(nodes, nodeId) ?? ROOT_PLACEMENT;
+  const provided =
+    runtimeId === undefined ? undefined : geometry.values.get(String(runtimeId));
+  return provided
+    ? penpotPlacement(provided, baseline, nodes[nodeId]?.type === "PATH")
+    : baseline;
+}
+
+// A Penpot edit sends only the absolute attributes it touched, but inside a
+// turned parent one absolute move changes both canonical x and y, and a
+// path's new selrect moves and resizes its box: store every relative field
+// that now differs and that the edit did not set itself.
+function compileImpliedPlacement(operation, node, relative, size) {
+  const implied = [
+    ["x", "x", relative.x, node.x ?? 0],
+    ["y", "y", relative.y, node.y ?? 0],
+    ["rotation", "rotation", relative.rotation, node.rotation ?? 0],
+    ["flipX", "flip-x", relative.flipX, node.flipX === true],
+    ["flipY", "flip-y", relative.flipY, node.flipY === true],
+  ];
+  if (node.type === "PATH") {
+    implied.push(
+      ["width", "width", size.width, node.width],
+      ["height", "height", size.height, node.height],
+    );
+  }
+  for (const [field, attr, value, current] of implied) {
+    if (Object.hasOwn(operation.changes, field) || value === current) continue;
+    compileAttribute(
+      operation,
+      attr,
+      typeof value === "number" ? canonicalNumber(value) : value,
+      { ...node, ...operation.changes },
     );
   }
 }
@@ -3543,7 +4826,9 @@ function tokenCellUpdate(snapshot, ref, change, operationsByToken) {
       fail("unsupported_penpot_operation", `Phase 0 cannot compile Penpot operation: ${String(item?.type)}`);
     }
     const itemType = normalizeType(item.type);
-    if (itemType === "set-touched") continue;
+    if (itemType === "set-touched" || itemType === "set-remote-synced") {
+      continue;
+    }
     const attr = normalizeType(item.attr);
     if (itemType === "unset") {
       fail(
@@ -3943,25 +5228,6 @@ function componentSetWithVariant(snapshot, componentSetId, variantId) {
   fail("missing_component", `SmallPen Component variant does not exist: ${componentSetId}/${variantId}`);
 }
 
-function variantNodeOrigin(variant, nodeId) {
-  const nodes = variant.nodes ?? {};
-  let x = 0;
-  let y = 0;
-  let cursor = nodeId;
-  const seen = new Set();
-  while (cursor && !seen.has(cursor)) {
-    seen.add(cursor);
-    const node = nodes[cursor];
-    if (!node) break;
-    x += node.x ?? 0;
-    y += node.y ?? 0;
-    cursor = Object.values(nodes).find(
-      (candidate) => candidate.children?.includes(cursor),
-    )?.id;
-  }
-  return { x, y };
-}
-
 const COMPONENT_NODE_UNSET_FIELDS = new Map([
   ["grow-type", "growType"],
   ["hidden", "visible"],
@@ -4006,16 +5272,35 @@ function componentNodeUpdate(
     operationsByNode.set(key, operation);
     operations.push(operation);
   }
-  const origin = variantNodeOrigin(variant, nodeId);
-  let runtimeOriginX = origin.x + (canonicalNode.x ?? 0);
-  let runtimeOriginY = origin.y + (canonicalNode.y ?? 0);
+  // Variant geometry is relative to the parent's full transform inside the
+  // variant tree, like screen nodes; turns, flips and path content convert
+  // against the composed tree (x/y stay locked below).
+  const variantNodes = { ...variant.nodes, [nodeId]: canonicalNode };
+  const parentNodeId = canonicalParentIndex(variantNodes).get(nodeId);
+  const parentPlacement =
+    (parentNodeId && canonicalTreePlacement(variantNodes, parentNodeId)) ||
+    ROOT_PLACEMENT;
+  const provided = {};
   for (const item of change.operations ?? []) {
-    if (isRecord(item) && normalizeType(item.type) === "set") {
-      const itemAttr = normalizeType(item.attr);
-      if (itemAttr === "x" && Number.isFinite(item.val)) runtimeOriginX = item.val;
-      if (itemAttr === "y" && Number.isFinite(item.val)) runtimeOriginY = item.val;
+    const itemAttr = normalizeType(item?.attr);
+    if (normalizeType(item?.type) === "set" && PLACEMENT_ATTRIBUTES.has(itemAttr)) {
+      provided[itemAttr] = item.val;
     }
   }
+  const placement = penpotPlacement(
+    provided,
+    canonicalTreePlacement(variantNodes, nodeId) ?? ROOT_PLACEMENT,
+    canonicalNode.type === "PATH",
+  );
+  const relative = relativePlacement(parentPlacement, placement, [
+    penpotRelativeFlips(parentPlacement, placement),
+    { flipX: canonicalNode.flipX === true, flipY: canonicalNode.flipY === true },
+  ]);
+  const relativeValues = {
+    "flip-x": relative.flipX,
+    "flip-y": relative.flipY,
+    rotation: relative.rotation,
+  };
   for (const item of change.operations ?? []) {
     if (!isRecord(item)) {
       fail("unsupported_penpot_operation", `Phase 0 cannot compile Penpot operation: ${String(item?.type)}`);
@@ -4024,6 +5309,8 @@ function componentNodeUpdate(
     if (!PENPOT_WRITE.operationTypes.includes(itemType)) {
       fail("unsupported_penpot_operation", `Phase 0 cannot compile Penpot operation: ${String(item?.type)}`);
     }
+    // Remote-library sync state: nothing in the source to write.
+    if (itemType === "set-remote-synced") continue;
     const attr = normalizeType(item.attr);
     if (PENPOT_DERIVED_ATTRIBUTES.has(attr)) continue;
     if (descriptor.kind === "component-sample" && (itemType === "set-touched" || attr === "touched")) continue;
@@ -4050,18 +5337,31 @@ function componentNodeUpdate(
       });
     }
     if (attr === "content" && canonicalNode.type === "PATH") {
-      // Penpot path content is page-absolute; canonical pathData is local
-      // to the node origin inside the variant tree.
-      operation.changes.pathData = compilePathContent(item.val, {
-        x: runtimeOriginX,
-        y: runtimeOriginY,
-      });
+      // Penpot path content is page-absolute and already turned; canonical
+      // pathData is local to the node box inside the variant tree.
+      operation.changes.pathData = compilePathContent(
+        item.val,
+        invertMatrix(
+          relativeNodeMatrix(
+            parentPlacement,
+            relative,
+            placement.width,
+            placement.height,
+          ),
+        ),
+      );
       continue;
     }
     compileAttribute(
       operation,
       attr,
-      item.val,
+      Object.hasOwn(relativeValues, attr) &&
+        (item.val === null ||
+          (attr === "rotation"
+            ? Number.isFinite(item.val)
+            : typeof item.val === "boolean"))
+        ? relativeValues[attr]
+        : item.val,
       { ...canonicalNode, ...operation.changes },
       snapshot,
     );
@@ -4164,11 +5464,536 @@ function componentNodeUpdate(
   }
 }
 
+// Penpot keeps a shape's page-absolute geometry when mov-objects reparents
+// it (group, ungroup, drag into a board) and sends no geometry change, but
+// canonical geometry is relative to the parent's full transform. Re-express
+// each moved node's unchanged placement against its final parent, unless the
+// same commit sets its geometry itself (compileNodeUpdate then converts it
+// against the final parent). Nodes created in this commit are placed by
+// compileAddedNode.
+function compileReparentedPositions(
+  snapshot,
+  changes,
+  geometry,
+  operations,
+  operationsByNode,
+) {
+  const deleted = new Set();
+  for (const change of changes) {
+    if (normalizeType(change?.type) === "del-obj") {
+      deleted.add(String(change.id));
+    }
+  }
+  const visited = new Set();
+  for (const change of changes) {
+    if (
+      normalizeType(change?.type) !== "mov-objects" ||
+      !Array.isArray(change.shapes)
+    ) {
+      continue;
+    }
+    const page = pageDescriptor(snapshot, change);
+    for (const shape of change.shapes) {
+      const runtimeId = String(shape);
+      if (
+        visited.has(runtimeId) ||
+        deleted.has(runtimeId) ||
+        geometry.values.has(runtimeId)
+      ) {
+        continue;
+      }
+      visited.add(runtimeId);
+      const descriptor = nodeDescriptor(snapshot, runtimeId, page, true);
+      const node = presentationNodes(snapshot, page)?.[descriptor.nodeId];
+      if (!node) continue;
+      const placement = canonicalAbsolutePlacement(
+        snapshot,
+        page,
+        descriptor.nodeId,
+      );
+      if (!placement) continue;
+      const parentPlacement = runtimeAbsolutePlacement(
+        snapshot,
+        page,
+        geometry.parents.get(runtimeId),
+        geometry,
+      );
+      const relative = relativePlacement(parentPlacement, placement, [
+        penpotRelativeFlips(parentPlacement, placement),
+        { flipX: node.flipX === true, flipY: node.flipY === true },
+      ]);
+      const key = `${descriptor.screenId}\0${descriptor.presentationId}\0${descriptor.nodeId}`;
+      let operation = operationsByNode.get(key);
+      if (!operation) {
+        operation = {
+          changes: {},
+          nodeId: descriptor.nodeId,
+          presentationId: descriptor.presentationId,
+          screenId: descriptor.screenId,
+          type: "update-presentation-node",
+        };
+        operationsByNode.set(key, operation);
+        operations.push(operation);
+      }
+      compileImpliedPlacement(operation, node, relative, {
+        height: node.height,
+        width: node.width,
+      });
+    }
+  }
+}
+
+// Penpot only sends the shapes whose page placement changed. When it refits
+// a group or bool box around an edited child (changes_builder
+// `resize-parents`), or resizes a board whose children stay put, the
+// children it does not send keep their page placement; their canonical x/y
+// are relative to the parent box, so restate them against the new box.
+function compileUntouchedChildPositions(
+  snapshot,
+  changes,
+  geometry,
+  placedRuntimeIds,
+  operations,
+  operationsByNode,
+) {
+  const skipped = new Set(geometry.parents.keys());
+  for (const change of changes) {
+    const type = normalizeType(change?.type);
+    if (type === "del-obj" || type === "add-obj") skipped.add(String(change.id));
+  }
+  for (const runtimeId of placedRuntimeIds) {
+    const descriptor = snapshot.runtime.reverseNodes[runtimeId];
+    if (!descriptor) continue;
+    const page = {
+      presentationId: descriptor.presentationId,
+      screenId: descriptor.screenId,
+    };
+    const nodes = presentationNodes(snapshot, page);
+    const parentNode = nodes?.[descriptor.nodeId];
+    if (!parentNode?.children?.length) continue;
+    const before = canonicalAbsolutePlacement(snapshot, page, descriptor.nodeId);
+    const after = runtimeAbsolutePlacement(snapshot, page, runtimeId, geometry);
+    if (!before || before.matrix.every((value, index) => value === after.matrix[index])) {
+      continue;
+    }
+    const runtimeIds =
+      snapshot.runtime.nodes?.[page.screenId]?.[page.presentationId] ?? {};
+    for (const childId of parentNode.children) {
+      const node = nodes[childId];
+      const childRuntimeId = String(runtimeIds[childId]);
+      if (
+        !node ||
+        runtimeIds[childId] === undefined ||
+        skipped.has(childRuntimeId) ||
+        geometry.values.has(childRuntimeId)
+      ) {
+        continue;
+      }
+      const relative = relativePlacement(after, childPlacement(before, node), [
+        { flipX: node.flipX === true, flipY: node.flipY === true },
+      ]);
+      const key = `${descriptor.screenId}\0${descriptor.presentationId}\0${childId}`;
+      let operation = operationsByNode.get(key);
+      if (!operation) {
+        operation = {
+          changes: {},
+          nodeId: childId,
+          presentationId: descriptor.presentationId,
+          screenId: descriptor.screenId,
+          type: "update-presentation-node",
+        };
+        operationsByNode.set(key, operation);
+        operations.push(operation);
+      }
+      compileImpliedPlacement(operation, node, relative, {
+        height: node.height,
+        width: node.width,
+      });
+    }
+  }
+}
+
+// Penpot orders siblings with changes.cljc `insert-at-index`: the shapes land
+// at `index` of the parent's current list (the shapes themselves included,
+// wherever they are), and an index past either end clamps to it.
+function penpotInsertAt(list, index, ids) {
+  const moving = new Set(ids);
+  const at = Math.max(0, Math.min(index, list.length));
+  return [
+    ...list.slice(0, at).filter((id) => !moving.has(id)),
+    ...ids,
+    ...list.slice(at).filter((id) => !moving.has(id)),
+  ];
+}
+
+// files/helpers.cljc `append-at-the-end`: a shape already in the list keeps
+// its place.
+function penpotAppend(list, ids) {
+  const result = [...list];
+  for (const id of ids) if (!result.includes(id)) result.push(id);
+  return result;
+}
+
+// Sibling lists of each Presentation while a commit applies, seeded from the
+// snapshot. A Presentation the snapshot lacks (a page added by the same
+// commit) is not tracked.
+function childOrderTracker(snapshot) {
+  const states = new Map();
+  const state = (page) => {
+    const key = `${page.screenId}\0${page.presentationId}`;
+    if (!states.has(key)) {
+      const presentation = snapshotPresentation(snapshot, page);
+      let value = null;
+      if (presentation) {
+        const children = new Map([
+          [
+            null,
+            Array.isArray(presentation.rootIds)
+              ? [...presentation.rootIds]
+              : typeof presentation.rootId === "string"
+                ? [presentation.rootId]
+                : [],
+          ],
+        ]);
+        const parents = new Map();
+        for (const id of children.get(null)) parents.set(id, null);
+        for (const node of Object.values(presentation.nodes ?? {})) {
+          children.set(node.id, [...(node.children ?? [])]);
+          for (const id of node.children ?? []) parents.set(id, node.id);
+        }
+        value = { children, parents };
+      }
+      states.set(key, value);
+    }
+    return states.get(key);
+  };
+  const tracker = {
+    tracks: (page) => state(page) !== null,
+    has: (page, nodeId) =>
+      nodeId === null || state(page).children.has(nodeId),
+    list: (page, parentId) => state(page).children.get(parentId) ?? [],
+    set(page, parentId, list) {
+      const { children, parents } = state(page);
+      children.set(parentId, list);
+      for (const id of list) parents.set(id, parentId);
+    },
+    // A new shape's own :shapes do not leave their current parent: Penpot
+    // detaches them when the following mov-objects lands.
+    add(page, parentId, nodeId, list, childIds) {
+      tracker.set(page, parentId, list);
+      state(page).children.set(nodeId, [...childIds]);
+    },
+    detach(page, nodeId, keepParentId) {
+      const { children, parents } = state(page);
+      const parentId = parents.get(nodeId);
+      if (parentId === undefined || parentId === keepParentId) return;
+      children.set(
+        parentId,
+        (children.get(parentId) ?? []).filter((id) => id !== nodeId),
+      );
+      parents.delete(nodeId);
+    },
+    remove(page, nodeId) {
+      tracker.detach(page, nodeId);
+      state(page).children.delete(nodeId);
+    },
+  };
+  return tracker;
+}
+
+// changes.cljc `process-children-reordering`: the current children sorted by
+// their position in `shapes`; children it does not name go first, in their
+// current order, and names that are not children are ignored.
+function penpotReordered(list, ids) {
+  const position = new Map();
+  ids.forEach((id, index) => {
+    if (!position.has(id)) position.set(id, index);
+  });
+  return list
+    .map((id, index) => ({ id, index, rank: position.get(id) ?? -1 }))
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map(({ id }) => id);
+}
+
+// Where a Penpot mov-objects puts its shapes (changes.cljc :mov-objects): an
+// `after-shape` found among the target's children wins over `index`, and no
+// index at all appends.
+function penpotMovedOrder(list, ids, spec) {
+  const after =
+    spec.afterShape === null ? -1 : list.indexOf(spec.afterShape);
+  const index = after >= 0 ? after + 1 : spec.index;
+  return Number.isInteger(index)
+    ? penpotInsertAt(list, index, ids)
+    : penpotAppend(list, ids);
+}
+
+// Penpot resolves sibling positions against the parent's current children,
+// in commit order; canonical add/move operations take an index into the
+// children that remain once the moved nodes are taken out, and node
+// additions run first (compilePenpotChanges). Re-derive every add and move
+// index from the Penpot rule against the canonical order at that point, then
+// restore the exact Penpot order for any parent that still differs.
+function compileChildOrder(snapshot, sourceChanges, operations, specs) {
+  const penpot = childOrderTracker(snapshot);
+  const touched = new Map();
+  const touch = (page, parentId) => {
+    touched.set(`${page.screenId}\0${page.presentationId}\0${parentId}`, {
+      page,
+      parentId,
+    });
+  };
+  for (const change of sourceChanges) {
+    const type = normalizeType(change?.type);
+    if (
+      !["add-obj", "del-obj", "mov-objects", "reorder-children"].includes(type)
+    ) {
+      continue;
+    }
+    const page = pageDescriptor(snapshot, change);
+    if (!penpot.tracks(page)) continue;
+    if (type === "add-obj") {
+      const parentId = parentDescriptor(
+        snapshot,
+        change["parent-id"] ?? change.parentId ?? change.obj?.["parent-id"],
+        page,
+      ).nodeId;
+      const nodeId = nodeDescriptor(
+        snapshot,
+        change.id ?? change.obj?.id,
+        page,
+        true,
+      ).nodeId;
+      const list = penpot.list(page, parentId);
+      penpot.add(
+        page,
+        parentId,
+        nodeId,
+        list.includes(nodeId)
+          ? list
+          : Number.isInteger(change.index)
+            ? penpotInsertAt(list, change.index, [nodeId])
+            : [...list, nodeId],
+        (change.obj?.shapes ?? []).map(
+          (runtimeId) => nodeDescriptor(snapshot, runtimeId, page, true).nodeId,
+        ),
+      );
+      touch(page, parentId);
+    } else if (type === "del-obj") {
+      penpot.remove(page, nodeDescriptor(snapshot, change.id, page, true).nodeId);
+    } else if (type === "reorder-children") {
+      const spec = specs.get(change);
+      if (!spec || !penpot.has(page, spec.parentId)) continue;
+      penpot.set(
+        page,
+        spec.parentId,
+        penpotReordered(penpot.list(page, spec.parentId), spec.nodeIds),
+      );
+      touch(page, spec.parentId);
+    } else {
+      const spec = specs.get(change);
+      if (!spec) continue;
+      for (const nodeId of spec.nodeIds) {
+        penpot.detach(page, nodeId, spec.parentId);
+      }
+      penpot.set(
+        page,
+        spec.parentId,
+        penpotMovedOrder(penpot.list(page, spec.parentId), spec.nodeIds, spec),
+      );
+      touch(page, spec.parentId);
+    }
+  }
+  if (touched.size === 0) return;
+
+  const canonical = childOrderTracker(snapshot);
+  for (const operation of operations) {
+    const page = {
+      presentationId: operation.presentationId,
+      screenId: operation.screenId,
+    };
+    if (
+      ![
+        "add-presentation-node",
+        "delete-presentation-node",
+        "move-presentation-nodes",
+        "reorder-presentation-children",
+      ].includes(operation.type) ||
+      !canonical.tracks(page)
+    ) {
+      continue;
+    }
+    if (operation.type === "add-presentation-node") {
+      const list = canonical.list(page, operation.parentId);
+      let next = list;
+      if (!list.includes(operation.node.id)) {
+        if (Number.isInteger(operation.index)) {
+          operation.index = Math.max(
+            0,
+            Math.min(operation.index, list.length),
+          );
+        }
+        next = [...list];
+        next.splice(operation.index ?? list.length, 0, operation.node.id);
+      }
+      canonical.add(
+        page,
+        operation.parentId,
+        operation.node.id,
+        next,
+        operation.node.children ?? [],
+      );
+    } else if (operation.type === "delete-presentation-node") {
+      canonical.remove(page, operation.nodeId);
+    } else if (operation.type === "reorder-presentation-children") {
+      if (specs.has(operation) && canonical.has(page, operation.parentId)) {
+        operation.childIds = penpotReordered(
+          canonical.list(page, operation.parentId),
+          specs.get(operation).nodeIds,
+        );
+      }
+      canonical.set(page, operation.parentId, [...operation.childIds]);
+    } else {
+      const spec = specs.get(operation);
+      const moving = new Set(operation.nodeIds);
+      if (spec) {
+        const order = penpotMovedOrder(
+          canonical.list(page, operation.parentId),
+          operation.nodeIds,
+          spec,
+        );
+        const first = order.findIndex((id) => moving.has(id));
+        operation.index = order
+          .slice(0, first)
+          .filter((id) => !moving.has(id)).length;
+      }
+      for (const nodeId of operation.nodeIds) canonical.detach(page, nodeId);
+      const remaining = canonical
+        .list(page, operation.parentId)
+        .filter((id) => !moving.has(id));
+      remaining.splice(
+        operation.index ?? remaining.length,
+        0,
+        ...operation.nodeIds,
+      );
+      canonical.set(page, operation.parentId, remaining);
+    }
+  }
+  for (const { page, parentId } of touched.values()) {
+    if (!penpot.has(page, parentId) || !canonical.has(page, parentId)) continue;
+    const expected = penpot.list(page, parentId);
+    const actual = canonical.list(page, parentId);
+    if (
+      expected.length !== actual.length ||
+      expected.every((id, index) => actual[index] === id) ||
+      !expected.every((id) => actual.includes(id))
+    ) {
+      continue;
+    }
+    operations.push({
+      childIds: [...expected],
+      parentId,
+      presentationId: page.presentationId,
+      screenId: page.screenId,
+      type: "reorder-presentation-children",
+    });
+  }
+}
+
+// The generated Components and Design System pages draw a source tree
+// shifted by a layout offset (projection.cljs `shift-origins`). The frontend
+// sends that shift with an edit made there, so the shape's page-absolute
+// geometry is moved back to the source layout before it is compiled. A copy
+// instantiated from a generated main keeps the main's plugin data, offset
+// included: on any other page the shape is drawn unshifted.
+function withoutLayoutOffset(snapshot, change) {
+  const offset = change?.["smallpen-layout-offset"];
+  if (offset === undefined || offset === null) return change;
+  const pageId = String(change.pageId ?? change["page-id"] ?? "");
+  if (
+    pageId !== String(snapshot.runtime?.componentsPage) &&
+    pageId !== String(snapshot.runtime?.designSystemPage)
+  ) {
+    const unshifted = { ...change };
+    delete unshifted["smallpen-layout-offset"];
+    return unshifted;
+  }
+  if (
+    normalizeType(change.type) !== "mod-obj" ||
+    !isRecord(offset) ||
+    !Number.isFinite(offset.x) ||
+    !Number.isFinite(offset.y) ||
+    !Array.isArray(change.operations)
+  ) {
+    fail(
+      "invalid_penpot_change",
+      "smallpen-layout-offset must be a finite {x, y} on a mod-obj change",
+      { offset },
+    );
+  }
+  const shift = (value, axis) =>
+    Number.isFinite(value) ? canonicalNumber(value - offset[axis]) : value;
+  const shiftPoint = (value, prefix = "") =>
+    isRecord(value)
+      ? {
+          ...value,
+          [`${prefix}x`]: shift(value[`${prefix}x`], "x"),
+          [`${prefix}y`]: shift(value[`${prefix}y`], "y"),
+        }
+      : value;
+  const shiftValue = (attr, value) => {
+    if (attr === "x" || attr === "y") return shift(value, attr);
+    if (attr === "selrect" && isRecord(value)) {
+      return ["x1", "x2"].reduce(
+        (rect, key) => ({ ...rect, [key]: shift(rect[key], "x") }),
+        ["y1", "y2"].reduce(
+          (rect, key) => ({ ...rect, [key]: shift(rect[key], "y") }),
+          shiftPoint(value),
+        ),
+      );
+    }
+    if (attr === "points" && Array.isArray(value)) {
+      return value.map((point) => shiftPoint(point));
+    }
+    if (attr === "content" && Array.isArray(value)) {
+      return value.map((segment) =>
+        isRecord(segment) && isRecord(segment.params)
+          ? {
+              ...segment,
+              params: shiftPoint(
+                shiftPoint(shiftPoint(segment.params), "c1"),
+                "c2",
+              ),
+            }
+          : segment,
+      );
+    }
+    return value;
+  };
+  return {
+    ...change,
+    operations: change.operations.map((item) =>
+      isRecord(item) && normalizeType(item.type) === "set"
+        ? { ...item, val: shiftValue(normalizeType(item.attr), item.val) }
+        : item,
+    ),
+  };
+}
+
 function completedOperations(operations) {
   return operations.filter(
     (operation) =>
       operation.type !== "update-presentation-node" ||
       Object.keys(operation.changes).length > 0,
+  );
+}
+
+// Penpot sends a mov-objects with no shapes when a drag ends in the same
+// parent and treats it as a no-op; it moves nothing here either.
+function isEmptyMove(change) {
+  return (
+    normalizeType(change?.type) === "mov-objects" &&
+    Array.isArray(change.shapes) &&
+    change.shapes.length === 0
   );
 }
 
@@ -4183,10 +6008,32 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
   if (typeof commit.commitId !== "string" || commit.commitId.length === 0) {
     fail("invalid_penpot_commit", "Penpot commit must contain a commitId");
   }
+  const unshiftedChanges = commit.changes.map((change) =>
+    withoutLayoutOffset(snapshot, change),
+  );
+  const domainInstances = domainInstanceAdds(snapshot, unshiftedChanges);
+  snapshot.addedNodeIds = domainInstances.nodeIds;
+  const commitChanges = withoutProjectedCopyChanges(
+    unshiftedChanges,
+    domainInstances,
+  );
+  // The touched groups each shape ends the commit with, when it sets them.
+  const touchedByRuntimeId = new Map();
+  for (const change of commitChanges) {
+    if (normalizeType(change?.type) !== "mod-obj") continue;
+    for (const item of Array.isArray(change.operations) ? change.operations : []) {
+      if (isRecord(item) && normalizeType(item.type) === "set-touched") {
+        touchedByRuntimeId.set(
+          String(change.id),
+          new Set((Array.isArray(item.touched) ? item.touched : []).map(normalizeType)),
+        );
+      }
+    }
+  }
 
   const operations = [];
   const movedChildIds = new Set();
-  for (const change of commit.changes) {
+  for (const change of commitChanges) {
     if (normalizeType(change?.type) === "mov-objects" && Array.isArray(change.shapes)) {
       for (const shapeId of change.shapes) movedChildIds.add(String(shapeId));
     }
@@ -4195,6 +6042,9 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
   const operationsByToken = new Map();
   const updateStatesByNode = new Map();
   const projections = new Map();
+  const placedRuntimeIds = new Set();
+  const addedNodes = new Map();
+  const childOrderSpecs = new Map();
   let acceptedNoOp = false;
   // DSE-004/005: split the commit into generated-page changes (translated or
   // rejected) and everything else. Structural mutations of the generated
@@ -4207,8 +6057,9 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
     String(change?.pageId ?? change?.["page-id"] ?? "") ===
       String(designSystemPageId);
   const sourceChanges = [];
-  for (const change of commit.changes) {
+  for (const change of commitChanges) {
     const type = normalizeType(change?.type);
+    if (isEmptyMove(change)) continue;
     if (isDesignSystemPageChange(change) && type !== "mod-obj") {
       if (type === "reg-objects") {
         // The text editor registers the edited objects in the SAME commit
@@ -4263,20 +6114,25 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
       operations.push(compileDeletedComponent(snapshot, change));
     }
   }
-  const tokenChanges = commit.changes.filter((change) =>
+  const tokenChanges = commitChanges.filter((change) =>
     TOKEN_CHANGE_TYPES.has(normalizeType(change?.type)),
   );
   if (tokenChanges.length > 0) {
     operations.push(compileTokenLibraryChanges(snapshot, tokenChanges));
   }
-  const assetChanges = commit.changes.filter((change) =>
+  const assetChanges = commitChanges.filter((change) =>
     ASSET_CHANGE_TYPES.has(normalizeType(change?.type)),
   );
   if (assetChanges.length > 0) {
     operations.push(compileAssetLibraryChanges(snapshot, assetChanges));
   }
-  for (const originalChange of commit.changes) {
+  const deletedNodeIds = deletedCanonicalNodeIds(snapshot, commitChanges);
+  for (const originalChange of commitChanges) {
     const originalType = normalizeType(originalChange?.type);
+    if (isEmptyMove(originalChange)) {
+      acceptedNoOp = true;
+      continue;
+    }
     if (
       originalType === "add-component" ||
       originalType === "mod-component" ||
@@ -4303,13 +6159,23 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
     } else if (type === "del-page") {
       operations.push(compileDeletedPresentation(snapshot, change));
     } else if (type === "mod-page") {
-      operations.push(compileUpdatedPresentation(snapshot, change));
+      const operation = compileUpdatedPresentation(snapshot, change);
+      if (operation) operations.push(operation);
+      else acceptedNoOp = true;
     } else if (type === "mov-page") {
       operations.push(compileMovedPresentation(snapshot, change));
     } else if (type === "set-flow") {
       operations.push(compilePrototypeFlow(snapshot, change));
     } else if (type === "mod-obj") {
-      if (change.operations?.length > 0) {
+      if (
+        metadata &&
+        originalChange.operations?.length > 0 &&
+        change.operations.length === 0
+      ) {
+        // Only validated Component metadata (an undo clearing it): the
+        // canonical node has nothing to change.
+        acceptedNoOp = true;
+      } else if (change.operations?.length > 0) {
         if (
           snapshot.runtime.componentsPage &&
           String(change.pageId ?? change["page-id"]) === String(snapshot.runtime.componentsPage) &&
@@ -4390,6 +6256,27 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
               "Component definition layout is edited on its own screen; board positions are presentation-only",
             );
           }
+          // A path's box is its page-absolute selrect: without the board's
+          // layout offset it would move the source node to the board spot.
+          const sourceNode = presentationNodes(snapshot, designRef)?.[
+            designRef.nodeId
+          ];
+          if (
+            sourceNode?.type === "PATH" &&
+            change["smallpen-layout-offset"] === undefined &&
+            (change.operations ?? []).some(
+              (item) =>
+                isRecord(item) &&
+                normalizeType(item.type) === "set" &&
+                ["content", "selrect"].includes(normalizeType(item.attr)),
+            )
+          ) {
+            fail(
+              "design_system_layout_offset_missing",
+              "A path edit on the Design System board needs the board layout offset to map back to its source screen",
+              { nodeId: designRef.nodeId },
+            );
+          }
           compileNodeUpdate(
             snapshot,
             {
@@ -4422,15 +6309,50 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
             updateStatesByNode,
             projections,
             geometry,
+            addedNodes,
+            touchedByRuntimeId,
           );
+          placedRuntimeIds.add(targetId);
         }
       }
     } else if (type === "add-obj") {
-      operations.push(compileAddedNode(snapshot, change, geometry, movedChildIds));
+      const added = compileAddedNode(
+        snapshot,
+        change,
+        geometry,
+        movedChildIds,
+        domainInstances,
+      );
+      addedNodes.set(
+        `${added.screenId}\0${added.presentationId}\0${added.node.id}`,
+        added.node,
+      );
+      operations.push(added);
     } else {
       const page = pageDescriptor(snapshot, change);
       if (type === "del-obj") {
         const descriptor = nodeDescriptor(snapshot, change.id, page, true);
+        if (deletedWithOwnerInstance(snapshot, descriptor, deletedNodeIds)) {
+          // Penpot deletes each projected child before the instance root;
+          // removing the root already removes them.
+          acceptedNoOp = true;
+          continue;
+        }
+        if (
+          snapshot.runtime.reverseNodes?.[String(change.id)] === undefined &&
+          !presentationNodes(snapshot, page)?.[descriptor.nodeId] &&
+          [...deletedNodeIds].some(
+            (nodeId) => presentationNodes(snapshot, page)?.[nodeId]?.instance,
+          )
+        ) {
+          // A copy child of an Instance dropped in this session keeps the
+          // runtime id Penpot gave it until the page reloads; a Background
+          // that no longer knows it (projectedRuntimeIds below) still sees
+          // the Instance it belongs to deleted in the same commit.
+          acceptedNoOp = true;
+          continue;
+        }
+        requireCanonicalStructure(snapshot, change.id, descriptor);
         operations.push({
           nodeId: descriptor.nodeId,
           presentationId: page.presentationId,
@@ -4446,16 +6368,36 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
           change["parent-id"] ?? change.parentId,
           page,
         );
-        operations.push({
+        requireCanonicalStructure(
+          snapshot,
+          change["parent-id"] ?? change.parentId,
+          parent,
+        );
+        const afterShape = change["after-shape"] ?? change.afterShape;
+        const move = {
           index: change.index,
           nodeIds: change.shapes.map((runtimeId) => {
-            return nodeDescriptor(snapshot, runtimeId, page, true).nodeId;
+            const descriptor = nodeDescriptor(snapshot, runtimeId, page, true);
+            requireCanonicalStructure(snapshot, runtimeId, descriptor);
+            return descriptor.nodeId;
           }),
           parentId: parent.nodeId,
           presentationId: page.presentationId,
           screenId: page.screenId,
           type: "move-presentation-nodes",
-        });
+        };
+        const spec = {
+          afterShape:
+            afterShape === undefined || afterShape === null
+              ? null
+              : nodeDescriptor(snapshot, afterShape, page, true).nodeId,
+          index: change.index,
+          nodeIds: move.nodeIds,
+          parentId: move.parentId,
+        };
+        childOrderSpecs.set(originalChange, spec);
+        childOrderSpecs.set(move, spec);
+        operations.push(move);
       } else if (type === "reorder-children") {
         if (!Array.isArray(change.shapes)) {
           fail(
@@ -4468,7 +6410,12 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
           change["parent-id"] ?? change.parentId,
           page,
         );
-        operations.push({
+        requireCanonicalStructure(
+          snapshot,
+          change["parent-id"] ?? change.parentId,
+          parent,
+        );
+        const reorder = {
           childIds: change.shapes.map((runtimeId) => {
             return nodeDescriptor(snapshot, runtimeId, page, true).nodeId;
           }),
@@ -4476,10 +6423,32 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
           presentationId: page.presentationId,
           screenId: page.screenId,
           type: "reorder-presentation-children",
-        });
+        };
+        const spec = {
+          nodeIds: reorder.childIds,
+          parentId: reorder.parentId,
+        };
+        childOrderSpecs.set(originalChange, spec);
+        childOrderSpecs.set(reorder, spec);
+        operations.push(reorder);
       }
     }
   }
+  compileReparentedPositions(
+    snapshot,
+    sourceChanges,
+    geometry,
+    operations,
+    operationsByNode,
+  );
+  compileUntouchedChildPositions(
+    snapshot,
+    sourceChanges,
+    geometry,
+    placedRuntimeIds,
+    operations,
+    operationsByNode,
+  );
   // Components are compiled in an earlier loop than node changes, but the
   // Package requires a component's main node to exist when add-component
   // applies: run node additions first (stable order inside each group).
@@ -4495,11 +6464,13 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
     operations.length = 0;
     operations.push(...nodeAdds, ...componentAdds, ...rest);
   }
+  compileChildOrder(snapshot, sourceChanges, operations, childOrderSpecs);
   for (const tokenOperation of operationsByToken.values()) {
     if (tokenOperation.value !== undefined) {
       operations.push(tokenOperation);
     }
   }
+  compileInstanceOverrides(snapshot, updateStatesByNode, operations);
   validateNodeUpdateStates(updateStatesByNode);
   const completed = completedOperations(operations).filter((operation) => {
     if (operation.type !== "update-component-node") return true;
@@ -4529,6 +6500,12 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
       "empty_penpot_commit",
       "Penpot commit did not contain a supported completed edit",
     );
+  }
+  // The copy children of new domain Instances keep the runtime ids Penpot
+  // gave them until the page reloads; the caller maps them to the projected
+  // nodes they now are for later commits of the session.
+  for (const [runtimeId, descriptor] of domainInstances.childNodeIds) {
+    options.projectedRuntimeIds?.set(runtimeId, descriptor);
   }
   return {
     baseRevision: snapshot.revision,

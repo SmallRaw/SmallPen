@@ -13,6 +13,7 @@ import {
 } from "@smallpen/core";
 import {
   defaultLibraryCacheRoot,
+  openPackage,
   openRemoteLibrary,
   sfntToWoff,
 } from "@smallpen/local-package";
@@ -278,6 +279,22 @@ test("import-font converts SFNT to WOFF and bounds WOFF2 support (SP-033/034/035
   assert.equal(ttfImport.fontId, "font_sourcesans");
   assert.ok(ttfImport.files.ttf, "original TTF bytes are preserved");
   assert.ok(ttfImport.files.woff, "SFNT is converted to WOFF");
+  const italicImport = JSON.parse(
+    (await runCli([
+      "import-font", packagePath, "--file", ttf, "--family", "Source Sans Pro",
+      "--font-id", "font_sourcesans", "--variant-id", "fvar_bold_italic",
+      "--weight", "700", "--style", "italic", "--json",
+    ])).stdout,
+  );
+  assert.equal(italicImport.variantId, "fvar_bold_italic");
+  // Variants carry Penpot's display name, not their weight-style key.
+  const imported = await openPackage(packagePath);
+  const fonts = Object.values(imported.entries).flatMap((entry) => entry.fonts ?? []);
+  const variants = fonts.find((font) => font.id === "font_sourcesans").variants;
+  assert.deepEqual(
+    variants.map(({ id, name }) => [id, name]),
+    [["fvar_regular", "Regular"], ["fvar_bold_italic", "Bold Italic"]],
+  );
 
   // WOFF imports as-is with byte validation.
   const woffPath = join(root, "regular.woff");

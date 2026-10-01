@@ -3,7 +3,15 @@ import { dirname, join, resolve } from "node:path";
 import { SmallPenError } from "@smallpen/core";
 
 import { LocalPackageBackend } from "./local-package-backend.mjs";
-import { resolveWorkspace } from "./workspace.mjs";
+import {
+  localLibraryLocator,
+  MAX_LIBRARY_DECLARATIONS,
+  resolveWorkspace,
+} from "./workspace.mjs";
+
+// A Package in Repair because a linked Foundation or Library is unavailable
+// gets no event when that link is fixed, so its status is resolved again.
+const LINK_REPAIR_RETRY_MS = 1000;
 
 function collectStableIds(value, result) {
   if (Array.isArray(value)) {
@@ -49,22 +57,6 @@ function defaultTokenLibrary() {
   };
 }
 
-async function seedDefaultTheme(backend, snapshot) {
-  if (snapshot.manifest.entries.tokens.length > 0) return snapshot;
-  await backend.commit({
-    baseRevision: snapshot.revision,
-    batchId: `seed-default-theme-${snapshot.revision.slice(0, 12)}`,
-    operations: [
-      {
-        entry: "tokens/tokens.json",
-        library: defaultTokenLibrary(),
-        type: "replace-token-library",
-      },
-    ],
-  });
-  return backend.snapshot;
-}
-
 export function reconcilePackageViewState(snapshot, value = {}) {
   const firstScreenEntry = snapshot.manifest.entries.screens[0];
   const defaultScreen =
@@ -94,13 +86,21 @@ export function reconcilePackageViewState(snapshot, value = {}) {
 }
 
 export class LocalWorkspaceSession {
+  #fetchImpl;
   #libraryCacheRoot;
   #listeners = new Set();
+  // Opens still running: requests, dependency events and Repair retries.
+  #opening = new Set();
   #packages = new Map();
+  // Remote Library snapshots verified by this session, keyed by manifest URL.
+  // Status updates after commits reuse them so a slow or unreachable remote
+  // never blocks a local write; open() and refresh() read them again.
+  #remoteLibraries = new Map();
 
   activeLocator;
 
-  constructor({ libraryCacheRoot } = {}) {
+  constructor({ fetchImpl, libraryCacheRoot } = {}) {
+    this.#fetchImpl = fetchImpl;
     this.#libraryCacheRoot = libraryCacheRoot;
   }
 
@@ -120,40 +120,67 @@ export class LocalWorkspaceSession {
     }));
   }
 
-  async open(locator, viewState = {}) {
+  open(locator, viewState = {}) {
+    const opening = this.#open(locator, viewState);
+    this.#opening.add(opening);
+    const settled = () => this.#opening.delete(opening);
+    opening.then(settled, settled);
+    return opening;
+  }
+
+  async #open(locator, viewState) {
     const requested = resolve(locator);
     const existing = this.#find(requested);
     if (existing) {
       this.activeLocator = existing.locator;
       return this.describe(existing.locator);
     }
-    const backend = new LocalPackageBackend();
-    let snapshot = await backend.open(requested);
-    const duplicate = [...this.#packages.values()].find(
-      (candidate) =>
-        candidate.backend.snapshot.runtime.file === snapshot.runtime.file,
-    );
-    if (duplicate) {
-      await backend.close();
-      throw new SmallPenError(
-        "duplicate_file_id",
-        "Another open Package has the same persistent file identity",
-        {
-          fileId: snapshot.runtime.file,
+    // Opening never writes: a Package without Tokens is served with the
+    // default Theme projected in memory and persisted by its first commit.
+    const backend = new LocalPackageBackend({
+      defaultTokenLibrary: defaultTokenLibrary(),
+    });
+    let session;
+    let opened;
+    try {
+      const snapshot = await backend.open(requested);
+      // A symlinked or non-canonical spelling of an open Package, or a
+      // concurrent open of the same one, selects the session already open.
+      opened = this.#packages.get(snapshot.locator);
+      if (!opened) {
+        const duplicate = [...this.#packages.values()].find(
+          (candidate) =>
+            candidate.backend.snapshot.runtime.file === snapshot.runtime.file,
+        );
+        if (duplicate) {
+          throw new SmallPenError(
+            "duplicate_file_id",
+            "Another open Package has the same persistent file identity",
+            {
+              fileId: snapshot.runtime.file,
+              locator: snapshot.locator,
+              openLocator: duplicate.locator,
+              packageId: snapshot.manifest.packageId,
+            },
+          );
+        }
+        session = {
+          backend,
           locator: snapshot.locator,
-          openLocator: duplicate.locator,
-          packageId: snapshot.manifest.packageId,
-        },
-      );
+          unsubscribe: undefined,
+          statusSequence: 0,
+          viewState: reconcilePackageViewState(snapshot, viewState),
+          workspaceStatus: structuredClone(backend.status),
+        };
+      }
+    } finally {
+      if (!session) await backend.close();
     }
-    snapshot = await seedDefaultTheme(backend, snapshot);
-    const session = {
-      backend,
-      locator: snapshot.locator,
-      unsubscribe: undefined,
-      viewState: reconcilePackageViewState(snapshot, viewState),
-      workspaceStatus: structuredClone(backend.status),
-    };
+    if (opened) {
+      this.activeLocator = opened.locator;
+      return this.describe(opened.locator);
+    }
+    const { snapshot } = backend;
     session.unsubscribe = backend.subscribe((event) => {
       if (event.snapshot) {
         session.viewState = reconcilePackageViewState(
@@ -161,7 +188,11 @@ export class LocalWorkspaceSession {
           session.viewState,
         );
       }
-      void this.#updateWorkspaceStatus(session);
+      // An external edit can retarget the Foundation or a Library.
+      const linked = event.snapshot
+        ? this.#openLinkedPackages(event.snapshot)
+        : Promise.resolve();
+      void linked.then(() => this.#updateWorkspaceStatus(session));
       this.#emit({ ...event, locator: session.locator });
       if (
         event.type === "external-revision" ||
@@ -173,25 +204,8 @@ export class LocalWorkspaceSession {
     });
     this.#packages.set(session.locator, session);
     this.activeLocator ??= session.locator;
-    if (snapshot.manifest.role === "product") {
-      const dependency = snapshot.manifest.dependencies[0];
-      try {
-        await this.open(join(dirname(snapshot.locator), dependency.path));
-      } catch {
-        // Composite status below retains Product and exposes dependency Repair.
-      }
-    }
-    for (const library of snapshot.manifest.libraries ?? []) {
-      if (library.source.type !== "local") continue;
-      try {
-        await this.open(
-          resolve(dirname(snapshot.locator), library.source.path),
-        );
-      } catch {
-        // Composite status below retains the owner and exposes Library Repair.
-      }
-    }
-    await this.#updateWorkspaceStatus(session);
+    await this.#openLinkedPackages(snapshot);
+    await this.#updateWorkspaceStatus(session, { reuseRemoteLibraries: false });
     this.#emit({ locator: session.locator, snapshot, type: "package-opened" });
     return this.describe(session.locator);
   }
@@ -219,7 +233,7 @@ export class LocalWorkspaceSession {
 
   async refresh(locator) {
     const session = this.#required(locator);
-    await this.#updateWorkspaceStatus(session);
+    await this.#updateWorkspaceStatus(session, { reuseRemoteLibraries: false });
     return this.describe(session.locator);
   }
 
@@ -245,6 +259,7 @@ export class LocalWorkspaceSession {
     const session = this.#required(locator);
     this.#assertWorkspaceWritable(session);
     const result = await session.backend.commit(batch);
+    await this.#openLinkedPackages(session.backend.snapshot);
     await this.#updateWorkspaceStatus(session);
     session.viewState = reconcilePackageViewState(
       session.backend.snapshot,
@@ -256,6 +271,7 @@ export class LocalWorkspaceSession {
       result,
       type: "package-committed",
     });
+    this.#emitDependencyChanges(session, { type: "package-committed" });
     return result;
   }
 
@@ -269,6 +285,7 @@ export class LocalWorkspaceSession {
       session.viewState,
     );
     this.#emit({ locator: session.locator, result, type: "package-undone" });
+    this.#emitDependencyChanges(session, { type: "package-undone" });
     return result;
   }
 
@@ -282,6 +299,7 @@ export class LocalWorkspaceSession {
       session.viewState,
     );
     this.#emit({ locator: session.locator, result, type: "package-redone" });
+    this.#emitDependencyChanges(session, { type: "package-redone" });
     return result;
   }
 
@@ -330,6 +348,8 @@ export class LocalWorkspaceSession {
 
   async close(locator) {
     const session = this.#required(locator);
+    clearTimeout(session.repairRetry);
+    session.repairRetry = undefined;
     session.unsubscribe?.();
     await session.backend.close();
     this.#packages.delete(session.locator);
@@ -339,8 +359,14 @@ export class LocalWorkspaceSession {
     this.#emit({ locator: session.locator, type: "package-closed" });
   }
 
+  // An open still in flight can register a Package (or its Foundation and
+  // Libraries) after the loop has passed; its watchers would keep the
+  // process alive, so close until no open is pending.
   async closeAll() {
-    for (const locator of [...this.#packages.keys()]) await this.close(locator);
+    while (this.#packages.size > 0 || this.#opening.size > 0) {
+      for (const locator of [...this.#packages.keys()]) await this.close(locator);
+      await Promise.allSettled([...this.#opening]);
+    }
   }
 
   #find(locator) {
@@ -363,37 +389,134 @@ export class LocalWorkspaceSession {
     return session;
   }
 
-  #emitDependencyChanges(changed, event) {
-    const packageId = changed.backend.snapshot?.manifest.packageId;
-    if (!packageId) return;
-    for (const session of this.#packages.values()) {
-      if (session === changed) continue;
-      if (
-        session.backend.snapshot.manifest.dependencies?.some(
-          (dependency) => dependency.packageId === packageId,
-        ) ||
-        session.backend.snapshot.manifest.libraries?.some(
-          (library) => library.packageId === packageId,
-        )
-      ) {
-        void this.#updateWorkspaceStatus(session).then(() => {
-          this.#emit({
-            dependencyEvent: event.type,
-            dependencyLocator: changed.locator,
-            locator: session.locator,
-            status: structuredClone(session.workspaceStatus),
-            type: "package-dependency-changed",
-          });
-        });
+  // Opens the Foundation and local Libraries a Package links to, so their
+  // external edits reach it. Links that cannot be opened stay in Repair and
+  // are retried while the owner's status is not ready. The active Package
+  // never changes here.
+  async #openLinkedPackages(snapshot) {
+    const locators = [];
+    if (snapshot.manifest.role === "product") {
+      const dependency = snapshot.manifest.dependencies[0];
+      locators.push(join(dirname(snapshot.locator), dependency.path));
+    }
+    // Resolution never follows more declarations than this, so retrying
+    // the rest would only spend CPU on every Repair retry.
+    for (const library of (snapshot.manifest.libraries ?? []).slice(
+      0,
+      MAX_LIBRARY_DECLARATIONS,
+    )) {
+      if (library.source.type !== "local") continue;
+      try {
+        locators.push(localLibraryLocator(snapshot.locator, library.source));
+      } catch {
+        // Composite status exposes the invalid Library source for Repair.
+      }
+    }
+    for (const locator of locators) {
+      if (this.#find(locator)) continue;
+      const active = this.activeLocator;
+      try {
+        await this.open(locator);
+      } catch {
+        // Composite status retains the owner and exposes the Repair.
+      } finally {
+        this.activeLocator = active ?? this.activeLocator;
       }
     }
   }
 
-  async #updateWorkspaceStatus(session) {
-    try {
-      const resolution = await resolveWorkspace(session.locator, {
-        libraryCacheRoot: this.#libraryCacheRoot,
+  // Every open Package whose composite Workspace includes the changed one,
+  // directly or through a Foundation or Library chain.
+  #dependentSessions(changed) {
+    const dependents = [];
+    const seen = new Set([changed]);
+    const pending = [changed];
+    while (pending.length > 0) {
+      const packageId = pending.shift().backend.snapshot?.manifest.packageId;
+      if (!packageId) continue;
+      for (const session of this.#packages.values()) {
+        if (seen.has(session)) continue;
+        const manifest = session.backend.snapshot?.manifest;
+        if (
+          manifest?.dependencies?.some(
+            (dependency) => dependency.packageId === packageId,
+          ) ||
+          manifest?.libraries?.some((library) => library.packageId === packageId)
+        ) {
+          seen.add(session);
+          dependents.push(session);
+          pending.push(session);
+        }
+      }
+    }
+    return dependents;
+  }
+
+  #emitDependencyChanges(changed, event) {
+    for (const session of this.#dependentSessions(changed)) {
+      void this.#updateWorkspaceStatus(session).then(() => {
+        this.#emit({
+          dependencyEvent: event.type,
+          dependencyLocator: changed.locator,
+          locator: session.locator,
+          status: structuredClone(session.workspaceStatus),
+          type: "package-dependency-changed",
+        });
       });
+    }
+  }
+
+  #scheduleLinkRepairRetry(session) {
+    clearTimeout(session.repairRetry);
+    session.repairRetry = undefined;
+    // A Package whose own state is invalid recovers through its Backend.
+    if (
+      session.workspaceStatus.state !== "repair" ||
+      session.backend.status.state !== "ready"
+    ) {
+      return;
+    }
+    session.repairRetry = setTimeout(async () => {
+      session.repairRetry = undefined;
+      if (this.#packages.get(session.locator) !== session) return;
+      const before = JSON.stringify(session.workspaceStatus);
+      await this.#openLinkedPackages(session.backend.snapshot);
+      if (this.#packages.get(session.locator) !== session) return;
+      await this.#updateWorkspaceStatus(session, { emitUnchanged: false });
+      if (JSON.stringify(session.workspaceStatus) === before) return;
+      this.#emit({
+        dependencyEvent: "link-repair-retry",
+        locator: session.locator,
+        status: structuredClone(session.workspaceStatus),
+        type: "package-dependency-changed",
+      });
+    }, LINK_REPAIR_RETRY_MS);
+    session.repairRetry.unref?.();
+  }
+
+  async #updateWorkspaceStatus(
+    session,
+    { emitUnchanged = true, reuseRemoteLibraries = true } = {},
+  ) {
+    // Updates run concurrently (events do not await them); only the latest
+    // one started may set the status, so a slow older read never wins.
+    session.statusSequence += 1;
+    const sequence = session.statusSequence;
+    const before = JSON.stringify(session.workspaceStatus);
+    let resolution;
+    let failure;
+    try {
+      resolution = await resolveWorkspace(session.locator, {
+        fetchImpl: this.#fetchImpl,
+        libraryCacheRoot: this.#libraryCacheRoot,
+        remoteLibrarySnapshots: this.#remoteLibraries,
+        reuseRemoteLibrarySnapshots: reuseRemoteLibraries,
+      });
+    } catch (error) {
+      failure = error;
+    }
+    if (sequence !== session.statusSequence) return session.workspaceStatus;
+    if (resolution) {
       if (resolution.status === "ready") {
         session.lastValidWorkspace = resolution.workspace;
         session.repairWorkspace = undefined;
@@ -429,7 +552,8 @@ export class LocalWorkspaceSession {
           state: "repair",
         };
       }
-    } catch (error) {
+    } else {
+      const error = failure;
       session.workspaceStatus = {
         error: {
           code: error?.code ?? "invalid_workspace_state",
@@ -444,11 +568,14 @@ export class LocalWorkspaceSession {
         state: "repair",
       };
     }
-    this.#emit({
-      locator: session.locator,
-      status: structuredClone(session.workspaceStatus),
-      type: "package-workspace-status",
-    });
+    this.#scheduleLinkRepairRetry(session);
+    if (emitUnchanged || JSON.stringify(session.workspaceStatus) !== before) {
+      this.#emit({
+        locator: session.locator,
+        status: structuredClone(session.workspaceStatus),
+        type: "package-workspace-status",
+      });
+    }
     return session.workspaceStatus;
   }
 
@@ -467,6 +594,7 @@ export class LocalWorkspaceSession {
       type,
       value,
     });
+    this.#emitDependencyChanges(session, { type });
     return value;
   }
 

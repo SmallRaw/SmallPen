@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { watch } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
 import {
   canonicalJSON,
+  loadPackageFromValues,
   SmallPenError,
   SMALLPEN_RUNTIME_CAPABILITIES,
 } from "@smallpen/core";
@@ -19,6 +21,63 @@ import {
 } from "./local-package.mjs";
 
 const MAX_CHANGE_HISTORY = 200;
+const DEFAULT_TOKEN_ENTRY = "tokens/tokens.json";
+// File systems with coarse timestamps (HFS+, FAT) can hide a same-size edit
+// made in the same timestamp granule as the fingerprint. A fingerprint that
+// contains a timestamp this recent is never trusted to skip a reload.
+const FINGERPRINT_SETTLE_MS = 2000;
+
+// A cheap stat-only fingerprint of the Package directory, its manifest, its
+// entries, its blob directory, and its blobs. Commits replace the whole
+// directory, and external edits change a file's size or timestamps, so an
+// unchanged fingerprint means a full reload would read the same content.
+async function packageFingerprint(packagePath, entries) {
+  const parts = [];
+  let newest = 0n;
+  for (const path of [
+    packagePath,
+    join(packagePath, "manifest.json"),
+    join(packagePath, "blobs"),
+    ...entries.map((entry) => join(packagePath, entry)),
+  ]) {
+    try {
+      const info = await lstat(path, { bigint: true });
+      parts.push(`${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`);
+      for (const time of [info.mtimeMs, info.ctimeMs]) {
+        if (time > newest) newest = time;
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") return undefined;
+      parts.push("-");
+    }
+  }
+  if (Date.now() - Number(newest) < FINGERPRINT_SETTLE_MS) return undefined;
+  return parts.join("|");
+}
+
+// Blobs are listed too: an in-place blob edit changes no entry or directory.
+function diskEntries(snapshot) {
+  return [
+    ...Object.values(snapshot.manifest.entries).flat(),
+    ...[...snapshot.blobs.keys()].sort(),
+  ];
+}
+
+// Projects an in-memory default Token library into a Package that has none,
+// so opening never writes. The first commit made against the projected
+// revision persists the library together with the edit.
+async function projectDefaultTokenLibrary(snapshot, library) {
+  if (!library || snapshot.manifest.entries.tokens.length > 0) return snapshot;
+  const manifest = structuredClone(snapshot.manifest);
+  manifest.entries.tokens = [DEFAULT_TOKEN_ENTRY];
+  const values = new Map([["manifest.json", manifest]]);
+  for (const [entry, value] of Object.entries(snapshot.entries)) {
+    values.set(entry, structuredClone(value));
+  }
+  values.set(DEFAULT_TOKEN_ENTRY, structuredClone(library));
+  for (const [blob, bytes] of snapshot.blobs) values.set(blob, bytes);
+  return loadPackageFromValues(snapshot.locator, values);
+}
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -103,9 +162,13 @@ export class LocalPackageBackend {
   #changeSequence = 0;
   #confirmedBatches = new Map();
   #commitQueue = Promise.resolve();
+  #defaultTokenLibrary;
+  #diskEntries = [];
+  #fingerprint;
   #listeners = new Set();
   #packagePath;
   #pollTimer;
+  #projection;
   #refreshPromise;
   #redoStack = [];
   #timer;
@@ -115,6 +178,15 @@ export class LocalPackageBackend {
   changes = [];
   snapshot;
   status = { readOnly: true, state: "closed" };
+
+  // `defaultTokenLibrary`: when set, a Package without Token entries is
+  // served with this library projected in memory (see
+  // projectDefaultTokenLibrary); nothing is written until the first commit.
+  constructor({ defaultTokenLibrary } = {}) {
+    this.#defaultTokenLibrary = defaultTokenLibrary
+      ? structuredClone(defaultTokenLibrary)
+      : undefined;
+  }
 
   capabilities() {
     return structuredClone(SMALLPEN_RUNTIME_CAPABILITIES);
@@ -127,11 +199,49 @@ export class LocalPackageBackend {
     this.#undoStack = [];
     this.#changeSequence = 0;
     this.changes = [];
-    this.snapshot = await openPackage(resolve(locator));
-    this.#packagePath = this.snapshot.locator;
+    const disk = await openPackage(resolve(locator));
+    this.#packagePath = disk.locator;
+    this.snapshot = await this.#project(disk);
+    this.#fingerprint = undefined;
     this.#markReady();
     this.#startWatchers();
     return this.snapshot;
+  }
+
+  async #project(disk) {
+    const snapshot = await projectDefaultTokenLibrary(
+      disk,
+      this.#defaultTokenLibrary,
+    );
+    this.#projection =
+      snapshot === disk
+        ? undefined
+        : { diskRevision: disk.revision };
+    this.#diskEntries = diskEntries(disk);
+    return snapshot;
+  }
+
+  // A batch prepared against the projected revision is rebased onto the
+  // Package on disk with the projected default Token library prepended, so
+  // the commit persists exactly the state the client edited.
+  #diskBatch(batch) {
+    if (!this.#projection || batch?.baseRevision !== this.snapshot?.revision) {
+      return batch;
+    }
+    return {
+      ...batch,
+      baseRevision: this.#projection.diskRevision,
+      operations: Array.isArray(batch.operations)
+        ? [
+            {
+              entry: DEFAULT_TOKEN_ENTRY,
+              library: structuredClone(this.#defaultTokenLibrary),
+              type: "replace-token-library",
+            },
+            ...batch.operations,
+          ]
+        : batch.operations,
+    };
   }
 
   commit(batch, options = {}) {
@@ -187,34 +297,47 @@ export class LocalPackageBackend {
   }
 
   importMedia(media) {
-    return this.#write(async () => {
-      const imported = await importPackageMedia(this.#packagePath, media);
+    return this.#write(async (options) => {
+      const imported = await importPackageMedia(this.#packagePath, media, options);
       return { result: imported.result, value: imported };
     });
   }
 
   importFontVariant(font) {
-    return this.#write(async () => {
-      const imported = await importPackageFontVariant(this.#packagePath, font);
+    return this.#write(async (options) => {
+      const imported = await importPackageFontVariant(
+        this.#packagePath,
+        font,
+        options,
+      );
       return { result: imported.result, value: imported };
     });
   }
 
   updateFontFamily(fontId, family) {
-    return this.#write(async () => ({
-      result: await updatePackageFontFamily(this.#packagePath, fontId, family),
+    return this.#write(async (options) => ({
+      result: await updatePackageFontFamily(
+        this.#packagePath,
+        fontId,
+        family,
+        options,
+      ),
     }));
   }
 
   deleteFontFamily(fontId) {
-    return this.#write(async () => ({
-      result: await deletePackageFontFamily(this.#packagePath, fontId),
+    return this.#write(async (options) => ({
+      result: await deletePackageFontFamily(this.#packagePath, fontId, options),
     }));
   }
 
   deleteFontVariant(fontVariantId) {
-    return this.#write(async () => ({
-      result: await deletePackageFontVariant(this.#packagePath, fontVariantId),
+    return this.#write(async (options) => ({
+      result: await deletePackageFontVariant(
+        this.#packagePath,
+        fontVariantId,
+        options,
+      ),
     }));
   }
 
@@ -236,7 +359,22 @@ export class LocalPackageBackend {
   async #performRefresh() {
     if (!this.#packagePath) return undefined;
     try {
-      const next = await openPackage(this.#packagePath);
+      // Stat before reading: a change that lands during the read alters the
+      // next fingerprint, so it is never hidden behind this one.
+      const entries = this.#diskEntries;
+      const fingerprint = await packageFingerprint(this.#packagePath, entries);
+      if (
+        fingerprint !== undefined &&
+        fingerprint === this.#fingerprint &&
+        this.status.state === "ready"
+      ) {
+        return this.snapshot;
+      }
+      const next = await this.#project(await openPackage(this.#packagePath));
+      this.#fingerprint =
+        canonicalJSON(entries) === canonicalJSON(this.#diskEntries)
+          ? fingerprint
+          : undefined;
       const recovered = this.status.state === "repair";
       if (next.revision === this.snapshot?.revision) {
         this.#markReady();
@@ -248,11 +386,22 @@ export class LocalPackageBackend {
       }
       const before = this.snapshot;
       const change = externalChange(before, next);
+      // Every local inverse batch targets a revision that no longer exists,
+      // so Undo and Redo could only fail with stale_revision from here on.
+      const historyCleared =
+        this.#undoStack.length > 0 || this.#redoStack.length > 0;
+      this.#redoStack = [];
+      this.#undoStack = [];
       this.snapshot = next;
       this.#markReady();
       this.#recordChange(change);
       this.#startWatchers();
-      this.#emit({ change, snapshot: next, type: "external-revision" });
+      this.#emit({
+        change,
+        historyCleared,
+        snapshot: next,
+        type: "external-revision",
+      });
       return next;
     } catch (error) {
       const alreadyRepair = this.status.state === "repair";
@@ -268,6 +417,7 @@ export class LocalPackageBackend {
       if (!alreadyRepair) {
         this.#emit({ error, snapshot: this.snapshot, status: this.status, type: "invalid-external-state" });
       }
+      this.#fingerprint = undefined;
       return undefined;
     }
   }
@@ -282,6 +432,9 @@ export class LocalPackageBackend {
     this.#timer = undefined;
     this.#closeWatchers();
     this.#packagePath = undefined;
+    this.#diskEntries = [];
+    this.#fingerprint = undefined;
+    this.#projection = undefined;
     this.snapshot = undefined;
     this.status = { readOnly: true, state: "closed" };
     this.#confirmedBatches.clear();
@@ -312,11 +465,15 @@ export class LocalPackageBackend {
           this.#startWatchers();
           return { ...confirmed.result, duplicate: true };
         }
-        const result = await applyOperationBatch(this.#packagePath, batch);
-        this.snapshot = await openPackage(this.#packagePath);
-        this.#markReady();
-        this.#startWatchers();
+        const result = await this.#applyCommitted((options) =>
+          applyOperationBatch(this.#packagePath, this.#diskBatch(batch), options),
+        );
         this.#confirmedBatches.set(batch.batchId, { identity, result });
+        if (result.alreadyApplied) {
+          // Replayed from the persistent ledger: nothing was written now, so
+          // its (possibly stale) inverse must not enter local history.
+          return result;
+        }
         if (historyMode === "normal") {
           this.#undoStack.push(result.inverseBatch);
           this.#redoStack = [];
@@ -352,10 +509,13 @@ export class LocalPackageBackend {
       this.#assertWritable();
       this.#closeWatchers();
       try {
-        const { result, value } = await operation();
-        this.snapshot = await openPackage(this.#packagePath);
-        this.#markReady();
-        this.#startWatchers();
+        let value;
+        const result = await this.#applyCommitted(async (options) => {
+          const written = await operation(options);
+          value = written.value;
+          return written.result;
+        });
+        if (result.alreadyApplied) return value ?? result;
         this.#undoStack.push(result.inverseBatch);
         this.#redoStack = [];
         this.#recordChange({
@@ -377,6 +537,32 @@ export class LocalPackageBackend {
       () => undefined,
     );
     return pending;
+  }
+
+  // Runs one write and adopts the Package state read under its write lock.
+  // Reopening after the lock is released could absorb an external revision
+  // that landed in between without reporting it; instead the fingerprint is
+  // dropped so the next refresh compares the disk against this snapshot and
+  // emits an external-revision event for anything newer.
+  async #applyCommitted(write) {
+    let committed;
+    const result = await write({
+      onCommitted: (snapshot) => {
+        committed = snapshot;
+      },
+    });
+    this.snapshot = await this.#project(
+      committed ?? (await openPackage(this.#packagePath)),
+    );
+    this.#fingerprint = undefined;
+    this.#markReady();
+    this.#startWatchers();
+    this.#scheduleRefresh();
+    // Clients use the reported revision as their next base revision; while a
+    // default Token library is projected that is the projected revision.
+    return this.#projection
+      ? { ...result, revision: this.snapshot.revision }
+      : result;
   }
 
   #assertWritable() {
@@ -406,9 +592,14 @@ export class LocalPackageBackend {
     if (this.changes.length > MAX_CHANGE_HISTORY) this.changes.shift();
   }
 
+  // A pending refresh is never pushed back: a steady stream of external
+  // writes (or watcher events) must not postpone it indefinitely.
   #scheduleRefresh() {
-    clearTimeout(this.#timer);
-    this.#timer = setTimeout(() => void this.refresh(), 120);
+    if (this.#timer) return;
+    this.#timer = setTimeout(() => {
+      this.#timer = undefined;
+      void this.refresh();
+    }, 120);
   }
 
   #startWatchers() {

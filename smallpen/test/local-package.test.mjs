@@ -312,6 +312,26 @@ test("a Package reader waits for an active commit journal owner", async (context
   await assert.rejects(readFile(journalPath), (error) => error?.code === "ENOENT");
 });
 
+test("an oversized commit journal is refused instead of read whole", async (context) => {
+  const packagePath = await copyFixture();
+  const parent = dirname(packagePath);
+  const transactionPath = await mkdtemp(join(parent, ".smallpen-transaction-"));
+  const candidatePath = join(transactionPath, "candidate.smallpen");
+  const backupPath = join(parent, `.${basename(packagePath)}.backup-interrupted`);
+  const journalPath = join(parent, `.${basename(packagePath)}.commit.json`);
+  context.after(() => rm(parent, { force: true, recursive: true }));
+  await cp(packagePath, candidatePath, { recursive: true });
+  // Valid JSON padded past the control-file limit.
+  await writeFile(
+    journalPath,
+    `${JSON.stringify({ backupPath, candidatePath, transactionPath })}${" ".repeat(128 * 1024)}`,
+  );
+  await rename(packagePath, backupPath);
+
+  await assert.rejects(openPackage(packagePath), (error) =>
+    error?.code === "invalid_commit_journal" && /exceeds/.test(error.message));
+});
+
 test("opening a valid Package discards a truncated pre-commit journal", async (context) => {
   const packagePath = await copyFixture();
   const parent = dirname(packagePath);
@@ -535,6 +555,42 @@ test("local Backend Undo and Redo submit inverse Operation Batches", async (cont
     backend.changes.slice(-3).map(({ source }) => source),
     ["local", "undo", "redo"],
   );
+});
+
+test("an external revision clears local Undo and Redo and says so", async (context) => {
+  const packagePath = await copyFixture();
+  const backend = new LocalPackageBackend();
+  const events = [];
+  backend.subscribe((event) => events.push(event));
+  context.after(() => backend.close());
+  const opened = await backend.open(packagePath);
+  const first = await backend.commit(
+    opacityBatch(opened.revision, 0.35, "_history_first"),
+  );
+  const second = await backend.commit(
+    opacityBatch(first.revision, 0.5, "_history_second"),
+  );
+  await backend.undo();
+  await applyOperationBatch(
+    packagePath,
+    opacityBatch(first.revision, 0.2, "_history_external"),
+  );
+  await waitFor(() => events.some(({ type }) => type === "external-revision"));
+  const event = events.find(({ type }) => type === "external-revision");
+  assert.equal(event.historyCleared, true);
+  assert.notEqual(backend.snapshot.revision, second.revision);
+  await assert.rejects(backend.undo(), { code: "nothing_to_undo" });
+  await assert.rejects(backend.redo(), { code: "nothing_to_redo" });
+
+  // A later external revision with no local history left reports nothing lost.
+  await applyOperationBatch(
+    packagePath,
+    opacityBatch(backend.snapshot.revision, 0.1, "_history_external_2"),
+  );
+  await waitFor(
+    () => events.filter(({ type }) => type === "external-revision").length === 2,
+  );
+  assert.equal(events.at(-1).historyCleared, false);
 });
 
 test("one workspace session opens multiple independent files and reconciles surviving UI state", async (context) => {

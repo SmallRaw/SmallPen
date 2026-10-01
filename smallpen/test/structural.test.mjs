@@ -770,3 +770,175 @@ test("mod-page names are preserved literally across shapes (RV-002-A)", async ()
     );
   }
 });
+
+// Fixture variant whose page-root canvas sits away from the origin, so
+// parent-relative and page-absolute coordinates differ at every level.
+async function offsetCanvasSnapshot() {
+  const values = await fixtureValues();
+  const nodes = values.get("screens/roundtrip.json").presentations[0].nodes;
+  nodes.node_canvas.x = 100;
+  nodes.node_canvas.y = 50;
+  nodes.node_board = rectangle("node_board", {
+    children: [],
+    height: 400,
+    name: "Board",
+    type: "FRAME",
+    width: 400,
+    x: 300,
+    y: 200,
+  });
+  nodes.node_canvas.children.push("node_board");
+  return loadPackageFromValues("memory://offset-canvas.smallpen", values);
+}
+
+function nodeAt(snapshot, nodeId) {
+  return snapshot.entries["screens/roundtrip.json"].presentations[0].nodes[
+    nodeId
+  ];
+}
+
+function absoluteOrigin(snapshot, nodeId) {
+  const nodes =
+    snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+  let x = 0;
+  let y = 0;
+  let current = nodeId;
+  while (current) {
+    x += nodes[current].x ?? 0;
+    y += nodes[current].y ?? 0;
+    current = Object.values(nodes).find((node) =>
+      (node.children ?? []).includes(current),
+    )?.id;
+  }
+  return { x, y };
+}
+
+test("Penpot reparenting keeps page-absolute positions under an offset parent", async () => {
+  const snapshot = await offsetCanvasSnapshot();
+  const pageId = snapshot.runtime.pages.scr_roundtrip.pres_desktop;
+  const runtime = snapshot.runtime.nodes.scr_roundtrip.pres_desktop;
+  const before = absoluteOrigin(snapshot, "node_rectangle");
+  assert.deepEqual(before, { x: 180, y: 146 });
+
+  // Drag into a board: Penpot sends only mov-objects; x/y stay absolute.
+  const drag = compilePenpotChanges(snapshot, {
+    changes: [
+      {
+        index: 0,
+        "page-id": pageId,
+        "parent-id": runtime.node_board,
+        shapes: [runtime.node_rectangle],
+        type: "mov-objects",
+      },
+    ],
+    commitId: "drag-into-board",
+  });
+  const dragged = await prepareOperationBatch(snapshot, drag);
+  assert.deepEqual(
+    nodeAt(dragged.snapshot, "node_board").children,
+    ["node_rectangle"],
+  );
+  assert.deepEqual(
+    { x: nodeAt(dragged.snapshot, "node_rectangle").x, y: nodeAt(dragged.snapshot, "node_rectangle").y },
+    { x: -220, y: -104 },
+  );
+  assert.deepEqual(absoluteOrigin(dragged.snapshot, "node_rectangle"), before);
+  const dragReversed = await prepareOperationBatch(
+    dragged.snapshot,
+    dragged.result.inverseBatch,
+  );
+  assert.equal(dragReversed.snapshot.revision, snapshot.revision);
+
+  // Group: a new group at the child's page-absolute box, then the move.
+  const group = {
+    ...penpotRectangle(newRuntimeId, runtime.node_canvas),
+    name: "Group",
+    shapes: [runtime.node_rectangle],
+    type: "group",
+    x: 180,
+    y: 146,
+    selrect: { height: 80, width: 160, x: 180, y: 146 },
+  };
+  const grouping = compilePenpotChanges(snapshot, {
+    changes: [
+      {
+        id: newRuntimeId,
+        index: 1,
+        obj: group,
+        "page-id": pageId,
+        "parent-id": runtime.node_canvas,
+        type: "add-obj",
+      },
+      {
+        index: 0,
+        "page-id": pageId,
+        "parent-id": newRuntimeId,
+        shapes: [runtime.node_rectangle],
+        type: "mov-objects",
+      },
+    ],
+    commitId: "group-rectangle",
+  });
+  const grouped = await prepareOperationBatch(snapshot, grouping);
+  assert.deepEqual(
+    { x: nodeAt(grouped.snapshot, newNodeId).x, y: nodeAt(grouped.snapshot, newNodeId).y },
+    { x: 80, y: 96 },
+  );
+  assert.deepEqual(
+    { x: nodeAt(grouped.snapshot, "node_rectangle").x, y: nodeAt(grouped.snapshot, "node_rectangle").y },
+    { x: 0, y: 0 },
+  );
+  assert.deepEqual(absoluteOrigin(grouped.snapshot, "node_rectangle"), before);
+
+  // Ungroup: the child moves back to the canvas and the group is deleted.
+  const ungrouping = compilePenpotChanges(grouped.snapshot, {
+    changes: [
+      {
+        index: 0,
+        "page-id": pageId,
+        "parent-id": runtime.node_canvas,
+        shapes: [runtime.node_rectangle],
+        type: "mov-objects",
+      },
+      { id: newRuntimeId, "page-id": pageId, type: "del-obj" },
+    ],
+    commitId: "ungroup-rectangle",
+  });
+  const ungrouped = await prepareOperationBatch(grouped.snapshot, ungrouping);
+  assert.equal(nodeAt(ungrouped.snapshot, newNodeId), undefined);
+  assert.deepEqual(
+    { x: nodeAt(ungrouped.snapshot, "node_rectangle").x, y: nodeAt(ungrouped.snapshot, "node_rectangle").y },
+    { x: 80, y: 96 },
+  );
+  assert.deepEqual(absoluteOrigin(ungrouped.snapshot, "node_rectangle"), before);
+});
+
+test("an explicit x/y in the reparenting commit wins over the preserved origin", async () => {
+  const snapshot = await offsetCanvasSnapshot();
+  const pageId = snapshot.runtime.pages.scr_roundtrip.pres_desktop;
+  const runtime = snapshot.runtime.nodes.scr_roundtrip.pres_desktop;
+  const batch = compilePenpotChanges(snapshot, {
+    changes: [
+      {
+        index: 0,
+        "page-id": pageId,
+        "parent-id": runtime.node_board,
+        shapes: [runtime.node_rectangle],
+        type: "mov-objects",
+      },
+      {
+        id: runtime.node_rectangle,
+        "page-id": pageId,
+        operations: [{ attr: "x", type: "set", val: 410 }],
+        type: "mod-obj",
+      },
+    ],
+    commitId: "drag-and-nudge",
+  });
+  const moved = await prepareOperationBatch(snapshot, batch);
+  // x comes from the explicit page-absolute value; y keeps its origin.
+  assert.deepEqual(
+    { x: nodeAt(moved.snapshot, "node_rectangle").x, y: nodeAt(moved.snapshot, "node_rectangle").y },
+    { x: 10, y: -104 },
+  );
+});

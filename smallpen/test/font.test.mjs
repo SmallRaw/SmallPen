@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  fontVariantName,
   inspectFont,
   prepareFontFiles,
   sfntToWoff,
@@ -49,4 +50,13 @@ test("Font inspection rejects mismatched bytes and WOFF2-only conversion", () =>
       }),
     (error) => error?.code === "unsupported_font_conversion",
   );
+});
+
+test("Font Variant names follow Penpot's weight and style display names", () => {
+  assert.equal(fontVariantName(400, "normal"), "Regular");
+  assert.equal(fontVariantName("700", "italic"), "Bold Italic");
+  assert.equal(fontVariantName(100, "normal"), "Hairline");
+  assert.equal(fontVariantName(950, "italic"), "Extra Black Italic");
+  // A weight Penpot has no name for keeps its number.
+  assert.equal(fontVariantName(450, "normal"), "450");
 });

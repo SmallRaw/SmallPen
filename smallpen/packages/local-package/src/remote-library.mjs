@@ -10,11 +10,23 @@ import {
   SmallPenError,
 } from "@smallpen/core";
 
+import { createLibraryFetch } from "./library-network.mjs";
+
 const MAX_REMOTE_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_REMOTE_MANIFEST_BYTES = 4 * 1024 * 1024;
 const MAX_REMOTE_PACKAGE_BYTES = 200 * 1024 * 1024;
+const REMOTE_REQUEST_TIMEOUT_MS = 30000;
+const MAX_REMOTE_REDIRECTS = 5;
+// Each entry and blob is one request: a manifest listing millions of tiny
+// files must not turn one Library open into millions of downloads.
+export const MAX_REMOTE_FILES = 10000;
 
 export function defaultLibraryCacheRoot() {
   return join(homedir(), ".smallpen", "library-cache");
+}
+
+export function remoteManifestUrl(sourceUrl) {
+  return manifestUrl(sourceUrl).href;
 }
 
 function manifestUrl(sourceUrl) {
@@ -33,43 +45,137 @@ function manifestUrl(sourceUrl) {
   return parsed;
 }
 
-async function responseBytes(response, label) {
+function tooLarge(label, byteLength, url, limit) {
+  return new SmallPenError(
+    "remote_library_too_large",
+    `${label} exceeds the remote Library file limit`,
+    { byteLength, limit, url },
+  );
+}
+
+// Reads the body as a stream and stops as soon as it passes the file limit,
+// so an oversized or endless response is never buffered whole.
+async function responseBytes(response, label, url, limit) {
   if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
     throw new SmallPenError(
       "remote_library_unavailable",
       `${label} returned HTTP ${response.status}`,
-      { status: response.status, url: response.url },
+      { status: response.status, url },
     );
   }
   const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_REMOTE_FILE_BYTES) {
-    throw new SmallPenError(
-      "remote_library_too_large",
-      `${label} exceeds the remote Library file limit`,
-      { byteLength: declared, url: response.url },
-    );
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel().catch(() => {});
+    throw tooLarge(label, declared, url, limit);
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > MAX_REMOTE_FILE_BYTES) {
-    throw new SmallPenError(
-      "remote_library_too_large",
-      `${label} exceeds the remote Library file limit`,
-      { byteLength: bytes.byteLength, url: response.url },
-    );
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > limit) {
+      throw tooLarge(label, bytes.byteLength, url, limit);
+    }
+    return bytes;
+  }
+  const chunks = [];
+  let byteLength = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    byteLength += value.byteLength;
+    if (byteLength > limit) {
+      await reader.cancel().catch(() => {});
+      throw tooLarge(label, byteLength, url, limit);
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
   }
   return bytes;
 }
 
-async function fetchValue(fetchImpl, url, label) {
-  const bytes = await responseBytes(await fetchImpl(url), label);
+// Every request has a total time budget (headers and body) and follows
+// redirects only within the Library's origin: a Library URL must not be able
+// to steer Background requests to another host.
+async function fetchBytes(
+  { fetchImpl, timeoutMs },
+  url,
+  label,
+  limit = MAX_REMOTE_FILE_BYTES,
+) {
+  const signal = AbortSignal.timeout(timeoutMs);
+  const origin = new URL(url).origin;
+  let current = url;
+  try {
+    for (let redirects = 0; ; redirects += 1) {
+      const response = await fetchImpl(current, { redirect: "manual", signal });
+      if (!(response.status >= 300 && response.status < 400)) {
+        return await responseBytes(response, label, current, limit);
+      }
+      await response.body?.cancel().catch(() => {});
+      const location = response.headers.get("location");
+      const next = location ? new URL(location, current) : undefined;
+      if (!next || next.origin !== origin || redirects >= MAX_REMOTE_REDIRECTS) {
+        throw new SmallPenError(
+          "remote_library_redirect",
+          `${label} redirected outside the Library origin`,
+          { status: response.status, url: current },
+        );
+      }
+      current = next.href;
+    }
+  } catch (error) {
+    if (signal.aborted && !(error instanceof SmallPenError)) {
+      throw new SmallPenError(
+        "remote_library_timeout",
+        `${label} did not finish within ${timeoutMs} ms`,
+        { url },
+      );
+    }
+    // Refused connections, DNS and TLS failures arrive as bare transport
+    // errors; name the Library and keep the system error code.
+    if (!(error instanceof SmallPenError)) {
+      const cause = networkErrorCode(error);
+      throw new SmallPenError(
+        "remote_library_unavailable",
+        `${label} could not be fetched: ${cause ?? error?.message ?? error}`,
+        cause ? { cause, url } : { url },
+      );
+    }
+    throw error;
+  }
+}
+
+// fetch() wraps the system error in `cause`, and a failed multi-address
+// connect is an AggregateError: find the first ECONNREFUSED/ENOTFOUND/
+// CERT_*-style code anywhere in that chain.
+function networkErrorCode(error, depth = 0) {
+  if (!error || typeof error !== "object" || depth > 4) return undefined;
+  if (typeof error.code === "string" && /^[A-Z][A-Z0-9_]+$/.test(error.code)) {
+    return error.code;
+  }
+  for (const child of [error.cause, ...(Array.isArray(error.errors) ? error.errors : [])]) {
+    const code = networkErrorCode(child, depth + 1);
+    if (code) return code;
+  }
+  return undefined;
+}
+
+async function fetchValue(request, url, label, limit) {
+  const bytes = await fetchBytes(request, url, label, limit);
   let value;
   try {
     value = JSON.parse(new TextDecoder().decode(bytes));
-  } catch (error) {
+  } catch {
+    // JSON.parse messages quote the payload; never echo remote content.
     throw new SmallPenError(
       "invalid_remote_library",
       `${label} is not valid JSON`,
-      { reason: error instanceof Error ? error.message : String(error), url },
+      { url },
     );
   }
   return { bytes, value };
@@ -91,20 +197,30 @@ function collectBlobPaths(value, result = new Set()) {
   return result;
 }
 
-async function downloadRemotePackage(sourceUrl, fetchImpl) {
+function tooManyFiles(count, manifest) {
+  return new SmallPenError(
+    "remote_library_too_large",
+    "Remote Library lists more files than the package limit",
+    { count, limit: MAX_REMOTE_FILES, url: manifest.href },
+  );
+}
+
+async function downloadRemotePackage(sourceUrl, request) {
   const manifest = manifestUrl(sourceUrl);
   const base = new URL("./", manifest);
   const manifestResult = await fetchValue(
-    fetchImpl,
+    request,
     manifest.href,
     "Remote Library manifest",
+    MAX_REMOTE_MANIFEST_BYTES,
   );
   const { entries } = listPackageEntries(manifestResult.value);
+  if (entries.length > MAX_REMOTE_FILES) throw tooManyFiles(entries.length, manifest);
   const values = new Map([["manifest.json", manifestResult.value]]);
   let totalBytes = manifestResult.bytes.byteLength;
   for (const entry of entries) {
     const result = await fetchValue(
-      fetchImpl,
+      request,
       new URL(entry, base).href,
       `Remote Library entry ${entry}`,
     );
@@ -118,9 +234,14 @@ async function downloadRemotePackage(sourceUrl, fetchImpl) {
     }
     values.set(entry, result.value);
   }
-  for (const blob of collectBlobPaths([...values.values()])) {
-    const bytes = await responseBytes(
-      await fetchImpl(new URL(blob, base).href),
+  const blobs = collectBlobPaths([...values.values()]);
+  if (entries.length + blobs.size > MAX_REMOTE_FILES) {
+    throw tooManyFiles(entries.length + blobs.size, manifest);
+  }
+  for (const blob of blobs) {
+    const bytes = await fetchBytes(
+      request,
+      new URL(blob, base).href,
       `Remote Library blob ${blob}`,
     );
     totalBytes += bytes.byteLength;
@@ -223,7 +344,13 @@ async function readSnapshotCache(cacheRoot, sourceUrl) {
         "remote_library_cache_corrupt",
         "Cached Library content failed integrity validation",
         {
-          reason: error instanceof Error ? error.message : String(error),
+          // JSON.parse messages quote the (remote-origin) cached content.
+          reason:
+            error instanceof SyntaxError
+              ? "invalid JSON"
+              : error instanceof Error
+                ? error.message
+                : String(error),
           sourceUrl: manifestUrl(sourceUrl).href,
         },
       );
@@ -242,7 +369,15 @@ async function readSnapshotCache(cacheRoot, sourceUrl) {
 
 export async function openRemoteLibrary(
   sourceUrl,
-  { cacheRoot, expectedPackageId, fetchImpl = fetch, refresh = false } = {},
+  {
+    cacheRoot,
+    allowPrivateNetwork,
+    expectedPackageId,
+    // A caller-supplied fetch owns its own destination policy.
+    fetchImpl = createLibraryFetch({ allowPrivateNetwork }),
+    refresh = false,
+    requestTimeoutMs = REMOTE_REQUEST_TIMEOUT_MS,
+  } = {},
 ) {
   let cached;
   let corruptCacheError;
@@ -263,7 +398,10 @@ export async function openRemoteLibrary(
     }
   }
   try {
-    const snapshot = await downloadRemotePackage(sourceUrl, fetchImpl);
+    const snapshot = await downloadRemotePackage(sourceUrl, {
+      fetchImpl,
+      timeoutMs: requestTimeoutMs,
+    });
     if (
       expectedPackageId !== undefined &&
       snapshot.manifest.packageId !== expectedPackageId
@@ -295,6 +433,7 @@ export async function openRemoteLibrary(
         cache: "stale",
         sourceUrl: manifestUrl(sourceUrl).href,
         warning: error instanceof Error ? error.message : String(error),
+        warningCode: error?.code ?? "remote_library_unavailable",
       },
     };
   }

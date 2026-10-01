@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, posix, resolve, win32 } from "node:path";
 
 import {
   combineContextAxes,
@@ -9,16 +9,63 @@ import {
   SmallPenError,
 } from "@smallpen/core";
 
+import { isWithinRoot } from "./fs-utils.mjs";
 import { openPackage } from "./local-package.mjs";
-import { openRemoteLibrary } from "./remote-library.mjs";
+import { openRemoteLibrary, remoteManifestUrl } from "./remote-library.mjs";
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isWithinRoot(rootPath, candidatePath) {
-  const child = relative(rootPath, candidatePath);
-  return child === "" || (!child.startsWith("..") && !isAbsolute(child));
+// Local Library paths are relative to the declaring Package's directory, like
+// Foundation dependency paths. Unlike dependencies they may climb out of the
+// Workspace ("../libraries/x.smallpen" is the documented form and resolves
+// with an external_library_path warning), but absolute, drive-letter, UNC,
+// and backslash paths are machine-specific and are rejected.
+export function localLibraryLocator(ownerLocator, source) {
+  const path = source?.path;
+  if (
+    typeof path !== "string" ||
+    path.length === 0 ||
+    path.includes("\0") ||
+    path.includes("\\") ||
+    isAbsolute(path) ||
+    posix.isAbsolute(path) ||
+    win32.isAbsolute(path)
+  ) {
+    throw new SmallPenError(
+      "invalid_library_source",
+      "Local Library path must be relative to the declaring Package",
+      { path },
+    );
+  }
+  return resolve(dirname(ownerLocator), path);
+}
+
+// `remoteLibrarySnapshots` (a Map keyed by manifest URL) lets a long-lived
+// caller reuse remote snapshots it already verified; with
+// `reuseRemoteLibrarySnapshots` the network and disk cache are skipped.
+async function remoteLibrarySnapshot(library, options) {
+  const memo =
+    options.remoteLibrarySnapshots instanceof Map
+      ? options.remoteLibrarySnapshots
+      : undefined;
+  const key = remoteManifestUrl(library.source.url);
+  if (
+    memo?.has(key) &&
+    options.reuseRemoteLibrarySnapshots === true &&
+    options.refreshRemoteLibraries !== true
+  ) {
+    return memo.get(key);
+  }
+  const snapshot = await openRemoteLibrary(library.source.url, {
+    cacheRoot: options.libraryCacheRoot,
+    expectedPackageId: library.packageId,
+    fetchImpl: options.fetchImpl,
+    refresh: options.refreshRemoteLibraries === true,
+  });
+  memo?.set(key, snapshot);
+  return snapshot;
 }
 
 function chooseFoundation(dependency) {
@@ -213,7 +260,8 @@ function validateExternalReferences(product, libraries) {
 
 function contextSelections(product, foundation) {
   const axes = [...combineContextAxes(product, foundation).values()].sort(
-    (left, right) => left.id.localeCompare(right.id),
+    // Code-unit order: localeCompare would follow the host LANG.
+    (left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
   );
   let selections = [{}];
   for (const axis of axes) {
@@ -313,14 +361,35 @@ function chooseLibrarySource(library) {
   };
 }
 
+// Remote Libraries declare their own child Libraries, so a Library server
+// could generate an endless chain of new Package IDs (or a huge fan-out) and
+// keep resolution downloading and caching forever. Every declaration the
+// resolution follows counts against one budget.
+export const MAX_LIBRARY_DECLARATIONS = 256;
+
 async function resolveDeclaredLibraries(owners, options, workspaceRoot) {
   const conflicts = [];
   const records = new Map();
   const warnings = [];
+  let declarations = 0;
 
   const visit = async (owner, library, index, depth, stack) => {
     const path = `manifest.json.libraries[${index}]`;
     const choice = chooseLibrarySource(library);
+    declarations += 1;
+    if (declarations > MAX_LIBRARY_DECLARATIONS) {
+      if (declarations === MAX_LIBRARY_DECLARATIONS + 1) {
+        conflicts.push(
+          conflict(
+            "library_limit_exceeded",
+            `Library resolution stopped after ${MAX_LIBRARY_DECLARATIONS} Library declarations`,
+            path,
+            [choice],
+          ),
+        );
+      }
+      return;
+    }
     if (stack.has(library.packageId)) {
       conflicts.push(
         conflict(
@@ -335,12 +404,7 @@ async function resolveDeclaredLibraries(owners, options, workspaceRoot) {
     let snapshot;
     try {
       if (library.source.type === "url") {
-        snapshot = await openRemoteLibrary(library.source.url, {
-          cacheRoot: options.libraryCacheRoot,
-          expectedPackageId: library.packageId,
-          fetchImpl: options.fetchImpl,
-          refresh: options.refreshRemoteLibraries === true,
-        });
+        snapshot = await remoteLibrarySnapshot(library, options);
       } else {
         if (owner.remote) {
           throw new SmallPenError(
@@ -349,7 +413,7 @@ async function resolveDeclaredLibraries(owners, options, workspaceRoot) {
             { packageId: library.packageId },
           );
         }
-        const candidate = resolve(dirname(owner.locator), library.source.path);
+        const candidate = localLibraryLocator(owner.locator, library.source);
         const locator = await realpath(candidate);
         snapshot = await openPackage(locator);
         if (!isWithinRoot(workspaceRoot, locator)) {
@@ -363,10 +427,16 @@ async function resolveDeclaredLibraries(owners, options, workspaceRoot) {
         }
       }
     } catch (error) {
+      // A Package chooses its URL Libraries: report only the typed code, never
+      // upstream status or transport text a Package could use as a probe.
+      const reason =
+        library.source.type === "url"
+          ? (error?.code ?? "remote_library_unavailable")
+          : error.message;
       conflicts.push(
         conflict(
           "library_unavailable",
-          `Library ${library.packageId} cannot be opened: ${error.message}`,
+          `Library ${library.packageId} cannot be opened: ${reason}`,
           `${path}.source`,
           [choice],
         ),
@@ -407,7 +477,7 @@ async function resolveDeclaredLibraries(owners, options, workspaceRoot) {
       warnings.push(
         warning(
           "remote_library_offline",
-          `Library ${snapshot.manifest.name} is using its last verified cache: ${snapshot.remote.warning}`,
+          `Library ${snapshot.manifest.name} is using its last verified cache: ${snapshot.remote.warningCode}`,
           `${path}.source.url`,
         ),
       );

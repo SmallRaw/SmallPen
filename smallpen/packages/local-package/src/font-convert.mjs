@@ -20,7 +20,9 @@ function matches(bytes, signature) {
 }
 
 export function inspectFont(bytes, mimeType) {
-  const signature = FONT_SIGNATURES[mimeType];
+  const signature = Object.hasOwn(FONT_SIGNATURES, mimeType)
+    ? FONT_SIGNATURES[mimeType]
+    : undefined;
   if (!signature || !matches(bytes, signature)) {
     failFont(
       "invalid_font_blob",
@@ -106,6 +108,26 @@ export function sfntToWoff(bytes, mimeType) {
     dataOffset += align4(record.stored.byteLength);
   }
   return output;
+}
+
+// Penpot names a Font Variant without a stored name from its weight and
+// style (app.common.media/font-display-variant), e.g. "Bold Italic".
+const FONT_WEIGHT_NAMES = {
+  100: "Hairline",
+  200: "Extra Light",
+  300: "Light",
+  400: "Regular",
+  500: "Medium",
+  600: "Semi Bold",
+  700: "Bold",
+  800: "Extra Bold",
+  900: "Black",
+  950: "Extra Black",
+};
+
+export function fontVariantName(weight, style) {
+  const base = FONT_WEIGHT_NAMES[Number(weight)] ?? String(weight);
+  return style === "italic" ? `${base} Italic` : base;
 }
 
 export function prepareFontFiles(input) {
