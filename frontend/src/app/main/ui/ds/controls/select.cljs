@@ -61,11 +61,30 @@
    [:on-change {:optional true} fn?]
    [:dropdown-alignment {:optional true} [:maybe [:enum :left :right]]]
    [:variant {:optional true} [:maybe [:enum "default" "ghost" "icon-only"]]]
-   [:has-portal {:optional true} :boolean]])
+   [:has-portal {:optional true} :boolean]
+   ;; Opt-in for selects rendered inside a modal focus scope.
+   [:is-in-modal {:optional true} :boolean]])
+
+(defn- consume-key-open-click!
+  "After a key-down open, Firefox still emits the keyboard click (detail 0)
+  on Space key-up; swallow it so the select stays open."
+  [key-open-ref event]
+  (when (and (mf/ref-val key-open-ref)
+             (zero? (.-detail event)))
+    (mf/set-ref-val! key-open-ref false)
+    true))
+
+(defn- close-if-focus-left!
+  [select-node focused* open*]
+  (when-not (and (some? select-node)
+                 (.-isConnected select-node)
+                 (dom/is-child? select-node (dom/get-active)))
+    (reset! focused* nil)
+    (reset! open* false)))
 
 (mf/defc select*
   {::mf/schema schema:select}
-  [{:keys [options class disabled default-selected empty-to-end on-change variant wrapper-class dropdown-alignment has-portal] :rest props}]
+  [{:keys [options class disabled default-selected empty-to-end on-change variant wrapper-class dropdown-alignment has-portal is-in-modal] :rest props}]
   (let [;; NOTE: we use mfu/bean here for transparently handle
         ;; options provide as clojure data structures or javascript
         ;; plain objects and lists.
@@ -90,6 +109,7 @@
         nodes-ref    (mf/use-ref nil)
         options-ref  (mf/use-ref nil)
         select-ref   (mf/use-ref nil)
+        key-open-ref (mf/use-ref false)
 
         container    (hooks/use-portal-container :popup)
         dropdown-wrapper-ref (mf/use-ref nil)
@@ -131,32 +151,30 @@
          (fn [event]
            (dom/prevent-default event)
            (dom/stop-propagation event)
-           (when-not disabled
+           (when-not (or disabled (consume-key-open-click! key-open-ref event))
              (swap! is-open* not))))
 
         on-blur
         (mf/use-fn
+         (mf/deps is-in-modal)
          (fn [event]
            (let [target      (dom/get-related-target event)
                  select-node (mf/ref-val select-ref)]
              (when-not (dom/is-child? select-node target)
-               (if (some? target)
-                 (do
-                   (reset! focused-id* nil)
-                   (reset! is-open* false))
-                 (timers/raf
-                  (fn []
-                    (when (and (some? select-node)
-                               (.-isConnected select-node)
-                               (not (dom/is-child? select-node (dom/get-active))))
-                      (reset! focused-id* nil)
-                      (reset! is-open* false)))))))))
+               (if (and ^boolean is-in-modal (nil? target))
+                 (timers/raf #(close-if-focus-left! select-node focused-id* is-open*))
+                 (do (reset! focused-id* nil)
+                     (reset! is-open* false)))))))
 
         on-button-key-down
         (mf/use-fn
-         (mf/deps focused-id selected-id is-open disabled on-change)
+         (mf/deps focused-id selected-id disabled is-in-modal)
          (fn [event]
-           (dom/stop-propagation event)
+           ;; Escape on a closed select inside a modal dismisses the modal.
+           (when-not (and ^boolean is-in-modal
+                          (kbd/esc? event)
+                          (not (deref is-open*)))
+             (dom/stop-propagation event))
            (when-not disabled
              (let [options (mf/ref-val options-ref)
                    len     (count options)
@@ -172,19 +190,24 @@
                  (kbd/down-arrow? event)
                  (handle-focus-change options focused-id* (mod (+ index 1) len) nodes)
 
+                 ;; A modal focus scope swallows the native button click,
+                 ;; so open from the key itself.
+                 (and ^boolean is-in-modal
+                      (not (deref is-open*))
+                      (or (kbd/space? event) (kbd/enter? event)))
+                 (do (dom/prevent-default event)
+                     (mf/set-ref-val! key-open-ref true)
+                     (reset! focused-id* selected-id)
+                     (reset! is-open* true))
+
                  (or (kbd/space? event)
                      (kbd/enter? event))
-                 (do
+                 (when (deref is-open*)
                    (dom/prevent-default event)
-                   (if (deref is-open*)
-                     (do
-                       (handle-selection focused-id* selected-id* is-open*)
-                       (when (and (fn? on-change)
-                                  (some? focused-id))
-                         (on-change focused-id)))
-                     (do
-                       (reset! focused-id* selected-id)
-                       (reset! is-open* true))))
+                   (handle-selection focused-id* selected-id* is-open*)
+                   (when (and (fn? on-change)
+                              (some? focused-id))
+                     (on-change focused-id)))
 
                  (kbd/esc? event)
                  (do (reset! is-open* false)

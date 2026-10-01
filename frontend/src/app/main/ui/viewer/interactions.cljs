@@ -16,6 +16,7 @@
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
    [app.main.features :as features]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.context :as ctx]
@@ -89,14 +90,21 @@
             (dissoc :fills)
             (assoc :interactions non-delay-interactions))]
 
-    ;; SmallPen keeps text content canonical and deliberately does not persist
-    ;; Penpot's derived position-data. Viewer is a render surface, so let the
-    ;; shared text renderer use its foreignObject fallback while that cache is
-    ;; unavailable. Dashboard thumbnails remain outside this provider.
-    [:& (mf/provider ctx/is-render?) {:value true}
-     [:& (mf/provider shapes/base-frame-ctx) {:value base}
-      [:& (mf/provider shapes/frame-offset-ctx) {:value offset}
-       (if is-fixed
+    [:& (mf/provider shapes/base-frame-ctx) {:value base}
+     [:& (mf/provider shapes/frame-offset-ctx) {:value offset}
+      (if is-fixed
+        [:svg {:class (stl/css :fixed)
+               :view-box vbox
+               :width (:width size)
+               :height (:height size)
+               :version "1.1"
+               :xmlnsXlink "http://www.w3.org/1999/xlink"
+               :xmlns "http://www.w3.org/2000/svg"
+               :fill "none"}
+         [:& wrapper-not-fixed {:shape frame :view-box vbox}]]
+
+        [:*
+         ;; We have two different svgs for fixed and not fixed elements so we can emulate the sticky css attribute in svg
          [:svg {:class (stl/css :fixed)
                 :view-box vbox
                 :width (:width size)
@@ -104,33 +112,21 @@
                 :version "1.1"
                 :xmlnsXlink "http://www.w3.org/1999/xlink"
                 :xmlns "http://www.w3.org/2000/svg"
+                :fill "none"
+                :style {:width (:width size)
+                        :height (:height size)
+                        :z-index 1}}
+          [:& wrapper-fixed {:shape fixed-frame :view-box vbox}]]
+
+         [:svg {:class (stl/css :not-fixed)
+                :view-box vbox
+                :width (:width size)
+                :height (:height size)
+                :version "1.1"
+                :xmlnsXlink "http://www.w3.org/1999/xlink"
+                :xmlns "http://www.w3.org/2000/svg"
                 :fill "none"}
-          [:& wrapper-not-fixed {:shape frame :view-box vbox}]]
-
-         [:*
-          ;; We have two different svgs for fixed and not fixed elements so we can emulate the sticky css attribute in svg
-          [:svg {:class (stl/css :fixed)
-                 :view-box vbox
-                 :width (:width size)
-                 :height (:height size)
-                 :version "1.1"
-                 :xmlnsXlink "http://www.w3.org/1999/xlink"
-                 :xmlns "http://www.w3.org/2000/svg"
-                 :fill "none"
-                 :style {:width (:width size)
-                         :height (:height size)
-                         :z-index 1}}
-           [:& wrapper-fixed {:shape fixed-frame :view-box vbox}]]
-
-          [:svg {:class (stl/css :not-fixed)
-                 :view-box vbox
-                 :width (:width size)
-                 :height (:height size)
-                 :version "1.1"
-                 :xmlnsXlink "http://www.w3.org/1999/xlink"
-                 :xmlns "http://www.w3.org/2000/svg"
-                 :fill "none"}
-           [:& wrapper-not-fixed {:shape frame :view-box vbox}]]])]]]))
+          [:& wrapper-not-fixed {:shape frame :view-box vbox}]]])]]))
 
 (mf/defc viewport*
   {::mf/wrap [mf/memo]}
@@ -138,20 +134,6 @@
   (let [;; NOTE: with `use-equal-memo` hook we ensure that all values
         ;; conserves the reference identity for avoid unnecessary
         ;; dummy rerenders.
-
-        ;; The viewer is a presentation surface: shapes flagged
-        ;; hide-in-viewer render only in the editor, so mark them invisible
-        ;; before either renderer (wasm or svg) consumes the page.
-        page   (let [objects (:objects page)]
-                 (if (some :hide-in-viewer (vals objects))
-                   (assoc page :objects
-                          (into {}
-                                (map (fn [[id shape]]
-                                       (if (:hide-in-viewer shape)
-                                         [id (assoc shape :visible false :hidden true)]
-                                         [id shape])))
-                                objects))
-                   page))
 
         mode   (h/use-equal-memo interactions-mode)
         offset (h/use-equal-memo frame-offset)
@@ -202,13 +184,16 @@
                                         :size size
                                         :delta delta
                                         :is-fixed is-fixed}]
-      [:> viewport-svg* {:page page
-                         :frame frame
-                         :base base
-                         :offset offset
-                         :size size
-                         :delta delta
-                         :is-fixed is-fixed}])))
+      ;; SmallPen does not persist Penpot's derived text position-data, so
+      ;; the viewer lets the text renderer use its foreignObject fallback.
+      [:& (mf/provider ctx/is-render?) {:value (smallpen/enabled?)}
+       [:> viewport-svg* {:page page
+                          :frame frame
+                          :base base
+                          :offset offset
+                          :size size
+                          :delta delta
+                          :is-fixed is-fixed}]])))
 
 (mf/defc flows-menu*
   {::mf/wrap [mf/memo]}
@@ -662,3 +647,4 @@
                            :easing (name (:easing animation))}
                       #(st/emit! (dv/complete-animation)
                                  (dv/close-overlay overlay-id)))))))
+

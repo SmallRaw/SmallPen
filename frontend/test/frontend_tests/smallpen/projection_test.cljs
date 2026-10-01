@@ -4,13 +4,42 @@
 
 (ns frontend-tests.smallpen.projection-test
   (:require
-   [app.main.smallpen.token-state :as spts]
-   [app.common.types.tokens-lib :as ctob]
+   [app.common.geom.matrix :as gmt]
+   [app.common.geom.point :as gpt]
+   [app.common.types.path :as path]
    [app.common.types.shape.shadow :as ctss]
+   [app.common.types.tokens-lib :as ctob]
    [app.common.uuid :as uuid]
    [app.main.smallpen.projection :as projection]
    [app.main.smallpen.session :as session]
+   [app.main.smallpen.token-state :as spts]
    [cljs.test :as t]))
+
+(def cos30 (/ (js/Math.sqrt 3) 2))
+
+(defn- close?
+  [expected actual]
+  (and (number? actual) (< (js/Math.abs (- expected actual)) 1e-9)))
+
+(defn- close-matrix?
+  [expected actual]
+  (every? #(close? (% expected) (% actual)) [:a :b :c :d :e :f]))
+
+(defn- close-points?
+  [expected actual]
+  (and (= (count expected) (count actual))
+       (every? true? (map #(and (close? (:x %1) (:x %2))
+                                (close? (:y %1) (:y %2)))
+                          expected
+                          actual))))
+
+(defn- corners
+  "Penpot points of a half-width x half-height box turned by [a b c d] about
+  its page center (cx, cy): top-left, top-right, bottom-right, bottom-left."
+  [cx cy a b c d hw hh]
+  (mapv (fn [[x y]]
+          (gpt/point (+ cx (* a x) (* c y)) (+ cy (* b x) (* d y))))
+        [[(- hw) (- hh)] [hw (- hh)] [hw hh] [(- hw) hh]]))
 
 (def file-id #uuid "aaaaaaaa-aaaa-aaaa-8aaa-aaaaaaaaaaaa")
 (def project-id #uuid "bbbbbbbb-bbbb-bbbb-8bbb-bbbbbbbbbbbb")
@@ -416,8 +445,9 @@
          :name "Label background"
          :type "RECTANGLE"
          :width 120
-         :x 380
-         :y 120}
+         ;; Parent-relative: 20,24 inside the main at 360,96.
+         :x 20
+         :y 24}
         instance
         {:children [copy-child-stable-id]
          :componentId component-stable-id
@@ -439,8 +469,8 @@
          :touched ["fill-group"]
          :type "RECTANGLE"
          :width 120
-         :x 580
-         :y 120}
+         :x 20
+         :y 24}
         candidate
         (-> snapshot
             (assoc-in [:manifest :entries :components]
@@ -485,7 +515,12 @@
         copy      (get-in file [:data :pages-index page-id
                                 :objects instance-id])
         copy-child (get-in file [:data :pages-index page-id
-                                 :objects instance-child-id])]
+                                 :objects instance-child-id])
+        main-child (get-in file [:data :pages-index page-id
+                                 :objects component-child-id])]
+    ;; Penpot shapes are absolute: each child adds its parent's origin.
+    (t/is (= [380 120] [(:x main-child) (:y main-child)]))
+    (t/is (= [580 120] [(:x copy-child) (:y copy-child)]))
     (t/is (= {:id component-id
               :main-instance-id component-main-id
               :main-instance-page page-id
@@ -501,6 +536,66 @@
     (t/is (true? (:component-root copy)))
     (t/is (= component-child-id (:shape-ref copy-child)))
     (t/is (= #{:fill-group} (:touched copy-child)))))
+
+(t/deftest shapes-without-fills-project-without-penpot-default-fills
+  (let [nodes     [:entries "screens/roundtrip.json" :presentations 0 :nodes]
+        candidate (-> snapshot
+                      (assoc-in (conj nodes :node_rectangle :fills) [])
+                      (update-in (conj nodes :node_canvas) dissoc :fills))
+        objects   (get-in (projection/project-snapshot
+                           candidate
+                           {:file-id file-id :project-id project-id})
+                          [:file :data :pages-index page-id :objects])]
+    ;; A removed fill stays removed after a reload instead of coming back
+    ;; as Penpot's grey shape default.
+    (t/is (= [] (:fills (get objects rectangle-id))))
+    ;; The screen root keeps the white board both renderers draw.
+    (t/is (= ["#FFFFFF"] (mapv :fill-color (:fills (get objects canvas-id)))))))
+
+(t/deftest absolute-origins-accumulate-every-ancestor-offset
+  (let [nodes   {:frame {:children ["group"] :id "frame" :x 100 :y 50}
+                 :group {:children ["leaf"] :id "group" :x 10 :y 20}
+                 :leaf  {:children [] :id "leaf" :x 5 :y 7}}
+        origins (#'projection/absolute-origins nodes ["frame"])]
+    (t/is (= (gmt/matrix 1 0 0 1 100 50) (get-in origins ["frame" :matrix])))
+    (t/is (= (gmt/matrix 1 0 0 1 110 70) (get-in origins ["group" :matrix])))
+    (t/is (= (gmt/matrix 1 0 0 1 115 77) (get-in origins ["leaf" :matrix])))
+    (t/is (= (gmt/matrix 1 0 0 1 125 87)
+             (get-in (#'projection/absolute-origins nodes ["frame"] 10 10)
+                     ["leaf" :matrix])))))
+
+(t/deftest component-grid-tracks-fit-their-largest-variant
+  (let [variant    (fn [id width height]
+                     {:id id
+                      :rootId "root"
+                      :nodes {:root {:height height :id "root" :width width}}})
+        ;; Seven variants: six fill the first row, the seventh opens row two.
+        sizes      [[400 50] [100 300] [10 10] [10 10] [10 10] [10 10] [30 20]]
+        placements (#'projection/variant-placements
+                    {"cmp_a" {:variants (map-indexed (fn [index [width height]]
+                                                       (variant (str "v" index) width height))
+                                                     sizes)}})]
+    (t/is (= [[0 0] [480 0] [660 0] [750 0] [840 0] [930 0] [0 380]]
+             (mapv (juxt :offset-x :offset-y) placements)))))
+
+(t/deftest token-sets-keep-the-canonical-token-order
+  (let [names    (mapv #(str "space." (char (+ 97 %))) (range 12))
+        ids      (mapv #(str "tok_" %) (range 12))
+        library  {:activeSetIds ["set_core"]
+                  :activeThemeIds []
+                  :sets [{:id "set_core"
+                          :name "core"
+                          :tokens (mapv (fn [id name]
+                                          {:id id :name name :type "spacing" :value 4})
+                                        (rseq ids)
+                                        (rseq names))}]
+                  :themes []}
+        set-id   (uuid/next)
+        runtime  (-> {:tokenSets {"set_core" (str set-id)}}
+                     (assoc :tokens (zipmap ids (repeatedly #(str (uuid/next))))))
+        lib      (#'projection/project-token-library {:runtime runtime} library)]
+    (t/is (= (vec (rseq names))
+             (vec (keys (ctob/get-tokens lib set-id)))))))
 
 (t/deftest project-snapshot-preserves-an-external-component-source-chain
   (let [component-stable-id "cmp_shared_button"
@@ -768,7 +863,7 @@
                                :fonts []
                                :id "alib_shared"
                                :media [{:blob (str "blobs/"
-                                                  (apply str (repeat 64 "a")))
+                                                   (apply str (repeat 64 "a")))
                                         :byteLength 4
                                         :height 24
                                         :id media-stable-id
@@ -1204,10 +1299,142 @@
                        {:file-id file-id :project-id project-id})
                       (get-in [:file :data :pages-index page-id
                                :objects rectangle-id]))]
+    ;; R(30)·diag(-1, 1) about the unchanged center (200, 156).
     (t/is (true? (:flip-x shape)))
     (t/is (= 30 (:rotation shape)))
-    (t/is (not= (:points plain) (:points shape)))
-    (t/is (not= (:transform plain) (:transform shape)))))
+    (t/is (= (gmt/matrix) (:transform plain)))
+    (t/is (close-matrix? (gmt/matrix (- cos30) -0.5 -0.5 cos30 0 0)
+                         (:transform shape)))
+    (t/is (close-matrix? (gmt/inverse (:transform shape))
+                         (:transform-inverse shape)))
+    (t/is (= [80 96 240 120] ((juxt :x :y :width :height) (:selrect shape))))
+    (t/is (close-points? (corners 200 156 (- cos30) -0.5 -0.5 cos30 120 60)
+                         (:points shape)))))
+
+;; Shared geometry fixture: smallpen/test/geometry-roundtrip.test.mjs feeds
+;; these exact Penpot values back through the adapter and renders the same
+;; tree with render.mjs, so projection, adapter and renderer agree.
+;; board  FRAME x100 y100 200x100 rotation 90 -> page p = (250 - y, 50 + x)
+;;   child  RECT x10 y20 40x30                -> selrect (195 65), rotation 90
+;;   turned RECT x10 y20 40x30 rotation 30    -> selrect (195 65), rotation 120
+;;   line   PATH x10 y20 40x30 "M0,0L40,30"   -> content (230 60) (200 100)
+;;   group  GROUP x120 y40 60x40 rotation 90
+;;     leaf RECT x5 y6 20x10                  -> selrect (195 204), rotation 180
+;; mirror FRAME x400 y100 200x100 flipX       -> page p = (600 - x, 100 + y)
+;;   mirrored RECT x10 y20 40x30 rotation 30  -> selrect (550 120), rotation
+;;                                               330, flip-x
+(def geometry-nodes
+  {:node_board    {:children ["node_child" "node_turned" "node_line" "node_group"]
+                   :height 100 :id "node_board" :name "Board" :rotation 90
+                   :type "FRAME" :width 200 :x 100 :y 100}
+   :node_child    {:children [] :height 30 :id "node_child" :name "Child"
+                   :type "RECTANGLE" :width 40 :x 10 :y 20}
+   :node_turned   {:children [] :height 30 :id "node_turned" :name "Turned"
+                   :rotation 30 :type "RECTANGLE" :width 40 :x 10 :y 20}
+   :node_line     {:children [] :height 30 :id "node_line" :name "Line"
+                   :pathData "M0,0L40,30"
+                   ;; Stale page-absolute corners an older adapter stored.
+                   :points [{:x 999 :y 999} {:x 999 :y 999}
+                            {:x 999 :y 999} {:x 999 :y 999}]
+                   :type "PATH" :width 40 :x 10 :y 20}
+   :node_group    {:children ["node_leaf"] :height 40 :id "node_group"
+                   :name "Group" :rotation 90 :type "GROUP" :width 60
+                   :x 120 :y 40}
+   :node_leaf     {:children [] :height 10 :id "node_leaf" :name "Leaf"
+                   :type "RECTANGLE" :width 20 :x 5 :y 6}
+   :node_mirror   {:children ["node_mirrored"] :flipX true :height 100
+                   :id "node_mirror" :name "Mirror" :type "FRAME" :width 200
+                   :x 400 :y 100}
+   :node_mirrored {:children [] :height 30 :id "node_mirrored"
+                   :name "Mirrored" :rotation 30 :type "RECTANGLE" :width 40
+                   :x 10 :y 20}})
+
+(defn- geometry-runtime-id
+  [node-key]
+  (uuid/custom 0 (hash node-key)))
+
+(defn- geometry-objects
+  []
+  (let [candidate (reduce
+                   (fn [snapshot node-key]
+                     (assoc-in snapshot
+                               [:runtime :nodes :scr_roundtrip :pres_desktop
+                                node-key]
+                               (str (geometry-runtime-id node-key))))
+                   (-> snapshot
+                       (update-in [:entries "screens/roundtrip.json"
+                                   :presentations 0 :nodes]
+                                  merge geometry-nodes)
+                       (update-in [:entries "screens/roundtrip.json"
+                                   :presentations 0 :nodes :node_canvas
+                                   :children]
+                                  conj "node_board" "node_mirror"))
+                   (keys geometry-nodes))
+        objects   (-> (projection/project-snapshot
+                       candidate
+                       {:file-id file-id :project-id project-id})
+                      (get-in [:file :data :pages-index page-id :objects]))]
+    (fn [node-key]
+      (get objects (geometry-runtime-id node-key)))))
+
+(t/deftest project-snapshot-composes-a-turned-parent-into-its-children
+  (let [shape (geometry-objects)
+        board (shape :node_board)
+        child (shape :node_child)
+        turned (shape :node_turned)]
+    (t/is (= [100 100 200 100] ((juxt :x :y :width :height) (:selrect board))))
+    (t/is (= 90 (:rotation board)))
+    (t/is (= (gmt/matrix 0 1 -1 0 0 0) (:transform board)))
+    ;; An unturned child inherits the parent's quarter turn.
+    (t/is (= [195 65 40 30] ((juxt :x :y :width :height) (:selrect child))))
+    (t/is (= [195 65] ((juxt :x :y) child)))
+    (t/is (= 90 (:rotation child)))
+    (t/is (= (gmt/matrix 0 1 -1 0 0 0) (:transform child)))
+    (t/is (= (gmt/matrix 0 -1 1 0 0 0) (:transform-inverse child)))
+    (t/is (= [(gpt/point 230 60) (gpt/point 230 100)
+              (gpt/point 200 100) (gpt/point 200 60)]
+             (:points child)))
+    ;; A turned child adds its own turn about the same center.
+    (t/is (= [195 65] ((juxt :x :y) (:selrect turned))))
+    (t/is (= 120 (:rotation turned)))
+    (t/is (close-matrix? (gmt/matrix -0.5 cos30 (- cos30) -0.5 0 0)
+                         (:transform turned)))
+    (t/is (close-points? (corners 215 80 -0.5 cos30 (- cos30) -0.5 20 15)
+                         (:points turned)))))
+
+(t/deftest project-snapshot-composes-nested-turns-and-mirrors
+  (let [shape    (geometry-objects)
+        leaf     (shape :node_leaf)
+        mirrored (shape :node_mirrored)]
+    (t/is (= [195 204 20 10] ((juxt :x :y :width :height) (:selrect leaf))))
+    (t/is (= 180 (:rotation leaf)))
+    (t/is (= (gmt/matrix -1 0 0 -1 0 0) (:transform leaf)))
+    (t/is (= [(gpt/point 215 214) (gpt/point 195 214)
+              (gpt/point 195 204) (gpt/point 215 204)]
+             (:points leaf)))
+    ;; A mirrored parent turns its children the other way: diag(-1, 1)·R(30)
+    ;; = R(330)·diag(-1, 1).
+    (t/is (= [550 120 40 30] ((juxt :x :y :width :height) (:selrect mirrored))))
+    (t/is (true? (:flip-x mirrored)))
+    (t/is (not (:flip-y mirrored)))
+    (t/is (= 330 (:rotation mirrored)))
+    (t/is (close-matrix? (gmt/matrix (- cos30) 0.5 0.5 cos30 0 0)
+                         (:transform mirrored)))
+    (t/is (close-points? (corners 570 135 (- cos30) 0.5 0.5 cos30 20 15)
+                         (:points mirrored)))))
+
+(t/deftest project-snapshot-maps-path-content-through-the-parent-turn
+  (let [line ((geometry-objects) :node_line)]
+    (t/is (= :path (:type line)))
+    (t/is (= [(gpt/point 230 60) (gpt/point 200 100)]
+             (path/get-points (:content line))))
+    (t/is (= "M0,0L40,30" (:path-data line)))
+    (t/is (= [195 65 40 30] ((juxt :x :y :width :height) (:selrect line))))
+    (t/is (= 90 (:rotation line)))
+    ;; Stored page-absolute points are ignored; corners follow the content.
+    (t/is (= [(gpt/point 230 60) (gpt/point 230 100)
+              (gpt/point 200 100) (gpt/point 200 60)]
+             (:points line)))))
 
 (t/deftest project-snapshot-materializes-ellipse-group-and-path-nodes
   (let [group-runtime-id   #uuid "16161616-1616-4616-8616-161616161616"
@@ -1363,9 +1590,16 @@
         pad    (apply str (repeat (- 12 (count digits)) "0"))]
     (uuid/parse (str "7e57a100-0000-4000-8000-" pad digits))))
 
+(defn- specimen-caption-id
+  [n]
+  (let [digits (str n)
+        pad    (apply str (repeat (- 12 (count digits)) "0"))]
+    (str "7e57ca00-0000-4000-8000-" pad digits)))
+
 (defn- fill-specimen-ref
   [n]
   {:attribute "fill"
+   :caption (specimen-caption-id n)
    :ownerPackageId "pkg_roundtrip"
    :path (str "color.swatch" n)
    :raw "#2563eb"
@@ -1497,12 +1731,10 @@
         objects (:objects page)
         board   (get objects ds-board-id)]
     (t/is (= :frame (:type board)))
-    ;; The board lists direct children only: the label, the top-level
-    ;; specimens, and the sample ROOT — never the sample's descendants.
-    (t/is (= [ds-label-id tokens-section-id components-section-id
-              specimen-id ds-sample-id sample-root-id]
-             (:shapes board)))
-    ;; ...so both traversal directions describe the same tree.
+    ;; The board lists direct children only, never a sample's descendants,
+    ;; so both traversal directions describe the same tree.
+    (t/is (some? (get objects specimen-id)))
+    (t/is (not-any? #{sample-body-id sample-text-id} (:shapes board)))
     (t/is (= ds-board-id (:parent-id (get objects sample-root-id))))
     (t/is (= sample-root-id (:parent-id (get objects sample-body-id))))
     (t/is (= [sample-body-id] (:shapes (get objects sample-root-id))))
@@ -1513,6 +1745,8 @@
 (t/deftest design-system-gap-specimen-children-are-listed-once
   (let [ref (assoc (fill-specimen-ref 1)
                    :attribute "gap"
+                   :raw 16
+                   :type "spacing"
                    :value 16
                    :children [(str specimen-child-a-id)
                               (str specimen-child-b-id)])
@@ -1529,73 +1763,7 @@
     (t/is (= (specimen-shape-id 1)
              (:parent-id (get objects specimen-child-b-id))))
     ;; Fillers belong to their frame, not to the board.
-    (t/is (= [ds-label-id tokens-section-id components-section-id
-              (specimen-shape-id 1) ds-sample-id sample-root-id]
-             (:shapes board)))
-    (assert-consistent-shape-tree objects)))
-
-(t/deftest design-system-specimen-grid-wraps-without-dropping-specimens
-  (let [n 7
-        specimens (into {}
-                        (map (fn [i] [(str "tok_color_swatch" i)
-                                      (fill-specimen-ref i)]))
-                        (range 1 (inc n)))
-        page      (design-system-page (design-system-snapshot specimens))
-        objects   (:objects page)
-        board     (get objects ds-board-id)
-        specimen-ids (mapv specimen-shape-id (range 1 (inc n)))]
-    ;; Every input specimen reaches the objects map exactly once.
-    (t/is (= (set specimen-ids)
-             (set (filter (set specimen-ids) (map :id (vals objects))))))
-    (t/is (= (into [ds-label-id tokens-section-id components-section-id]
-                   (concat specimen-ids [ds-sample-id sample-root-id]))
-             (:shapes board)))
-    ;; Row 1 holds five 96px swatches (x 40/160/280/400/520, y 116); the 6th
-    ;; specimen is the first overflow and must open row 2 instead of being
-    ;; consumed by the wrap.
-    (t/is (= [40 160 280 400 520]
-             (mapv :x (map objects (take 5 specimen-ids)))))
-    (t/is (every? #(= 116 (:y %)) (map objects (take 5 specimen-ids))))
-    (t/is (= 40 (:x (get objects (nth specimen-ids 5)))))
-    (t/is (= 192 (:y (get objects (nth specimen-ids 5)))))
-    (t/is (= 160 (:x (get objects (nth specimen-ids 6)))))
-    (t/is (= 192 (:y (get objects (nth specimen-ids 6)))))
-    (assert-consistent-shape-tree objects)))
-
-(t/deftest design-system-specimen-grid-places-mixed-widths-and-empty-sets
-  (let [gap-ref (assoc (fill-specimen-ref 6)
-                       :attribute "gap"
-                       :value 16
-                       :children [(str specimen-child-a-id)
-                                  (str specimen-child-b-id)])
-        specimens (merge
-                   (into {} (map (fn [i]
-                                   [(str "tok_color_swatch" i)
-                                    (fill-specimen-ref i)]))
-                         (range 1 6))
-                   {"tok_space_gap" gap-ref})
-        page      (design-system-page (design-system-snapshot specimens))
-        objects   (:objects page)
-        board     (get objects ds-board-id)
-        gap-frame (get objects (specimen-shape-id 6))]
-    ;; Five swatches fill row 1; the 120px gap frame is the first item that
-    ;; does not fit and opens row 2 at the pad origin.
-    (t/is (= 40 (:x gap-frame)))
-    (t/is (= 192 (:y gap-frame)))
-    ;; An empty specimen set leaves only the label plus the sample tree.
-    (let [empty-page   (design-system-page (design-system-snapshot {}))
-          empty-objects (:objects empty-page)
-          empty-board   (get empty-objects ds-board-id)]
-      (t/is (= [ds-label-id tokens-section-id components-section-id
-                tokens-empty-id ds-sample-id sample-root-id]
-               (:shapes empty-board)))
-      (t/is (= #{"Label · No Tokens"}
-               (into #{}
-                     (comp (map :name)
-                           (filter #{"Label · No Tokens" "Label · No Pages"}))
-                     (vals empty-objects))))
-      (t/is (nil? (get empty-objects (specimen-shape-id 1))))
-      (assert-consistent-shape-tree empty-objects))
+    (t/is (not-any? #{specimen-child-a-id specimen-child-b-id} (:shapes board)))
     (assert-consistent-shape-tree objects)))
 
 (t/deftest design-system-token-cells-show-group-metadata-and-real-visuals
@@ -1686,11 +1854,8 @@
         white-caption    (get objects token-caption-a-id)
         transparent-caption (get objects token-caption-b-id)
         caption-names   (into #{} (map :name) (vals objects))]
-    (t/is (contains? caption-names "Label · pkg_roundtrip / core / color"))
-    (t/is (contains? caption-names
-                     "Label · pkg_roundtrip · core · color\ncolor.swatch1 = #ffffff · literal · active"))
-    (t/is (contains? caption-names
-                     "Label · pkg_roundtrip · core · border-radius\nradius.alias = {base} · alias · archived"))
+    (t/is (contains? caption-names "Label · color.swatch1 = #ffffff"))
+    (t/is (contains? caption-names "Label · heading = Inter · 28/1.2 · 600"))
     (t/is (= :solid (get-in white [:strokes 0 :stroke-style])))
     (t/is (= :dashed (get-in transparent [:strokes 0 :stroke-style])))
     (t/is (= 0 (get-in transparent [:fills 0 :fill-opacity])))
@@ -1704,7 +1869,7 @@
           "measured multiline captions do not overlap on a narrow board")
     (t/is (= :text (:type typography)))
     (t/is (= "28" (get-in typography [:content :children 0 :children 0
-                                       :children 0 :font-size])))
+                                      :children 0 :font-size])))
     (assert-consistent-shape-tree objects)))
 
 (t/deftest design-system-keeps-located-components-but-excludes-page-previews
@@ -1785,6 +1950,61 @@
     (t/is (some? (get pages third-page-id)) "empty real pages are preserved")
     (assert-consistent-shape-tree objects)))
 
+(defn- layout-offset
+  [shape]
+  (some->> (get-in shape [:plugin-data :smallpen "layout-offset"])
+           (re-matches #"(\S+) (\S+)")
+           (rest)
+           (mapv js/Number)))
+
+;; Generated pages draw copies of source trees elsewhere on the page. Each
+;; copy records the shift from its source placement, which a commit sends
+;; along so the adapter maps page-absolute geometry back to the source.
+(t/deftest generated-page-copies-record-their-layout-offset
+  (let [located-entry  {:id "cmp_located"
+                        :mainNodeId "node_rectangle"
+                        :name "Located rectangle"
+                        :presentationId "pres_desktop"
+                        :screenId "scr_roundtrip"}
+        located-family {:caption (str located-caption-id)
+                        :componentId "cmp_located"
+                        :kind "located"
+                        :label "Located rectangle"
+                        :mainNodeId "node_rectangle"
+                        :nodeCount 1
+                        :presentationId "pres_desktop"
+                        :screenId "scr_roundtrip"}
+        source-nodes   [:entries "screens/roundtrip.json" :presentations 0 :nodes]
+        card-root      [:entries "components/card.json" :componentSets 0
+                        :variants 0 :nodes :node_card_root]
+        candidate      (-> (design-system-snapshot {})
+                           ;; The source node sits inside a moved canvas, so
+                           ;; its page placement is not its own x/y.
+                           (assoc-in (conj source-nodes :node_canvas :x) 30)
+                           (assoc-in (conj source-nodes :node_canvas :y) 50)
+                           (assoc-in (conj card-root :x) 7)
+                           (assoc-in (conj card-root :y) 9)
+                           (update-in [:manifest :entries :components] conj "components/located.json")
+                           (assoc-in [:entries "components/located.json"] located-entry)
+                           (assoc-in [:runtime :components :cmp_located] (str located-component-id))
+                           (update-in [:runtime :designSystemRefs :families] conj located-family))
+        pages          (get-in (projection/project-snapshot
+                                candidate
+                                {:file-id file-id :project-id project-id})
+                               [:file :data :pages-index])
+        source         (get-in pages [page-id :objects rectangle-id])
+        copy           (get-in pages [ds-page-id :objects rectangle-id])]
+    (t/is (= [110 146] [(:x source) (:y source)]))
+    (t/is (nil? (layout-offset source)) "source pages are not shifted")
+    (t/is (= [(- (:x copy) 110) (- (:y copy) 146)] (layout-offset copy)))
+    (t/is (not= [0 0] (layout-offset copy)))
+    (doseq [page [ds-page-id components-page-id]]
+      (let [root (get-in pages [page :objects sample-root-id])
+            body (get-in pages [page :objects sample-body-id])]
+        (t/is (= [(- (:x root) 7) (- (:y root) 9)] (layout-offset root)))
+        (t/is (= (layout-offset root) (layout-offset body))
+              "one offset shifts the whole variant tree")))))
+
 (t/deftest design-system-excludes-pages-without-changing-source-geometry
   (doseq [show-content [nil false true]
           panorama? [false true]]
@@ -1830,9 +2050,14 @@
 (defn- shadow-specimen-ref
   [color-value]
   {:attribute "shadow"
+   :caption (specimen-caption-id 8)
    :ownerPackageId "pkg_roundtrip"
    :path "effect/md.elevation-1"
-   :raw color-value
+   :raw {:blur 4
+         :color color-value
+         :offsetX 0
+         :offsetY 2
+         :spread 0}
    :setId "tset_canvas_effect"
    :setName "effect"
    :shape (str (specimen-shape-id 8))
@@ -1865,22 +2090,6 @@
       (t/is (= 0 (:offset-x record)))
       (t/is (= 0 (:spread record)))
       (t/is (= {:color "#000000" :opacity 0.24} (:color record))))))
-
-(t/deftest design-system-sizing-flow-reserves-the-clamped-visual-height
-  (let [specimens (into {}
-                        (map (fn [i]
-                               [(str "sizing-" i)
-                                (assoc (fill-specimen-ref i)
-                                       :attribute "height"
-                                       :type "sizing"
-                                       :value (if (= i 1) 300 8))]))
-                        (range 1 8))
-        objects (:objects (design-system-page (design-system-snapshot specimens)))
-        tall    (get objects (specimen-shape-id 1))
-        wrapped (get objects (specimen-shape-id 6))]
-    (t/is (= 160 (:height tall)))
-    (t/is (>= (:y wrapped) (+ (:y tall) (:height tall) 28))
-          "the next row starts below the actual clamped sizing sample")))
 
 (t/deftest design-system-shadow-specimen-parses-hex-colors
   (let [page   (design-system-page

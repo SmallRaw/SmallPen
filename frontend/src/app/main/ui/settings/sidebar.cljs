@@ -63,8 +63,7 @@
 
 (mf/defc sidebar-content*
   [{:keys [profile section]}]
-  (let [local?         (smallpen/enabled?)
-        profile?       (= section :settings-profile)
+  (let [profile?       (= section :settings-profile)
         password?      (= section :settings-password)
         options?       (= section :settings-options)
         feedback?      (= section :settings-feedback)
@@ -78,39 +77,34 @@
         go-dashboard
         (mf/use-fn
          (mf/deps team-id)
-         #(if local?
-            (st/emit! (rt/nav :smallpen-home))
-            (st/emit! (dcm/go-to-dashboard-recent :team-id team-id))))]
+         #(st/emit! (dcm/go-to-dashboard-recent :team-id team-id)))]
 
     [:div {:class (stl/css :sidebar-content)}
      [:div {:class (stl/css :sidebar-content-section)}
       [:button {:class (stl/css :back-to-dashboard)
                 :on-click go-dashboard}
        arrow-icon
-       [:span {:class (stl/css :back-text)}
-        (if local? "SmallPen" (tr "labels.dashboard"))]]]
+       [:span {:class (stl/css :back-text)} (tr "labels.dashboard")]]]
 
      [:hr {:class (stl/css :sidebar-separator)}]
 
      [:nav {:class (stl/css :sidebar-content-section)
             :aria-label (tr "labels.settings")}
       [:ul {:class (stl/css :sidebar-nav-settings)}
-       (when-not local?
-         [:*
-          [:li {:class (stl/css-case :current profile?
-                                     :settings-item true)
-                :on-click go-settings-profile}
-           [:span {:class (stl/css :element-title)} (tr "labels.profile")]]
+       [:li {:class (stl/css-case :current profile?
+                                  :settings-item true)
+             :on-click go-settings-profile}
+        [:span {:class (stl/css :element-title)} (tr "labels.profile")]]
 
-          [:li {:class (stl/css-case :current password?
-                                     :settings-item true)
-                :on-click go-settings-password}
-           [:span {:class (stl/css :element-title)} (tr "labels.password")]]
+       [:li {:class (stl/css-case :current password?
+                                  :settings-item true)
+             :on-click go-settings-password}
+        [:span {:class (stl/css :element-title)} (tr "labels.password")]]
 
-          [:li {:class (stl/css-case :current notifications?
-                                     :settings-item true)
-                :on-click go-settings-notifications}
-           [:span {:class (stl/css :element-title)} (tr "labels.notifications")]]])
+       [:li {:class (stl/css-case :current notifications?
+                                  :settings-item true)
+             :on-click go-settings-notifications}
+        [:span {:class (stl/css :element-title)} (tr "labels.notifications")]]
 
        (when (contains? cf/flags :custom-shortcuts)
          [:li {:class (stl/css-case :current shortcuts?
@@ -124,18 +118,16 @@
              :data-testid "settings-profile"}
         [:span {:class (stl/css :element-title)} (tr "labels.settings")]]
 
-       (when (and (not local?)
-                  (or (contains? cf/flags :subscriptions)
-                      (contains? cf/flags :admin-console)))
+       (when (or (contains? cf/flags :subscriptions)
+                 (contains? cf/flags :admin-console))
          [:li {:class (stl/css-case :current subscription?
                                     :settings-item true)
                :on-click go-settings-subscription
                :data-testid "settings-subscription"}
           [:span {:class (stl/css :element-title)} (tr "subscription.labels")]])
 
-       (when (and (not local?)
-                  (or (contains? cf/flags :access-tokens)
-                      (contains? cf/flags :mcp)))
+       (when (or (contains? cf/flags :access-tokens)
+                 (contains? cf/flags :mcp))
          [:li {:class (stl/css-case :current integrations?
                                     :settings-item true)
                :on-click go-settings-integrations
@@ -155,11 +147,38 @@
           feedback-icon
           [:span {:class (stl/css :element-title)} (tr "labels.contact-us")]])]]]))
 
+(def ^:private go-smallpen-home
+  #(st/emit! (rt/nav :smallpen-home)))
+
+(mf/defc smallpen-sidebar-content*
+  "SmallPen has no account, team or subscription; its settings only hold
+  the local preferences."
+  {::mf/private true}
+  []
+  [:div {:class (stl/css :sidebar-content)}
+   [:div {:class (stl/css :sidebar-content-section)}
+    [:button {:class (stl/css :back-to-dashboard)
+              :on-click go-smallpen-home}
+     arrow-icon
+     [:span {:class (stl/css :back-text)} (tr "smallpen.home.navigation")]]]
+
+   [:hr {:class (stl/css :sidebar-separator)}]
+
+   [:nav {:class (stl/css :sidebar-content-section)
+          :aria-label (tr "labels.settings")}
+    [:ul {:class (stl/css :sidebar-nav-settings)}
+     [:li {:class (stl/css :current :settings-item)
+           :on-click go-settings-options
+           :data-testid "settings-profile"}
+      [:span {:class (stl/css :element-title)} (tr "labels.settings")]]]]])
+
 (mf/defc sidebar*
   {::mf/wrap [mf/memo]}
   [{:keys [profile section]}]
   [:aside {:class (stl/css :dashboard-sidebar :settings)}
-   [:> sidebar-content* {:profile profile
-                         :section section}]
+   (if (smallpen/enabled?)
+     [:> smallpen-sidebar-content* {}]
+     [:> sidebar-content* {:profile profile
+                           :section section}])
    (when-not (smallpen/enabled?)
      [:> profile-section* {:profile profile}])])

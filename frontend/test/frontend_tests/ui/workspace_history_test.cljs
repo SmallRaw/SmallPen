@@ -6,8 +6,17 @@
 
 (ns frontend-tests.ui.workspace-history-test
   (:require
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.ui.history :as sp-history]
    [app.main.ui.workspace.sidebar.history :as history]
    [cljs.test :as t :include-macros true]))
+
+(def ^:private enabled? smallpen/enabled?)
+
+;; Token history rows exist only in SmallPen.
+(t/use-fixtures :each
+  {:before #(set! smallpen/enabled? (constantly true))
+   :after  #(set! smallpen/enabled? enabled?)})
 
 (defn- token-entry
   [redo-attrs undo-attrs]
@@ -78,7 +87,7 @@
                                   :id (random-uuid)}]
                   :undo-changes [{:type :mod-page
                                   :id (random-uuid)}]}]
-        grouped (history/group-undo-entries entries)
+        grouped (sp-history/group-undo-entries entries)
         parsed (history/parse-entries grouped
                                       {shape-id {:id shape-id :type :rect}})]
     (t/is (= 2 (count grouped)))

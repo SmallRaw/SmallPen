@@ -16,6 +16,7 @@
    [app.main.data.workspace :as dw]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen.ui.layers :as sp-layers]
    [app.main.store :as st]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.context :as ctx]
@@ -135,22 +136,15 @@
              (st/emit! (dw/start-rename-page-item id)))))
 
         on-blur
-        ;; `name` participates in deps so the callback compares the CURRENT
-        ;; display name; a stale closure would resend an old composed name
-        ;; after the first rename (RV-002-B).
         (mf/use-fn
          (mf/deps id is-separator? name)
          (fn [event]
            (let [new-name (ctp/normalize-page-name (dom/get-target-val event))]
-             (cond
-               (not (ctp/valid-page-name? new-name))
+             (if (not (ctp/valid-page-name? new-name))
                (when is-separator?
                  (st/emit! (dw/delete-page id)))
-
-               ;; A blur without an edit must not write back the composed
-               ;; display name (SmallPen shows "Screen · Presentation").
-               (not= new-name name)
-               (st/emit! (dw/rename-page id new-name))))
+               (when-not (sp-layers/skip-page-rename? name new-name)
+                 (st/emit! (dw/rename-page id new-name)))))
            (st/emit! (dw/stop-rename-page-item))))
 
         on-key-down
@@ -244,21 +238,7 @@
                       :title name
                       :data-testid "page-name"}
                name]
-              ;; DSE-008: the generated Design System page is a distinct
-              ;; system page, not an ordinary document page.
-              (when (some-> page :plugin-data :smallpen (get "design-system-page"))
-                [:span {:style {:background "var(--color-acid-green, #a8e10c)"
-                                :border-radius "999px"
-                                :color "#111827"
-                                :flex "none"
-                                :font-size "9px"
-                                :font-weight "600"
-                                :letter-spacing "0.04em"
-                                :line-height "1"
-                                :margin-left "4px"
-                                :padding "3px 6px"}
-                        :data-testid "dse-page-badge"}
-                 "DS"])
+              [:> sp-layers/design-system-page-badge* {:page page}]
               [:div {:class (stl/css :page-item-actions)}
                (when (and is-deletable (not read-only?))
                  [:> icon-button* {:variant "action"

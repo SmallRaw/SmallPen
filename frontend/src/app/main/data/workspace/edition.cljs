@@ -31,9 +31,7 @@
     (update [_ state]
       (let [objects (dsh/lookup-page-objects state)]
         ;; Can only edit objects that exist
-        (if (and (contains? objects id)
-                 (or (not (dsep/current-page-locked? state))
-                     (dsep/source-shape? (get objects id))))
+        (if (and (contains? objects id) (dsep/shape-editable? state (get objects id)))
           (-> state
               (update :workspace-local assoc :edition id)
               (dissoc :workspace-grid-edition))

@@ -219,20 +219,20 @@
         :on-zoom-fit on-zoom-fit
         :on-zoom-selected on-zoom-selected}]]
 
-     (when (smallpen/capability-enabled? :comments)
-       [:div {:class (stl/css :comments-section)}
-        [:> icon-button* {:variant "action"
-                          :class (stl/css :comments-btn)
-                          :tooltip-placement "bottom-left"
-                          :aria-pressed (= selected-drawtool :comments)
-                          :aria-label (tr "workspace.toolbar.comments" (get-tt :add-comment))
-                          :icon i/comments
-                          :on-click toggle-comments
-                          :data-tool "comments"}
-         (when ^boolean has-unread-comments?
-           [:div {:class (stl/css :unread)}])]])
+     [:div {:class (stl/css :comments-section)
+            :hidden (not (smallpen/capability-enabled? :comments))}
+      [:> icon-button* {:variant "action"
+                        :class (stl/css :comments-btn)
+                        :tooltip-placement "bottom-left"
+                        :aria-pressed (= selected-drawtool :comments)
+                        :aria-label (tr "workspace.toolbar.comments" (get-tt :add-comment))
+                        :icon i/comments
+                        :on-click toggle-comments
+                        :data-tool "comments"}
+       (when ^boolean has-unread-comments?
+         [:div {:class (stl/css :unread)}])]]
 
-     (when (not read-only?)
+     (when-not ^boolean read-only?
        [:div {:class (stl/css :history-section)}
         [:> icon-button* {:variant "action"
                           :tooltip-placement "bottom-left"

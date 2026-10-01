@@ -31,3 +31,11 @@
   [tokens value]
   (when-let [token-name (reference-name value)]
     (some #(when (= token-name (:name %)) %) tokens)))
+
+(defn color-dropdown-options
+  "Marks token options as color tokens so the dropdown previews a swatch."
+  [options]
+  (mapv (fn [option]
+          (cond-> option
+            (= :token (:type option)) (assoc :token-type :color)))
+        options))

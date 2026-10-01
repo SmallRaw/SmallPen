@@ -5,6 +5,7 @@
 (ns frontend-tests.smallpen.home-test
   (:require
    [app.main.smallpen.home :as home]
+   [app.util.i18n :refer [tr]]
    [cljs.test :as t]))
 
 (t/deftest local-home-tolerates-a-recent-package-without-a-role
@@ -37,3 +38,11 @@
        {:packages [{:active true
                     :packageId "pkg_product"
                     :status {:state "ready"}}]}))))
+
+(t/deftest local-home-routing-notices-follow-the-ui-language
+  (t/is (= (tr "smallpen.home.notice.file-not-found")
+           (home/notice-message {:code "file_not_found"})))
+  (t/is (= (tr "smallpen.home.notice.file-identity-mismatch")
+           (home/notice-message {:code "file_identity_mismatch"})))
+  (t/is (= (tr "smallpen.home.notice.link-unavailable")
+           (home/notice-message {:code "file_unavailable"}))))

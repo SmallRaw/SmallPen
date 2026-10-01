@@ -25,6 +25,7 @@
    [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.refs :as refs]
    [app.main.smallpen :as smallpen]
+   [app.main.smallpen.token-matrix :as sptm]
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*
                                                  dropdown-menu-item*]]
@@ -738,6 +739,7 @@
         [:> select* {:options options
                      :default-selected (some-> active-variant :id str)
                      :wrapper-class (stl/css :combination-dialog-select)
+                     :is-in-modal true
                      :aria-label (tr "workspace.tokens.matrix.current-domain" name)
                      :on-change #(on-change % axis)}]])]]])
 
@@ -814,7 +816,7 @@
          (fn [event]
            (when-let [{:keys [write-set-id]} (first variants)]
              (dom/stop-propagation event)
-             (st/emit! (dwtl/duplicate-token-matrix-variant
+             (st/emit! (sptm/duplicate-token-matrix-variant
                         (:name active-axis)
                         write-set-id)))))
 
@@ -859,7 +861,7 @@
            (dom/prevent-default event)
            (dom/stop-propagation event)
            (let [name (matrix-data/next-theme-name axes)]
-             (st/emit! (dwtl/create-token-matrix-domain name))
+             (st/emit! (sptm/create-token-matrix-domain name))
              (reset! active-axis-id* name))))
 
         change-combination
@@ -867,7 +869,7 @@
          (fn [value axis]
            (when-let [variant (some #(when (= (str (:id %)) value) %)
                                     (:variants axis))]
-             (st/emit! (dwtl/activate-token-matrix-variant
+             (st/emit! (sptm/activate-token-matrix-variant
                         (:name axis)
                         (:set-id variant))))))
 
@@ -927,7 +929,7 @@
 
                (= kind :axis)
                (do
-                 (st/emit! (dwtl/rename-token-matrix-domain
+                 (st/emit! (sptm/rename-token-matrix-domain
                             (:path target)
                             new-name))
                  (reset! active-axis-id* new-name)
@@ -935,7 +937,7 @@
 
                (= kind :variant)
                (do
-                 (st/emit! (dwtl/rename-token-matrix-variant
+                 (st/emit! (sptm/rename-token-matrix-variant
                             (:name active-axis)
                             (:set-id target)
                             new-name))
@@ -943,7 +945,7 @@
 
                (= kind :new-axis)
                (do
-                 (st/emit! (dwtl/create-token-matrix-domain new-name))
+                 (st/emit! (sptm/create-token-matrix-domain new-name))
                  (reset! active-axis-id* new-name)
                  (close-rename))
 
@@ -951,7 +953,7 @@
                (do
                  (when name-changed?
                    (st/emit! (dwtl/toggle-nested-token-path (:type target) new-name)))
-                 (st/emit! (dwtl/update-token-matrix-row
+                 (st/emit! (sptm/update-token-matrix-row
                             (:definitions target)
                             {:name new-name
                              :description new-description}))
@@ -967,7 +969,7 @@
                          :message (tr "workspace.tokens.matrix.delete-axis-message" (:name axis))
                          :accept-label (tr "labels.delete")
                          :on-accept #(st/emit!
-                                      (dwtl/delete-token-matrix-domain
+                                      (sptm/delete-token-matrix-domain
                                        (:path axis)))}))))
 
         confirm-delete-variant
@@ -980,7 +982,7 @@
                          :message (tr "workspace.tokens.matrix.delete-variant-message" (:name variant))
                          :accept-label (tr "labels.delete")
                          :on-accept #(st/emit!
-                                      (dwtl/delete-token-matrix-variant
+                                      (sptm/delete-token-matrix-variant
                                        (:name active-axis)
                                        (:set-id variant)))}))))
 
@@ -1219,7 +1221,7 @@
         delete-context-token
         (mf/use-fn
          (fn [_token]
-           (st/emit! (dwtl/delete-token-matrix-row
+           (st/emit! (sptm/delete-token-matrix-row
                       (:definitions @context-row*)))))
 
         add-token
@@ -1250,21 +1252,13 @@
                                :on-create-token
                                (when (seq variant-set-ids)
                                  (fn [token undo-group]
-                                   (dwtl/create-token-in-sets
+                                   (sptm/create-token-in-sets
                                     variant-set-ids
                                     token
                                     :undo-group undo-group)))})))))]
 
-    (mf/with-effect [axes can-edit?]
-      (when can-edit?
-        (doseq [{:keys [name variants]} axes
-                :when (not-any? :active? variants)
-                :let [variant (first variants)]
-                :when variant]
-          (st/emit! (dwtl/activate-token-matrix-variant
-                     name
-                     (:set-id variant))))))
-
+    ;; A domain without an active variant stays inactive: opening the panel
+    ;; never writes; only the variant buttons activate one.
     (mf/with-effect [can-edit?]
       (let [previous-can-edit? (mf/ref-val previous-can-edit-ref)]
         (mf/set-ref-val! previous-can-edit-ref can-edit?)
@@ -1390,7 +1384,7 @@
                      :disabled (not can-edit?)
                      :on-click #(when can-edit?
                                   (st/emit!
-                                   (dwtl/activate-token-matrix-variant
+                                   (sptm/activate-token-matrix-variant
                                     (:name active-axis)
                                     (:set-id variant))))}
             [:span]]

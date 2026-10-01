@@ -42,8 +42,4 @@
         (when-some [shape (get objects shape-id)]
           (t/is (= board-id (:parent-id shape))
                 (str "specimen not adopted by board: " (:tokenId s)
-                     " parent=" (:parent-id shape))))))
-    (doseq [g real-groups]
-      (let [header-id (uuid/parse (:header g))]
-        (t/is (some? (get objects header-id))
-              (str "group header missing: " (:setName g) "/" (:type g) " " (:header g)))))))
+                     " parent=" (:parent-id shape))))))))

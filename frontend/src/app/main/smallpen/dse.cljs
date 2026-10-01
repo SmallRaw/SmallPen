@@ -14,39 +14,30 @@
    [app.common.files.changes-builder :as pcb]
    [app.common.files.shapes-helpers :as cfsh]
    [app.common.geom.point :as gpt]
+   [app.common.logging :as log]
    [app.common.logic.libraries :as cll]
-   [app.common.types.file :as ctf]
    [app.common.types.components-list :as ctkl]
+   [app.common.types.file :as ctf]
    [app.common.types.shape :as cts]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.helpers :as dsh]
+   [app.main.data.notifications :as ntf]
    [app.main.data.workspace.selection :as dws]
    [app.main.data.workspace.undo :as dwu]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.edit-policy :as policy]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.button :refer [button*]]
+   [app.util.dom :as dom]
+   [app.util.i18n :refer [tr]]
+   [app.util.keyboard :as kbd]
    [beicon.v2.core :as rx]
    [clojure.string :as str]
    [potok.v2.core :as ptk]
    [rumext.v2 :as mf]))
-
-(defn design-system-page?
-  "True when the given projected page is the generated Design System page."
-  [page]
-  (some-> page :plugin-data :smallpen (get "design-system-page")))
-
-(defn generated-page?
-  "True for projection-only pages (generated Design System board, Components
-  overview) that can never be a write destination."
-  [page]
-  (boolean
-   (some (fn [[key _value]]
-           (and (string? key)
-                (or (str/starts-with? key "design-system")
-                    (= key "components-page"))))
-         (-> page :plugin-data :smallpen))))
 
 (defn writable-containers
   "Destination choices for drag-free creation: every frame of every real
@@ -58,7 +49,7 @@
             (let [path (conj path (:name object))
                   acc  (cond-> acc
                          (and (= :frame (:type object))
-                              (not (generated-page? page)))
+                              (not (smallpen/generated-page? page)))
                          (conj {:container-id (:id object)
                                 :label (str page-name " / " (str/join " / " path))
                                 :page-id (:id page)
@@ -88,14 +79,15 @@
   already has. The panel stays visible on the Design System page with an
   actionable reason instead of a failing fake entry."
   [file page]
-  (let [containers (writable-containers file)
-        components (ctkl/components-seq (:data file))
-        can-edit?  (not (false? (get-in file [:permissions :can-edit])))]
-    (if-not (design-system-page? page)
-      {:can-create? false
-       :can-insert? false
-       :reason nil
-       :visible? false}
+  (if-not (policy/design-system-page? page)
+    ;; Checked first: the page walk below is O(file size).
+    {:can-create? false
+     :can-insert? false
+     :reason nil
+     :visible? false}
+    (let [containers (writable-containers file)
+          components (ctkl/components-seq (:data file))
+          can-edit?  (not (false? (get-in file [:permissions :can-edit])))]
       (cond-> {:reason nil :visible? true :has-components? (boolean (seq components))}
         (not can-edit?)
         (assoc :reason :read-only :can-create? false :can-insert? false)
@@ -110,7 +102,7 @@
   pages can never be a destination, so they resolve to nil."
   [state file-id page-id container-id]
   (let [page (get-in (dsh/lookup-file-data state file-id) [:pages-index page-id])]
-    (when (and page (not (generated-page? page)))
+    (when (and page (not (smallpen/generated-page? page)))
       (let [object (get-in page [:objects container-id])]
         (when (and object (= :frame (:type object)))
           [page object])))))
@@ -130,8 +122,6 @@
     (watch [it state _]
       (let [file-id     (or file-id (:current-file-id state))
             [page container] (find-container state file-id page-id container-id)]
-        (js/console.log "dse-insert-event" "page" (boolean page) "container" (boolean container)
-                        "component" (component-exists? state file-id component-id))
         (when (and page container (component-exists? state file-id component-id))
           (let [objects   (or (:objects page) {})
                 libraries (dsh/lookup-libraries state)
@@ -210,33 +200,29 @@
                      (ptk/data-event :layout/update {:ids [new-id]})
                      (ptk/data-event ::created-component {:component-id component-id
                                                           :page-id page-id})))
-            (catch :default e
-              ;; A failed create must leave no ghost shape; surface the
-              ;; validation payload for diagnosis before rolling back.
-              (js/console.error
-               "dse-create-failed"
-               (str (ex-message e))
-               (some-> e ex-data :app.common.schema/explain :errors (->> (mapv #(dissoc % :schema)))))
-
-              (rx/empty))))))))
+            (catch :default cause
+              ;; A failed create commits nothing, so no ghost shape is left;
+              ;; tell the user instead of failing silently.
+              (log/error :hint "smallpen component create failed" :cause cause)
+              (rx/of (ntf/error (tr "smallpen.dse.create-component-failed"))))))))))
 
 ;; --- Sidebar affordance (Design System page only) --------------------------
 
-(mf/defc insert-panel*
+(mf/defc insert-panel-body*
   {::mf/private true}
-  []
-  (let [file       (mf/deref refs/file)
-        page-id    (mf/use-ctx ctx/current-page-id)
-        page       (get-in file [:data :pages-index page-id])
-        {:keys [visible? reason can-create? can-insert? has-components?]}
-        (insert-panel-state file page)
-        containers (->> (writable-containers file)
-                        (sort-by :label)
-                        (vec))
-        components (->> (ctkl/components-seq (:data file))
-                        (sort-by (fn [component]
-                                   (str/lower-case (or (some-> component :name str) ""))))
-                        (vec))
+  [{:keys [file page]}]
+  (let [{:keys [visible? reason can-create? can-insert? has-components?]}
+        (mf/with-memo [file page]
+          (insert-panel-state file page))
+        containers (mf/with-memo [file]
+                     (->> (writable-containers file)
+                          (sort-by :label)
+                          (vec)))
+        components (mf/with-memo [file]
+                     (->> (ctkl/components-seq (:data file))
+                          (sort-by (fn [component]
+                                     (str/lower-case (or (some-> component :name str) ""))))
+                          (vec)))
         target-ref    (mf/use-ref nil)
         component-ref (mf/use-ref nil)
         target-id*    (mf/use-state "")
@@ -274,29 +260,33 @@
     (when visible?
       [:details {:class (stl/css :insert-panel)
                  :data-testid "dse-insert-panel"}
-       [:summary {:class (stl/css :insert-summary)} "添加组件…"]
+       ;; The workspace binds Tab to layer selection and lets it through
+       ;; only on fields and buttons; without this, focus is stuck here.
+       [:summary {:class (stl/css :insert-summary)
+                  :on-key-down #(when (kbd/tab? %) (dom/stop-propagation %))}
+        (tr "smallpen.dse.insert.summary")]
        [:div {:class (stl/css :insert-fields)}
         [:p {:class (stl/css :insert-hint)}
-         "添加到源页面，Design System 展示会自动更新。"]
+         (tr "smallpen.dse.insert.hint")]
         (case reason
           :read-only
           [:div {:data-testid "dse-insert-reason"}
-           "当前包为只读，无法写入源页面"]
+           (tr "smallpen.dse.insert.read-only")]
 
           :no-container
           [:div {:data-testid "dse-insert-reason"}
-           "没有可写源容器：先在普通页面创建一个 Frame"]
+           (tr "smallpen.dse.insert.no-container")]
 
           nil
           [:> mf/Fragment #js {}
            [:label {:class (stl/css :insert-label)}
-            "源页面 / 容器"
+            (tr "smallpen.dse.insert.target")
             [:select {:data-testid "dse-insert-target"
                       :class (stl/css :insert-select)
                       :ref target-ref
                       :on-change #(reset! target-id* (.. % -target -value))
                       :default-value ""}
-             [:option {:value ""} "选择可写源容器…"]
+             [:option {:value ""} (tr "smallpen.dse.insert.target-placeholder")]
              (for [container containers]
                ^{:key (str (:container-id container))}
                [:option {:value (str (:container-id container))}
@@ -308,23 +298,23 @@
            (when-not has-components?
              [:div {:data-testid "dse-insert-no-components"
                     :class (stl/css :insert-hint)}
-              "暂无可用组件，可以在源页面新建。"])
+              (tr "smallpen.dse.insert.no-components")])
 
            (when can-insert?
              [:> mf/Fragment #js {}
               [:label {:class (stl/css :insert-label)}
-               "已有组件"
+               (tr "smallpen.dse.insert.component")
                [:select {:data-testid "dse-insert-component"
                          :class (stl/css :insert-select)
                          :ref component-ref
                          :on-change #(reset! component-id* (.. % -target -value))
                          :default-value ""}
-                [:option {:value ""} "选择组件变体…"]
+                [:option {:value ""} (tr "smallpen.dse.insert.component-placeholder")]
                 (for [component components]
                   ^{:key (str (:id component))}
                   [:option {:value (str (:id component))}
                    (str (when (seq (:path component)) (str (:path component) " / "))
-                        (or (some-> component :name str) "Unnamed"))])]]])
+                        (or (some-> component :name str) (tr "smallpen.dse.insert.unnamed")))])]]])
 
            [:div {:class (stl/css :insert-actions)}
             (when can-insert?
@@ -332,10 +322,20 @@
                            :variant "secondary"
                            :disabled (not (and target-valid? component-valid?))
                            :on-click on-insert}
-               "插入实例"])
+               (tr "smallpen.dse.insert.insert-instance")])
             (when can-create?
               [:> button* {:data-testid "dse-create-button"
                            :variant "secondary"
                            :disabled (not target-valid?)
                            :on-click on-create}
-               "新建组件"])]])]])))
+               (tr "smallpen.dse.insert.create-component")])]])]])))
+
+(mf/defc insert-panel*
+  "Sidebar entry point. Renders nothing, and walks nothing, outside a
+  Design System page."
+  []
+  (let [file    (mf/deref refs/file)
+        page-id (mf/use-ctx ctx/current-page-id)
+        page    (get-in file [:data :pages-index page-id])]
+    (when (policy/design-system-page? page)
+      [:> insert-panel-body* {:file file :page page}])))

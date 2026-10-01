@@ -6,10 +6,10 @@
 
 (ns frontend-tests.tokens.matrix-data-test
   (:require
-   [app.main.smallpen.token-state :as spts]
    [app.common.types.tokens-lib :as ctob]
-   [app.main.ui.workspace.tokens.matrix-data :as matrix-data]
+   [app.main.smallpen.token-state :as spts]
    [app.main.ui.workspace.tokens.management.forms.modals :as token-modals]
+   [app.main.ui.workspace.tokens.matrix-data :as matrix-data]
    [cljs.test :as t]))
 
 (t/deftest centered-token-dialog-has-no-anchor-dependent-offsets

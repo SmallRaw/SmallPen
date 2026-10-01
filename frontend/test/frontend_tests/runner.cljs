@@ -96,12 +96,7 @@
    [frontend-tests.render-wasm.text-paste-test]
    [frontend-tests.render-wasm.webgl-test]
    [frontend-tests.router-test]
-   [frontend-tests.smallpen.dse-test]
-   [frontend-tests.smallpen.panorama-probe-test]
-   [frontend-tests.smallpen.ds-real-refs-test]
-   [frontend-tests.smallpen.home-test]
-   [frontend-tests.smallpen.projection-test]
-   [frontend-tests.smallpen.session-test]
+   [frontend-tests.smallpen-suite :as smallpen-suite]
    [frontend-tests.svg-fills-test]
    [frontend-tests.svg-filters-test]
    [frontend-tests.text-editor-paste-guard-test]
@@ -120,10 +115,6 @@
    [frontend-tests.tokens.workspace-tokens-remap-test]
    [frontend-tests.ui.check-updates-test]
    [frontend-tests.ui.color-token-position-test]
-   [frontend-tests.tokens.library-assets-data-test]
-   [frontend-tests.tokens.matrix-data-test]
-   [frontend-tests.tokens.quick-panel-data-test]
-   [frontend-tests.ui.colorpicker-reference-input-test]
    [frontend-tests.ui.colorpicker-token-set-order-test]
    [frontend-tests.ui.comment-input-ime-test]
    [frontend-tests.ui.comments-clustering-test]
@@ -152,7 +143,6 @@
    [frontend-tests.ui.stroke-menu-test]
    [frontend-tests.ui.text-attrs-multiple-test]
    [frontend-tests.ui.workspace-libraries-test]
-   [frontend-tests.ui.workspace-history-test]
    [frontend-tests.util-clipboard-test]
    [frontend-tests.util-object-test]
    [frontend-tests.util-queue-test]
@@ -269,12 +259,6 @@
    'frontend-tests.render-wasm.webgl-test
    'frontend-tests.browser-history-test
    'frontend-tests.router-test
-   'frontend-tests.smallpen.dse-test
-   'frontend-tests.smallpen.panorama-probe-test
-   'frontend-tests.smallpen.ds-real-refs-test
-   'frontend-tests.smallpen.home-test
-   'frontend-tests.smallpen.projection-test
-   'frontend-tests.smallpen.session-test
    'frontend-tests.svg-fills-test
    'frontend-tests.svg-filters-test
    'frontend-tests.tokens.copy-paste-props-test
@@ -284,9 +268,6 @@
    'frontend-tests.tokens.logic.token-data-test
    'frontend-tests.tokens.logic.token-remapping-test
    'frontend-tests.tokens.referenced-token-value-test
-   'frontend-tests.tokens.library-assets-data-test
-   'frontend-tests.tokens.matrix-data-test
-   'frontend-tests.tokens.quick-panel-data-test
    'frontend-tests.tokens.style-dictionary-test
    'frontend-tests.tokens.token-errors-test
    'frontend-tests.tokens.token-path-test
@@ -297,7 +278,6 @@
    'frontend-tests.ui.color-token-position-test
    'frontend-tests.ui.colorpicker-token-set-order-test
    'frontend-tests.ui.comment-input-ime-test
-   'frontend-tests.ui.colorpicker-reference-input-test
    'frontend-tests.ui.comments-clustering-test
    'frontend-tests.ui.comments-position-modifier-test
    'frontend-tests.ui.dashboard-import-linking-test
@@ -326,7 +306,6 @@
    'frontend-tests.ui.stroke-menu-test
    'frontend-tests.ui.text-attrs-multiple-test
    'frontend-tests.ui.workspace-libraries-test
-   'frontend-tests.ui.workspace-history-test
    'frontend-tests.util-clipboard-test
    'frontend-tests.util-object-test
    'frontend-tests.util-queue-test
@@ -338,6 +317,9 @@
    'frontend-tests.util.dom.dnd-test
    'frontend-tests.util-zip-test
    'frontend-tests.worker-snap-test])
+
+;; SmallPen test namespaces are registered in `frontend-tests.smallpen-suite`.
+(set! test-namespaces (into test-namespaces smallpen-suite/test-namespaces))
 
 (assert (every? find-ns-obj test-namespaces)
         "test-namespaces contains a namespace that isn't required in runner.cljs")

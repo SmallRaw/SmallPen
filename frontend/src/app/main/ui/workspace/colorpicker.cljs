@@ -26,6 +26,7 @@
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.components.file-uploader :refer [file-uploader]]
    [app.main.ui.components.select :refer [select]]
@@ -150,7 +151,8 @@
         (mf/use-fn
          (mf/deps on-token-detach)
          (fn []
-           (when-let [token-name (mf/ref-val reference-name-ref)]
+           (when-let [token-name (and (smallpen/enabled?)
+                                      (mf/ref-val reference-name-ref))]
              (set-reference-name nil)
              (when (fn? on-token-detach)
                (on-token-detach token-name)))))
@@ -614,8 +616,8 @@
               :on-add-library-color on-add-library-color}]])]
 
         [:> token-section* {:combined-tokens combined-tokens
-                            :on-token-change handle-change-reference
-                            :applied-token reference-name
+                            :on-token-change (if (smallpen/enabled?) handle-change-reference on-token-change)
+                            :applied-token (if (smallpen/enabled?) reference-name applied-token)
                             :color-origin color-origin}])]
      (when (fn? on-accept)
        [:div {:class (stl/css :actions)}
@@ -868,7 +870,8 @@
         (when (and @dirty? @last-change on-close)
           (on-close @last-change))))
 
-    [:div {:class (stl/css :colorpicker-tooltip)
+    [:div {:class (stl/css-case :colorpicker-tooltip true
+                                :colorpicker-wide (smallpen/enabled?))
            :data-testid "colorpicker"
            :style style}
 

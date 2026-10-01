@@ -6,9 +6,9 @@
 
 (ns app.main.ui.workspace.tokens.matrix-data
   (:require
-   [app.main.smallpen.token-state :as spts]
    [app.common.types.token :as cto]
    [app.common.types.tokens-lib :as ctob]
+   [app.main.smallpen.token-state :as spts]
    [clojure.set :as set]
    [clojure.string :as str]))
 

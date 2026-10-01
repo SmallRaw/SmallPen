@@ -130,18 +130,36 @@
   [file]
   (str/replace (.-name file) #"\.json$" ""))
 
+(defn- review-revision
+  "The Package revision a review was computed against. The Background
+  reports it with the review; a Background that does not falls back to the
+  revision the workspace is on, which pending edits were flushed into before
+  the review."
+  [result reviewed-at]
+  (or (:revision result) reviewed-at))
+
+(defn- apply-error-message
+  "A stale review (the Package changed after it was computed) must be
+  reviewed again; anything else shows the Background's message."
+  [cause]
+  (let [{:keys [code status]} (ex-data cause)]
+    (if (or (= 409 status) (= :stale_revision code))
+      (tr "smallpen.tokens.import.stale-review")
+      (or (ex-message cause) (tr "errors.generic")))))
+
 (mf/defc import-tokens-modal*
   {::mf/register modal/components
    ::mf/register-as :smallpen/import-tokens}
   []
-  (let [state     (mf/use-state {:document nil
+  (let [state     (mf/use-state {:base-revision nil
+                                 :document nil
                                  :error nil
                                  :file-name nil
                                  :result nil
                                  :selected #{}
                                  :set-name nil
                                  :stage :pick})
-        {:keys [document error file-name result selected set-name stage]} @state
+        {:keys [base-revision document error file-name result selected set-name stage]} @state
         input-ref (mf/use-ref nil)
         diff      (:diff result)
         rows      (vec (diff-rows diff))
@@ -167,19 +185,24 @@
                       :file-name (.-name file)
                       :set-name name
                       :stage :loading)
-               (-> (.text file)
+               ;; Flush local edits first so the review describes the
+               ;; revision the import will be applied against.
+               (-> (smallpen/persist-pending-edits!)
+                   (.then (fn [_] (.text file)))
                    (.then (fn [text] (js/JSON.parse text)))
                    (.then (fn [doc]
-                            (-> (smallpen/import-tokens! {:document doc
-                                                          :setName name})
-                                (.then (fn [res]
-                                         (swap! state assoc
-                                                :document doc
-                                                :result res
-                                                :selected (into #{}
-                                                                (map row-key)
-                                                                (diff-rows (:diff res)))
-                                                :stage :review))))))
+                            (let [reviewed-at (smallpen/current-revision)]
+                              (-> (smallpen/import-tokens! {:document doc
+                                                            :setName name})
+                                  (.then (fn [res]
+                                           (swap! state assoc
+                                                  :base-revision (review-revision res reviewed-at)
+                                                  :document doc
+                                                  :result res
+                                                  :selected (into #{}
+                                                                  (map row-key)
+                                                                  (diff-rows (:diff res)))
+                                                  :stage :review)))))))
                    (.catch (fn [cause]
                              (swap! state assoc
                                     :stage :pick
@@ -204,23 +227,30 @@
 
         apply-import
         (mf/use-fn
-         (mf/deps document selected set-name)
+         (mf/deps base-revision document selected set-name)
          (fn []
            (swap! state assoc :stage :applying :error nil)
-           (-> (smallpen/import-tokens! {:apply true
-                                         :document document
-                                         :selection (vec selected)
-                                         :setName set-name})
-               (.then (fn [res]
+           ;; baseRevision makes the Background refuse (409) an import whose
+           ;; review no longer matches the Package.
+           (-> (smallpen/import-tokens! (cond-> {:apply true
+                                                 :document document
+                                                 :selection (vec selected)
+                                                 :setName set-name}
+                                          (some? base-revision)
+                                          (assoc :baseRevision base-revision)))
+               (.then (fn [_]
                         (swap! state assoc :stage :done)
-                        (smallpen/reload-after-external-write! (:revision res))))
+                        (smallpen/reload-after-external-write!)))
                (.catch (fn [cause]
                          (swap! state assoc
                                 :stage :review
-                                :error (or (ex-message cause) (tr "errors.generic"))))))))]
+                                :error (apply-error-message cause)))))))]
 
     [:div {:class (stl/css :modal-overlay)}
      [:div {:class (stl/css :modal-dialog)
+            :role "dialog"
+            :aria-modal true
+            :aria-labelledby "smallpen-import-tokens-title"
             :data-testid "smallpen-import-tokens"}
       [:> icon-button* {:class (stl/css :close-btn)
                         :on-click modal/hide!
@@ -228,7 +258,9 @@
                         :variant "ghost"
                         :icon i/close}]
       [:div {:class (stl/css :body)}
-       [:> heading* {:level 2 :typography "headline-medium"}
+       [:> heading* {:level 2
+                     :typography "headline-medium"
+                     :id "smallpen-import-tokens-title"}
         (tr "smallpen.tokens.import.title")]
        [:input {:type "file"
                 :accept ".json,application/json"
@@ -242,6 +274,7 @@
           [:> text* {:as "p" :typography "body-medium"}
            (tr "smallpen.tokens.import.hint")]
           [:> button* {:type "button"
+                       :auto-focus true
                        :on-click choose-file
                        :disabled (= stage :loading)}
            (tr "smallpen.tokens.import.choose-file")]

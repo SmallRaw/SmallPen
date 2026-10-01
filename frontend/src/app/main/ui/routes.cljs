@@ -16,7 +16,7 @@
    [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.router :as rt]
-   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.routing :as sprt]
    [app.main.store :as st]
    [app.util.storage :as storage]
    [beicon.v2.core :as rx]
@@ -63,10 +63,9 @@
           :dashboard-libraries
           :dashboard-files
           :dashboard-deleted
-          :workspace
-          :smallpen-home
-          :smallpen-design-system}
+          :workspace}
         (concat
+         [:smallpen-home :smallpen-design-system]
          (when (contains? cf/flags :admin-console)
            [:nitrate-entry])
          (when *assert*
@@ -102,10 +101,6 @@
     ["/shortcuts"     :settings-shortcuts]]
 
    ["/frame-preview" :frame-preview]
-
-   ["/smallpen" :smallpen-home]
-
-   ["/design-system" :smallpen-design-system]
 
    ["/view" :viewer]
 
@@ -274,16 +269,11 @@
         ;; (e.g. `template`) are forwarded to the dashboard or kept for
         ;; after login.
         root?        (nil? (rt/get-query-param query-params :screen))
-        match        (rt/match router token)]
+        match        (rt/match router token)
+        redirect     (sprt/redirect match query-params)]
     (cond
-      (and (smallpen/enabled?)
-           (or (nil? (rt/get-query-param query-params :screen))
-               (some-> (get-in match [:data :name]) name (str/starts-with? "dashboard"))))
-      (st/emit! (rt/nav :smallpen-home))
-
-      (and (contains? #{:smallpen-home :smallpen-design-system} (get-in match [:data :name]))
-           (not (smallpen/enabled?)))
-      (st/emit! (rt/assign-exception {:type :not-found}))
+      (some? redirect)
+      (st/emit! redirect)
 
       (some? match)
       (handle-sso-error-and-navigate match send-event-info? (rt/get-current-href))

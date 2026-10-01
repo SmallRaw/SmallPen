@@ -1,0 +1,56 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS SUBSIDIARY SL
+
+@use "ds/typography.scss" as t;
+@use "ds/_borders.scss" as b;
+@use "ds/_sizes.scss" as s;
+
+.media-list {
+  display: grid;
+  gap: var(--sp-xxs);
+  inline-size: var(--options-width);
+  padding-inline-start: var(--sp-xs);
+}
+
+.media-item {
+  display: grid;
+  grid-template-columns: s.$sz-40 minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-xs);
+  min-block-size: s.$sz-48;
+  padding: var(--sp-xxs) var(--sp-xs);
+  border-radius: b.$br-8;
+  color: var(--color-foreground-primary);
+  background: var(--color-background-tertiary);
+  cursor: grab;
+}
+
+.media-thumbnail {
+  inline-size: s.$sz-40;
+  block-size: s.$sz-40;
+  padding: var(--sp-xxs);
+  border-radius: b.$br-6;
+  background: var(--color-canvas);
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.media-copy {
+  display: grid;
+  min-inline-size: 0;
+}
+
+.media-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-meta {
+  @include t.use-typography("code-font");
+
+  color: var(--color-foreground-secondary);
+}
