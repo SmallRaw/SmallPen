@@ -14,6 +14,7 @@ import {
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyRuntimeDependencies } from "./copy-runtime-dependencies.mjs";
+import { buildSkills } from "./build-skills.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const smallpenRoot = resolve(here, "..");
@@ -24,7 +25,12 @@ function option(args, name) {
   return index === -1 ? undefined : args[index + 1];
 }
 
-async function copyModule(targetRoot, sourceRelative, targetRelative, children) {
+async function copyModule(
+  targetRoot,
+  sourceRelative,
+  targetRelative,
+  children,
+) {
   const source = join(smallpenRoot, sourceRelative);
   const target = join(targetRoot, targetRelative);
   await mkdir(target, { recursive: true });
@@ -55,16 +61,21 @@ async function build(output) {
     throw new Error("CLI output cannot be a filesystem root");
   }
   await assertReplaceable(output);
+  await buildSkills();
   await mkdir(dirname(output), { recursive: true });
-  const transaction = await mkdtemp(join(dirname(output), ".smallpen-cli-build-"));
+  const transaction = await mkdtemp(
+    join(dirname(output), ".smallpen-cli-build-"),
+  );
   const candidate = join(transaction, basename(output));
   try {
     const appRoot = join(candidate, "app");
     await copyModule(appRoot, "apps/cli", "apps/cli", ["package.json", "bin"]);
-    await copyModule(join(appRoot, "node_modules", "@smallpen"), "packages/core", "core", [
-      "package.json",
-      "src",
-    ]);
+    await copyModule(
+      join(appRoot, "node_modules", "@smallpen"),
+      "packages/core",
+      "core",
+      ["package.json", "src"],
+    );
     await copyModule(
       join(appRoot, "node_modules", "@smallpen"),
       "packages/local-package",
@@ -72,6 +83,11 @@ async function build(output) {
       ["assets", "package.json", "src"],
     );
     await copyRuntimeDependencies(smallpenRoot, appRoot);
+    await cp(
+      join(smallpenRoot, "skills", "smallpen-ui-design"),
+      join(candidate, "skills", "smallpen-ui-design"),
+      { recursive: true },
+    );
 
     const unixLauncher = `#!/bin/sh
 set -eu
@@ -108,11 +124,17 @@ exec node "$SMALLPEN_CLI_ROOT/app/apps/cli/bin/smallpen-check.cjs" "$@"
   }
 }
 
-const output = resolve(option(process.argv.slice(2), "--output") ?? defaultOutput);
+const output = resolve(
+  option(process.argv.slice(2), "--output") ?? defaultOutput,
+);
 
 build(output)
-  .then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`))
+  .then((result) =>
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`),
+  )
   .catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    process.stderr.write(
+      `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+    );
     process.exitCode = 1;
   });

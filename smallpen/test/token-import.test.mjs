@@ -256,6 +256,16 @@ test("fresh ids never displace a reused id that shares the same slug", () => {
   assert.equal(b.tokens[0].id, "tok_x_2", "the new one is suffixed instead");
 });
 
+test("token imports preserve surviving defaults and discard stale unthemed defaults", () => {
+  const previous = { ...previousLibrary, defaultSetIds: ["tset_core_existing"], defaultThemeIds: [] };
+  const sameSets = buildTokenLibrary(parseTokenDocument(penpotExport), previous);
+  assert.deepEqual(sameSets.defaultSetIds, ["tset_core_existing"]);
+  const replacedSets = buildTokenLibrary(parseTokenDocument({ next: { $type: "color", $value: "#123456" } }), previous);
+  assert.equal(replacedSets.defaultSetIds, undefined);
+  const intentionalEmpty = buildTokenLibrary(parseTokenDocument(penpotExport), { ...previous, defaultSetIds: [] });
+  assert.deepEqual(intentionalEmpty.defaultSetIds, []);
+});
+
 test("the diff lists added, changed, and removed tokens with real values", () => {
   const library = buildTokenLibrary(parseTokenDocument(penpotExport), previousLibrary);
   const diff = diffTokenLibraries(previousLibrary, library);

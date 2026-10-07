@@ -11,7 +11,9 @@ import {
 // state: an interaction state the user causes (hover, pressed, disabled).
 export const AXIS_ROLES = Object.freeze(["configuration", "state"]);
 
-const NODE_TYPES = new Set([
+// The node types a Component variant may hold; Presentations also allow
+// ELLIPSE, GROUP and PATH.
+export const VARIANT_NODE_TYPES = Object.freeze([
   "COMPONENT",
   "COMPONENT_SET",
   "FRAME",
@@ -20,6 +22,7 @@ const NODE_TYPES = new Set([
   "RECTANGLE",
   "TEXT",
 ]);
+const NODE_TYPES = new Set(VARIANT_NODE_TYPES);
 
 function nonEmpty(value, code, path) {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -61,17 +64,23 @@ function validateNode(nodeValue, nodeId, path) {
   if (!NODE_TYPES.has(nodeValue.type)) {
     fail(
       "unsupported_node_type",
-      `${path}.type ${JSON.stringify(nodeValue.type ?? null)} is unsupported. ` +
-        `Variant node types: ${[...NODE_TYPES].join(", ")}`,
+      `${path}.type ${JSON.stringify(nodeValue.type ?? null)} is unsupported in a Component variant. ` +
+        `Variant node types: ${[...NODE_TYPES].join(", ")}` +
+        (["ELLIPSE", "GROUP", "PATH"].includes(nodeValue.type)
+          ? ` (${nodeValue.type} is allowed only in Screen Presentations; in a variant use a RECTANGLE ` +
+            "with cornerRadius for a circle, a FRAME to group, an IMAGE for an icon)"
+          : ""),
       { allowedValues: [...NODE_TYPES], path: `${path}.type`, type: nodeValue.type },
     );
   }
   nonEmpty(nodeValue.name, "invalid_node_name", `${path}.name`);
   for (const field of ["height", "width", "x", "y"]) {
     if (typeof nodeValue[field] !== "number" || !Number.isFinite(nodeValue[field])) {
-      fail("invalid_node_number", `${path}.${field} must be finite`, {
-        path: `${path}.${field}`,
-      });
+      fail(
+        "invalid_node_number",
+        `${path}.${field} must be a finite number; received ${JSON.stringify(nodeValue[field]) ?? "nothing"}`,
+        { path: `${path}.${field}` },
+      );
     }
   }
   if (!Array.isArray(nodeValue.children)) {
@@ -213,18 +222,26 @@ function parseVariant(value, axes, path) {
   );
   for (const axis of axes) {
     if (!Object.hasOwn(selection, axis.id)) {
-      fail("missing_variant_axis", `${path} must select ${axis.id}`);
+      fail(
+        "missing_variant_axis",
+        `${path} must select ${axis.id}${axis.domain ? ` (one of ${axis.domain.join(", ")})` : ""}`,
+      );
     }
     if (axis.domain && !axis.domain.includes(selection[axis.id])) {
       fail(
         "variant_outside_domain",
-        `${path}.selection.${axis.id} is outside the Axis domain`,
+        `${path}.selection.${axis.id} ${JSON.stringify(selection[axis.id])} is outside the Axis domain: ` +
+          axis.domain.join(", "),
+        { allowedValues: [...axis.domain], path: `${path}.selection.${axis.id}` },
       );
     }
   }
   for (const axisId of Object.keys(selection)) {
     if (!axes.some((axis) => axis.id === axisId)) {
-      fail("unknown_variant_axis", `${path} selects unknown Axis ${axisId}`);
+      fail(
+        "unknown_variant_axis",
+        `${path} selects unknown Axis ${axisId}; axes: ${axes.map(({ id }) => id).join(", ") || "none"}`,
+      );
     }
   }
   return {
@@ -349,4 +366,134 @@ export function findComponentVariant(componentSet, selection, options = {}) {
         ? (componentSet.variants[0] ?? null)
         : null,
   };
+}
+
+// The variant a stale selection is drawn with until it is repaired, by
+// Penpot's variant distance: a differing Axis weighs more the earlier it is
+// (2^(axes - index)); earlier variants win a tie, so with nothing in common
+// it is the set's first variant. Deterministic, so every reader agrees.
+export function closestComponentVariant(componentSet, selection) {
+  const chosen = isRecord(selection) ? selection : {};
+  const count = componentSet.axes.length;
+  let best = componentSet.variants[0] ?? null;
+  let bestDistance = Infinity;
+  for (const variant of componentSet.variants) {
+    const distance = componentSet.axes.reduce(
+      (sum, axis, index) =>
+        variant.selection[axis.id] === chosen[axis.id] ? sum : sum + 2 ** (count - index),
+      0,
+    );
+    if (distance < bestDistance) {
+      best = variant;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+// A Package's Component Sets changed from `before` to `after`: the
+// operations that keep `dependent`'s Instances on the same variants. A
+// variant keeps its id when its values are renamed (in the editor or by
+// put-component-set), so an Instance that selected its old values follows
+// it to the new ones, as a Penpot copy follows its component. Instances of
+// a deleted variant have nothing to follow and are left to Repair.
+export function followedVariantOperations(before, after, dependent) {
+  const ownerId = after.manifest.packageId;
+  const moves = new Map();
+  for (const [setId, oldSet] of before.domain?.componentSets ?? []) {
+    const newSet = after.domain?.componentSets?.get(setId);
+    if (!newSet) continue;
+    for (const variant of oldSet.variants) {
+      const next = newSet.variants.find(({ id }) => id === variant.id);
+      if (next && selectionKey(next.selection) !== selectionKey(variant.selection)) {
+        moves.set(`${setId}\0${selectionKey(variant.selection)}`, next.selection);
+      }
+    }
+  }
+  if (moves.size === 0) return [];
+  const moved = (instance) =>
+    instance?.component?.packageId === ownerId
+      ? moves.get(`${instance.component.assetId}\0${selectionKey(instance.variant ?? {})}`)
+      : undefined;
+  const operations = [];
+  for (const entry of dependent.manifest.entries.screens) {
+    const screen = dependent.entries[entry];
+    for (const presentation of screen.presentations) {
+      for (const node of Object.values(presentation.nodes)) {
+        const selection = moved(node.instance);
+        if (!selection) continue;
+        operations.push({
+          nodeId: node.id,
+          presentationId: presentation.id,
+          screenId: screen.id,
+          selection: structuredClone(selection),
+          type: "select-instance-variant",
+        });
+      }
+    }
+  }
+  for (const componentSet of dependent.domain?.componentSets?.values() ?? []) {
+    for (const variant of componentSet.variants) {
+      for (const node of Object.values(variant.nodes)) {
+        const selection = moved(node.instance);
+        if (!selection) continue;
+        operations.push({
+          changes: {
+            instance: { ...structuredClone(node.instance), variant: structuredClone(selection) },
+          },
+          componentId: componentSet.id,
+          nodeId: node.id,
+          type: "update-component-node",
+          unset: [],
+          variantId: variant.id,
+        });
+      }
+    }
+  }
+  return operations;
+}
+
+// Why `selection` matches no variant of `componentSet`, for errors and
+// diagnostics: the Axis values that are wrong or missing, and the
+// selections that exist.
+export function variantMismatch(componentSet, selection) {
+  const chosen = isRecord(selection) ? selection : {};
+  const problems = [];
+  for (const axis of componentSet.axes) {
+    const used = [
+      ...new Set(componentSet.variants.map((variant) => variant.selection[axis.id])),
+    ];
+    if (!Object.hasOwn(chosen, axis.id)) {
+      problems.push(`${axis.id} is missing (values: ${used.join(", ")})`);
+    } else if (!used.includes(chosen[axis.id])) {
+      problems.push(
+        `no variant selects ${axis.id} ${JSON.stringify(chosen[axis.id])} (values: ${used.join(", ")})`,
+      );
+    }
+  }
+  for (const axisId of Object.keys(chosen)) {
+    if (!componentSet.axes.some(({ id }) => id === axisId)) {
+      problems.push(
+        `${axisId} is not an Axis of ${componentSet.id} (axes: ${componentSet.axes.map(({ id }) => id).join(", ") || "none"})`,
+      );
+    }
+  }
+  if (problems.length === 0) {
+    problems.push("this combination of Axis values has no variant");
+  }
+  return {
+    problems,
+    validSelections: componentSet.variants.map((variant) =>
+      structuredClone(variant.selection),
+    ),
+  };
+}
+
+export function variantMismatchText(componentSet, selection) {
+  const { problems, validSelections } = variantMismatch(componentSet, selection);
+  const shown = validSelections.slice(0, 12).map((value) => JSON.stringify(value));
+  return (
+    `${problems.join("; ")}. Variants of ${componentSet.id}: ${shown.join(", ") || "(none)"}` +
+    (validSelections.length > shown.length ? `, ... (${validSelections.length} in all)` : "")
+  );
 }

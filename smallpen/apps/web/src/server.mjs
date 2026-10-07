@@ -3,7 +3,16 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
+import {
+  compressBuffer,
+  MIN_COMPRESSED_BYTES,
+  negotiateEncoding,
+} from "./compression.mjs";
+
 const MAX_CONTROL_BODY_BYTES = 16 * 1024;
+// The Background checks file contents against the 50 MB limit; reserve 1 MB
+// here for multipart headers and up to 2000 browser-relative field names.
+const MAX_PACKAGE_UPLOAD_BODY_BYTES = 51 * 1024 * 1024;
 const CLOSE_GRACE_MS = 1000;
 // Penpot asks for every variant of a family in one stylesheet, and CJK
 // families list each weight as ~100 unicode-range faces: Noto Sans TC with
@@ -20,6 +29,9 @@ const SAFE_SHADOW_MODULE_LOADED_CALL =
   "globalThis.shadow?.cljs?.devtools?.client?.env?.module_loaded?.(";
 const defaultFrontendRoot = fileURLToPath(
   new URL("../../../../frontend/resources/public/", import.meta.url),
+);
+const browserFilesPath = fileURLToPath(
+  new URL("./browser-files.mjs", import.meta.url),
 );
 
 const contentTypes = new Map([
@@ -427,6 +439,40 @@ function isWithinRoot(rootPath, candidatePath) {
   );
 }
 
+// Text and wasm assets travel compressed when the browser accepts it. The
+// Penpot bundles are several megabytes and never change while the host
+// runs, so each compressed form is kept per file version and encoding.
+const COMPRESSIBLE_EXTENSIONS = new Set([
+  ".css",
+  ".html",
+  ".js",
+  ".json",
+  ".map",
+  ".svg",
+  ".ttf",
+  ".wasm",
+]);
+const STATIC_CACHE_LIMIT = 64;
+const compressedStatic = new Map();
+
+function compressedStaticBody(target, descriptor, body, encoding) {
+  const key = [target, descriptor.mtimeMs, descriptor.size, encoding].join(
+    "\0",
+  );
+  let pending = compressedStatic.get(key);
+  if (pending) {
+    compressedStatic.delete(key);
+  } else {
+    pending = compressBuffer(body, encoding);
+    pending.catch(() => compressedStatic.delete(key));
+  }
+  compressedStatic.set(key, pending);
+  while (compressedStatic.size > STATIC_CACHE_LIMIT) {
+    compressedStatic.delete(compressedStatic.keys().next().value);
+  }
+  return pending;
+}
+
 function prepareStaticBody(target, body) {
   if (extension(target) !== ".js") return body;
   const source = body.toString("utf8");
@@ -452,12 +498,22 @@ async function serveStatic(request, response, frontendRoot, pathname) {
     return false;
   }
   if (!descriptor.isFile()) return false;
-  const body = prepareStaticBody(target, await readFile(target));
+  let body = prepareStaticBody(target, await readFile(target));
+  const encoding =
+    COMPRESSIBLE_EXTENSIONS.has(extension(target)) &&
+    body.length >= MIN_COMPRESSED_BYTES
+      ? negotiateEncoding(request.headers["accept-encoding"])
+      : null;
+  if (encoding) {
+    body = await compressedStaticBody(target, descriptor, body, encoding);
+  }
   response.writeHead(200, {
     "cache-control": "no-store",
     "content-length": body.length,
     "content-type":
       contentTypes.get(extension(target)) ?? "application/octet-stream",
+    ...(encoding ? { "content-encoding": encoding } : {}),
+    vary: "accept-encoding",
     "x-content-type-options": "nosniff",
   });
   response.end(request.method === "HEAD" ? undefined : body);
@@ -469,7 +525,7 @@ function runtimeScript(backendUrl, desktop) {
     backendUrl: backendUrl.href,
     desktop,
   }).replaceAll("<", "\\u003c");
-  return `<script>globalThis.smallpenRuntime=${runtime};</script>`;
+  return `<script>globalThis.smallpenRuntime=${runtime};${desktop ? "" : 'globalThis.smallpenNativeFilesReady=import("/smallpen/browser-files.mjs");'}</script>`;
 }
 
 function writeRuntimeIndex(request, response, indexBody, backendUrl, desktop) {
@@ -574,6 +630,58 @@ export async function servePenpotFrontend({
       const url = new URL(request.url ?? "/", origin);
       if (request.method === "GET" && url.pathname === "/health") {
         writeJson(response, 200, { status: "ok", ui: "penpot" });
+        return;
+      }
+      if (
+        request.method === "GET" &&
+        url.pathname === "/smallpen/browser-files.mjs"
+      ) {
+        const body = await readFile(browserFilesPath);
+        response.writeHead(200, {
+          "cache-control": "no-store",
+          "content-type": "text/javascript; charset=utf-8",
+          "content-length": body.length,
+          "x-content-type-options": "nosniff",
+        });
+        response.end(body);
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/packages/import") {
+        const contentType = request.headers["content-type"] ?? "";
+        if (mediaType(contentType) !== "multipart/form-data") {
+          throw new RequestError(
+            415,
+            "unsupported_media_type",
+            "Select a Package directory to upload.",
+          );
+        }
+        let size = 0;
+        const chunks = [];
+        for await (const chunk of request) {
+          size += chunk.length;
+          if (size > MAX_PACKAGE_UPLOAD_BODY_BYTES)
+            throw new RequestError(
+              413,
+              "package_upload_too_large",
+              "The Package exceeds the 50 MB upload limit.",
+            );
+          chunks.push(chunk);
+        }
+        const opened = await fetchJson(
+          backendEndpoint(backendUrl, "/v1/packages/import"),
+          {
+            method: "POST",
+            headers: { "content-type": contentType },
+            body: Buffer.concat(chunks),
+          },
+        );
+        const snapshot = await selectedWorkspace(backendUrl, {
+          packageSessionId: opened.activeSessionId,
+        });
+        writeJson(response, 201, {
+          url: workspaceUrl(origin, snapshot),
+          packagePath: opened.packagePath,
+        });
         return;
       }
       if (

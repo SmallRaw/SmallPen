@@ -1,0 +1,30 @@
+{
+  "axes": [
+    {
+      "defaultValue": "desktop",
+      "id": "axis_platform",
+      "kind": "viewport",
+      "name": "Platform",
+      "values": [
+        {
+          "id": "desktop",
+          "name": "desktop"
+        },
+        {
+          "id": "mobile",
+          "name": "mobile"
+        }
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "default": true,
+      "id": "ctx_desktop",
+      "name": "desktop",
+      "values": {
+        "axis_platform": "desktop"
+      }
+    }
+  ]
+}

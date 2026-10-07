@@ -1,366 +1,159 @@
 (ns frontend-tests.smallpen.panorama-probe-test
+  "The Penpot projection of the generated Design System page. SmallPen core
+  lays the page out (design-system-page.mjs, tested there); these tests
+  check that the tree is drawn faithfully with its write targets."
   (:require
    [app.common.uuid :as uuid]
    [app.main.smallpen.projection :as projection]
-   [app.util.i18n :as i18n :refer [tr]]
-   [cljs.test :as t]))
+   [app.util.i18n :refer [tr]]
+   [cljs.test :as t]
+   [cuerdas.core :as str]
+   [frontend-tests.smallpen.ds-tree :as ds]))
 
-;; Generated labels size the layout, so the layout tests measure real English
-;; text instead of raw PO keys (no translations are loaded in tests).
-(def ^:private en-labels
-  #js {"smallpen.design-system.axis.style" "Style"
-       "smallpen.design-system.axis.content" "Content"
-       "smallpen.design-system.axis.state" "State"
-       "smallpen.design-system.axis.theme" "Theme"
-       "smallpen.design-system.axis.tone" "Tone"
-       "smallpen.design-system.axis.level" "Level"
-       "smallpen.design-system.axis.kind" "Kind"
-       "smallpen.design-system.axis.primary" "Primary"
-       "smallpen.design-system.axis.secondary" "Secondary"
-       "smallpen.design-system.axis.ghost" "Ghost"
-       "smallpen.design-system.axis.text" "Text only"
-       "smallpen.design-system.axis.leading" "Leading icon"
-       "smallpen.design-system.axis.trailing" "Trailing icon"
-       "smallpen.design-system.axis.icon" "Icon only"
-       "smallpen.design-system.axis.default" "Default"
-       "smallpen.design-system.axis.hover" "Hover"
-       "smallpen.design-system.axis.pressed" "Pressed"
-       "smallpen.design-system.axis.disabled" "Disabled"
-       "smallpen.design-system.axis.light" "Light"
-       "smallpen.design-system.axis.dark" "Dark"
-       "smallpen.design-system.axis.neutral" "Neutral"
-       "smallpen.design-system.axis.success" "Success"
-       "smallpen.design-system.axis.danger" "Danger"
-       "smallpen.design-system.axis.focus" "Focus"
-       "smallpen.design-system.axis.error" "Error"
-       "smallpen.design-system.axis.page" "Page title"
-       "smallpen.design-system.axis.section" "Section title"
-       "smallpen.design-system.axis.dialog" "Dialog title"
-       "smallpen.design-system.axis.confirm" "Confirm"
-       "smallpen.design-system.axis.form" "Form"
-       "smallpen.design-system.facet" "%s: %s"
-       "smallpen.design-system.family-samples" "%s \u00b7 Samples shown: %s"
-       "smallpen.design-system.component" "Component"
-       "smallpen.design-system.archived" "Archived (inactive)"
-       "smallpen.design-system.other-tokens" "Other tokens"
-       "smallpen.design-system.no-tokens" "No tokens yet"
-       "smallpen.design-system.no-components" "No components yet"
-       "smallpen.design-system.components-source" "Component sources"
-       "smallpen.design-system.summary" "Display groups: %s \u00b7 Valid combinations: %s"})
+(def ^:private page-id (uuid/parse "a1e50000-0000-4000-8000-000000000002"))
+(def ^:private board "b0000000-0000-4000-8000-000000000001")
 
-(t/use-fixtures :each
-  (fn [test-fn]
-    (let [locale i18n/*current-locale*]
-      (i18n/set-translations "smallpen_en_test" en-labels)
-      (set! i18n/*current-locale* "smallpen_en_test")
-      (try
-        (test-fn)
-        (finally
-          (set! i18n/*current-locale* locale))))))
-
-;; Minimal combination-aware refs (same shape the runtime emits for the demo
-;; package): two combinations, one radius Cell covered by both, one archived
-;; Cell covered by none.
 (def combos
   [{:id "cb-light" :label "Light" :selection [] :setIds ["s1"] :themeIds ["t1"]}
    {:id "cb-dark" :label "Dark" :selection [] :setIds ["s2"] :themeIds ["t2"]}])
 
-(def specimens
-  {"tok1@cb-light"
-   {:ownerPackageId "pkg" :order 0 :path "base" :raw 8 :setId "s1" :setName "radius/md"
-    :status "active" :tokenId "tok1" :type "border-radius" :value 8 :attribute "radius"
-    :writable true :alias false :resolved 8 :resolvedFrom nil :unresolvedAlias false
-    :aliasCycle false :combinationIds ["cb-light" "cb-dark"] :combinationId "cb-light"
-    :caption "cccccccc-0000-4000-8000-000000000001"
-    :shape "cccccccc-0000-4000-8000-000000000002"}
-   "tok1@cb-dark"
-   {:ownerPackageId "pkg" :order 0 :path "base" :raw 8 :setId "s1" :setName "radius/md"
-    :status "active" :tokenId "tok1" :type "border-radius" :value 8 :attribute "radius"
-    :writable true :alias false :resolved 8 :resolvedFrom nil :unresolvedAlias false
-    :aliasCycle false :combinationIds ["cb-light" "cb-dark"] :combinationId "cb-dark"
-    :caption "cccccccc-0000-4000-8000-000000000003"
-    :shape "cccccccc-0000-4000-8000-000000000004"}
-   "tok9"
-   {:ownerPackageId "pkg" :order 1 :path "legacy" :raw "#cccccc" :setId "s9" :setName "color/archived"
-    :status "archived" :tokenId "tok9" :type "color" :value "#cccccc" :attribute "fill"
-    :writable true :alias false :resolved "#cccccc" :resolvedFrom nil :unresolvedAlias false
-    :aliasCycle false :combinationIds [] :combinationId nil
-    :caption "cccccccc-0000-4000-8000-000000000005"
-    :shape "cccccccc-0000-4000-8000-000000000006"}})
-
-(defn- project-specimens
-  [items & [combinations samples]]
-  (let [ids (mapv #(str "b0000000-0000-4000-8000-00000000000" %) (range 1 9))
-        snapshot {:manifest {:packageId "pkg" :name "Fixture"}
-                  :formatCapabilities {:webProjection projection/format-capabilities}
-                  :runtime {:file "1c241d42-8fd3-56f0-958f-0eabe092adaf"
-                            :pages {}
-                            :designSystemPage "a1e50000-0000-4000-8000-000000000002"
-                            :designSystem (zipmap [:board :tokenLabel :tokensSection
-                                                   :componentsSection :pagesSection :tokensEmpty
-                                                   :componentsEmpty :pagesEmpty] ids)
-                            :designSystemRefs (cond-> {:specimens items :combinations (or combinations combos)
-                                                       :families [] :pages []}
-                                                samples (assoc :componentSamples samples))
-                            :components {} :variants {:cmp_test {:var_test "e0000000-0000-4000-8000-000000000001"}}
-                            :componentNodes {} :nodes {} :fonts {}}}
-        result (projection/project-snapshot snapshot {:file-id uuid/zero :project-id uuid/zero})]
-    (get-in result [:file :data :pages-index
-                    (uuid/parse "a1e50000-0000-4000-8000-000000000002") :objects])))
-
-(t/deftest component-samples-stack-in-one-family-column-with-exact-source-identity
-  (let [samples (mapv (fn [index]
-                        {:kind "variant" :componentSetId "cmp_test" :variantId "var_test"
-                         :familyName "Card" :classification "Primitive" :variantIndex 0
-                         :rootId "node_root" :label "Card · idle" :combinationLabel (if (zero? index) "Light" "Dark")
-                         :caption (str "e1000000-0000-4000-8000-00000000000" index)
-                         :runtimeNodes {:node_root (str "e2000000-0000-4000-8000-00000000000" index)}
-                         :sources {:node_root {:nodeId "node_root" :componentId "cmp_test" :variantId "var_test"}}
-                         :nodes {:node_root {:id "node_root" :type "FRAME" :name "Card"
-                                             :children [] :x 0 :y 0 :width 200 :height 100
-                                             :cornerRadius 8 :fills [{:color "#ffffff" :type "solid"}]}}})
-                      [0 1])
-        objects (project-specimens {} combos samples)
-        roots (mapv #(get objects (uuid/parse (get-in % [:runtimeNodes :node_root]))) samples)
-        pages-heading (get objects (uuid/parse "b0000000-0000-4000-8000-000000000005"))
-        empty-page (get objects (uuid/parse "b0000000-0000-4000-8000-000000000008"))]
-    (t/is (= (:x (first roots)) (:x (second roots))))
-    (t/is (> (:y (second roots)) (+ (:y (first roots)) (:height (first roots)))))
-    (t/is (nil? pages-heading))
-    (t/is (nil? empty-page))
-    (t/is (= 2 (count (filter #(.startsWith (or (:name %) "") "Component sample ·") (vals objects)))))
-    (doseq [root roots]
-      (t/is (nil? (:main-instance root)))
-      (let [ref (js->clj (js/JSON.parse (get-in root [:plugin-data :smallpen "design-system-ref"])))]
-        (t/is (= "node_root" (get ref "sourceNodeId")))))))
-
-(t/deftest empty-combinations-still-show-all-type-cards
-  (let [objects (project-specimens {} [])
-        cards (filter #(.startsWith (or (:name %) "") "Token type ·") (vals objects))]
-    (t/is (= 14 (count cards)))
-    (t/is (every? #(= [{:fill-color "#ffffff" :fill-opacity 1}] (:fills %)) cards))))
-
-(t/deftest component-matrix-preserves-all-samples-and-aligns-dimensions
-  (let [axes [{:id "style" :name "Style" :role "configuration" :domain ["primary" "secondary" "ghost"]}
-              {:id "content" :name "Content" :role "configuration" :domain ["text" "leading" "trailing" "icon"]}
-              {:id "state" :name "State" :role "state" :domain ["default" "hover" "pressed" "disabled"]}]
-        samples (mapv (fn [i [style content state theme]]
-                        {:componentSetId "cmp_test" :variantId "var_test" :familyName "Button"
-                         :classification "Primitive" :variantIndex i :axes axes
-                         :selection {:style style :content content :state state}
-                         :combinationId theme :combinationLabel theme :rootId "node_root"
-                         :label (str "Button / " style " / " content " / " state)
-                         :caption (str (uuid/next)) :runtimeNodes {:node_root (str (uuid/next))}
-                         :sources {:node_root {:nodeId "node_root" :componentId "cmp_test" :variantId "var_test"}}
-                         :nodes {:node_root {:id "node_root" :type "FRAME" :name "Button"
-                                             :x 0 :y 0 :width 152 :height 44 :children []}}})
-                      (range)
-                      (for [style ["primary" "secondary" "ghost"]
-                            content ["text" "leading" "trailing" "icon"]
-                            state ["default" "hover" "pressed" "disabled"]
-                            theme ["Light" "Dark"]]
-                        [style content state theme]))
-        objects (project-specimens {} combos samples)
-        roots (mapv #(get objects (uuid/parse (get-in % [:runtimeNodes :node_root]))) samples)
-        matrices (filter #(.startsWith (or (:name %) "") "Component matrix ·") (vals objects))
-        root-at (fn [content state]
-                  (let [sample (some #(when (and (= {:style "primary" :content content :state state} (:selection %))
-                                                 (= "Light" (:combinationId %))) %) samples)]
-                    (get objects (uuid/parse (get-in sample [:runtimeNodes :node_root])))))]
-    (t/is (= 96 (count (filter some? roots))))
-    (t/is (= 6 (count matrices)))
-    (t/is (= (:y (root-at "text" "default")) (:y (root-at "leading" "default"))))
-    (t/is (< (:x (root-at "text" "default")) (:x (root-at "leading" "default"))))
-    (t/is (= (:x (root-at "text" "default")) (:x (root-at "text" "hover"))))
-    (t/is (< (- (apply max (map :y roots)) (apply min (map :y roots))) 2000))
-    (doseq [root roots]
-      (t/is (= [152 44] ((juxt :width :height) root)))
-      (t/is (some? (get-in root [:plugin-data :smallpen "design-system-ref"]))))))
-
-(t/deftest matrix-adapts-to-two-and-three-dimensions-and-wide-previews
-  (doseq [with-state? [false true]]
-    (let [axes (cond-> [{:id "size" :name "Custom size" :role "configuration"
-                         :domain (mapv str (range 7))}]
-                 with-state? (conj {:id "status" :name "Custom status" :role "state" :domain ["a" "b"]}))
-          samples (mapv (fn [[size status theme]]
-                          {:componentSetId "cmp_test" :variantId "var_test" :familyName "Unknown component"
-                           :axes axes :classification "Composite" :rootId "node_root"
-                           :selection (cond-> {:size size} with-state? (assoc :status status))
-                           :combinationId theme :combinationLabel theme :label "Custom"
-                           :caption (str (uuid/next)) :runtimeNodes {:node_root (str (uuid/next))}
-                           :sources {:node_root {:nodeId "node_root"}}
-                           :nodes {:node_root {:id "node_root" :name "Preview" :type "FRAME"
-                                               :x 0 :y 0 :width 320 :height 240 :children []}}})
-                        (for [size (map str (range 7))
-                              status (if with-state? ["a" "b"] [nil])
-                              theme ["Light" "Dark"]]
-                          [size status theme]))
-          objects (project-specimens {} combos samples)
-          roots (mapv #(get objects (uuid/parse (get-in % [:runtimeNodes :node_root]))) samples)
-          panels (filter #(.startsWith (or (:name %) "") "Component matrix ·") (vals objects))]
-      (t/is (every? some? roots))
-      (t/is (= (count roots) (count (set (map (juxt :x :y) roots)))))
-      (t/is (every? #(<= (:width %) 2400) panels) "large domains split into bounded matrix blocks")
-      (t/is (every? #(= [320 240] ((juxt :width :height) %)) roots))
-      (doseq [a roots b roots :when (not= (:id a) (:id b))]
-        (t/is (or (<= (+ (:x a) (:width a)) (:x b))
-                  (<= (+ (:x b) (:width b)) (:x a))
-                  (<= (+ (:y a) (:height a)) (:y b))
-                  (<= (+ (:y b) (:height b)) (:y a))))))))
-
-(t/deftest spacing-ruler-measures-only-the-gap
-  (doseq [gap [4 8 16]]
-    (let [ref (assoc (get specimens "tok1@cb-light")
-                     :type "spacing" :attribute "gap" :raw gap :value gap
-                     :children ["eeeeeeee-0000-4000-8000-000000000001"
-                                "eeeeeeee-0000-4000-8000-000000000002"])
-          objects (project-specimens {"gap" ref})
-          frame (get objects (uuid/parse (:shape ref)))
-          ruler (some #(when (and (= (:y %) (+ (:y frame) 52))
-                                  (= 1 (:height %))
-                                  (= [{:fill-color "#94a3b8" :fill-opacity 1}] (:fills %))) %)
-                      (vals objects))]
-      (t/is (= gap (:width ruler)))
-      (t/is (= (+ (:x frame) 32) (:x ruler))))))
-
-(def ^:private combination-snapshot
+(defn- snapshot-with
+  [refs tree]
   {:manifest {:packageId "pkg" :name "Fixture"}
    :formatCapabilities {:webProjection projection/format-capabilities}
    :runtime {:file "1c241d42-8fd3-56f0-958f-0eabe092adaf"
              :pages {}
-             :designSystemPage "a1e50000-0000-4000-8000-000000000002"
-             :designSystem {:board "b0000000-0000-4000-8000-000000000001"
-                            :tokenLabel "b0000000-0000-4000-8000-000000000002"
-                            :tokensSection "b0000000-0000-4000-8000-000000000003"
-                            :componentsSection "b0000000-0000-4000-8000-000000000004"
-                            :pagesSection "b0000000-0000-4000-8000-000000000005"
-                            :tokensEmpty "b0000000-0000-4000-8000-000000000006"
-                            :componentsEmpty "b0000000-0000-4000-8000-000000000007"
-                            :pagesEmpty "b0000000-0000-4000-8000-000000000008"
-                            :combinations {"cb-light" "c0000000-0000-4000-8000-000000000001"
-                                           "cb-dark" "c0000000-0000-4000-8000-000000000002"}
-                            :types {"border-radius" "d0000000-0000-4000-8000-000000000001"
-                                    "color" "d0000000-0000-4000-8000-000000000002"}}
-             :designSystemRefs {:specimens specimens
-                                :combinations combos
-                                :types [{:type "border-radius" :cells 1}
-                                        {:type "color" :cells 1}]
-                                :tokenGroups []
-                                :families []
-                                :pages []}
+             :designSystemPage (str page-id)
+             :designSystem {:board board}
+             :designSystemRefs refs
+             :designSystemTree tree
              :components {}
-             :variants {}
-             :componentNodes {}
-             :nodes {}
-             :fonts {}}})
+             :variants {:cmp_test {:var_test "e0000000-0000-4000-8000-000000000001"}}
+             :componentNodes {} :nodes {} :fonts {}}})
 
-(defn- design-system-page
+(defn- page-objects
   [snapshot]
-  (let [result (projection/project-snapshot snapshot {:file-id uuid/zero :project-id uuid/zero})]
-    (get-in result [:file :data :pages-index (uuid/parse "a1e50000-0000-4000-8000-000000000002")])))
+  (get-in (projection/project-snapshot snapshot {:file-id uuid/zero :project-id uuid/zero})
+          [:file :data :pages-index page-id :objects]))
 
-(t/deftest panorama-projects-combination-specimens
-  (let [page (design-system-page combination-snapshot)
-        objects (:objects page)
-        names (into #{} (map (fn [[_ shape]] (:name shape))) objects)
-        token-rows (filter #(and (string? %) (.startsWith % "Token /")) names)]
-    ;; 2 combination specimens + the archived band specimen.
-    (t/is (= #{"Token / radius/md/base · Light"
-               "Token / radius/md/base · Dark"
-               (str "Token / color/archived/legacy · " (tr "smallpen.design-system.archived"))}
-             (set token-rows)))
-    ;; Each type gets its own white card, not a global combination column.
-    (t/is (= 14 (count (filter #(and (string? %) (.startsWith % "Token type ·")) names))))
-    (t/is (contains? names "Light"))
-    (t/is (contains? names (tr "smallpen.design-system.other-tokens")))
-    (t/is (not-any? (fn [[_ shape]]
-                      (some-> shape :plugin-data :smallpen
-                              (get "design-system-combination")))
-                    objects))))
+(defn- shape-text
+  [shape]
+  (str/join "\n"
+            (for [block (get-in shape [:content :children])
+                  paragraph (:children block)]
+              (apply str (map :text (:children paragraph))))))
 
-(t/deftest panorama-generated-text-has-no-hardcoded-language
-  ;; Without loaded translations every generated label is its PO key, so any
-  ;; CJK left on the page is a hardcoded string.
-  (let [page (design-system-page combination-snapshot)]
-    (t/is (not (re-find #"[\u3400-\u9fff\uff00-\uffef]" (pr-str page))))
-    (t/is (= (tr "smallpen.design-system") (:name page)))))
+(defn- sample
+  [nodes]
+  {:kind "variant" :componentSetId "cmp_test" :variantId "var_test"
+   :familyName "Card" :classification "Composite" :variantIndex 0
+   :axes [] :selection {} :rootId "node_root"
+   :caption (str (uuid/next))
+   :runtimeNodes (into {} (map (fn [[id _]] [id (str (uuid/next))])) nodes)
+   :sources {}
+   :nodes nodes})
 
-(t/deftest panorama-labels-follow-the-ui-language
-  (let [locale i18n/*current-locale*]
-    (i18n/set-translations "smallpen_test"
-                           #js {"smallpen.design-system" "设计系统"
-                                "smallpen.design-system.archived" "已归档（未激活）"
-                                "smallpen.design-system.other-tokens" "其他令牌"})
-    (set! i18n/*current-locale* "smallpen_test")
-    (try
-      (let [page  (design-system-page combination-snapshot)
-            names (into #{} (map :name) (vals (:objects page)))]
-        (t/is (= "设计系统" (:name page)))
-        (t/is (contains? names "其他令牌"))
-        (t/is (contains? names "Token / color/archived/legacy · 已归档（未激活）")))
-      (finally
-        (set! i18n/*current-locale* locale)))))
+(t/deftest component-sample-keeps-every-descendants-exact-source
+  (let [children (mapv #(str "child-" %) (range 64))
+        item     (-> (sample (into {:node_root {:id "node_root" :type "FRAME" :name "Card"
+                                                :children children :x 0 :y 0 :width 600 :height 100}}
+                                   (map-indexed (fn [index id]
+                                                  [(keyword id) {:id id :type "RECTANGLE" :name id
+                                                                 :children [] :width 8 :height 8
+                                                                 :x index :y 4}]))
+                                   children))
+                     (assoc :sources (into {}
+                                           (map-indexed (fn [index id]
+                                                          [(keyword id) {:nodeId (str "source-" index)
+                                                                         :variantId "var_test"
+                                                                         :occurrencePath id
+                                                                         :overrideNodeId "nested-instance"}]))
+                                           children)))
+        refs     {:specimens {} :combinations combos :componentSamples [item]}
+        objects  (page-objects (snapshot-with refs (ds/ds-tree board {} 1 [])))]
+    (doseq [[index node-id] (map-indexed vector children)]
+      (let [shape (get objects (uuid/parse (get-in item [:runtimeNodes (keyword node-id)])))
+            ref   (js/JSON.parse (get-in shape [:plugin-data :smallpen "design-system-ref"]))]
+        (t/is (= [(str "source-" index) node-id "nested-instance"]
+                 [(.-sourceNodeId ref) (.-occurrencePath ref) (.-overrideNodeId ref)]))))))
 
-(t/deftest typography-is-the-only-font-section
-  (let [value {:fontFamily "Inter" :fontSize 24 :fontWeight 600 :lineHeight 1.4}
-        style (assoc (get specimens "tok1@cb-light")
-                     :type "typography" :attribute "typography" :raw value :value value)
-        primitive (assoc (get specimens "tok9")
-                         :type "font-size" :attribute "font-size" :raw 24 :value 24)
-        objects (project-specimens {"style" style "primitive" primitive})
-        names (set (map :name (vals objects)))]
-    (t/is (contains? names "Token type · typography"))
-    (t/is (some? (get objects (uuid/parse (:shape style)))))
-    (t/is (nil? (get objects (uuid/parse (:shape primitive)))))
-    (doseq [type ["font-family" "font-size" "font-weight" "letter-spacing"
-                  "text-case" "text-decoration"]]
-      (t/is (not (contains? names (str "Token type · " type)))))))
+(t/deftest a-sample-lands-exactly-on-its-placeholder
+  (let [item    (sample {:node_root {:id "node_root" :type "FRAME" :name "Card"
+                                     :children [] :x 7 :y 9 :width 160 :height 80}})
+        tree    (ds/ds-tree board {} 1 [])
+        spot    (some (fn [[_ node]] (when (= "component-sample" (get-in node [:designSystem :role])) node))
+                      (:nodes tree))
+        objects (page-objects (snapshot-with {:specimens {} :componentSamples [item]} tree))
+        root    (get objects (uuid/parse (get-in item [:runtimeNodes :node_root])))]
+    (t/is (= [(:x spot) (:y spot)] [(:x root) (:y root)]))
+    (t/is (= (uuid/parse board) (:parent-id root)))
+    (t/is (nil? (:main-instance root)) "a sample is a preview, not a second main")))
 
 ;; DSE-R19 regression: a color specimen's swatch is a real color chip — its
-;; fill IS the Token Cell value. When it was projected without fills it fell
-;; back to the shape default (#B1B2B5), which also poisoned the FILL panel's
-;; undo inverse (the undo wrote the default gray into the Cell instead of the
-;; previous Token value, so undo never restored the source).
-(t/deftest panorama-color-specimen-carries-token-fill
-  (let [specimens {"tokc@cb-light"
-                   {:ownerPackageId "pkg" :order 0 :path "primary" :raw "#6750a4"
-                    :setId "s1" :setName "color/light" :status "active" :tokenId "tokc"
-                    :type "color" :value "#6750a4" :attribute "fill" :writable true
-                    :alias false :resolved "#6750a4" :resolvedFrom nil :unresolvedAlias false
-                    :aliasCycle false :combinationIds ["cb-light"] :combinationId "cb-light"
-                    :caption "cccccccc-0000-4000-8000-000000000011"
-                    :shape "cccccccc-0000-4000-8000-000000000012"}}
-        snapshot {:manifest {:packageId "pkg" :name "Fixture"}
-                  :formatCapabilities {:webProjection projection/format-capabilities}
-                  :runtime {:file "1c241d42-8fd3-56f0-958f-0eabe092adaf"
-                            :pages {}
-                            :designSystemPage "a1e50000-0000-4000-8000-000000000002"
-                            :designSystem {:board "b0000000-0000-4000-8000-000000000001"
-                                           :tokenLabel "b0000000-0000-4000-8000-000000000002"
-                                           :tokensSection "b0000000-0000-4000-8000-000000000003"
-                                           :componentsSection "b0000000-0000-4000-8000-000000000004"
-                                           :pagesSection "b0000000-0000-4000-8000-000000000005"
-                                           :tokensEmpty "b0000000-0000-4000-8000-000000000006"
-                                           :componentsEmpty "b0000000-0000-4000-8000-000000000007"
-                                           :pagesEmpty "b0000000-0000-4000-8000-000000000008"
-                                           :combinations {"cb-light" "c0000000-0000-4000-8000-000000000001"}
-                                           :types {"color" "d0000000-0000-4000-8000-000000000002"}}
-                            :designSystemRefs {:specimens specimens
-                                               :combinations combos
-                                               :types [{:type "color" :cells 1}]
-                                               :tokenGroups []
-                                               :families []
-                                               :pages []}
-                            :components {}
-                            :variants {}
-                            :componentNodes {}
-                            :nodes {}
-                            :fonts {}}}
-        result (projection/project-snapshot snapshot {:file-id uuid/zero :project-id uuid/zero})
-        page (get-in result [:file :data :pages-index (uuid/parse "a1e50000-0000-4000-8000-000000000002")])
-        swatch (->> (:objects page)
-                    vals
-                    (filter #(= "Token / color/light/primary · Light" (:name %)))
-                    (first))]
-    (t/is (some? swatch))
-    (t/is (= [{:fill-color "#6750a4" :fill-opacity 1}] (:fills swatch)))))
+;; fill IS the Token Cell value, and the shape names the Cell it writes to.
+(t/deftest color-specimen-carries-token-fill-and-its-cell
+  (let [ref     {:ownerPackageId "pkg" :path "primary" :raw "#6750a4" :setId "s1"
+                 :setName "color/light" :tokenId "tokc" :type "color" :value "#6750a4"
+                 :attribute "fill" :combinationIds ["cb-light"] :combinationId "cb-light"
+                 :caption "cccccccc-0000-4000-8000-000000000011"
+                 :shape "cccccccc-0000-4000-8000-000000000012"}
+        refs    {:specimens {"tokc@cb-light" ref} :combinations combos}
+        objects (page-objects (snapshot-with refs (ds/ds-tree board {(keyword "tokc@cb-light") ref} 0 [])))
+        swatch  (get objects (uuid/parse (:shape ref)))
+        target  (js/JSON.parse (get-in swatch [:plugin-data :smallpen "design-system-ref"]))]
+    (t/is (= [{:fill-color "#6750a4" :fill-opacity 1}] (:fills swatch)))
+    (t/is (= "token-cell" (get-in swatch [:plugin-data :smallpen "design-system-kind"])))
+    (t/is (= "tokc" (.-tokenId target)))))
+
+(t/deftest page-text-is-the-trees-own-text
+  ;; Labels arrive translated in the tree; the projection adds none.
+  (let [tree    (-> (ds/ds-tree board {} 0 [])
+                    (assoc-in [:nodes :node_title]
+                              {:id "node_title" :type "TEXT" :name "设计系统" :text "设计系统"
+                               :x 40 :y 40 :width 200 :height 40 :children []
+                               :textStyle {:fontFamily "Source Sans Pro" :fontSize 28 :fontWeight 600}
+                               :designSystem {:role "decoration"}})
+                    (assoc-in [:runtimeIds :node_title] "b0000000-0000-4000-8000-000000000002"))
+        tree    (update-in tree [:nodes (keyword (:rootId tree)) :children] conj "node_title")
+        objects (page-objects (snapshot-with {:specimens {}} tree))
+        title   (get objects (uuid/parse "b0000000-0000-4000-8000-000000000002"))]
+    (t/is (= "设计系统" (shape-text title)))
+    (t/is (= "decoration" (get-in title [:plugin-data :smallpen "design-system"])))))
+
+(t/deftest without-a-tree-the-page-is-an-empty-board
+  (let [objects (page-objects (snapshot-with {:specimens {}} nil))]
+    (t/is (= #{uuid/zero (uuid/parse board)} (set (keys objects))))
+    (t/is (= (tr "smallpen.design-system") (:name (get objects (uuid/parse board)))))))
+
+(t/deftest board-layers-follow-the-tree-order
+  ;; A card shell comes before its content in the tree, so it is drawn
+  ;; under it; map order would let shells hide swatches at random.
+  (let [ids   (mapv #(str "b1000000-0000-4000-8000-00000000000" %) (range 1 10))
+        nodes (into {}
+                    (map-indexed (fn [index _]
+                                   [(keyword (str "node_" index))
+                                    {:id (str "node_" index) :type "RECTANGLE" :name (str "Layer " index)
+                                     :x 0 :y (* 10 index) :width 10 :height 10 :children []
+                                     :designSystem {:role "decoration"}}]))
+                    ids)
+        order (mapv #(str "node_" %) [8 3 5 0 7 1 6 2 4])
+        tree  {:rootId "node_root"
+               :nodes (assoc nodes :node_root {:id "node_root" :type "FRAME" :name "Page" :x 0 :y 0
+                                               :width 100 :height 100 :children order
+                                               :designSystem {:role "decoration"}})
+               :runtimeIds (assoc (into {} (map-indexed (fn [index id] [(keyword (str "node_" index)) id])) ids)
+                                  :node_root board)}
+        objects (page-objects (snapshot-with {:specimens {}} tree))]
+    (t/is (= (mapv #(uuid/parse (nth ids (js/parseInt (subs % 5)))) order)
+             (:shapes (get objects (uuid/parse board)))))))
+
+(t/deftest a-foundation-sample-draws-without-a-component-in-this-file
+  ;; A Product's page shows its Foundation's sets; the Product file has no
+  ;; component for them, and the sample is a preview anyway.
+  (let [item     (sample {:node_root {:id "node_root" :type "FRAME" :name "Card"
+                                      :children [] :x 0 :y 0 :width 160 :height 80}})
+        snapshot (-> (snapshot-with {:specimens {} :componentSamples [item]} (ds/ds-tree board {} 1 []))
+                     (assoc-in [:runtime :variants] {}))
+        root     (get (page-objects snapshot) (uuid/parse (get-in item [:runtimeNodes :node_root])))]
+    (t/is (some? root))
+    (t/is (nil? (:component-id root)))))

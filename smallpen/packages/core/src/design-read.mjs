@@ -226,11 +226,11 @@ function selectionArguments(selection, options = {}) {
             .map(([axis, value]) => `${axis}=${value}`),
         }),
     format: selection.viewFormat,
-    presentation: selection.presentationId,
+    "presentation-id": selection.presentationId,
     ...(options.scenario === false || !selection.scenarioId
       ? {}
-      : { scenario: selection.scenarioId }),
-    screen: selection.screenId,
+      : { "scenario-id": selection.scenarioId }),
+    "screen-id": selection.screenId,
   };
 }
 
@@ -263,10 +263,10 @@ export function createDiscoveryGuide(product, resolved, options = {}) {
         localized.presentation,
         {
           ...selectionArguments(resolved.selection, { scenario: false }),
-          presentation: presentation.id,
+          "presentation-id": presentation.id,
         },
         {
-          defaults: { presentation: resolved.screen.basePresentationId },
+          defaults: { "presentation-id": resolved.screen.basePresentationId },
           validValues: resolved.screen.presentations.map(({ id }) => id),
         },
       ),
@@ -315,7 +315,7 @@ export function createDiscoveryGuide(product, resolved, options = {}) {
         localized.context,
         {
           ...selectionArguments(resolved.selection, { context: false }),
-          "context-profile": profile.id,
+          "context-profile-id": profile.id,
         },
         { defaults: {}, validValues: [profile.id] },
       ),
@@ -337,13 +337,13 @@ export function createDiscoveryGuide(product, resolved, options = {}) {
         localized.scenario,
         {
           ...selectionArguments(resolved.selection, { scenario: false }),
-          presentation:
+          "presentation-id":
             scenario.target.presentationId ?? resolved.selection.presentationId,
-          scenario: scenario.id,
-          screen: scenario.target.screen.assetId,
+          "scenario-id": scenario.id,
+          "screen-id": scenario.target.screen.assetId,
         },
         {
-          defaults: { scenario: null },
+          defaults: { "scenario-id": null },
           validValues: [...product.domain.scenarios.keys()].sort(),
         },
       ),

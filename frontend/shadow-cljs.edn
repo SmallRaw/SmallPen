@@ -154,7 +154,11 @@
   {:target :esm
    :output-dir "target/tests"
    :runtime :custom
-   :js-options {:js-provider :import}
+   :js-options {:js-provider :import
+                ;; Native ESM shim runs from target/tests/cljs-runtime.
+                :resolve {"smallpen-token-authoring"
+                          {:target :npm
+                           :require "esm:../../../../smallpen/packages/core/src/token-authoring.mjs"}}}
 
 
    :modules

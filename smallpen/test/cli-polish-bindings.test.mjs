@@ -91,6 +91,7 @@ test("raw stroke colours get Token advice; stroke and strokes.N bindings count a
   ]);
   assert.deepEqual(raw[0].recommendedBinding, {
     field: "strokes.0",
+    token: "color.accent",
     reference: { assetId: "tok_accent", packageId: "pkg_stroke_advice" },
   });
   const reference = { assetId: "tok_accent", packageId: "pkg_stroke_advice" };

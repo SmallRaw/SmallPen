@@ -2,7 +2,9 @@ import { realpath } from "node:fs/promises";
 import { dirname, isAbsolute, posix, resolve, win32 } from "node:path";
 
 import {
+  closestComponentVariant,
   combineContextAxes,
+  findComponentVariant,
   listEffectiveTokens,
   projectScenario,
   projectScreen,
@@ -294,13 +296,17 @@ const DEPENDENCY_PROJECTION_CODES = new Set([
 ]);
 
 function validateWorkspaceProjections(product, foundation, libraries = []) {
+  // The Presentation being projected, so a failing Instance is found in it
+  // and not in another Screen that reuses its node id.
+  let projecting;
   try {
     for (const context of contextSelections(product, foundation)) {
       listEffectiveTokens(product, { context, foundation, libraries });
     }
     for (const entry of product.manifest.entries.screens) {
       const screen = product.entries[entry];
-      for (const presentation of screen.presentations) {
+      for (const [index, presentation] of screen.presentations.entries()) {
+        projecting = `${entry}.presentations[${index}]`;
         projectScreen(product, screen.id, {
           foundation,
           libraries,
@@ -308,6 +314,7 @@ function validateWorkspaceProjections(product, foundation, libraries = []) {
         });
       }
     }
+    projecting = undefined;
     for (const scenario of product.domain.scenarios.values()) {
       projectScenario(product, scenario.id, { foundation, libraries });
     }
@@ -324,7 +331,9 @@ function validateWorkspaceProjections(product, foundation, libraries = []) {
     if (!path && error.details.instanceId) {
       const suffix = `.nodes.${error.details.instanceId}.instance.component`;
       const usage = externalReferences(product).find((candidate) =>
-        candidate.path.endsWith(suffix),
+        projecting
+          ? candidate.path === `${projecting}${suffix}`
+          : candidate.path.endsWith(suffix),
       );
       path = usage?.path;
       reference = usage?.reference;
@@ -351,6 +360,83 @@ function validateWorkspaceProjections(product, foundation, libraries = []) {
       },
     ];
   }
+}
+
+// Instances of the Product whose selection no variant of their Component
+// Set has any more (the Foundation renamed a value or deleted the variant).
+// They still draw, with the closest variant (`degraded` conflicts let reads
+// go on); the Product waits in Repair for one of the typed choices: select
+// a variant, or remove the Instance (or retarget it, as any reference).
+function staleInstanceConflicts(product, foundation, libraries = []) {
+  const sets = new Map([[product.manifest.packageId, product.domain.componentSets]]);
+  for (const owner of [foundation, ...libraries]) {
+    if (owner) sets.set(owner.manifest.packageId, owner.domain.componentSets);
+  }
+  const conflicts = [];
+  const check = (instance, path, nodePath, target) => {
+    const reference = instance?.component;
+    const componentSet = sets.get(reference?.packageId)?.get(reference?.assetId);
+    if (!componentSet || findComponentVariant(componentSet, instance.variant ?? {}).variant) {
+      return;
+    }
+    const closest = closestComponentVariant(componentSet, instance.variant);
+    const select = closest
+      ? [
+          {
+            action: "select-instance-variant",
+            referencePath: `${nodePath}.instance`,
+            selection: structuredClone(closest.selection),
+            validSelections: componentSet.variants.map((variant) =>
+              structuredClone(variant.selection),
+            ),
+            ...target,
+          },
+        ]
+      : [];
+    conflicts.push({
+      ...conflict(
+        "missing_variant",
+        `Instance ${target.nodeId} selects ${JSON.stringify(instance.variant ?? {})}, ` +
+          `which no variant of ${reference.assetId} has. It draws as ` +
+          `${JSON.stringify(closest?.selection ?? {})} until it is repaired`,
+        `${path}`,
+        [...select, ...referenceRepairChoices(path, reference)],
+      ),
+      degraded: true,
+      reference: structuredClone(reference),
+    });
+  };
+  for (const entry of product.manifest.entries.screens) {
+    const screen = product.entries[entry];
+    screen.presentations.forEach((presentation, index) => {
+      for (const [nodeId, node] of Object.entries(presentation.nodes)) {
+        if (!node.instance) continue;
+        const nodePath = `${entry}.presentations[${index}].nodes.${nodeId}`;
+        check(node.instance, `${nodePath}.instance.component`, nodePath, {
+          nodeId,
+          presentationId: presentation.id,
+          screenId: screen.id,
+        });
+      }
+    });
+  }
+  for (const entry of product.manifest.entries.components) {
+    (product.entries[entry].componentSets ?? []).forEach((componentSet, setIndex) => {
+      componentSet.variants.forEach((variant, variantIndex) => {
+        for (const [nodeId, node] of Object.entries(variant.nodes)) {
+          if (!node.instance) continue;
+          const nodePath =
+            `${entry}.componentSets[${setIndex}].variants[${variantIndex}].nodes.${nodeId}`;
+          check(node.instance, `${nodePath}.instance.component`, nodePath, {
+            componentSetId: componentSet.id,
+            nodeId,
+            variantId: variant.id,
+          });
+        }
+      });
+    });
+  }
+  return conflicts;
 }
 
 function chooseLibrarySource(library) {
@@ -631,6 +717,11 @@ export async function resolveWorkspace(productLocator, options = {}) {
   if (conflicts.length === 0) {
     conflicts.push(
       ...validateWorkspaceProjections(product, foundation, resolved.libraries),
+    );
+  }
+  if (conflicts.length === 0) {
+    conflicts.push(
+      ...staleInstanceConflicts(product, foundation, resolved.libraries),
     );
   }
   if (conflicts.length > 0) {

@@ -7,6 +7,12 @@
 import { listEffectiveTokens } from "./effective-tokens.mjs";
 import { tokenInventoryRows } from "./catalog.mjs";
 import { loadPackageFromValues } from "./package.mjs";
+import {
+  listTokenThemes,
+  productFoundationThemeIds,
+  selectTokenThemes,
+  tokenLibraryOf,
+} from "./token-themes.mjs";
 
 function compareText(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -28,51 +34,46 @@ function aliasPathOf(value) {
 // the Paired Themes already defined in the package. No names are hardcoded;
 // selection is by stable theme ids. The project Current Combination is
 // reported per domain so the UI can show what the workbench does NOT change.
-export function enumerateWorkbenchCombinations(snapshot) {
+// options.foundation: a Product's Foundation, whose themes it selects; its
+// variants carry the owning packageId.
+export function enumerateWorkbenchCombinations(snapshot, options = {}) {
   const domains = new Map();
-  const activeThemeIds = new Set();
-  const libraries = tokenLibraryEntries(snapshot);
-  for (const { library } of libraries) {
-    for (const themeId of library.activeThemeIds ?? []) {
-      activeThemeIds.add(themeId);
-    }
-  }
-  for (const { library } of libraries) {
-    for (const theme of library.themes ?? []) {
-      const domain = theme.group;
-      if (!domains.has(domain)) {
-        domains.set(domain, {
-          currentProjectThemeId: null,
-          domain,
-          domainId: `domain_${domain}`,
-          variants: [],
-        });
-      }
-      const record = domains.get(domain);
-      if (activeThemeIds.has(theme.id)) {
-        record.currentProjectThemeId = theme.id;
-      }
-      record.variants.push({
-        name: theme.name,
-        setIds: [...(theme.setIds ?? [])],
-        themeId: theme.id,
+  for (const theme of listTokenThemes(snapshot, options.foundation)) {
+    const domain = theme.group;
+    if (!domains.has(domain)) {
+      domains.set(domain, {
+        currentProjectThemeId: null,
+        domain,
+        domainId: `domain_${domain}`,
+        variants: [],
       });
     }
+    const record = domains.get(domain);
+    if (theme.active) record.currentProjectThemeId = theme.id;
+    record.variants.push({
+      name: theme.name,
+      packageId: theme.packageId,
+      setIds: [...theme.setIds],
+      themeId: theme.id,
+    });
   }
   const diagnostics = [];
-  const knownThemeIds = new Set(
-    libraries.flatMap(({ library }) =>
-      (library.themes ?? []).map((theme) => theme.id),
-    ),
-  );
-  for (const themeId of activeThemeIds) {
-    if (!knownThemeIds.has(themeId)) {
-      diagnostics.push({
-        code: "combination_unknown_active_theme",
-        message: `Active theme id is not defined in any token library: ${themeId}`,
-        themeId,
-      });
-    }
+  const known = (library) => new Set((library?.themes ?? []).map(({ id }) => id));
+  const ownKnown = known(tokenLibraryOf(snapshot));
+  const foundationKnown = known(tokenLibraryOf(options.foundation));
+  for (const themeId of [
+    ...(tokenLibraryOf(snapshot)?.activeThemeIds ?? []).filter((id) => !ownKnown.has(id)),
+    ...(options.foundation && options.foundation !== snapshot
+      ? productFoundationThemeIds(snapshot, options.foundation).filter(
+          (id) => !foundationKnown.has(id),
+        )
+      : []),
+  ]) {
+    diagnostics.push({
+      code: "combination_unknown_active_theme",
+      message: `Active theme id is not defined in any token library: ${themeId}`,
+      themeId,
+    });
   }
   const domainsList = [...domains.values()].sort((left, right) =>
     compareText(left.domain, right.domain),
@@ -92,9 +93,9 @@ export function enumerateWorkbenchCombinations(snapshot) {
 
 // DSP-003-A: validate a workbench selection given as stable-id pairs
 // [{domainId, themeId}]. Empty diagnostics means the combination is usable.
-export function validateWorkbenchCombination(snapshot, combination) {
+export function validateWorkbenchCombination(snapshot, combination, options = {}) {
   const { diagnostics: enumerationDiagnostics, domains } =
-    enumerateWorkbenchCombinations(snapshot);
+    enumerateWorkbenchCombinations(snapshot, options);
   const diagnostics = [...enumerationDiagnostics];
   const byId = new Map(domains.map((domain) => [domain.domainId, domain]));
   const seen = new Set();
@@ -173,20 +174,25 @@ function rawValueOf(previewSnapshot, token) {
   return undefined;
 }
 
-// Raw/alias/resolved/source rows over an already-built preview snapshot.
-function previewTokenRows(previewSnapshot) {
-  return listEffectiveTokens(previewSnapshot).map((effective) => {
+// Raw/alias/resolved/source rows over an already-built preview snapshot;
+// with a Foundation, its Tokens read from their own Package.
+function previewTokenRows(previewSnapshot, foundation) {
+  return listEffectiveTokens(previewSnapshot, { foundation }).map((effective) => {
     const token = effective.token;
-    const home = homeSetOf(previewSnapshot, token) ?? {
+    const owner =
+      foundation && effective.sourcePackageId === foundation.manifest.packageId
+        ? foundation
+        : previewSnapshot;
+    const home = homeSetOf(owner, token) ?? {
       setId: null,
       setName: null,
     };
-    const raw = rawValueOf(previewSnapshot, token);
+    const raw = rawValueOf(owner, token);
     return {
       alias: aliasPathOf(raw),
       homeSetId: home.setId,
       homeSetName: home.setName,
-      ownerPackageId: previewSnapshot.manifest.packageId,
+      ownerPackageId: owner.manifest.packageId,
       path: token.path,
       raw,
       resolved: effective.value,
@@ -201,8 +207,8 @@ function previewTokenRows(previewSnapshot) {
 // DSP-003-B: pure evaluation preview. Patches the *observed* active themes in
 // a cloned package (never the source, never an activate event) and runs the
 // authoritative token resolver over it.
-export async function createWorkbenchPreview(snapshot, combination) {
-  const { diagnostics } = validateWorkbenchCombination(snapshot, combination);
+export async function createWorkbenchPreview(snapshot, combination, options = {}) {
+  const { diagnostics } = validateWorkbenchCombination(snapshot, combination, options);
   if (diagnostics.length > 0) {
     const error = new Error(
       `Invalid workbench combination: ${diagnostics
@@ -213,7 +219,31 @@ export async function createWorkbenchPreview(snapshot, combination) {
     error.diagnostics = diagnostics;
     throw error;
   }
-  const enumeration = enumerateWorkbenchCombinations(snapshot);
+  const enumeration = enumerateWorkbenchCombinations(snapshot, options);
+  if (options.foundation && options.foundation !== snapshot) {
+    // A Product observes Product and Foundation themes alike through a
+    // read-only theme view; nothing is written.
+    const paths = (combination ?? []).map((selection) => {
+      const domain = enumeration.domains.find(
+        (candidate) => candidate.domainId === selection.domainId,
+      );
+      const variant = domain.variants.find(
+        (candidate) =>
+          candidate.themeId === selection.themeId &&
+          (selection.packageId === undefined || candidate.packageId === selection.packageId),
+      );
+      return `${domain.domain}/${variant.name}`;
+    });
+    const view = selectTokenThemes(
+      { foundation: options.foundation, product: snapshot },
+      paths,
+    );
+    return {
+      combination: (combination ?? []).map((selection) => ({ ...selection })),
+      preview: view.product,
+      tokens: previewTokenRows(view.product, view.foundation),
+    };
+  }
   const values = clonePackageValues(snapshot);
   const observedThemeByGroup = new Map(
     (combination ?? []).map((selection) => {

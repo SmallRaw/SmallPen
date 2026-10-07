@@ -3,6 +3,13 @@ import { fail } from "./errors.mjs";
 import { isRecord } from "./internal.mjs";
 
 const PROJECT_KINDS = ["application", "motion", "custom"];
+// foundationChoice answers; `init --layout` names them single and
+// foundation-product.
+const PACKAGE_LAYOUT_CHOICES = ["self-contained", "create-new"];
+export const INIT_LAYOUTS = Object.freeze({
+  "foundation-product": "create-new",
+  single: "self-contained",
+});
 
 function slug(value, separator = "_") {
   const normalized = value
@@ -83,11 +90,15 @@ const QUESTION_DEFINITIONS = [
   },
   {
     id: "foundationChoice",
-    label: { en: "Foundation", "zh-TW": "Foundation 選擇" },
-    reason: "Initialization currently creates a local Foundation beside the Product.",
-    recommendation: "create-new",
-    schema: { enum: ["create-new"], type: "string" },
-    valid: (value) => value === "create-new",
+    label: { en: "Package layout", "zh-TW": "Package 結構" },
+    reason:
+      "self-contained (default): one Package holds token sets and themes, Components and Screens. " +
+      "create-new (advanced, init --layout foundation-product): a Foundation Package with the shared " +
+      "token sets, themes and Components beside a Product Package with the Screens, which selects the " +
+      "Foundation's themes.",
+    recommendation: "self-contained",
+    schema: { enum: PACKAGE_LAYOUT_CHOICES, type: "string" },
+    valid: (value) => PACKAGE_LAYOUT_CHOICES.includes(value),
   },
   {
     id: "platforms",
@@ -108,14 +119,17 @@ const QUESTION_DEFINITIONS = [
   {
     id: "contextAxes",
     label: { en: "Context axes", "zh-TW": "Context 軸" },
-    reason: "Declares finite theme, density, locale, accessibility, or custom alternatives.",
+    reason:
+      "Declares finite alternatives. A theme-kind axis becomes token themes (Penpot token sets + " +
+      "themes: group = axis name, one theme per value, a base set plus one set per value); density, " +
+      "locale, accessibility, viewport and custom kinds become Context axes.",
     recommendation: [
       {
-        defaultValue: "light",
+        defaultValue: "Light",
         id: "axis_theme",
         kind: "theme",
         name: "Theme",
-        values: ["light", "dark"],
+        values: ["Light", "Dark"],
       },
     ],
     schema: {
@@ -252,20 +266,58 @@ export function parseInitializationAnswers(value) {
   return result;
 }
 
+// Each theme-kind axis becomes one theme group: a base set active in every
+// theme, one set per value, one theme per value activating [base, value].
+export function initializationTokenThemes(contextAxesValue) {
+  const axes = contextAxesValue.filter(({ kind }) => kind === "theme");
+  const sets = [{ id: "tset_base", name: "base" }];
+  const themes = [];
+  for (const axis of axes) {
+    const group = slug(axis.name);
+    for (const value of axis.values) {
+      const setId = `tset_${group}_${slug(value)}`;
+      // Native App domains/options come from Set paths. Keep display names in
+      // those paths; only stable IDs use slugs.
+      sets.push({ id: setId, name: `${axis.name}/${value}` });
+      themes.push({
+        active: value === axis.defaultValue,
+        group: axis.name,
+        id: `theme_${group}_${slug(value)}`,
+        name: value,
+        setIds: ["tset_base", setId],
+      });
+    }
+  }
+  return { sets, themes };
+}
+
 function proposal(answers) {
   const project = slug(answers.projectName);
   const firstScreen = slug(answers.firstScreen);
   const platform = slug(answers.platforms[0]);
-  const packageIds = {
-    foundation: `pkg_${project}_foundation`,
-    product: `pkg_${project}_product`,
-  };
+  const layout =
+    answers.foundationChoice === "create-new" ? "foundation-product" : "single";
+  const packageIds =
+    layout === "single"
+      ? { package: `pkg_${project}` }
+      : {
+          foundation: `pkg_${project}_foundation`,
+          product: `pkg_${project}_product`,
+        };
+  const tokenThemes = initializationTokenThemes(answers.contextAxes);
   return {
-    assumptions: [
-      "The first platform is the Base Presentation and default Design View.",
-      "Foundation owns shared Contexts, Tokens, and starter Component Sets.",
-      "Product owns Screens, Scenarios, requirements, Flows, and local overrides.",
-    ],
+    assumptions:
+      layout === "single"
+        ? [
+            "The first platform is the Base Presentation and default Design View.",
+            "One self-contained Package owns token sets and themes, Components, Screens, Scenarios, requirements and Flows.",
+            "Theme-kind answers become token themes; reads select one with --theme GROUP/NAME.",
+          ]
+        : [
+            "The first platform is the Base Presentation and default Design View.",
+            "Foundation owns the token sets and themes, shared Contexts, and starter Component Sets.",
+            "Product owns Screens, Scenarios, requirements, Flows, and local overrides, and stores which Foundation themes it uses.",
+          ],
     brief: structuredClone(answers),
     firstDesign: {
       flowId: `flow_${slug(answers.firstJourney)}`,
@@ -275,21 +327,38 @@ function proposal(answers) {
       scenarioId: `scn_${firstScreen}_${slug(answers.firstScenario)}`,
       screenId: `scr_${firstScreen}`,
     },
-    packages: {
-      foundation: {
-        directoryName: `${project.replaceAll("_", "-")}-foundation.smallpen`,
-        name: `${answers.projectName} Foundation`,
-        packageId: packageIds.foundation,
-        role: "foundation",
-      },
-      product: {
-        directoryName: `${project.replaceAll("_", "-")}.smallpen`,
-        name: answers.projectName,
-        packageId: packageIds.product,
-        role: "product",
-      },
-    },
+    layout,
+    packages:
+      layout === "single"
+        ? {
+            package: {
+              directoryName: `${project.replaceAll("_", "-")}.smallpen`,
+              name: answers.projectName,
+              packageId: packageIds.package,
+              role: "foundation",
+            },
+          }
+        : {
+            foundation: {
+              directoryName: `${project.replaceAll("_", "-")}-foundation.smallpen`,
+              name: `${answers.projectName} Foundation`,
+              packageId: packageIds.foundation,
+              role: "foundation",
+            },
+            product: {
+              directoryName: `${project.replaceAll("_", "-")}.smallpen`,
+              name: answers.projectName,
+              packageId: packageIds.product,
+              role: "product",
+            },
+          },
     proposalVersion: 1,
+    tokenThemes: tokenThemes.themes.map(({ active, group, id, name, setIds }) => ({
+      active,
+      id,
+      path: `${group}/${name}`,
+      setIds,
+    })),
   };
 }
 

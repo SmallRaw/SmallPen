@@ -638,3 +638,45 @@ test("untouched copies follow the Context-specific token value (RV-001-C)", asyn
   assert.equal(dark.result.nodes.node_master_card.fills[0].color, "#111827");
   assert.equal(dark.result.nodes.node_copy_card.fills[0].color, "#111827");
 });
+
+test("put-screen with a presentation missing interactions fails as invalid, not internally", async () => {
+  const snapshot = await snapshotWith(await fixtureValues());
+  await assert.rejects(
+    prepareOperationBatch(snapshot, {
+      baseRevision: snapshot.revision,
+      batchId: "put-screen-without-interactions",
+      operations: [
+        {
+          screen: {
+            basePresentationId: "pres_extra",
+            counterparts: [],
+            id: "scr_extra",
+            name: "Extra",
+            presentations: [
+              {
+                id: "pres_extra",
+                name: "desktop",
+                nodes: {
+                  node_extra_root: {
+                    children: [],
+                    height: 100,
+                    id: "node_extra_root",
+                    name: "Extra",
+                    type: "FRAME",
+                    width: 100,
+                    x: 0,
+                    y: 0,
+                  },
+                },
+                rootId: "node_extra_root",
+                viewport: { height: 100, width: 100 },
+              },
+            ],
+          },
+          type: "put-screen",
+        },
+      ],
+    }),
+    { code: "invalid_interactions" },
+  );
+});

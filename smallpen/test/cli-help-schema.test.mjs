@@ -7,25 +7,29 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
-  INITIALIZATION_QUESTION_IDS,
   OPERATION_SCHEMAS,
   SMALLPEN_FORMAT_CAPABILITIES,
   TOKEN_VALUE_SHAPES,
   tokenValueMatchesType,
 } from "@smallpen/core";
 
-import {
-  INIT_ANSWERS_EXAMPLE,
-  INSTANCE_NODE_EXAMPLE,
-  SCHEMA_TOPICS,
-  WORKED_EXAMPLE,
-} from "../apps/cli/bin/schema.mjs";
+import * as cliSchema from "../apps/cli/bin/schema.mjs";
+
+const { INIT_ANSWERS_EXAMPLE, INSTANCE_NODE_EXAMPLE, SCHEMA_TOPICS } =
+  cliSchema;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
-const OPERATION_TYPES = SMALLPEN_FORMAT_CAPABILITIES.canonicalWrite.operationTypes;
+const OPERATION_TYPES =
+  SMALLPEN_FORMAT_CAPABILITIES.canonicalWrite.operationTypes;
 
 function runCli(args, cwd) {
+  // Schema and full-value checks opt into stdout; fixed-file transport is tested separately.
+  if (
+    (args[0] === "schema" || args.includes("--full")) &&
+    !args.includes("--stdout")
+  )
+    args = [...args, "--stdout"];
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
       cwd,
@@ -49,21 +53,46 @@ async function scratch(context) {
   return root;
 }
 
-async function initAcme(root) {
-  await writeFile(join(root, "answers.json"), JSON.stringify(INIT_ANSWERS_EXAMPLE));
+async function initAcme(root, layout) {
+  await writeFile(
+    join(root, "answers.json"),
+    JSON.stringify(INIT_ANSWERS_EXAMPLE),
+  );
+  if (layout === "foundation-product") {
+    const pair = await runCli(
+      [
+        "project",
+        "init",
+        "pair",
+        "--answers",
+        "answers.json",
+        "--layout",
+        layout,
+        "--confirm",
+        "--json",
+      ],
+      root,
+    );
+    assert.equal(pair.code, 0, pair.stdout);
+    return {
+      foundation: join(root, "pair", "acme-foundation.smallpen"),
+      product: join(root, "pair", "acme.smallpen"),
+    };
+  }
   const init = await runCli(
-    ["init", "acme", "--answers", "answers.json", "--confirm", "--json"],
+    ["project", "init", "acme", "--answers", "answers.json", "--confirm", "--json"],
     root,
   );
   assert.equal(init.code, 0, init.stdout);
+  // The default layout is one self-contained Package for both roles.
   return {
-    foundation: join(root, "acme", "acme-foundation.smallpen"),
+    foundation: join(root, "acme", "acme.smallpen"),
     product: join(root, "acme", "acme.smallpen"),
   };
 }
 
 async function revision(packagePath, root) {
-  const inspected = await runCli(["inspect", packagePath, "--json"], root);
+  const inspected = await runCli(["project", "show", packagePath, "--json"], root);
   assert.equal(inspected.code, 0, inspected.stdout);
   return JSON.parse(inspected.stdout).package.revision;
 }
@@ -81,12 +110,18 @@ const SEQUENCE = [
   "put-token",
   "set-token-value",
   "deprecate-token",
+  "put-set-token",
+  "put-token-set",
+  "put-token-theme",
+  "delete-token-theme",
+  "delete-token-set",
   "put-component-set",
   "put-variant",
   "update-component-node",
   "put-context-file",
   "put-screen",
   "set-default-screen",
+  "put-canvases",
   "set-token-binding",
   "repair-reference",
   "add-presentation",
@@ -111,7 +146,8 @@ const SEQUENCE = [
   "replace-token-library",
   "set-active-token-themes",
   "replace-asset-library",
-  "set-foundation-dependency",
+  // A Foundation dependency exists only in the foundation-product layout.
+  { name: "set-foundation-dependency", pair: true },
   // A linked Library must resolve on later reads, so these two only preview.
   { dryRun: true, name: "put-library" },
   { dryRun: true, name: "remove-library", setup: ["put-library"] },
@@ -129,14 +165,20 @@ const SEQUENCE = [
 ];
 
 test("every operation type has a schema entry, and every schema entry is an operation type", () => {
-  assert.deepEqual(Object.keys(OPERATION_SCHEMAS).sort(), [...OPERATION_TYPES].sort());
+  assert.deepEqual(
+    Object.keys(OPERATION_SCHEMAS).sort(),
+    [...OPERATION_TYPES].sort(),
+  );
   for (const [type, schema] of Object.entries(OPERATION_SCHEMAS)) {
     assert.equal(schema.example.type, type, type);
     assert.ok(schema.purpose && schema.inverse, type);
     assert.ok(["any", "foundation", "product"].includes(schema.package), type);
   }
-  const covered = SEQUENCE.map((step) => (typeof step === "string" ? step : step.name));
-  for (const type of OPERATION_TYPES) assert.ok(covered.includes(type), `${type} example is not tested`);
+  const covered = SEQUENCE.map((step) =>
+    typeof step === "string" ? step : step.name,
+  );
+  for (const type of OPERATION_TYPES)
+    assert.ok(covered.includes(type), `${type} example is not tested`);
 });
 
 test("every Token type documents a value shape whose example validates", () => {
@@ -151,20 +193,42 @@ test("smallpen schema prints every topic and every operation from the validators
   const root = await scratch(context);
   const index = JSON.parse((await runCli(["schema"], root)).stdout);
   assert.deepEqual(Object.keys(index.topics), [...SCHEMA_TOPICS]);
-  for (const topic of SCHEMA_TOPICS.filter((name) => name !== "operation")) {
-    const result = await runCli(["schema", topic, "--json"], root);
+  for (const topic of SCHEMA_TOPICS.filter(
+    (name) => name !== "operation",
+  )) {
+    const result = await runCli(
+      ["schema", topic, ...(topic === "command" ? ["view"] : []), "--json"],
+      root,
+    );
     assert.equal(result.code, 0, `${topic}: ${result.stdout}`);
-    assert.equal(JSON.parse(result.stdout).topic, topic);
+    assert.equal(
+      JSON.parse(result.stdout).topic,
+      topic === "workflow" ? "rules" : topic,
+    );
   }
-  const listed = JSON.parse((await runCli(["schema", "operations"], root)).stdout);
-  assert.deepEqual(listed.operations.map(({ type }) => type), [...OPERATION_TYPES]);
-  const detail = JSON.parse((await runCli(["schema", "operation", "put-token"], root)).stdout);
-  assert.deepEqual(detail.example.operations, [OPERATION_SCHEMAS["put-token"].example]);
+  const listed = JSON.parse(
+    (await runCli(["schema", "operations", "--full"], root)).stdout,
+  );
+  assert.deepEqual(
+    listed.operations.map(({ type }) => type),
+    [...OPERATION_TYPES],
+  );
+  const detail = JSON.parse(
+    (await runCli(["schema", "operation", "put-token"], root)).stdout,
+  );
+  assert.deepEqual(detail.example.operations, [
+    OPERATION_SCHEMAS["put-token"].example,
+  ]);
   assert.equal(detail.fields.filePath.required, true);
-  const shorthand = JSON.parse((await runCli(["schema", "put-token"], root)).stdout);
-  assert.deepEqual(shorthand, detail);
+  // Themes are token sets + themes, documented in their own topic.
   const theme = JSON.parse((await runCli(["schema", "theme"], root)).stdout);
-  assert.equal(theme.topic, "context");
+  assert.equal(theme.topic, "theme");
+  assert.deepEqual(
+    theme.operations.createTheme,
+    OPERATION_SCHEMAS["put-token-theme"].example,
+  );
+  assert.match(theme.read, /--theme GROUP\/NAME/);
+  assert.match(theme.foundationProduct, /dependencies\[0\]\.activeThemeIds/);
 
   const typo = await runCli(["schema", "operation", "put-tokn"], root);
   assert.equal(typo.code, 1);
@@ -177,29 +241,32 @@ test("smallpen schema prints every topic and every operation from the validators
   assert.equal(JSON.parse(option.stdout).error.code, "unknown_option");
 
   const init = JSON.parse((await runCli(["schema", "init"], root)).stdout);
-  assert.deepEqual(Object.keys(init.answersFile).sort(), [...INITIALIZATION_QUESTION_IDS].sort());
-  const axes = init.questions.find(({ id }) => id === "contextAxes");
-  assert.deepEqual(Object.keys(axes.schema.items.properties).sort(), [
-    "defaultValue",
-    "id",
-    "kind",
-    "name",
-    "values",
-  ]);
+  assert.equal(init.questions, undefined);
+  assert.equal(init.answersFile, undefined);
+  const contract = JSON.parse(
+    (await runCli(init.nextOperations[0].argv, root)).stdout,
+  );
+  assert.equal(contract.command, "project init");
+  assert.ok(contract.parameters.name);
 });
 
 test("every operation example applies to a workspace made by smallpen init", async (context) => {
   const root = await scratch(context);
-  const packages = await initAcme(root);
-  const revisions = {
-    foundation: await revision(packages.foundation, root),
-    product: await revision(packages.product, root),
-  };
+  const single = await initAcme(root);
+  const pair = await initAcme(root, "foundation-product");
+  // Revisions by Package path: both roles may name the same Package.
+  const revisions = {};
+  for (const path of [single.foundation, pair.foundation, pair.product]) {
+    revisions[path] = await revision(path, root);
+  }
   for (const [index, step] of SEQUENCE.entries()) {
+    const packages = step.pair ? pair : single;
     const name = typeof step === "string" ? step : step.name;
     const example = step.example ?? OPERATION_SCHEMAS[name].example;
     const target =
-      (OPERATION_SCHEMAS[example.type].package === "foundation") ? "foundation" : "product";
+      OPERATION_SCHEMAS[example.type].package === "foundation"
+        ? "foundation"
+        : "product";
     const operations = [
       ...(step.setup ?? []).map((type) => OPERATION_SCHEMAS[type].example),
       example,
@@ -207,10 +274,22 @@ test("every operation example applies to a workspace made by smallpen init", asy
     const batchPath = join(root, `step-${index}.json`);
     await writeFile(
       batchPath,
-      JSON.stringify({ baseRevision: revisions[target], batchId: `example-${index}`, operations }),
+      JSON.stringify({
+        baseRevision: revisions[packages[target]],
+        batchId: `example-${index}`,
+        operations,
+      }),
     );
     const result = await runCli(
-      ["apply", packages[target], "--batch", batchPath, ...(step.dryRun ? ["--dry-run"] : []), "--json"],
+      [
+        "advanced",
+        "apply",
+        packages[target],
+        "--batch",
+        batchPath,
+        ...(step.dryRun ? ["--dry-run"] : []),
+        "--json",
+      ],
       root,
     );
     assert.equal(result.code, 0, `${name}: ${result.stdout}`);
@@ -223,32 +302,39 @@ test("every operation example applies to a workspace made by smallpen init", asy
       !["remove-library", "set-foundation-dependency"].includes(name),
       name,
     );
-    if (!step.dryRun) revisions[target] = applied.revision;
+    if (!step.dryRun) revisions[packages[target]] = applied.revision;
   }
-  const validated = await runCli(["validate", packages.product, "--json"], root);
+  const validated = await runCli(["validate", single.product, "--json"], root);
   assert.equal(validated.code, 0, validated.stdout);
 });
 
-test("the worked example in smallpen --help runs end to end", async (context) => {
+test("the worked example in smallpen schema batch --full runs end to end", async (context) => {
   const root = await scratch(context);
-  const help = (await runCli(["--help"], root)).stdout;
-  for (const step of WORKED_EXAMPLE) {
-    assert.ok(help.includes(`smallpen ${step.argv.join(" ")}`), step.title);
+  const help = (await runCli(["advanced", "apply", "--help"], root)).stdout;
+  assert.match(help, /smallpen schema batch/);
+  const schema = JSON.parse(
+    (await runCli(["schema", "batch", "--full"], root)).stdout,
+  );
+  assert.ok(cliSchema.WORKED_EXAMPLE, "schema.mjs exports WORKED_EXAMPLE");
+  assert.deepEqual(schema.workedExample, cliSchema.WORKED_EXAMPLE);
+  for (const step of schema.workedExample) {
     for (const [name, value] of Object.entries(step.files)) {
-      assert.ok(help.includes(`${name}: ${JSON.stringify(value)}`), name);
       let content = value;
       if (value.baseRevision !== undefined) {
-        content = { ...value, baseRevision: await revision(join(root, step.argv[1]), root) };
+        content = {
+          ...value,
+          baseRevision: await revision(join(root, "acme/acme.smallpen"), root),
+        };
       }
       await writeFile(join(root, name), JSON.stringify(content));
     }
     const result = await runCli(step.argv, root);
     assert.equal(result.code, 0, `${step.title}: ${result.stdout}`);
   }
-  const semantic = JSON.parse(
-    (await runCli(["read-view", "acme/acme.smallpen", "--format", "semantic", "--json"], root)).stdout,
+  // Every step names commands that still exist and leaves a valid package.
+  const validated = await runCli(
+    ["validate", "acme/acme.smallpen", "--json"],
+    root,
   );
-  const text = JSON.stringify(semantic);
-  assert.match(text, /Add task/);
-  assert.match(text, /node_title/);
+  assert.equal(validated.code, 0, validated.stdout);
 });

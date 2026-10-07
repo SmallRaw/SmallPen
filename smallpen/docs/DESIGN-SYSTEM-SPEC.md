@@ -1,23 +1,23 @@
 # Design System 产品规格
 
-更新：2026-09-23。最新用户决定优先；这是目标规格，不是完成证明。
+更新：2026-10-03。最新用户决定优先；这是目标规格，不是完成证明。
 
 ## Problem Statement
 
-用户需要一眼看全真实 Token 和组件组合，并能安全调整源参数。
-长条罗列、调试文案、不完整样本和来源不明的编辑，使展示难读且可能改错对象。
+用户需要快速看出 Token 与组件的主要差异，并能安全调整源参数。
+相同效果与普通排列组合反复展示、调试文案和来源不明的编辑，使展示难读且可能改错对象。
 
 ## Solution
 
-从当前 Package snapshot 动态生成原生 DS 画布：左侧简洁 Token 分块，右侧组件多维矩阵。
-全部有效组合同时展开，不再提供 DS 悬浮组合切换器。只展示 Token 与组件，不展示 Pages。
+从当前 Package snapshot 动态生成原生 DS 画布：左侧 Token 效果分块，右侧组件代表样例。
+默认只展示有实际差异的代表样例，不再铺开全部排列组合。完整定义留在组件源页与 Token 管理中。只展示 Token 与组件，不展示 Pages。
 
 ## User Stories
 
-1. 作为设计者，我希望所有 Token 按类型展开，以便直接理解设计系统。
+1. 作为设计者，我希望 Token 按类型展示不同效果，以便直接理解设计系统。
 2. 作为设计者，我希望颜色、圆角、间距等展示真实效果，以便直观比较数值。
 3. 作为设计者，我希望字体只集中展示 Typography，以免六类底层属性重复占位。
-4. 作为设计者，我希望所有真实组件及有效组合都出现，以免漏看未使用或无文字组件。
+4. 作为设计者，我希望每个组件家族展示典型样例和独有特点，以免重复组合增加浏览负担。
 5. 作为设计者，我希望组件按有意义的行列与分组排列，以免画布无限长或宽。
 6. 作为设计者，我希望标题、值和状态说明简洁清晰，以免被内部参数淹没。
 7. 作为设计者，我希望在 DS 修改 Token，以便同步更新真实使用者。
@@ -34,10 +34,10 @@
 ### D1 · 原生投影与隔离
 
 - 使用原生 workspace 的 shapes、图层、选择、属性、渲染、历史与提交链；不另建 SVG 编辑器、iframe 或截图展台。
-- 生成页、白底、标题、标尺、caption、矩阵布局不写 canonical，不计入普通 Pages、导出、缩略图或原型。
+- 生成页、底色、标题、标尺、caption、展示布局不写 canonical，不计入普通 Pages、导出、缩略图或原型。
 - 普通源页面保留且照常编辑；DS 不再铺 Pages、页面组合或未注册 Header。
 - 按 canonical 独立清单核对 owner/identity/variant/occurrence/revision，不能从投影结果反推预期。
-- 同名不同 owner、未使用/未激活、alias、无文字、纯白/透明、located 及只读来源不得静默遗漏。
+- 完整源清单保留同名不同 owner、未使用/未激活、alias、无文字、纯白/透明、located 及只读来源；预览按效果选择，错误诊断不得静默遗漏。
 - 展示身份稳定且区别于源身份；父子关系一致，无重复 children、悬空引用或循环展开。
 - 展示坐标不回写源 x/y；bounds、selrect、points、transform、命中和测量一致，测量簿记不产生源历史。
 - 在 DS 移动组件定义的 x/y 被拒绝（`design_system_layout_locked`）。路径编辑随提交携带展台位移（plugin-data `layout-offset`），据此映射回源坐标；缺位移则拒绝（`design_system_layout_offset_missing`），不把源节点移到展台位置。
@@ -48,8 +48,8 @@ canonical 共 20 类型：boolean、border-radius、color、dimensions、font-fa
 font-weight、letter-spacing、number、opacity、other、rotation、shadow、sizing、spacing、
 string、stroke-width、text-case、text-decoration、typography。dimension 归一为 dimensions，不另计类型。
 
-主画布 14 分区：六种单字段字体类型不单列，合为 Typography 视觉展示；Token 管理仍保留全部 20 类型。
-类型数、Cell 数与组合样本数分别统计，空分区保留简洁空态，不造假数据。
+主画布最多 14 分区，只显示有内容的类型：六种单字段字体类型不单列，合为 Typography 视觉展示；Token 管理仍保留全部 20 类型。
+同类型且解析效果相同的 Token 只展示一份，优先选激活的 literal Cell。错误引用保留独立诊断。没有 Token 时只显示一个空态。
 
 | 类型 | 展示契约 |
 | --- | --- |
@@ -63,18 +63,25 @@ string、stroke-width、text-case、text-decoration、typography。dimension 归
 | opacity / rotation | 矩形透明度、有方向的旋转样本 |
 | boolean / number / string / other | 清晰值卡，复杂值有摘要和完整详情入口 |
 
-- 各类型全部 Cell 与有效组合稳定排列；不再造 Gap/Padding/Margin 三套复杂演示。
+- 颜色、圆角、间距、字体和效果按实际解析值去重；主题名、别名或 Token 名不同本身不产生重复预览。源 Cell 不合并、不删除。
 - 画布只放短名称、视觉与值；owner、路径、literal/alias、active/archived 等放详情。
+- 类型分区按两列已占高度接续，短分区利用旁边空位，不必排在长颜色列表之后。
+- 所有类型卡片等宽，内部固定三列；样例底边、名称行、数值行分别对齐。长名称和数值在列内换行，不改变相邻样例的位置，也不改实际效果尺寸。
 - 零值、极值、长文本、空集合不重叠；缩放/钳制说明清楚，不改源、不误标单位。
 - 标题和说明使用可读字号与语义前景色，不继承黄色调试文字。
 
-### D3 · 组件多维矩阵
+### D3 · 组件代表样例
 
 - 右侧白底，Primitive 在前、Composite 按依赖层级在后；缺失/循环依赖局部诊断。
 - 读取声明的 state、size、style、content、icon/media、position、slot 等轴；不按名字猜，不造 canonical variants。
-- 组件属性轴与 Theme/Token 轴分开；展开实际有效组合，不盲目生成无效笛卡尔积。
-- 差异明显的轴作行列，其余分为有标题的小矩阵；按数量与实际 bounds 平衡二维、三维、四维及更多轴。
-- 全量存在且分块换行，不靠分页/折叠/切换/抽样隐藏；宽组件保持实际尺寸，长标签仍可区分。
+- 组件属性轴与 Theme/Token 轴分开；只检查实际有效组合，不生成无效笛卡尔积。
+- 每个家族先选默认样例，再选最接近默认的单轴差异；只在新增实际视觉特征时补样例。
+- 特征包括真实尺寸、布局、填充、描边、圆角、字体、效果、路径、图标、媒体和可见树结构；名称、绑定身份、重复主题和普通文案替换不单独增加样例。
+- 检查所有组合，补上单轴样例未覆盖的结构、布局、路径、媒体、透明度等特殊效果；只有色值变化的多轴组合不重复铺开，色值由 Token 分区展示。
+- 同一套规则适用于有轴、无轴、Primitive、Composite；家族标题只出现一次，样例只标相对默认的变化。
+- 代表样例按真实 bounds 换行；宽组件保持实际尺寸，长标签仍可区分。选择稳定，保留每个显示样例的精确来源。
+- 浅色文字使用深色预览底，纯白几何使用浅灰底；底色属于生成装饰，不改组件填充或源数据。
+- 未展示的 variants 仍可在组件源页查看和编辑，完整 inventory 与 Canonical 不变。预览中编辑只作用于选中样例的真实目标，不广播到相似对象。
 - 样本覆盖 Button 前/后图标、纯图标、纯文字、透明及其他声明样式/状态；常用例有 Title、Input、Badge、Card、Dialog。
 - 示例包提供定义，产品不得硬编码名称/数量；真实树、媒体、路径、布局、绑定和嵌套 override 均保留。
 - 源创建/修改/删除及 Undo/Redo 自动反映；失败不留幽灵组件，零数量不能使源创建入口消失。
@@ -88,7 +95,7 @@ string、stroke-width、text-case、text-decoration、typography。dimension 归
 | 嵌套实例属性 | 写支持的 occurrence override，不误改共享主定义 |
 | alias / 继承 | 区分引用表达式、引用源、当前覆盖与显式 literal |
 | 只读/歧义/未支持字段 | 提交前解释并拒绝，不假成功 |
-| 背景/标题/标尺/矩阵壳 | 生成装饰，不允许作为源编辑 |
+| 背景/标题/标尺/展示底色 | 生成装饰，不允许作为源编辑 |
 | 加框/字/图、粘贴、删除、编组、移动及结构布局重排 | 到源页操作；DS 前端提前拒绝，后端独立校验 |
 
 - 上下文固定 revision、owner、family/variant、node、occurrence path、field；可查来源与影响范围，切选择不能偷换目标。
@@ -104,7 +111,7 @@ string、stroke-width、text-case、text-decoration、typography。dimension 归
 - 一次用户动作一个撤销步骤；取消零写入，复合值保留未编辑字段，源确认成功才显示 saved。
 - 区分 clean/draft/invalid/submitting/saved/error/stale；失败恢复乐观态并保留可恢复输入，旧 revision 不覆盖新源。
 - 外部更新刷新受影响内容；切包释放订阅、拒绝迟到响应；目标消失清选择并提示，不整体崩溃。
-- 所有依赖样本及普通页同步，保留稳定身份/选择/视口，优先增量更新，不以隐藏样本换性能。
+- 展示样例及普通页同步；源变化后重新计算代表样例，保留仍存在的身份/选择/视口，优先增量更新。
 - 首次合理 fit，随后尊重用户视口；定位、fit selection 和长距离导航保持可用。
 
 ### D6 · Token 管理
@@ -116,10 +123,10 @@ string、stroke-width、text-case、text-decoration、typography。dimension 归
 ## Testing Decisions
 
 - 复用现有 DS 编辑门禁、投影、组件样本及端到端流程；统一遵循 [验收规格](ACCEPTANCE-SPEC.md)。
-- 独立源清单逐身份核对；覆盖空类型、同名 owner、白色/透明/alias、无文字、located、只读及坏依赖。
+- 用独立清单核对完整源身份与每个显示样例的精确来源；覆盖空类型、同名 owner、白色/透明/alias、无文字、located、只读及坏依赖。
 - 每种支持编辑通过真实控件 → source diff → Undo → Redo → 刷新；共享联动且其他组合/硬编码对象不误改。
 - 两层以上嵌套分别验证 master 和 override；从源新建组件后进入 DS 编辑，检查身份与持久化。
-- 校验画布/图层选择与实际 bounds、换行/多矩阵/超宽样本完整性。
+- 校验相同效果去重、单轴差异覆盖、特殊组合保留、精确来源、稳定选择、换行及超宽样例。
 - 非法结构动作零源写入，普通页同动作有效；覆盖失败、stale、外部更新、切包、目标删除、迟到响应。
 - 至少 500 Token、100 variants；Web/Desktop 分别报告，不能拿旧截图/总测试数宣称通过。
 

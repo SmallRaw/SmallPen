@@ -14,14 +14,51 @@ function edit(snapshot, sample, nodeId, operations) {
   });
 }
 
-test("every real variant expands into every theme view with stable, distinct source-mapped ids", async () => {
+test("every real variant expands with stable, distinct source-mapped ids, once for all themes when they draw it alike", async () => {
   const snapshot = await load();
   const refs = snapshot.runtime.designSystemRefs;
-  assert.equal(samples(snapshot).length, refs.families.filter((item) => item.kind === "variant").length * refs.combinations.length);
-  assert.ok(samples(snapshot).every((item) => !item.error));
+  assert.ok(refs.combinations.length > 1);
+  // No fixture set binds a Token whose value differs between combinations.
+  assert.equal(samples(snapshot).length, refs.families.filter((item) => item.kind === "variant").length);
+  assert.ok(samples(snapshot).every((item) => !item.error && item.allCombinations === true && item.combinationId === null));
+  assert.ok(samples(snapshot).every((item) => Object.values(item.sources).every((source) => source.allCombinations === true)));
   const ids = samples(snapshot).flatMap((item) => Object.values(item.runtimeNodes));
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(samples(await load()), samples(snapshot));
+});
+
+test("a set bound to a Token that differs between themes keeps one sample per combination", async () => {
+  const values = buildEditorPackageValues();
+  const components = values.get(values.get("manifest.json").entries.components[0]);
+  const variant = components.componentSets.find((item) => item.id === "cmp_canvas_button").variants[0];
+  variant.nodes[variant.rootId].tokenBindings.fill = { packageId: "pkg_canvas", assetId: "tok_canvas_color_light_primary" };
+  const snapshot = await load(values);
+  const { combinations } = snapshot.runtime.designSystemRefs;
+  const buttons = samples(snapshot).filter((item) => item.componentSetId === "cmp_canvas_button");
+  // The whole set follows the themes, also its variants without the binding.
+  assert.equal(buttons.length, 3 * combinations.length);
+  assert.ok(buttons.every((item) => item.allCombinations === undefined && item.combinationId !== null));
+  assert.deepEqual(
+    buttons.filter((item) => item.variantId === variant.id).map((item) => item.combinationId),
+    combinations.map(({ id }) => id),
+  );
+  assert.ok(samples(snapshot).filter((item) => item.componentSetId !== "cmp_canvas_button").every((item) => item.allCombinations));
+});
+
+test("samples are reused while their components and Tokens stay the same", async () => {
+  const first = await load();
+  assert.equal(samples(await load())[0], samples(first)[0]);
+  const renamed = buildEditorPackageValues();
+  const screen = renamed.get(renamed.get("manifest.json").entries.screens[0]);
+  screen.presentations[0].nodes.node_home_title.name = "Renamed title";
+  assert.equal(samples(await load(renamed))[0], samples(first)[0]);
+  const resized = buildEditorPackageValues();
+  const components = resized.get(resized.get("manifest.json").entries.components[0]);
+  const variant = components.componentSets.find((item) => item.id === "cmp_canvas_button").variants[0];
+  variant.nodes[variant.rootId].width = 177;
+  const changed = samples(await load(resized)).find((item) => item.variantId === variant.id);
+  assert.equal(changed.nodes[changed.rootId].width, 177);
+  assert.notEqual(samples(await load(resized))[0], samples(first)[0]);
 });
 
 test("bound radius edits write the Token, preserve bindings and reproject all specimens", async () => {
@@ -125,5 +162,6 @@ test("two nested occurrences edit independently and never mutate the shared chil
   assert.equal(after.nodes[target].opacity, 0.4);
   assert.notEqual(after.nodes["node_right_button__node_canvas_button_primary_label"].opacity, 0.4);
   assert.deepEqual(next.entries[path].componentSets.find((item) => item.id === "cmp_canvas_button"), sets.find((item) => item.id === "cmp_canvas_button"));
-  assert.throws(() => edit(snapshot, sample, target, [{ type: "set", attr: "width", val: 99 }]), { code: "component_override_unsupported" });
+  // A size is an occurrence override now; its position stays source layout.
+  assert.throws(() => edit(snapshot, sample, target, [{ type: "set", attr: "x", val: 99 }]), { code: "design_system_layout_locked" });
 });

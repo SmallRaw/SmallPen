@@ -142,6 +142,36 @@
     (t/is (= :structure (policy/commit-block-reason
                          file [{:type :del-obj :page-id page-id :id source-id}] propagation)))))
 
+;; A Product shows its Foundation's Token Cells and token sets, which belong
+;; to the Foundation: editing them in the Product is refused up front, with
+;; its own message, while theme switching stays allowed.
+(t/deftest gate-refuses-foundation-cells-and-token-sets
+  (let [set-id   #uuid "5e110000-0000-4000-8000-000000000010"
+        token-id #uuid "5e110000-0000-4000-8000-000000000011"
+        file     (-> (ds-file)
+                     (assoc-in [:data :pages-index page-id :objects source-id
+                                :plugin-data :smallpen "design-system-ref"]
+                               (js/JSON.stringify #js {:readOnly true}))
+                     (assoc-in [:data :plugin-data :smallpen "foundation-tokens"]
+                               (js/JSON.stringify
+                                (clj->js {:ids [(str set-id) (str token-id)]
+                                          :sets ["base" "theme/dark"]}))))]
+    (t/is (= :foundation (policy/commit-block-reason file [(modify source-id :fills)])))
+    (t/is (nil? (policy/commit-block-reason file [(modify source-id :position-data)])))
+    (t/is (= :foundation (policy/commit-block-reason
+                          file [{:type :set-token :set-id set-id :token-id token-id
+                                 :attrs {:value "#000000"}}])))
+    (t/is (= :foundation (policy/commit-block-reason
+                          file [{:type :move-token-set :from-path ["theme" "dark"]
+                                 :to-path ["dark"] :before-path nil}])))
+    (t/is (nil? (policy/commit-block-reason
+                 file [{:type :set-token :set-id (uuid/next) :token-id (uuid/next)
+                        :attrs {:value "#000000"}}]))
+          "the Product's own token sets stay editable")
+    (t/is (nil? (policy/commit-block-reason
+                 file [{:type :set-tokens-status :theme-ids [] :set-ids [set-id]}])))
+    (t/is (string? (policy/blocked-message :foundation)))))
+
 (t/deftest gate-refuses-page-changes-on-generated-pages
   (let [components-id #uuid "5e110000-0000-4000-8000-000000000004"
         normal-id     #uuid "5e110000-0000-4000-8000-000000000005"
@@ -160,6 +190,43 @@
     (t/is (= :generated-page (policy/commit-block-reason
                               file [{:type :mov-page :id components-id :index 0}])))
     (t/is (nil? (policy/commit-block-reason file [(rename normal-id)])))))
+
+;; The labels of the Components page are generated decoration: renderer
+;; bookkeeping on them passes, user edits are refused, and variant edits
+;; next to them stay allowed.
+(t/deftest gate-refuses-edits-of-components-page-labels
+  (let [components-id #uuid "5e110000-0000-4000-8000-000000000006"
+        label-id      #uuid "5e110000-0000-4000-8000-000000000007"
+        group-id      #uuid "5e110000-0000-4000-8000-000000000008"
+        main-id       #uuid "5e110000-0000-4000-8000-000000000009"
+        decoration    {:smallpen {"components-page" "decoration"}}
+        file          (assoc-in (ds-file) [:data :pages-index components-id]
+                                {:id components-id
+                                 :plugin-data {:smallpen {"components-page" true}}
+                                 :objects
+                                 {uuid/zero {:id uuid/zero :type :frame
+                                             :shapes [group-id main-id]}
+                                  group-id  {:id group-id :type :group :shapes [label-id]
+                                             :plugin-data decoration}
+                                  label-id  {:id label-id :type :text :parent-id group-id
+                                             :plugin-data decoration}
+                                  main-id   {:id main-id :type :frame :main-instance true}}})
+        edit          (fn [id & attrs]
+                        (assoc (apply modify id attrs) :page-id components-id))]
+    (t/is (= :decoration (policy/commit-block-reason file [(edit label-id :content)])))
+    (t/is (= :decoration (policy/commit-block-reason file [(edit group-id :blocked)])))
+    (t/is (= :decoration (policy/commit-block-reason
+                          file [{:type :del-obj :page-id components-id :id label-id}])))
+    (t/is (= :decoration (policy/commit-block-reason
+                          file [{:type :mov-objects :page-id components-id
+                                 :parent-id uuid/zero :shapes [label-id]}])))
+    (t/is (= :decoration (policy/commit-block-reason
+                          file [{:type :add-obj :page-id components-id :id (uuid/next)
+                                 :parent-id group-id :obj {}}])))
+    (t/is (nil? (policy/commit-block-reason file [(edit label-id :position-data)]))
+          "text measurement is bookkeeping")
+    (t/is (nil? (policy/commit-block-reason file [(edit main-id :x :y)]))
+          "variant mains move freely")))
 
 (t/deftest drawing-is-blocked-only-on-ds-pages
   (let [file-id (uuid/next)

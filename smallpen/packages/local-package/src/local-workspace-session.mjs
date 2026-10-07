@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 
-import { SmallPenError } from "@smallpen/core";
+import { followedVariantOperations, SmallPenError } from "@smallpen/core";
 
 import { LocalPackageBackend } from "./local-package-backend.mjs";
 import {
@@ -258,7 +259,10 @@ export class LocalWorkspaceSession {
   async commit(locator, batch) {
     const session = this.#required(locator);
     this.#assertWorkspaceWritable(session);
+    const before = session.backend.snapshot;
     const result = await session.backend.commit(batch);
+    const followed = await this.#followVariants(session, before);
+    if (followed.length > 0) result.followedVariants = followed;
     await this.#openLinkedPackages(session.backend.snapshot);
     await this.#updateWorkspaceStatus(session);
     session.viewState = reconcilePackageViewState(
@@ -278,7 +282,10 @@ export class LocalWorkspaceSession {
   async undo(locator) {
     const session = this.#required(locator);
     this.#assertWorkspaceWritable(session);
+    const before = session.backend.snapshot;
     const result = await session.backend.undo();
+    const followed = await this.#followVariants(session, before);
+    if (followed.length > 0) result.followedVariants = followed;
     await this.#updateWorkspaceStatus(session);
     session.viewState = reconcilePackageViewState(
       session.backend.snapshot,
@@ -292,7 +299,10 @@ export class LocalWorkspaceSession {
   async redo(locator) {
     const session = this.#required(locator);
     this.#assertWorkspaceWritable(session);
+    const before = session.backend.snapshot;
     const result = await session.backend.redo();
+    const followed = await this.#followVariants(session, before);
+    if (followed.length > 0) result.followedVariants = followed;
     await this.#updateWorkspaceStatus(session);
     session.viewState = reconcilePackageViewState(
       session.backend.snapshot,
@@ -423,6 +433,50 @@ export class LocalWorkspaceSession {
         this.activeLocator = active ?? this.activeLocator;
       }
     }
+  }
+
+  // A write renamed variant values in a Package other open Packages use:
+  // each of those re-points its Instances to the same variants in a batch
+  // of its own (its own undo entry), so it never turns stale for a rename.
+  // Instances of deleted variants stay for Repair. Returns what followed.
+  async #followVariants(session, before) {
+    const after = session.backend.snapshot;
+    if (!before || !after || before === after) return [];
+    const followed = [];
+    for (const dependent of this.#dependentSessions(session)) {
+      const snapshot = dependent.backend.snapshot;
+      if (!snapshot) continue;
+      const operations = followedVariantOperations(before, after, snapshot);
+      if (operations.length === 0) continue;
+      try {
+        const result = await dependent.backend.commit({
+          baseRevision: snapshot.revision,
+          batchId: `follow_variants_${randomUUID()}`,
+          operations,
+        });
+        followed.push({
+          batchId: result.batchId,
+          instances: operations.length,
+          locator: dependent.locator,
+          revision: result.revision,
+        });
+        await this.#updateWorkspaceStatus(dependent);
+        this.#emit({
+          change: dependent.backend.changes.at(-1),
+          locator: dependent.locator,
+          result,
+          type: "package-committed",
+        });
+      } catch (error) {
+        // The dependent stays as it was; its Instances show in Repair.
+        followed.push({
+          error: { code: error?.code ?? "follow_variants_failed", message: error?.message },
+          instances: operations.length,
+          locator: dependent.locator,
+        });
+      }
+    }
+    return followed;
   }
 
   // Every open Package whose composite Workspace includes the changed one,

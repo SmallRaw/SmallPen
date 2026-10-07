@@ -1,6 +1,7 @@
 import { canonicalJSON } from "./canonical.mjs";
 import { SMALLPEN_FORMAT_CAPABILITIES } from "./capabilities.mjs";
 import { fail } from "./errors.mjs";
+import { normalizeShadowValue } from "./shadows.mjs";
 import {
   assertValueDepth,
   compareStrings,
@@ -86,6 +87,9 @@ const NUMBER_TOKEN_TYPES = new Set([
 // 6- or 8-digit hex, so convert the forms that lose nothing; px is Penpot's
 // unit for lengths. Everything else is kept and judged by the loader rules.
 function normalizeTokenValue(type, value) {
+  // Tokens Studio writes shadow offsets as x/y; SmallPen and Penpot use
+  // offsetX/offsetY.
+  if (type === "shadow") return normalizeShadowValue(value);
   if (typeof value !== "string") return value;
   if (NUMBER_TOKEN_TYPES.has(type)) {
     const match = /^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))(px)?\s*$/.exec(value);
@@ -479,6 +483,9 @@ export function buildTokenLibrary(parsed, previous = null, options = {}) {
       ),
     ],
     id: previous?.id ?? "tlib_default",
+    ...(previous?.defaultThemeIds ? { defaultThemeIds: previous.defaultThemeIds.filter((id) => themes.some((theme) => theme.id === id)) } : {}),
+    ...(previous?.defaultSetIds && (previous.defaultSetIds.length === 0 || previous.defaultSetIds.some((id) => sets.some((set) => set.id === id)))
+      ? { defaultSetIds: previous.defaultSetIds.filter((id) => sets.some((set) => set.id === id)) } : {}),
     sets,
     themes,
   };

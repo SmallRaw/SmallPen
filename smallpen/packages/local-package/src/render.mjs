@@ -5,6 +5,7 @@ import opentype from "opentype.js";
 
 import {
   createSemanticTree,
+  layoutProjectionDiagnostics,
   projectDesignView,
   resolveDesignView,
   sha256Hex,
@@ -26,6 +27,17 @@ const BUILTIN_FONT_FILES = new Map([
 ]);
 const builtinFonts = new Map();
 let symbolFont;
+// A glyph the primary font lacks, from the symbol font. Other scripts need a
+// font imported into the package; until then they are missing glyphs.
+function fallbackGlyph(fonts, character) {
+  if (fonts.symbols.charToGlyphIndex(character) !== 0)
+    return {
+      advanceWidth: fonts.symbols.unitsPerEm,
+      font: fonts.symbols,
+      glyph: fonts.symbols.charToGlyph(character),
+    };
+  return null;
+}
 
 const NAMED_COLORS = new Map([
   ["black", [0, 0, 0, 255]],
@@ -250,10 +262,11 @@ function nearestWeight(weight, choices) {
   )[0];
 }
 
-function parseFont(bytes) {
+function parseFont(bytes, options) {
   const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   return opentype.parse(
     view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength),
+    options,
   );
 }
 
@@ -477,7 +490,6 @@ function contourWindingCount(contours, x, y) {
   return crossings;
 }
 
-const PATH_CURVE_STEPS = 16;
 const PATH_TOKEN =
   /[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g;
 
@@ -575,9 +587,24 @@ function arcToCubicSegments(current, rx, ry, angleDegrees, largeArc, sweep, next
   return segments;
 }
 
+// Line segments a cubic Bézier flattens to: Wang's bound keeps every chord
+// within PATH_FLATNESS local units of the curve, so curves stay smooth at
+// any size while straight-ish ones stay cheap.
+const PATH_FLATNESS = 0.02;
+const PATH_MAX_STEPS = 512;
+
+function cubicSteps(start, cubic) {
+  const second = Math.max(
+    Math.hypot(start.x - 2 * cubic.x1 + cubic.x2, start.y - 2 * cubic.y1 + cubic.y2),
+    Math.hypot(cubic.x1 - 2 * cubic.x2 + cubic.x, cubic.y1 - 2 * cubic.y2 + cubic.y),
+  );
+  return clamp(Math.ceil(Math.sqrt((0.75 * second) / PATH_FLATNESS)), 1, PATH_MAX_STEPS);
+}
+
 // Parses the full SVG path grammar (M L H V C S Q T A Z, absolute and relative)
-// into flattened contours and polyline segments. Used for canonical PATH nodes
-// and SVG media paths.
+// into flattened contours (for fills), stroke subpaths with their end
+// tangents (for strokes and markers) and polyline segments. Used for
+// canonical PATH nodes and SVG media paths.
 function parsePathData(value) {
   if (typeof value !== "string") return undefined;
   const tokens = value.match(PATH_TOKEN);
@@ -585,168 +612,181 @@ function parsePathData(value) {
   const segments = [];
   const contours = [];
   const closedContours = [];
+  const subpaths = [];
   let contour = [];
+  let subpath;
   let command;
   let index = 0;
   let cursor = { x: 0, y: 0 };
   let subpathStart = cursor;
-  let previousControl;
+  // Reflection sources for S and T: only a preceding C/S (or Q/T) counts.
+  let previousCubic;
+  let previousQuad;
   const readNumber = () => {
     const token = tokens[index++];
     const parsed = Number.parseFloat(token);
     if (!Number.isFinite(parsed)) throw new Error(`invalid path number ${token}`);
     return parsed;
   };
-  const pushLine = (next) => {
+  const readPoint = (relative) => ({
+    x: readNumber() + (relative ? cursor.x : 0),
+    y: readNumber() + (relative ? cursor.y : 0),
+  });
+  const startSubpath = (at) => {
+    subpath = { closed: false, points: [at] };
+    subpaths.push(subpath);
+  };
+  // The direction a drawing command leaves `from` with, for markers.
+  const tangent = (from, ...candidates) => {
+    for (const candidate of candidates) {
+      const dx = candidate.x - from.x;
+      const dy = candidate.y - from.y;
+      const length = Math.hypot(dx, dy);
+      if (length > 1e-9) return { x: dx / length, y: dy / length };
+    }
+    return undefined;
+  };
+  const pushPoint = (next) => {
     segments.push({ end: next, start: cursor });
     contour.push(next);
+    subpath.points.push(next);
     cursor = next;
   };
-  const pushCubic = (cubic, current) => {
-    for (let step = 1; step <= PATH_CURVE_STEPS; step += 1) {
-      const amount = step / PATH_CURVE_STEPS;
+  const pushLine = (next) => {
+    if (!subpath) startSubpath(cursor);
+    const direction = tangent(cursor, next);
+    subpath.startTangent ??= direction;
+    if (direction) subpath.endTangent = direction;
+    pushPoint(next);
+  };
+  const pushCubic = (cubic) => {
+    if (!subpath) startSubpath(cursor);
+    const start = cursor;
+    const end = { x: cubic.x, y: cubic.y };
+    const control1 = { x: cubic.x1, y: cubic.y1 };
+    const control2 = { x: cubic.x2, y: cubic.y2 };
+    subpath.startTangent ??= tangent(start, control1, control2, end);
+    const endTangent = tangent(end, control2, control1, start);
+    if (endTangent) subpath.endTangent = { x: -endTangent.x, y: -endTangent.y };
+    const steps = cubicSteps(start, cubic);
+    for (let step = 1; step <= steps; step += 1) {
+      const amount = step / steps;
       const inverseAmount = 1 - amount;
-      contour.push({
+      pushPoint(step === steps ? end : {
         x:
-          inverseAmount ** 3 * current.x +
+          inverseAmount ** 3 * start.x +
           3 * inverseAmount * inverseAmount * amount * cubic.x1 +
           3 * inverseAmount * amount * amount * cubic.x2 +
           amount ** 3 * cubic.x,
         y:
-          inverseAmount ** 3 * current.y +
+          inverseAmount ** 3 * start.y +
           3 * inverseAmount * inverseAmount * amount * cubic.y1 +
           3 * inverseAmount * amount * amount * cubic.y2 +
           amount ** 3 * cubic.y,
       });
     }
-    segments.push({ end: contour.at(-1), start: current });
-    return contour.at(-1);
   };
+  const pushQuad = (control, end) => {
+    pushCubic({
+      x1: cursor.x + (2 / 3) * (control.x - cursor.x),
+      y1: cursor.y + (2 / 3) * (control.y - cursor.y),
+      x2: end.x + (2 / 3) * (control.x - end.x),
+      y2: end.y + (2 / 3) * (control.y - end.y),
+      x: end.x,
+      y: end.y,
+    });
+  };
+  const reflect = (control) =>
+    control
+      ? { x: 2 * cursor.x - control.x, y: 2 * cursor.y - control.y }
+      : { x: cursor.x, y: cursor.y };
   try {
     while (index < tokens.length) {
       if (/^[a-zA-Z]$/.test(tokens[index])) command = tokens[index++];
       else if (!command) return undefined;
       const relative = command === command.toLowerCase();
       const normalized = command.toUpperCase();
-      const reflect = (x, y) =>
-        previousControl
-          ? { x: 2 * cursor.x - previousControl.x, y: 2 * cursor.y - previousControl.y }
-          : { x: cursor.x, y: cursor.y };
+      let cubicControl;
+      let quadControl;
       if (normalized === "Z") {
         if (contour.length > 0) {
-          segments.push({ end: subpathStart, start: cursor });
+          if (cursor.x !== subpathStart.x || cursor.y !== subpathStart.y) {
+            pushLine(subpathStart);
+          } else {
+            segments.push({ end: subpathStart, start: cursor });
+          }
           if (contour.length > 2) {
             contours.push(contour);
             closedContours.push(true);
           }
         }
-        contour = [];
+        if (subpath) subpath.closed = true;
+        // A drawing command after Z starts a new subpath at the same point.
+        contour = [subpathStart];
+        subpath = undefined;
         cursor = subpathStart;
         command = undefined;
-        previousControl = undefined;
       } else if (normalized === "M") {
         if (contour.length > 2) {
           contours.push(contour);
           closedContours.push(false);
         }
-        contour = [];
-        const next = {
-          x: readNumber() + (relative ? cursor.x : 0),
-          y: readNumber() + (relative ? cursor.y : 0),
-        };
-        contour.push(next);
+        const next = readPoint(relative);
+        contour = [next];
+        subpath = undefined;
         cursor = next;
         subpathStart = next;
-        previousControl = undefined;
         command = relative ? "l" : "L";
       } else if (normalized === "L") {
-        pushLine({
-          x: readNumber() + (relative ? cursor.x : 0),
-          y: readNumber() + (relative ? cursor.y : 0),
-        });
-        previousControl = undefined;
+        pushLine(readPoint(relative));
       } else if (normalized === "H") {
         pushLine({ x: readNumber() + (relative ? cursor.x : 0), y: cursor.y });
-        previousControl = undefined;
       } else if (normalized === "V") {
         pushLine({ x: cursor.x, y: readNumber() + (relative ? cursor.y : 0) });
-        previousControl = undefined;
-      } else if (normalized === "C") {
-        const cubic = {
-          x1: readNumber() + (relative ? cursor.x : 0),
-          y1: readNumber() + (relative ? cursor.y : 0),
-          x2: readNumber() + (relative ? cursor.x : 0),
-          y2: readNumber() + (relative ? cursor.y : 0),
-          x: readNumber() + (relative ? cursor.x : 0),
-          y: readNumber() + (relative ? cursor.y : 0),
-        };
-        previousControl = { x: cubic.x2, y: cubic.y2 };
-        cursor = pushCubic(cubic, cursor);
-      } else if (normalized === "S") {
-        const first = reflect(cursor.x, cursor.y);
-        const cubic = {
+      } else if (normalized === "C" || normalized === "S") {
+        const first = normalized === "C" ? readPoint(relative) : reflect(previousCubic);
+        const second = readPoint(relative);
+        const end = readPoint(relative);
+        cubicControl = second;
+        pushCubic({
           x1: first.x,
           y1: first.y,
-          x2: readNumber() + (relative ? cursor.x : 0),
-          y2: readNumber() + (relative ? cursor.y : 0),
-          x: readNumber() + (relative ? cursor.x : 0),
-          y: readNumber() + (relative ? cursor.y : 0),
-        };
-        previousControl = { x: cubic.x2, y: cubic.y2 };
-        cursor = pushCubic(cubic, cursor);
-      } else if (normalized === "Q") {
-        const control = {
-          x: readNumber() + (relative ? cursor.x : 0),
-          y: readNumber() + (relative ? cursor.y : 0),
-        };
-        const cubic = {
-          x1: control.x,
-          y1: control.y,
-          x2: control.x,
-          y2: control.y,
-          x: readNumber() + (relative ? cursor.x : 0),
-          y: readNumber() + (relative ? cursor.y : 0),
-        };
-        previousControl = control;
-        cursor = pushCubic(cubic, cursor);
-      } else if (normalized === "T") {
-        const control = reflect(cursor.x, cursor.y);
-        const cubic = {
-          x1: control.x,
-          y1: control.y,
-          x2: control.x,
-          y2: control.y,
-          x: readNumber() + (relative ? cursor.x : 0),
-          y: readNumber() + (relative ? cursor.y : 0),
-        };
-        previousControl = control;
-        cursor = pushCubic(cubic, cursor);
+          x2: second.x,
+          y2: second.y,
+          x: end.x,
+          y: end.y,
+        });
+      } else if (normalized === "Q" || normalized === "T") {
+        const control = normalized === "Q" ? readPoint(relative) : reflect(previousQuad);
+        quadControl = control;
+        pushQuad(control, readPoint(relative));
       } else if (normalized === "A") {
         const rx = readNumber();
         const ry = readNumber();
         const rotation = readNumber();
         const largeArc = readNumber() !== 0;
         const sweep = readNumber() !== 0;
-        const next = {
-          x: readNumber() + (relative ? cursor.x : 0),
-          y: readNumber() + (relative ? cursor.y : 0),
-        };
-        for (const cubic of arcToCubicSegments(
-          cursor,
-          rx,
-          ry,
-          rotation,
-          largeArc,
-          sweep,
-          next,
-        )) {
-          cursor = pushCubic(cubic, cursor);
+        const next = readPoint(relative);
+        if (next.x !== cursor.x || next.y !== cursor.y) {
+          const cubics = arcToCubicSegments(
+            cursor,
+            rx,
+            ry,
+            rotation,
+            largeArc,
+            sweep,
+            next,
+          );
+          // A zero radius draws a straight line (SVG 2 F.6.2).
+          if (cubics.length === 0) pushLine(next);
+          for (const cubic of cubics) pushCubic(cubic);
+          cursor = next;
         }
-        cursor = next;
-        previousControl = undefined;
       } else {
         return undefined;
       }
+      previousCubic = cubicControl;
+      previousQuad = quadControl;
     }
   } catch {
     return undefined;
@@ -762,6 +802,7 @@ function parsePathData(value) {
     totalLength += Math.hypot(segment.end.x - segment.start.x, segment.end.y - segment.start.y);
     cumulative.push(totalLength);
   }
+  const drawn = subpaths.filter(({ points }) => points.length > 1);
   return {
     closedContours,
     contours,
@@ -769,6 +810,7 @@ function parsePathData(value) {
     end: segments.at(-1).end,
     segments,
     start: segments[0].start,
+    subpaths: drawn,
     totalLength,
   };
 }
@@ -789,24 +831,6 @@ function pathFillContains(geometry, x, y, evenOdd = false) {
   return evenOdd
     ? contourWindingCount(geometry.contours, x, y) % 2 === 1
     : windingNumber(geometry.contours, x, y) !== 0;
-}
-
-function dashPattern(stroke, width) {
-  const style = stroke.style ?? "solid";
-  if (style === "solid") return undefined;
-  const scale = Math.max(1, width);
-  if (style === "dashed") {
-    return { on: stroke.dash ?? scale * 3, period: (stroke.dash ?? scale * 3) + (stroke.gap ?? scale * 3) };
-  }
-  if (style === "dotted") {
-    const on = stroke.dash ?? scale;
-    return { on, period: on + (stroke.gap ?? scale) };
-  }
-  // "mixed": dash, gap, dot, gap — deterministic alternating pattern.
-  const dash = stroke.dash ?? scale * 3;
-  const dot = scale;
-  const gap = stroke.gap ?? scale * 2;
-  return { on: dash, period: dash + gap + dot + gap, mixed: { dash, dot, gap } };
 }
 
 function dashOnAt(pattern, distance) {
@@ -858,146 +882,408 @@ function pathStrokeContains(
   return false;
 }
 
-const MARKER_SIDES = 24;
-
-function markerGeometry(cap, point, direction, width) {
-  const size = Math.max(3, width * 2.5);
-  const normal = { x: -direction.y, y: direction.x };
-  const at = (along, across) => ({
-    x: point.x + direction.x * along + normal.x * across,
-    y: point.y + direction.y * along + normal.y * across,
-  });
-  if (cap === "round") {
-    const radius = width / 2;
-    const contour = [];
-    for (let index = 0; index < MARKER_SIDES; index += 1) {
-      const angle = (index / MARKER_SIDES) * Math.PI * 2;
-      contour.push({
-        x: point.x + Math.cos(angle) * radius,
-        y: point.y + Math.sin(angle) * radius,
-      });
-    }
-    return { contours: [contour], segments: [] };
+// Penpot's SVG dash arrays (ui/shapes/attrs.cljs calculate-dasharray), in
+// local units: dashed defaults to w+10 on and off, dotted draws round dots
+// w+5 apart, mixed alternates a long and a short dash.
+function dashArray(stroke, width) {
+  const style = stroke.style ?? "solid";
+  let dashes;
+  if (style === "dashed") {
+    dashes = [stroke.dash ?? width + 10, stroke.gap ?? width + 10];
+  } else if (style === "dotted") {
+    dashes = [0, width + 5];
+  } else if (style === "mixed") {
+    dashes = [width + 5, width + 5, width + 1, width + 5];
+  } else {
+    return undefined;
   }
-  if (cap === "square") {
-    const half = width / 2;
-    return {
-      contours: [[
-        at(0, -half),
-        at(half, -half),
-        at(half, half),
-        at(0, half),
-      ]],
-      segments: [],
-    };
-  }
-  if (cap === "triangle-arrow") {
-    const length = Math.max(6, width * 4);
-    const half = size * 0.9;
-    return {
-      contours: [[
-        point,
-        at(-length, half),
-        at(-length, -half),
-      ]],
-      segments: [],
-    };
-  }
-  if (cap === "circle-marker") {
-    const contour = [];
-    for (let index = 0; index < MARKER_SIDES; index += 1) {
-      const angle = (index / MARKER_SIDES) * Math.PI * 2;
-      contour.push({
-        x: point.x + Math.cos(angle) * size,
-        y: point.y + Math.sin(angle) * size,
-      });
-    }
-    return { contours: [contour], segments: [] };
-  }
-  if (cap === "square-marker") {
-    return {
-      contours: [[
-        at(-size, size),
-        at(-size, -size),
-        at(size, -size),
-        at(size, size),
-      ]],
-      segments: [],
-    };
-  }
-  if (cap === "diamond-marker") {
-    return {
-      contours: [[
-        at(0, size),
-        at(-size, 0),
-        at(0, -size),
-        at(size, 0),
-      ]],
-      segments: [],
-    };
-  }
-  if (cap === "line-arrow") {
-    const length = Math.max(6, width * 4);
-    const spread = Math.PI / 7;
-    const back = {
-      x: -direction.x * Math.cos(spread) - -direction.y * Math.sin(spread),
-      y: -direction.y * Math.cos(spread) + -direction.x * Math.sin(spread),
-    };
-    const backOther = {
-      x: -direction.x * Math.cos(spread) - direction.y * Math.sin(spread),
-      y: -direction.y * Math.cos(spread) + direction.x * Math.sin(spread),
-    };
-    return {
-      contours: [],
-      segments: [
-        {
-          end: { x: point.x + back.x * length, y: point.y + back.y * length },
-          start: point,
-        },
-        {
-          end: {
-            x: point.x + backOther.x * length,
-            y: point.y + backOther.y * length,
-          },
-          start: point,
-        },
-      ],
-    };
-  }
-  return undefined;
+  if (dashes.some((value) => !Number.isFinite(value) || value < 0)) return undefined;
+  return dashes.reduce((sum, value) => sum + value, 0) > 0 ? dashes : undefined;
 }
 
-function capExtensions(geometry, width, pattern) {
-  // "square" caps extend the open ends by half the stroke width; "round" caps
-  // already fall out of the distance test.
-  if (!pattern && width <= 0) return undefined;
-  const segments = [];
-  const half = width / 2;
-  const first = geometry.segments[0];
-  if (first) {
-    const direction = directionAt(geometry, { segmentIndex: 0 });
-    segments.push({
-      end: first.start,
-      start: {
-        x: first.start.x - direction.x * half,
-        y: first.start.y - direction.y * half,
-      },
-    });
+const LINE_CAPS = new Set(["round", "square"]);
+const MARKER_CAPS = new Set([
+  "circle-marker",
+  "diamond-marker",
+  "line-arrow",
+  "square-marker",
+  "triangle-arrow",
+]);
+// SVG's default stroke-miterlimit, which Penpot never changes.
+const MITER_LIMIT = 4;
+
+function strokeBounds(points, reach) {
+  return {
+    bottom: Math.max(...points.map(({ y }) => y)) + reach,
+    left: Math.min(...points.map(({ x }) => x)) - reach,
+    right: Math.max(...points.map(({ x }) => x)) + reach,
+    top: Math.min(...points.map(({ y }) => y)) - reach,
+  };
+}
+
+// One stroked segment of a polyline, `half` either side of start→end. Each
+// end is "round" where it joins a neighbour (so consecutive segments overlap
+// without seams), or the polyline's linecap: "butt" or "square".
+function segmentPiece(start, end, half, startCap = "round", endCap = "round") {
+  const length = Math.hypot(end.x - start.x, end.y - start.y);
+  if (length < 1e-9) return undefined;
+  return {
+    bounds: strokeBounds([start, end], half * Math.SQRT2),
+    endCap,
+    half,
+    length,
+    start,
+    startCap,
+    type: "segment",
+    ux: (end.x - start.x) / length,
+    uy: (end.y - start.y) / length,
+  };
+}
+
+// A simple polygon (any winding, convex or not).
+function polygonPiece(points) {
+  if (points.length < 3) return undefined;
+  return { bounds: strokeBounds(points, 0), contour: points, type: "polygon" };
+}
+
+// A disc; with `facing` only the half on that side of the centre.
+function circlePiece(center, radius, facing) {
+  return {
+    bounds: strokeBounds([center], radius),
+    center,
+    facing,
+    radius,
+    type: "circle",
+  };
+}
+
+// Signed distance (negative inside) from a local point to a stroke piece.
+// Exact outside every piece, so the union (the minimum) is exact outside
+// the stroke too; inside, pieces overlap deeply wherever they meet.
+function pieceDistance(piece, x, y) {
+  if (piece.type === "segment") {
+    const dx = x - piece.start.x;
+    const dy = y - piece.start.y;
+    const along = dx * piece.ux + dy * piece.uy;
+    const across = Math.abs(-dx * piece.uy + dy * piece.ux) - piece.half;
+    const startReach = piece.startCap === "square" ? piece.half : 0;
+    const endReach = piece.endCap === "square" ? piece.half : 0;
+    if (along < 0 && piece.startCap === "round") return Math.hypot(along, across + piece.half) - piece.half;
+    if (along > piece.length && piece.endCap === "round") {
+      return Math.hypot(along - piece.length, across + piece.half) - piece.half;
+    }
+    const beyond = Math.max(
+      piece.startCap === "round" ? -Infinity : -along - startReach,
+      piece.endCap === "round" ? -Infinity : along - piece.length - endReach,
+    );
+    if (beyond > 0 || across > 0) {
+      return Math.hypot(Math.max(beyond, 0), Math.max(across, 0));
+    }
+    return Math.max(beyond, across);
   }
-  const last = geometry.segments.at(-1);
-  if (last) {
-    const direction = directionAt(geometry, {
-      segmentIndex: geometry.segments.length - 1,
-    });
-    segments.push({
-      end: {
-        x: last.end.x + direction.x * half,
-        y: last.end.y + direction.y * half,
-      },
-      start: last.end,
-    });
+  if (piece.type === "circle") {
+    const dx = x - piece.center.x;
+    const dy = y - piece.center.y;
+    const distance = Math.hypot(dx, dy) - piece.radius;
+    if (!piece.facing) return distance;
+    return Math.max(distance, -(dx * piece.facing.x + dy * piece.facing.y));
   }
-  return segments.length ? { contours: [], segments } : undefined;
+  let distance = Infinity;
+  const contour = piece.contour;
+  for (let index = 0; index < contour.length; index += 1) {
+    distance = Math.min(
+      distance,
+      distanceToSegment(x, y, contour[index], contour[(index + 1) % contour.length]),
+    );
+  }
+  return windingNumber([contour], x, y) !== 0 ? -distance : distance;
+}
+
+// Coverage of a pixel at a local point by a set of pieces, given device
+// pixels per local unit.
+function piecesCoverage(pieces, x, y, unit) {
+  const reach = 1 / unit;
+  let distance = Infinity;
+  for (const piece of pieces) {
+    const { bounds } = piece;
+    if (
+      x < bounds.left - reach ||
+      x > bounds.right + reach ||
+      y < bounds.top - reach ||
+      y > bounds.bottom + reach
+    ) {
+      continue;
+    }
+    distance = Math.min(distance, pieceDistance(piece, x, y));
+    if (distance * unit <= -0.5) return 1;
+  }
+  return edgeCoverage(distance * unit);
+}
+
+function unitDirection(start, end) {
+  const length = Math.hypot(end.x - start.x, end.y - start.y);
+  return length < 1e-9
+    ? undefined
+    : { x: (end.x - start.x) / length, y: (end.y - start.y) / length };
+}
+
+// The wedge a miter join adds past the round overlap of two segments, on
+// the outer side of the turn at `vertex` from `incoming` to `outgoing`.
+// Past the miter limit SVG bevels, which the round overlap already covers
+// except for a sliver under a pixel wide at stroke widths that matter.
+function joinPiece(vertex, incoming, outgoing, half) {
+  const cross = incoming.x * outgoing.y - incoming.y * outgoing.x;
+  const dot = incoming.x * outgoing.x + incoming.y * outgoing.y;
+  if (Math.abs(cross) < 1e-9) return undefined;
+  const side = cross > 0 ? -1 : 1;
+  const first = {
+    x: vertex.x - side * incoming.y * half,
+    y: vertex.y + side * incoming.x * half,
+  };
+  const second = {
+    x: vertex.x - side * outgoing.y * half,
+    y: vertex.y + side * outgoing.x * half,
+  };
+  // The miter ratio is 1 / sin(θ/2) for the angle θ between the segments.
+  const sinHalf = Math.sqrt(Math.max(0, (1 + dot) / 2));
+  const bisector = unitDirection(vertex, {
+    x: (first.x + second.x) / 2,
+    y: (first.y + second.y) / 2,
+  });
+  if (sinHalf * MITER_LIMIT < 1 || !bisector) {
+    return polygonPiece([vertex, first, second]);
+  }
+  const tipDistance = half / sinHalf;
+  return polygonPiece([
+    vertex,
+    first,
+    { x: vertex.x + bisector.x * tipDistance, y: vertex.y + bisector.y * tipDistance },
+    second,
+  ]);
+}
+
+// Pieces that stroke one polyline like SVG: segments, miter joins and the
+// given linecap ("round", "square" or butt) on open ends. A single point (a
+// zero-length dash) draws only its caps, along `direction`.
+function pushPolylinePieces(pieces, points, closed, half, linecap, direction) {
+  const add = (piece) => {
+    if (piece) pieces.push(piece);
+  };
+  const cap = linecap ?? "butt";
+  if (points.length === 1) {
+    if (cap === "round") add(circlePiece(points[0], half));
+    if (cap === "square" && direction) {
+      add(segmentPiece(
+        { x: points[0].x - direction.x * half, y: points[0].y - direction.y * half },
+        { x: points[0].x + direction.x * half, y: points[0].y + direction.y * half },
+        half,
+        "butt",
+        "butt",
+      ));
+    }
+    return;
+  }
+  const count = closed ? points.length : points.length - 1;
+  const directions = [];
+  for (let index = 0; index < count; index += 1) {
+    add(segmentPiece(
+      points[index],
+      points[(index + 1) % points.length],
+      half,
+      !closed && index === 0 ? cap : "round",
+      !closed && index === count - 1 ? cap : "round",
+    ));
+    directions.push(unitDirection(points[index], points[(index + 1) % points.length]));
+  }
+  for (let index = closed ? 0 : 1; index < count; index += 1) {
+    const incoming = directions[(index - 1 + count) % count];
+    const outgoing = directions[index];
+    if (incoming && outgoing) add(joinPiece(points[index], incoming, outgoing, half));
+  }
+}
+
+// Splits a polyline into its dashes (open polylines; a zero-length dash is a
+// single point) for an SVG dash array. The pattern restarts on every
+// subpath, like Skia.
+function dashPolyline(points, closed, dashes) {
+  const vertices = closed ? [...points, points[0]] : points;
+  const dashed = [];
+  let dashIndex = 0;
+  let remaining = dashes[0];
+  let current = [vertices[0]];
+  const finish = (direction) => {
+    const unique = current.filter(
+      (candidate, index) =>
+        index === 0 ||
+        Math.hypot(candidate.x - current[index - 1].x, candidate.y - current[index - 1].y) > 1e-9,
+    );
+    dashed.push({ direction, points: unique });
+    current = undefined;
+  };
+  let direction;
+  for (let index = 0; index < vertices.length - 1; index += 1) {
+    const start = vertices[index];
+    const end = vertices[index + 1];
+    const length = Math.hypot(end.x - start.x, end.y - start.y);
+    if (length < 1e-9) continue;
+    direction = { x: (end.x - start.x) / length, y: (end.y - start.y) / length };
+    let travelled = 0;
+    while (remaining <= length - travelled) {
+      travelled += remaining;
+      const at = {
+        x: start.x + direction.x * travelled,
+        y: start.y + direction.y * travelled,
+      };
+      if (current) {
+        current.push(at);
+        finish(direction);
+      } else {
+        current = [at];
+      }
+      dashIndex = (dashIndex + 1) % dashes.length;
+      remaining = dashes[dashIndex];
+    }
+    remaining -= length - travelled;
+    current?.push(end);
+  }
+  if (current && current.length > 1) finish(direction);
+  return dashed;
+}
+
+// Stroke subpaths of a PATH geometry: consecutive duplicate points dropped,
+// and a subpath ending on its start counts as closed, as Penpot's
+// close-subpaths does.
+function strokeSubpaths(geometry) {
+  return geometry.subpaths.map((subpath) => {
+    const points = subpath.points.filter(
+      (candidate, index, all) =>
+        index === 0 ||
+        Math.hypot(candidate.x - all[index - 1].x, candidate.y - all[index - 1].y) > 1e-9,
+    );
+    const first = points[0];
+    const last = points.at(-1);
+    const meets =
+      points.length > 2 && Math.hypot(last.x - first.x, last.y - first.y) <= 1e-9;
+    if (subpath.closed || meets) {
+      if (meets) points.pop();
+      return { ...subpath, closed: true, points };
+    }
+    return { ...subpath, points };
+  });
+}
+
+// Marker shapes from Penpot's SVG cap markers (ui/shapes/custom_stroke.cljs):
+// viewBox polygons and discs, the reference point, and the marker scale
+// (viewBox fitted into markerWidth/Height stroke widths, aspect kept).
+const MARKER_SHAPES = new Map([
+  ["line-arrow", {
+    polygons: [[[0.5, 0.5], [3, 3], [0.5, 5.5], [0, 5], [2, 3], [0, 1]]],
+    ref: [2, 3],
+    scale: 8.5 / 6,
+  }],
+  ["triangle-arrow", { polygons: [[[0, 0], [3, 3], [0, 6]]], ref: [2, 3], scale: 8.5 / 6 }],
+  ["square-marker", {
+    polygons: [[[0, 0], [6, 0], [6, 6], [0, 6]]],
+    ref: [3, 3],
+    scale: 4.2426 / 6,
+  }],
+  ["circle-marker", { circle: { center: [3, 3], radius: 3 }, ref: [3, 3], scale: 4 / 6 }],
+  ["diamond-marker", {
+    polygons: [[[3, 0], [6, 3], [3, 6], [0, 3]]],
+    ref: [3, 3],
+    scale: 1,
+  }],
+  ["round", {
+    circle: { center: [3, 3], facing: true, radius: 0.5 },
+    ref: [3, 3],
+    scale: 1,
+  }],
+  ["square", { polygons: [[[3, 2.5], [3.5, 2.5], [3.5, 3.5], [3, 3.5]]], ref: [3, 3], scale: 1 }],
+]);
+
+// A cap marker at `at`, its +x axis along `outward` (orient
+// auto-start-reverse), scaled by the stroke width (markerUnits strokeWidth).
+function markerPieces(cap, at, outward, width) {
+  const shape = MARKER_SHAPES.get(cap);
+  if (!shape || !outward) return [];
+  const scale = shape.scale * width;
+  const place = ([x, y]) => {
+    const along = (x - shape.ref[0]) * scale;
+    const across = (y - shape.ref[1]) * scale;
+    return {
+      x: at.x + outward.x * along - outward.y * across,
+      y: at.y + outward.y * along + outward.x * across,
+    };
+  };
+  if (shape.circle) {
+    return [circlePiece(
+      place(shape.circle.center),
+      shape.circle.radius * scale,
+      shape.circle.facing ? outward : undefined,
+    )];
+  }
+  return shape.polygons.map((polygon) => polygonPiece(polygon.map(place))).filter(Boolean);
+}
+
+// How far stroke ink may reach past the stroked outline, in local units.
+function strokeReach(width) {
+  return width * 4.25 + 1;
+}
+
+// Penpot's stroke rendering for a PATH geometry or a dashed rectangle or
+// ellipse outline (`subpaths`), as SVG pieces: the stroke itself and its cap
+// markers, which SVG paints as separate elements. Open paths always stroke
+// centred; closed ones grow the stroke to twice the width for inner and
+// outer alignment, which the caller clips to the fill (ui/shapes/custom_stroke.cljs).
+function strokePieces(subpaths, stroke, width) {
+  const alignment = stroke.alignment ?? "inner";
+  const open = subpaths.some(({ closed }) => !closed);
+  const aligned = !open && (alignment === "inner" || alignment === "outer");
+  const half = aligned ? width : width / 2;
+  const { capEnd, capStart } = stroke;
+  const style = stroke.style ?? "solid";
+  const linecap =
+    style === "dotted"
+      ? "round"
+      : LINE_CAPS.has(capStart) && capStart === capEnd && !aligned
+        ? capStart
+        : undefined;
+  const dashes = dashArray(stroke, width);
+  const pieces = [];
+  for (const subpath of subpaths) {
+    if (subpath.points.length === 0) continue;
+    if (!dashes) {
+      pushPolylinePieces(pieces, subpath.points, subpath.closed, half, linecap);
+      continue;
+    }
+    for (const dash of dashPolyline(subpath.points, subpath.closed, dashes)) {
+      pushPolylinePieces(pieces, dash.points, false, half, linecap, dash.direction);
+    }
+  }
+  const markers = [];
+  if (!aligned) {
+    const markerCap = (cap) =>
+      MARKER_CAPS.has(cap) || (LINE_CAPS.has(cap) && capStart !== capEnd) ? cap : undefined;
+    const first = subpaths[0];
+    const last = subpaths.at(-1);
+    if (markerCap(capStart) && first?.startTangent) {
+      markers.push(...markerPieces(
+        capStart,
+        first.points[0],
+        { x: -first.startTangent.x, y: -first.startTangent.y },
+        width,
+      ));
+    }
+    if (markerCap(capEnd) && last?.endTangent) {
+      markers.push(...markerPieces(
+        capEnd,
+        last.closed ? last.points[0] : last.points.at(-1),
+        last.endTangent,
+        width,
+      ));
+    }
+  }
+  return { alignment: aligned ? alignment : "center", markers, pieces };
 }
 
 const WHITESPACE = /\s/u;
@@ -1010,7 +1296,7 @@ function spaceAdvance(font) {
 
 function lineGlyphs(
   font,
-  symbolFont,
+  fonts,
   text,
   x,
   baseline,
@@ -1031,13 +1317,8 @@ function lineGlyphs(
       };
     }
     const glyph = font.charToGlyph(character);
-    if (glyph.index === 0 && symbolFont.charToGlyphIndex(character) !== 0) {
-      return {
-        advanceWidth: symbolFont.unitsPerEm,
-        font: symbolFont,
-        glyph: symbolFont.charToGlyph(character),
-      };
-    }
+    const fallback = glyph.index === 0 ? fallbackGlyph(fonts, character) : null;
+    if (fallback) return fallback;
     if (glyph.index === 0) {
       missing?.add(character);
       return {
@@ -1276,8 +1557,8 @@ function renderTextDecoration(
 function richTextRun(state, node, style, fills, path) {
   const font = resolveFont(state, style, node.id, path);
   const size = Number(style.fontSize ?? 14);
-  const height = Number(style.lineHeight ?? 1.2);
-  const lineHeight = height <= 4 ? size * height : height;
+  // Penpot reads lineHeight as a multiple of the font size, whatever its size.
+  const lineHeight = size * Number(style.lineHeight ?? 1.2);
   const ascent =
     (lineHeight - size) / 2 +
     (typographicAscender(font) * size) / font.unitsPerEm;
@@ -1395,13 +1676,9 @@ function richTextLines(state, node, path, missing) {
         let font = run.font;
         let glyph = font.charToGlyph(character);
         let advanceWidth = glyph.advanceWidth ?? font.unitsPerEm;
-        if (
-          glyph.index === 0 &&
-          state.fonts.symbols.charToGlyphIndex(character) !== 0
-        ) {
-          font = state.fonts.symbols;
-          glyph = font.charToGlyph(character);
-          advanceWidth = font.unitsPerEm;
+        const fallback = glyph.index === 0 ? fallbackGlyph(state.fonts, character) : null;
+        if (fallback) {
+          ({ font, glyph, advanceWidth } = fallback);
         } else if (glyph.index === 0) {
           missing?.add(character);
           advanceWidth = spaceAdvance(font);
@@ -1569,8 +1846,8 @@ function renderText(state, node, matrix, opacity, path, clips) {
   const style = node.textStyle ?? {};
   const font = resolveFont(state, style, node.id, path);
   const fontSize = Number(style.fontSize ?? 14);
-  const lineHeightValue = Number(style.lineHeight ?? 1.2);
-  const lineHeight = lineHeightValue <= 4 ? fontSize * lineHeightValue : lineHeightValue;
+  // Penpot reads lineHeight as a multiple of the font size, whatever its size.
+  const lineHeight = fontSize * Number(style.lineHeight ?? 1.2);
   const letterSpacing = Number(style.letterSpacing ?? 0);
   const source =
     style.textTransform === "uppercase"
@@ -1588,7 +1865,7 @@ function renderText(state, node, matrix, opacity, path, clips) {
           (text, previous) =>
             lineGlyphs(
               font,
-              state.fonts.symbols,
+              state.fonts,
               text,
               0,
               0,
@@ -1628,7 +1905,7 @@ function renderText(state, node, matrix, opacity, path, clips) {
   for (let index = 0; index < lines.length; index += 1) {
     const line = lineGlyphs(
       font,
-      state.fonts.symbols,
+      state.fonts,
       lines[index],
       0,
       0,
@@ -1645,7 +1922,7 @@ function renderText(state, node, matrix, opacity, path, clips) {
       verticalOffset + index * lineHeight + (lineHeight - fontSize) / 2 + ascender;
     lineGlyphs(
       font,
-      state.fonts.symbols,
+      state.fonts,
       lines[index],
       x,
       baseline,
@@ -2935,37 +3212,99 @@ function nodeContains(node, x, y) {
   return cornerContains(node, x, y);
 }
 
-function nodeContainsGeometry(node, geometry, x, y) {
-  if (geometry) return pathFillContains(geometry, x, y);
-  return nodeContains(node, x, y);
+// Corner radii after growing the outline by `grow` (negative shrinks), in
+// TL, TR, BR, BL order and scaled down like CSS when adjacent radii overflow
+// a side. Square corners stay square.
+function grownCornerRadii(node, width, height, grow) {
+  const values = Array.isArray(node.cornerRadius)
+    ? node.cornerRadius
+    : [node.cornerRadius ?? 0];
+  const requested = (values.length === 4 ? values : Array(4).fill(values[0]))
+    .map((value) => {
+      const radius = Math.max(0, Number(value) || 0);
+      return radius > 0 ? Math.max(0, radius + grow) : 0;
+    });
+  const [topLeft, topRight, bottomRight, bottomLeft] = requested;
+  const scale = Math.min(
+    1,
+    topLeft + topRight > 0 ? width / (topLeft + topRight) : 1,
+    bottomLeft + bottomRight > 0 ? width / (bottomLeft + bottomRight) : 1,
+    topLeft + bottomLeft > 0 ? height / (topLeft + bottomLeft) : 1,
+    topRight + bottomRight > 0 ? height / (topRight + bottomRight) : 1,
+  );
+  return requested.map((radius) => radius * scale);
 }
 
-function insetContains(node, x, y, inset) {
-  const width = node.width - inset * 2;
-  const height = node.height - inset * 2;
-  if (width <= 0 || height <= 0) return false;
-  const reduceRadius = (value) => Math.max(0, Number(value) - inset);
-  const cornerRadius = Array.isArray(node.cornerRadius)
-    ? node.cornerRadius.map(reduceRadius)
-    : reduceRadius(node.cornerRadius ?? 0);
-  return nodeContains(
-    { ...node, cornerRadius, height, width },
-    x - inset,
-    y - inset,
+// Signed distance (negative inside) from a node-local point to the outline
+// of a rectangle, rounded rectangle or ellipse grown by `grow` local units.
+// The ellipse distance uses the first-order gradient estimate, exact for
+// circles and accurate within a fraction of a pixel near any ellipse edge,
+// which is all edge coverage needs.
+function shapeDistance(node, x, y, grow = 0) {
+  const width = node.width + grow * 2;
+  const height = node.height + grow * 2;
+  if (width <= 0 || height <= 0) return Infinity;
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  const px = x + grow - halfWidth;
+  const py = y + grow - halfHeight;
+  if (node.type === "ELLIPSE") {
+    if (Math.abs(halfWidth - halfHeight) < 1e-9) {
+      return Math.hypot(px, py) - halfWidth;
+    }
+    const k0 = Math.hypot(px / halfWidth, py / halfHeight);
+    const k1 = Math.hypot(
+      px / (halfWidth * halfWidth),
+      py / (halfHeight * halfHeight),
+    );
+    if (k1 === 0) return -Math.min(halfWidth, halfHeight);
+    return (k0 * (k0 - 1)) / k1;
+  }
+  const radii = grownCornerRadii(node, width, height, grow);
+  const radius = px < 0
+    ? (py < 0 ? radii[0] : radii[3])
+    : (py < 0 ? radii[1] : radii[2]);
+  const qx = Math.abs(px) - halfWidth + radius;
+  const qy = Math.abs(py) - halfHeight + radius;
+  return (
+    Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) +
+    Math.min(Math.max(qx, qy), 0) -
+    radius
   );
 }
 
-function makeGeometry(segments) {
-  const cumulative = [];
-  let totalLength = 0;
-  for (const segment of segments) {
-    totalLength += Math.hypot(
-      segment.end.x - segment.start.x,
-      segment.end.y - segment.start.y,
-    );
-    cumulative.push(totalLength);
+// Pixel coverage of a shape edge from its signed distance in device pixels:
+// a box filter one pixel wide, so pixels the edge crosses get partial alpha.
+function edgeCoverage(deviceDistance) {
+  return clamp(0.5 - deviceDistance, 0, 1);
+}
+
+// Device pixels per node-local unit, for converting local distances.
+function deviceUnit(state, matrix) {
+  return state.scale * Math.sqrt(Math.abs(matrix[0] * matrix[3] - matrix[1] * matrix[2]));
+}
+
+// Signed distance (negative inside) from a node-local point to the outline
+// of PATH geometry, under the nonzero fill rule.
+function pathFillDistance(geometry, x, y) {
+  let distance = Infinity;
+  for (const contour of geometry.contours) {
+    for (let index = 0; index < contour.length; index += 1) {
+      distance = Math.min(
+        distance,
+        distanceToSegment(x, y, contour[index], contour[(index + 1) % contour.length]),
+      );
+    }
   }
-  return { contours: [], cumulative, segments, totalLength };
+  return pathFillContains(geometry, x, y) ? -distance : distance;
+}
+
+// Fill coverage of a node at a node-local point, antialiased. PATH geometry
+// is not clipped to the node box: Penpot derives a path's box from its
+// content and draws the content.
+function shapeCoverage(node, geometry, x, y, unit) {
+  if (geometry) return edgeCoverage(pathFillDistance(geometry, x, y) * unit);
+  return edgeCoverage(shapeDistance(node, x, y) * unit);
 }
 
 function clipsAllow(clips, x, y) {
@@ -2993,12 +3332,83 @@ function blurRadiusOf(value) {
   return Number.isFinite(radius) && radius > 0 ? radius : undefined;
 }
 
-function blurAlphaRegion(buffer, width, height, radius) {
-  const boxRadius = Math.round(radius);
-  if (boxRadius < 1) return;
+// Radii of three successive box filters whose result approximates a Gaussian
+// with standard deviation `sigma` (the "boxes for Gauss" construction): odd
+// widths w_l and w_l + 2 mixed so the summed variance (w^2 - 1) / 12 matches
+// sigma^2. A single radius r per pass would give sigma ~ r + 0.5 instead.
+function gaussBoxRadii(sigma, passes = 3) {
+  if (!(sigma > 0)) return [];
+  const variance = 12 * sigma * sigma;
+  const ideal = Math.sqrt(variance / passes + 1);
+  let lower = Math.floor(ideal);
+  if (lower % 2 === 0) lower -= 1;
+  const upper = lower + 2;
+  const lowerCount = Math.round(
+    (variance - passes * lower * lower - 4 * passes * lower - 3 * passes) /
+      (-4 * lower - 4),
+  );
+  return Array.from({ length: passes }, (_, index) =>
+    ((index < lowerCount ? lower : upper) - 1) / 2,
+  );
+}
+
+// How far, in pixels, a Gaussian blur of `sigma` spreads ink.
+function gaussReach(sigma) {
+  return gaussBoxRadii(sigma).reduce((sum, radius) => sum + radius, 0);
+}
+
+// A small sigma has no good three-box approximation (the boxes round to
+// radius 0 or 1); browsers and Skia switch to a direct Gaussian kernel there.
+const DIRECT_GAUSSIAN_SIGMA = 2;
+
+function gaussianKernel(sigma) {
+  const radius = Math.ceil(3 * sigma);
+  const weights = Array.from({ length: radius * 2 + 1 }, (_, index) =>
+    Math.exp(-((index - radius) ** 2) / (2 * sigma * sigma)),
+  );
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  return { radius, weights: weights.map((weight) => weight / total) };
+}
+
+function gaussianBlurAlphaRegion(buffer, width, height, sigma) {
+  const { radius, weights } = gaussianKernel(sigma);
   const temporary = new Float32Array(buffer.length);
-  const window = boxRadius * 2 + 1;
-  for (let pass = 0; pass < 3; pass += 1) {
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      let sum = 0;
+      for (let offset = -radius; offset <= radius; offset += 1) {
+        const source = column + offset;
+        if (source >= 0 && source < width) {
+          sum += buffer[row * width + source] * weights[offset + radius];
+        }
+      }
+      temporary[row * width + column] = sum;
+    }
+  }
+  for (let column = 0; column < width; column += 1) {
+    for (let row = 0; row < height; row += 1) {
+      let sum = 0;
+      for (let offset = -radius; offset <= radius; offset += 1) {
+        const source = row + offset;
+        if (source >= 0 && source < height) {
+          sum += temporary[source * width + column] * weights[offset + radius];
+        }
+      }
+      buffer[row * width + column] = sum;
+    }
+  }
+}
+
+function blurAlphaRegion(buffer, width, height, sigma) {
+  if (sigma > 0 && sigma < DIRECT_GAUSSIAN_SIGMA) {
+    gaussianBlurAlphaRegion(buffer, width, height, sigma);
+    return;
+  }
+  const radii = gaussBoxRadii(sigma).filter((radius) => radius >= 1);
+  if (radii.length === 0) return;
+  const temporary = new Float32Array(buffer.length);
+  for (const boxRadius of radii) {
+    const window = boxRadius * 2 + 1;
     for (let row = 0; row < height; row += 1) {
       let sum = 0;
       for (let offset = -boxRadius; offset <= boxRadius; offset += 1) {
@@ -3024,9 +3434,9 @@ function blurAlphaRegion(buffer, width, height, radius) {
   }
 }
 
-function blurRgbaRegion(pixels, width, height, left, top, right, bottom, radius) {
-  const boxRadius = Math.round(radius);
-  if (boxRadius < 1 || right <= left || bottom <= top) return;
+function blurRgbaRegion(pixels, width, height, left, top, right, bottom, sigma) {
+  const radii = gaussBoxRadii(sigma).filter((radius) => radius >= 1);
+  if (radii.length === 0 || right <= left || bottom <= top) return;
   const regionWidth = right - left;
   const regionHeight = bottom - top;
   const buffer = new Float32Array(regionWidth * regionHeight * 4);
@@ -3042,10 +3452,10 @@ function blurRgbaRegion(pixels, width, height, left, top, right, bottom, radius)
     }
   }
   const temporary = new Float32Array(buffer.length);
-  const window = boxRadius * 2 + 1;
   const at = (buffer_, row, column, channel) =>
     buffer_[(clamp(row, 0, regionHeight - 1) * regionWidth + clamp(column, 0, regionWidth - 1)) * 4 + channel];
-  for (let pass = 0; pass < 3; pass += 1) {
+  for (const boxRadius of radii) {
+    const window = boxRadius * 2 + 1;
     for (let row = 0; row < regionHeight; row += 1) {
       for (let channel = 0; channel < 4; channel += 1) {
         let sum = 0;
@@ -3093,8 +3503,18 @@ function blurRgbaRegion(pixels, width, height, left, top, right, bottom, radius)
   }
 }
 
-function pixelBounds(state, matrix, node) {
-  const bounds = transformedBounds(matrix, node.width, node.height);
+function pixelBounds(state, matrix, node, grow = 0) {
+  return localPixelBounds(state, matrix, {
+    bottom: node.height + grow,
+    left: -grow,
+    right: node.width + grow,
+    top: -grow,
+  });
+}
+
+// Device pixel bounds of a node-local rectangle.
+function localPixelBounds(state, matrix, local) {
+  const bounds = transformedRectangleBounds(matrix, local);
   return {
     bottom: clamp(Math.ceil(bounds.bottom * state.scale), 0, state.height),
     left: clamp(Math.floor(bounds.left * state.scale), 0, state.width),
@@ -3103,14 +3523,93 @@ function pixelBounds(state, matrix, node) {
   };
 }
 
+// Node-local bounds of PATH geometry: its contours and stroke points.
+function geometryBounds(geometry) {
+  return contourBounds([
+    ...geometry.contours,
+    ...geometry.subpaths.map(({ points }) => points),
+    [geometry.start, geometry.end],
+  ]);
+}
+
+function finiteNumber(value) {
+  const number = Number(value);
+  return value !== undefined && value !== null && Number.isFinite(number)
+    ? number
+    : undefined;
+}
+
+// Shadow offsets in canonical (offsetX/offsetY), Penpot kebab-case
+// (offset-x/offset-y) or legacy (x/y) spelling. Older packages wrote x/y.
+function shadowOffsets(shadow) {
+  const canonicalX = finiteNumber(shadow.offsetX ?? shadow["offset-x"]);
+  const canonicalY = finiteNumber(shadow.offsetY ?? shadow["offset-y"]);
+  const legacyX = canonicalX === undefined ? finiteNumber(shadow.x) : undefined;
+  const legacyY = canonicalY === undefined ? finiteNumber(shadow.y) : undefined;
+  return {
+    legacy: legacyX !== undefined || legacyY !== undefined,
+    offsetX: canonicalX ?? legacyX ?? 0,
+    offsetY: canonicalY ?? legacyY ?? 0,
+  };
+}
+
+// Shadow source alpha at a node-local point, with the outline grown by
+// `spread` local units (negative shrinks). Rectangles, rounded rectangles and
+// ellipses grow exactly (radii follow the spread, square corners stay square)
+// and get antialiased edges. PATH geometry approximates the dilation with the
+// distance to its flattened outline: a point within `spread` of the outline
+// counts as inside when growing, and as outside when shrinking.
+function shadowSourceAlpha(node, geometry, x, y, spread, unit) {
+  if (!geometry) return edgeCoverage(shapeDistance(node, x, y, spread) * unit);
+  if (
+    x < Math.min(0, -spread) ||
+    y < Math.min(0, -spread) ||
+    x >= node.width + Math.max(0, spread) ||
+    y >= node.height + Math.max(0, spread)
+  ) {
+    return 0;
+  }
+  const inside = pathFillContains(geometry, x, y);
+  if (spread === 0) return inside ? 1 : 0;
+  if (inside === spread > 0) return inside ? 1 : 0;
+  const reach = Math.abs(spread);
+  const near = geometry.segments.some(
+    ({ start, end }) => distanceToSegment(x, y, start, end) <= reach,
+  );
+  return near === spread > 0 ? 1 : 0;
+}
+
+// Penpot's drop-shadow filter (ui/shapes/filters.cljs) passes SourceAlpha
+// through a x127 alpha matrix, so any coverage of the shape counts as opaque
+// before the blur; CSS-equivalent SVG output keeps that.
+const PENPOT_SHADOW_ALPHA_GAIN = 127;
+
+// Shapes that paint nothing cast no shadow: the SVG filter has no alpha to
+// shadow. Frames shadow their content, which the outline stands for here.
+function castsShadow(node) {
+  if (node.type === "FRAME" || node.type === "COMPONENT" || node.type === "INSTANCE" ||
+      node.type === "TEXT" || node.type === "IMAGE" || node.type === "GROUP") {
+    return true;
+  }
+  const paints = (paint) =>
+    paint?.hidden !== true && Number(paint?.opacity ?? 1) > 0;
+  return (node.fills ?? []).some(paints) || (node.strokes ?? []).some(paints);
+}
+
 function renderNodeShadow(state, node, matrix, opacity, path, clips, geometry) {
-  const shadows = effectsOf(node.shadow);
+  if (!castsShadow(node)) return;
+  // The first shadow of the list is on top, as in CSS: paint from the last.
+  const shadows = effectsOf(node.shadow).slice().reverse();
+  let legacyReported = false;
   for (const shadow of shadows) {
     if (shadow.hidden === true) continue;
-    if (shadow.style !== undefined && shadow.style !== "drop-shadow") {
+    if (
+      shadow.inset === true ||
+      (shadow.style !== undefined && shadow.style !== "drop-shadow")
+    ) {
       state.diagnostics.push({
         code: "unsupported_render_shadow",
-        message: `Renderer ignored shadow style ${shadow.style}`,
+        message: `Renderer ignored shadow style ${shadow.style ?? "inner-shadow"}`,
         nodeId: node.id,
         path,
       });
@@ -3118,9 +3617,19 @@ function renderNodeShadow(state, node, matrix, opacity, path, clips, geometry) {
     }
     // Token shadows are DTCG objects; shadows edited in Penpot keep its
     // kebab-case offsets and a {color, opacity} color.
-    const offsetX = Number(shadow.offsetX ?? shadow["offset-x"] ?? 0);
-    const offsetY = Number(shadow.offsetY ?? shadow["offset-y"] ?? 0);
-    const blur = Number(shadow.blur ?? 0);
+    const { legacy, offsetX, offsetY } = shadowOffsets(shadow);
+    if (legacy && !legacyReported) {
+      legacyReported = true;
+      state.diagnostics.push({
+        code: "legacy_shadow_shape",
+        message:
+          "Shadow uses legacy x/y offsets; write offsetX/offsetY instead",
+        nodeId: node.id,
+        path,
+      });
+    }
+    const blur = Math.max(0, finiteNumber(shadow.blur) ?? 0);
+    const spread = finiteNumber(shadow.spread) ?? 0;
     const paint = isRecordLike(shadow.color) ? shadow.color : undefined;
     const color = parseColor(
       typeof shadow.color === "string"
@@ -3137,8 +3646,12 @@ function renderNodeShadow(state, node, matrix, opacity, path, clips, geometry) {
       (matrix[0] * offsetX + matrix[2] * offsetY) * state.scale;
     const offsetDeviceY =
       (matrix[1] * offsetX + matrix[3] * offsetY) * state.scale;
+    const unit = deviceUnit(state, matrix);
+    // Penpot and CSS treat blur as a radius: a Gaussian with sigma blur / 2.
+    const sigma = (blur / 2) * state.scale;
     const bounds = pixelBounds(state, matrix, node);
-    const expand = Math.ceil(blur * state.scale * 3) + 2;
+    const expand =
+      Math.ceil(Math.max(gaussReach(sigma), 3 * sigma) + Math.max(0, spread) * unit) + 2;
     const left = clamp(bounds.left + Math.floor(offsetDeviceX - expand), 0, state.width);
     const right = clamp(bounds.right + Math.ceil(offsetDeviceX + expand), 0, state.width);
     const top = clamp(bounds.top + Math.floor(offsetDeviceY - expand), 0, state.height);
@@ -3148,29 +3661,30 @@ function renderNodeShadow(state, node, matrix, opacity, path, clips, geometry) {
     const alphaBuffer = new Float32Array(regionWidth * (bottom - top));
     const inverseMatrix = inverse(matrix);
     if (!inverseMatrix) continue;
+    // The source is the node's own outline; ancestor clips act on where the
+    // shadow lands, below.
     for (let pixelY = top; pixelY < bottom; pixelY += 1) {
       for (let pixelX = left; pixelX < right; pixelX += 1) {
         const canvasX = (pixelX + 0.5 - offsetDeviceX) / state.scale;
         const canvasY = (pixelY + 0.5 - offsetDeviceY) / state.scale;
         const local = point(inverseMatrix, canvasX, canvasY);
-        if (
-          local.x < 0 ||
-          local.y < 0 ||
-          local.x >= node.width ||
-          local.y >= node.height ||
-          !nodeContainsGeometry(node, geometry, local.x, local.y) ||
-          !clipsAllow(clips, canvasX, canvasY)
-        ) {
-          continue;
+        const alpha = shadowSourceAlpha(node, geometry, local.x, local.y, spread, unit);
+        if (alpha > 0) {
+          alphaBuffer[(pixelY - top) * regionWidth + (pixelX - left)] = Math.min(
+            1,
+            alpha * PENPOT_SHADOW_ALPHA_GAIN,
+          );
         }
-        alphaBuffer[(pixelY - top) * regionWidth + (pixelX - left)] = 1;
       }
     }
-    blurAlphaRegion(alphaBuffer, regionWidth, bottom - top, blur * state.scale);
+    blurAlphaRegion(alphaBuffer, regionWidth, bottom - top, sigma);
     for (let pixelY = top; pixelY < bottom; pixelY += 1) {
       for (let pixelX = left; pixelX < right; pixelX += 1) {
         const coverage = alphaBuffer[(pixelY - top) * regionWidth + (pixelX - left)];
         if (coverage <= 0.004) continue;
+        if (!clipsAllow(clips, (pixelX + 0.5) / state.scale, (pixelY + 0.5) / state.scale)) {
+          continue;
+        }
         blend(
           state.pixels,
           (pixelY * state.width + pixelX) * 4,
@@ -3210,7 +3724,9 @@ function renderBackgroundBlur(state, node, matrix, clips) {
     bounds.top,
     bounds.right,
     bounds.bottom,
-    radius * state.scale,
+    // Penpot's background blur is a radius: a Gaussian with sigma value / 2
+    // (feGaussianBlur stdDeviation in its SVG renderer), like shadow blur.
+    (radius / 2) * state.scale,
   );
   for (let pixelY = bounds.top; pixelY < bounds.bottom; pixelY += 1) {
     for (let pixelX = bounds.left; pixelX < bounds.right; pixelX += 1) {
@@ -3297,12 +3813,6 @@ function boundaryGeometry(node) {
   return { contours: [], segments };
 }
 
-function strokeSegmentsFor(node, geometry, stroke, width, pattern) {
-  if (geometry) return [];
-  if (pattern) return boundaryGeometry(node).segments;
-  return [];
-}
-
 function renderStrokeColor(state, node, stroke, path) {
   return paintColor(
     stroke,
@@ -3336,10 +3846,19 @@ function createScratchState(state) {
   };
 }
 
+// Penpot clips every board (frames, components and their copies) unless it
+// shows its content (ui/shapes/frame.cljs).
+function clipsContent(node) {
+  return (
+    (node.type === "FRAME" || node.type === "COMPONENT" || node.type === "INSTANCE") &&
+    node["show-content"] !== true
+  );
+}
+
 function childClips(state, nodes, node, matrix, clips) {
   const inverseMatrix = inverse(matrix);
   if (!inverseMatrix) return clips;
-  if (node.type === "FRAME" && node["show-content"] === false) {
+  if (clipsContent(node)) {
     return [...(clips ?? []), { inverse: inverseMatrix, shape: node }];
   }
   if (
@@ -3412,7 +3931,7 @@ function renderTree(state, nodes, nodeId, parentMatrix, parentOpacity, stack, cl
         matrix,
         opacity,
         stack,
-        masked || (node.type === "FRAME" && node["show-content"] === false)
+        masked || clipsContent(node)
           ? childClips(state, nodes, node, matrix, clips)
           : clips,
       );
@@ -3420,12 +3939,13 @@ function renderTree(state, nodes, nodeId, parentMatrix, parentOpacity, stack, cl
     stack.delete(nodeId);
     for (const entry of scratch.diagnostics) state.diagnostics.push(entry);
     if (scratch.missingGlyphs) mergeMissingGlyphs(state, scratch.missingGlyphs);
-    // Blur and composite only around the subtree's ink: three box passes
-    // spread it at most three radii, and transparent pixels blend to no-ops.
-    const region = inkBounds(
-      scratch,
-      3 * Math.round(layerBlurRadius * state.scale) + 1,
-    );
+    // Penpot's layer blur value is the Gaussian sigma itself (its SVG
+    // renderer passes it to feGaussianBlur stdDeviation unhalved).
+    const layerSigma = layerBlurRadius * state.scale;
+    // Blur and composite only around the subtree's ink: the box passes
+    // spread it at most the sum of their radii, and transparent pixels
+    // blend to no-ops.
+    const region = inkBounds(scratch, gaussReach(layerSigma) + 1);
     if (!region) return;
     blurRgbaRegion(
       scratch.pixels,
@@ -3435,7 +3955,7 @@ function renderTree(state, nodes, nodeId, parentMatrix, parentOpacity, stack, cl
       region.top,
       region.right,
       region.bottom,
-      layerBlurRadius * state.scale,
+      layerSigma,
     );
     for (let pixelY = region.top; pixelY < region.bottom; pixelY += 1) {
       for (let pixelX = region.left; pixelX < region.right; pixelX += 1) {
@@ -3459,8 +3979,7 @@ function renderTree(state, nodes, nodeId, parentMatrix, parentOpacity, stack, cl
     renderNodeShape(state, node, matrix, opacity, path, clips);
   }
   stack.add(nodeId);
-  const clipsChildren =
-    masked || (node.type === "FRAME" && node["show-content"] === false);
+  const clipsChildren = masked || clipsContent(node);
   const childClipsHere = clipsChildren
     ? childClips(state, nodes, node, matrix, clips)
     : clips;
@@ -3477,10 +3996,12 @@ function renderTree(state, nodes, nodeId, parentMatrix, parentOpacity, stack, cl
 
 function renderNodeShape(state, node, matrix, opacity, path, clips) {
   const inverseMatrix = inverse(matrix);
-  if (!inverseMatrix || node.width <= 0 || node.height <= 0) return;
+  if (!inverseMatrix) return;
   const geometry = node.type === "PATH" && typeof node.pathData === "string"
     ? parsePathData(node.pathData)
     : undefined;
+  // A straight PATH has a zero-sized box but still draws its stroke.
+  if (!geometry && (node.width <= 0 || node.height <= 0)) return;
   if (node.type === "PATH" && typeof node.pathData === "string" && !geometry) {
     state.diagnostics.push({
       code: "unsupported_render_path",
@@ -3491,7 +4012,10 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
   }
   renderNodeShadow(state, node, matrix, opacity, path, clips, geometry);
   renderBackgroundBlur(state, node, matrix, clips);
-  const bounds = pixelBounds(state, matrix, node);
+  const bounds = geometry
+    ? localPixelBounds(state, matrix, geometryBounds(geometry))
+    : pixelBounds(state, matrix, node);
+  const unit = deviceUnit(state, matrix);
   // hide-fill-on-export suppresses fills in exported raster output while the
   // editing surface keeps showing them; the CLI render is the export surface.
   const suppressFill = node["hide-fill-on-export"] === true;
@@ -3539,26 +4063,22 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
         const canvasX = (pixelX + 0.5) / state.scale;
         const canvasY = (pixelY + 0.5) / state.scale;
         const local = point(inverseMatrix, canvasX, canvasY);
-        if (
-          local.x < 0 ||
-          local.y < 0 ||
-          local.x >= node.width ||
-          local.y >= node.height ||
-          !nodeContainsGeometry(node, geometry, local.x, local.y) ||
-          !clipsAllow(clips, canvasX, canvasY)
-        ) {
-          continue;
-        }
+        const coverage = shapeCoverage(node, geometry, local.x, local.y, unit);
+        if (coverage <= 0 || !clipsAllow(clips, canvasX, canvasY)) continue;
+        // Edge pixels whose centre lies just outside still sample the paint
+        // at the nearest point inside the node.
+        const sampleX = clamp(local.x, 0, node.width - 1e-6);
+        const sampleY = clamp(local.y, 0, node.height - 1e-6);
         const color = raster
-          ? rasterSample(raster, local.x, local.y, node)
+          ? rasterSample(raster, sampleX, sampleY, node)
           : media?.image
-            ? svgSample(media.image, local.x, local.y, node)
+            ? svgSample(media.image, sampleX, sampleY, node)
             : uniformColor
               ? [...uniformColor]
               : paintColor(
                   fill,
-                  local.x,
-                  local.y,
+                  sampleX,
+                  sampleY,
                   node,
                   state.colors,
                   state.diagnostics,
@@ -3566,7 +4086,7 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
                   state.productPackageId,
                 );
         if (fill.type === "image" && !media?.image && !raster) {
-          const band = (Math.floor(local.x / 8) + Math.floor(local.y / 8)) % 2;
+          const band = (Math.floor(sampleX / 8) + Math.floor(sampleY / 8)) % 2;
           color[0] -= band * 18;
           color[1] -= band * 18;
           color[2] -= band * 18;
@@ -3575,7 +4095,7 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
           state.pixels,
           (pixelY * state.width + pixelX) * 4,
           color,
-          opacity * (fill.opacity ?? 1),
+          opacity * (fill.opacity ?? 1) * coverage,
         );
       }
     }
@@ -3584,94 +4104,123 @@ function renderNodeShape(state, node, matrix, opacity, path, clips) {
     if (stroke.hidden === true) continue;
     const width = Math.max(1, stroke.width ?? 1);
     const color = renderStrokeColor(state, node, stroke, path);
-    const pattern = dashPattern(stroke, width);
-    const boundary = geometry || (pattern ? makeGeometry(boundaryGeometry(node).segments) : undefined);
-    const markerStart = stroke.capStart && geometry
-      ? markerGeometry(
-          stroke.capStart,
-          geometry.start,
-          directionAt(geometry, { segmentIndex: 0 }),
-          width,
-        )
-      : undefined;
-    const markerEnd = stroke.capEnd && geometry
-      ? markerGeometry(
-          stroke.capEnd,
-          geometry.end,
-          directionAt(geometry, { segmentIndex: geometry.segments.length - 1 }),
-          width,
-        )
-      : undefined;
-    const markerStartOutline = markerStart?.segments.length
-      ? makeGeometry(markerStart.segments)
-      : undefined;
-    const markerEndOutline = markerEnd?.segments.length
-      ? makeGeometry(markerEnd.segments)
-      : undefined;
-    for (let pixelY = bounds.top; pixelY < bounds.bottom; pixelY += 1) {
-      for (let pixelX = bounds.left; pixelX < bounds.right; pixelX += 1) {
+    const strokeOpacity = opacity * (stroke.opacity ?? 1);
+    const dashed = dashArray(stroke, width) !== undefined;
+    const sides = strokeSides(stroke);
+    if (sides && !geometry && !dashed && node.type !== "ELLIPSE") {
+      // Per-side widths: the band between the box grown and shrunk side by
+      // side per alignment, clipped to the shape's corners when inside.
+      const alignment = stroke.alignment ?? "inner";
+      const grow = alignment === "outer" ? 1 : alignment === "center" ? 0.5 : 0;
+      const shrink = 1 - grow;
+      const outer = { bottom: node.height + sides.bottom * grow, left: -sides.left * grow, right: node.width + sides.right * grow, top: -sides.top * grow };
+      const inner = { bottom: node.height - sides.bottom * shrink, left: sides.left * shrink, right: node.width - sides.right * shrink, top: sides.top * shrink };
+      const reach = Math.max(sides.top, sides.right, sides.bottom, sides.left) * grow + 1;
+      const strokeBounds = pixelBounds(state, matrix, node, reach);
+      for (let pixelY = strokeBounds.top; pixelY < strokeBounds.bottom; pixelY += 1) {
+        for (let pixelX = strokeBounds.left; pixelX < strokeBounds.right; pixelX += 1) {
+          const canvasX = (pixelX + 0.5) / state.scale;
+          const canvasY = (pixelY + 0.5) / state.scale;
+          if (!clipsAllow(clips, canvasX, canvasY)) continue;
+          const local = point(inverseMatrix, canvasX, canvasY);
+          let coverage = boxCoverage(outer, local, unit) - boxCoverage(inner, local, unit);
+          if (coverage > 0 && alignment === "inner") coverage *= shapeCoverage(node, geometry, local.x, local.y, unit);
+          if (coverage > 0) blend(state.pixels, (pixelY * state.width + pixelX) * 4, color, strokeOpacity * coverage);
+        }
+      }
+      continue;
+    }
+    if (!geometry && !dashed) {
+      // Solid strokes on rectangles, rounded rectangles and ellipses: the
+      // band between the outline grown and shrunk per alignment, with
+      // antialiased edges on both sides.
+      const alignment = stroke.alignment ?? "inner";
+      const outerGrow =
+        alignment === "outer" ? width : alignment === "center" ? width / 2 : 0;
+      const strokeBounds = pixelBounds(state, matrix, node, outerGrow + 1);
+      for (let pixelY = strokeBounds.top; pixelY < strokeBounds.bottom; pixelY += 1) {
+        for (let pixelX = strokeBounds.left; pixelX < strokeBounds.right; pixelX += 1) {
+          const canvasX = (pixelX + 0.5) / state.scale;
+          const canvasY = (pixelY + 0.5) / state.scale;
+          const local = point(inverseMatrix, canvasX, canvasY);
+          const coverage =
+            edgeCoverage(shapeDistance(node, local.x, local.y, outerGrow) * unit) -
+            edgeCoverage(shapeDistance(node, local.x, local.y, outerGrow - width) * unit);
+          if (coverage <= 0 || !clipsAllow(clips, canvasX, canvasY)) continue;
+          blend(
+            state.pixels,
+            (pixelY * state.width + pixelX) * 4,
+            color,
+            strokeOpacity * coverage,
+          );
+        }
+      }
+      continue;
+    }
+    const subpaths = geometry
+      ? strokeSubpaths(geometry)
+      : [{
+          closed: true,
+          points: boundaryGeometry(node).segments.map(({ start }) => start),
+        }];
+    const { alignment, markers, pieces } = strokePieces(subpaths, stroke, width);
+    const strokeBounds = localPixelBounds(
+      state,
+      matrix,
+      geometry
+        ? (() => {
+            const local = geometryBounds(geometry);
+            const reach = strokeReach(width);
+            return {
+              bottom: local.bottom + reach,
+              left: local.left - reach,
+              right: local.right + reach,
+              top: local.top - reach,
+            };
+          })()
+        : { bottom: node.height + width + 1, left: -width - 1, right: node.width + width + 1, top: -width - 1 },
+    );
+    for (let pixelY = strokeBounds.top; pixelY < strokeBounds.bottom; pixelY += 1) {
+      for (let pixelX = strokeBounds.left; pixelX < strokeBounds.right; pixelX += 1) {
         const canvasX = (pixelX + 0.5) / state.scale;
         const canvasY = (pixelY + 0.5) / state.scale;
+        if (!clipsAllow(clips, canvasX, canvasY)) continue;
         const local = point(inverseMatrix, canvasX, canvasY);
-        if (
-          local.x < 0 ||
-          local.y < 0 ||
-          local.x >= node.width ||
-          local.y >= node.height ||
-          !clipsAllow(clips, canvasX, canvasY)
-        ) {
-          continue;
+        const index = (pixelY * state.width + pixelX) * 4;
+        let coverage = piecesCoverage(pieces, local.x, local.y, unit);
+        if (coverage > 0 && alignment !== "center") {
+          // Inner and outer strokes are twice as wide, clipped to the
+          // inside or the outside of the fill.
+          const inside = shapeCoverage(node, geometry, local.x, local.y, unit);
+          coverage *= alignment === "inner" ? inside : 1 - inside;
         }
-        let covered;
-        if (boundary) {
-          const fillInside = nodeContainsGeometry(node, geometry, local.x, local.y);
-          covered = pathStrokeContains(
-            boundary,
-            local.x,
-            local.y,
-            width,
-            pattern,
-            stroke.alignment,
-            fillInside,
-          );
-        } else {
-          covered =
-            nodeContains(node, local.x, local.y) &&
-            !insetContains(node, local.x, local.y, width);
+        if (coverage > 0) blend(state.pixels, index, color, strokeOpacity * coverage);
+        // Cap markers are separate SVG elements painted over the stroke.
+        const markerCoverage = markers.length
+          ? piecesCoverage(markers, local.x, local.y, unit)
+          : 0;
+        if (markerCoverage > 0) {
+          blend(state.pixels, index, color, strokeOpacity * markerCoverage);
         }
-        if (!covered && markerStart) {
-          covered =
-            windingNumber(markerStart.contours, local.x, local.y) !== 0 ||
-            (markerStartOutline !== undefined &&
-              pathStrokeContains(
-                markerStartOutline,
-                local.x,
-                local.y,
-                width,
-              ));
-        }
-        if (!covered && markerEnd) {
-          covered =
-            windingNumber(markerEnd.contours, local.x, local.y) !== 0 ||
-            (markerEndOutline !== undefined &&
-              pathStrokeContains(
-                markerEndOutline,
-                local.x,
-                local.y,
-                width,
-              ));
-        }
-        if (!covered) continue;
-        blend(
-          state.pixels,
-          (pixelY * state.width + pixelX) * 4,
-          color,
-          opacity * (stroke.opacity ?? 1),
-        );
       }
     }
   }
   if (node.type === "TEXT") renderText(state, node, matrix, opacity, path, clips);
+}
+
+// A stroke's per-side widths, or null when it has one width.
+function strokeSides(stroke) {
+  const fields = ["widthTop", "widthRight", "widthBottom", "widthLeft"];
+  if (!fields.some((field) => stroke[field] !== undefined)) return null;
+  const width = stroke.width ?? 1;
+  return { bottom: stroke.widthBottom ?? width, left: stroke.widthLeft ?? width, right: stroke.widthRight ?? width, top: stroke.widthTop ?? width };
+}
+
+// Antialiased coverage of an axis-aligned box at a local point.
+function boxCoverage(box, local, unit) {
+  if (box.right <= box.left || box.bottom <= box.top) return 0;
+  const axis = (value, low, high) => clamp(Math.min(value - low, high - value) * unit + 0.5, 0, 1);
+  return axis(local.x, box.left, box.right) * axis(local.y, box.top, box.bottom);
 }
 
 function flattenRegions(
@@ -3710,6 +4259,43 @@ function flattenRegions(
   return result;
 }
 
+// Text QA uses exactly the fonts, wrapping and run metrics used by PNG output,
+// without allocating a raster or drawing glyphs.
+export async function measureProjectionText(product, projection, options = {}) {
+  const textNodes = Object.values(projection.nodes).filter((node) => node.type === "TEXT" && node.visible !== false && node.text);
+  if (!textNodes.length) return { items: [], diagnostics: [] };
+  const diagnostics = [];
+  const state = {
+    colors: colorLibrary(product, options.foundation, options.libraries ?? [], diagnostics),
+    diagnostics,
+    fontFallbacks: new Set(),
+    fonts: await createFontLibrary(product, options.foundation, options.libraries ?? [], diagnostics),
+    missingGlyphs: new Map(),
+    productPackageId: product.manifest.packageId,
+  };
+  const items = textNodes.map((node) => {
+    const missing = new Set();
+    let width, height;
+    if (node.textBlocks?.length) {
+      const lines = richTextLines(state, node, node.id, missing);
+      width = Math.max(0, ...lines.map((line) => line.width));
+      height = lines.reduce((sum, line) => sum + line.height, 0);
+    } else {
+      const style = node.textStyle ?? {};
+      const font = resolveFont(state, style, node.id, node.id);
+      const size = Number(style.fontSize ?? 14);
+      const spacing = Number(style.letterSpacing ?? 0);
+      const source = style.textTransform === "uppercase" ? node.text.toUpperCase() : style.textTransform === "lowercase" ? node.text.toLowerCase() : node.text;
+      const measure = (text, previous) => lineGlyphs(font, state.fonts, text, 0, 0, size, spacing, undefined, missing, previous);
+      const lines = node.growType === "auto-width" ? source.split("\n") : wrapTextLines(source, node.width, measure);
+      width = Math.max(0, ...lines.map((line) => measure(line).width));
+      height = lines.length * size * Number(style.lineHeight ?? 1.2);
+    }
+    return { nodeId: node.id, width, height, growType: node.growType ?? "fixed", missingGlyphs: [...missing] };
+  });
+  return { items, diagnostics };
+}
+
 export async function renderProjection(product, projection, options = {}) {
   if (projection.fallbackUsed) {
     throw new SmallPenError(
@@ -3725,8 +4311,12 @@ export async function renderProjection(product, projection, options = {}) {
   }
   const root = projection.nodes[projection.rootId];
   if (!root) throw new SmallPenError("missing_root_node", "Projection root is unavailable");
-  const width = Math.ceil(root.width * scale);
-  const height = Math.ceil(root.height * scale);
+  const crop = options.crop ?? { x: 0, y: 0, width: root.width, height: root.height };
+  if (![crop.x, crop.y, crop.width, crop.height].every(Number.isFinite) || crop.width <= 0 || crop.height <= 0) {
+    throw new SmallPenError("invalid_render_crop", "Crop must have finite x/y and positive width/height");
+  }
+  const width = Math.ceil(crop.width * scale);
+  const height = Math.ceil(crop.height * scale);
   if (
     width < 1 ||
     height < 1 ||
@@ -3742,6 +4332,8 @@ export async function renderProjection(product, projection, options = {}) {
     });
   }
   const diagnostics = [...(projection.diagnostics ?? [])];
+  for (const diagnostic of layoutProjectionDiagnostics(projection.nodes))
+    if (!diagnostics.some(existing => existing.code === diagnostic.code && existing.nodeId === diagnostic.nodeId)) diagnostics.push(diagnostic);
   const hasText = Object.values(projection.nodes).some(
     (node) => node.type === "TEXT" && node.text,
   );
@@ -3790,7 +4382,7 @@ export async function renderProjection(product, projection, options = {}) {
     state,
     projection.nodes,
     projection.rootId,
-    translate(-root.x, -root.y),
+    translate(-root.x - crop.x, -root.y - crop.y),
     1,
     new Set(),
   );
@@ -3828,6 +4420,7 @@ export async function createEvidence(product, options = {}) {
     rootY,
   );
   return {
+    projection,
     evidence: {
       diagnostics: render.diagnostics,
       nodeRegions: regions,

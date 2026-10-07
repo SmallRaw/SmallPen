@@ -66,7 +66,13 @@ test("common components expose all declared variants in both themes without proj
     "Input",
     "Title",
   ]);
-  assert.equal(samples.length, 122);
+  // Card binds no Token that differs between the themes: one sample per
+  // variant for both.
+  assert.equal(samples.length, 120);
+  assert.deepEqual(
+    samples.filter((s) => s.allCombinations).map((s) => s.familyName),
+    ["Card", "Card"],
+  );
   const ghost = samples.find(
     (s) => s.variantId === "var_demo_button_ghost_text_default",
   );

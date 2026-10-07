@@ -6,6 +6,11 @@ import {
   tokenAliasPath,
   tokenValueMatchesType,
 } from "./tokens-domain.mjs";
+import {
+  activeTokenSetIds,
+  foundationTokenView,
+  tokenLibraryEntry,
+} from "./token-themes.mjs";
 
 function contextualDefinition(token, context, axes) {
   for (const [index, candidate] of token.contextValues.entries()) {
@@ -68,32 +73,26 @@ function contextualDefinition(token, context, axes) {
       };
 }
 
-function penpotTokenEntry(snapshot) {
-  return snapshot.manifest.entries.tokens.find((entry) => {
-    const value = snapshot.entries[entry];
-    return Array.isArray(value?.sets) && Array.isArray(value?.themes);
-  });
+const penpotTokenEntry = tokenLibraryEntry;
+
+// Active Form A tokens by name; a later active set overrides an earlier one.
+function activeLibraryTokens(snapshot, result = new Map()) {
+  const entry = penpotTokenEntry(snapshot);
+  if (!entry) return result;
+  const library = snapshot.entries[entry];
+  const activeSetIds = activeTokenSetIds(library);
+  for (const tokenSet of library.sets) {
+    if (!activeSetIds.has(tokenSet.id)) continue;
+    for (const token of tokenSet.tokens) {
+      result.set(token.name, snapshot.domain.tokens.get(token.id));
+    }
+  }
+  return result;
 }
 
 function tokenPathIndex(snapshot) {
-  const result = new Map();
+  const result = activeLibraryTokens(snapshot);
   const entry = penpotTokenEntry(snapshot);
-  if (entry) {
-    const library = snapshot.entries[entry];
-    const activeSetIds = new Set(
-      library.activeThemeIds.length > 0
-        ? library.themes
-            .filter(({ id }) => library.activeThemeIds.includes(id))
-            .flatMap(({ setIds }) => setIds)
-        : library.activeSetIds,
-    );
-    for (const tokenSet of library.sets) {
-      if (!activeSetIds.has(tokenSet.id)) continue;
-      for (const token of tokenSet.tokens) {
-        result.set(token.name, snapshot.domain.tokens.get(token.id));
-      }
-    }
-  }
   for (const token of snapshot.domain.tokens.values()) {
     if (token.filePath !== entry && !result.has(token.path)) {
       result.set(token.path, token);
@@ -110,6 +109,7 @@ function createResolutionCache() {
     firstByPath: new Map(),
     overrides: new Map(),
     pathIndexes: new Map(),
+    resolutionIndexes: new Map(),
     values: new Map(),
   };
 }
@@ -121,6 +121,18 @@ function cached(map, key, build) {
 
 function cachedPathIndex(snapshot, cache) {
   return cached(cache.pathIndexes, snapshot, () => tokenPathIndex(snapshot));
+}
+
+// The names a resolution in `snapshot` sees: its own index, with the active
+// Form A tokens of the Product reading it on top (foundationTokenView).
+function cachedResolutionIndex(snapshot, cache) {
+  if (!snapshot.productOverlay) return cachedPathIndex(snapshot, cache);
+  return cached(cache.resolutionIndexes, snapshot, () =>
+    activeLibraryTokens(
+      snapshot.productOverlay,
+      new Map(cachedPathIndex(snapshot, cache)),
+    ),
+  );
 }
 
 function tokenByPath(snapshot, path, byPath, cache) {
@@ -265,10 +277,12 @@ function resolveInternal(
   ) {
     fail("invalid_asset_reference", "Token reference requires Package and asset ids");
   }
-  const foundation = options.foundation;
+  const foundation = foundationTokenView(product, options.foundation);
   const libraries = options.libraries ?? [];
   const owner = tokenOwner(product, foundation, libraries, reference);
-  const ownerTokensByPath = owner ? cachedPathIndex(owner, cache) : new Map();
+  const ownerTokensByPath = owner
+    ? cachedResolutionIndex(owner, cache)
+    : new Map();
   const targetToken = owner
     ? activeTargetToken(
         owner,
@@ -359,9 +373,15 @@ function resolveInternal(
     ownerTokensByPath,
     cache,
   );
+  // A Product token of the same name in an active Product set sits on top
+  // of a Foundation Form A token.
+  const source =
+    owner.productOverlay?.domain.tokens.get(targetToken.id) === targetToken
+      ? owner.productOverlay
+      : owner;
   candidates.push({
     layer:
-      owner === product
+      source === product || source === owner.productOverlay
         ? "product"
         : owner === foundation
           ? "foundation"
@@ -390,10 +410,19 @@ function resolveInternal(
         {
           packageId: owner.manifest.packageId,
           role: "target",
-          tokenId: targetToken.id,
+          tokenId: source === owner ? targetToken.id : reference.assetId,
         },
+        ...(source === owner
+          ? []
+          : [
+              {
+                packageId: source.manifest.packageId,
+                role: "set-override",
+                tokenId: targetToken.id,
+              },
+            ]),
       ],
-      sourcePackageId: owner.manifest.packageId,
+      sourcePackageId: source.manifest.packageId,
       sourceTokenId: targetToken.id,
       target: structuredClone(reference),
       token: {
@@ -416,7 +445,7 @@ export function explainEffectiveToken(product, reference, options = {}) {
 }
 
 export function listEffectiveTokens(product, options = {}) {
-  const foundation = options.foundation;
+  const foundation = foundationTokenView(product, options.foundation);
   const libraries = options.libraries ?? [];
   // Validate the selection even when no Token would resolve it, so an unknown
   // Axis fails here as it does for every other read.

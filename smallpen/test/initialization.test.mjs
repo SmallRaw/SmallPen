@@ -115,14 +115,28 @@ test("a confirmed Initialization Proposal atomically creates a valid workspace",
   assert.equal(workspace.product.domain.requirements.size, 1);
   assert.equal(workspace.foundation.domain.componentSets.size, 1);
   assert.equal(workspace.foundation.domain.tokens.size, 3);
+  assert.equal(initialized.layout, "foundation-product");
+  // The theme answer is the Foundation's token themes; the Product selects
+  // them on its dependency and has an empty set of its own on top.
+  const foundationTokens = JSON.parse(
+    await readFile(join(initialized.foundationPath, "tokens", "foundation.json"), "utf8"),
+  );
+  assert.deepEqual(foundationTokens.sets.map(({ name }) => name), ["base", "Theme/light", "Theme/dark"]);
+  assert.deepEqual(
+    foundationTokens.themes.map(({ group, id, name, setIds }) => ({ group, id, name, setIds })),
+    [
+      { group: "Theme", id: "theme_theme_light", name: "light", setIds: ["tset_base", "tset_theme_light"] },
+      { group: "Theme", id: "theme_theme_dark", name: "dark", setIds: ["tset_base", "tset_theme_dark"] },
+    ],
+  );
+  assert.deepEqual(foundationTokens.activeThemeIds, ["theme_theme_light"]);
+  assert.deepEqual(workspace.product.manifest.dependencies[0].activeThemeIds, ["theme_theme_light"]);
+  assert.equal(workspace.foundation.domain.contextAxes.has("axis_theme"), false);
   const productTokens = JSON.parse(
     await readFile(join(initialized.productPath, "tokens", "product.json"), "utf8"),
   );
-  assert.deepEqual(productTokens.sets.map(({ name }) => name), ["Theme/Default"]);
-  assert.deepEqual(
-    productTokens.themes.map(({ group, name }) => ({ group, name })),
-    [{ group: "Theme", name: "Default" }],
-  );
+  assert.deepEqual(productTokens.sets.map(({ name }) => name), ["product"]);
+  assert.deepEqual(productTokens.themes, []);
   assert.deepEqual(
     JSON.parse(await readFile(initialized.initializationBriefPath, "utf8")),
     answers(),
@@ -135,5 +149,69 @@ test("a confirmed Initialization Proposal atomically creates a valid workspace",
   await assert.rejects(
     initializeWorkspace(workspacePath, state.proposal, { confirmed: true }),
     (error) => error?.code === "workspace_already_exists",
+  );
+});
+
+test("the default layout is one self-contained Package with token themes", async (context) => {
+  const state = createInitializationState({
+    ...answers(),
+    contextAxes: [
+      ...answers().contextAxes,
+      {
+        defaultValue: "Normal",
+        id: "axis_contrast",
+        kind: "theme",
+        name: "Contrast",
+        values: ["Normal", "High"],
+      },
+      {
+        defaultValue: "regular",
+        id: "axis_density",
+        kind: "density",
+        name: "Density",
+        values: ["regular", "compact"],
+      },
+    ],
+    foundationChoice: "self-contained",
+  });
+  assert.equal(state.proposal.layout, "single");
+  assert.deepEqual(Object.keys(state.proposal.packages), ["package"]);
+  const parent = await mkdtemp(join(tmpdir(), "smallpen-initialize-"));
+  context.after(() => rm(parent, { force: true, recursive: true }));
+  const initialized = await initializeWorkspace(join(parent, "single"), state.proposal, {
+    confirmed: true,
+  });
+  assert.equal(initialized.layout, "single");
+  assert.equal(initialized.productPath, undefined);
+  const workspace = await openWorkspace(initialized.packagePath);
+  assert.equal(workspace.foundation, undefined);
+  const snapshot = workspace.product;
+  assert.equal(snapshot.manifest.role, "foundation");
+  assert.equal(snapshot.manifest.packageId, "pkg_quincy_test");
+  assert.equal(snapshot.domain.componentSets.size, 1);
+  assert.equal(snapshot.domain.scenarios.size, 1);
+  // Theme-kind axes became theme groups; the density axis stays a Context.
+  assert.deepEqual([...snapshot.domain.contextAxes.keys()].sort(), ["axis_density", "axis_platform"]);
+  const library = snapshot.entries["tokens/tokens.json"];
+  assert.deepEqual(library.sets.map(({ id }) => id), [
+    "tset_base",
+    "tset_theme_light",
+    "tset_theme_dark",
+    "tset_contrast_normal",
+    "tset_contrast_high",
+  ]);
+  assert.deepEqual(library.sets[0].tokens.map(({ id }) => id), [
+    "tok_color_brand",
+    "tok_spacing_md",
+    "tok_radius_md",
+  ]);
+  assert.deepEqual(
+    library.themes.map((theme) => `${theme.group}/${theme.name}`),
+    ["Theme/light", "Theme/dark", "Contrast/Normal", "Contrast/High"],
+  );
+  assert.deepEqual(library.activeThemeIds, ["theme_theme_light", "theme_contrast_normal"]);
+  assert.deepEqual(
+    state.proposal.tokenThemes.map(({ active, path }) => [path, active]),
+    [["Theme/light", true], ["Theme/dark", false], ["Contrast/Normal", true], ["Contrast/High", false]],
   );
 });

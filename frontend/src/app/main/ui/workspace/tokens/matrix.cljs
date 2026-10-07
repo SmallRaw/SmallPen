@@ -1096,20 +1096,8 @@
                  (when active?
                    (swap! inline-edit* assoc :saving? true :error nil))
                  (let [undo-group (uuid/next)]
-                   (st/emit! (if defined-token
-                               (dwtl/update-token
-                                set-id
-                                (:id defined-token)
-                                {:value value}
-                                :undo-group undo-group)
-                               (dwtl/create-token
-                                set-id
-                                (ctob/make-token
-                                 {:name (:name token)
-                                  :type (:type token)
-                                  :value value
-                                  :description (:description token)})
-                                :undo-group undo-group))
+                   (st/emit! (sptm/set-token-matrix-value
+                              set-id token value :undo-group undo-group)
                              (dwtp/propagate-workspace-tokens undo-group)))
                  (when (= cell-id (:id @inline-edit*))
                    (reset! inline-edit* nil)))))))

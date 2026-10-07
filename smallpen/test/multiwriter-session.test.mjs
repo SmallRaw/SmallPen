@@ -330,7 +330,7 @@ test("watch reports an invalid Package once and its recovery again", async (cont
   const manifest = await readFile(manifestPath, "utf8");
   const child = spawn(
     process.execPath,
-    [cli, "watch", packagePath, "--interval", "100", "--json"],
+    [cli, "project", "watch", packagePath, "--interval", "100", "--json"],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
   context.after(() => child.kill("SIGKILL"));

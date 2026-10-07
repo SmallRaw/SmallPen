@@ -2,13 +2,26 @@ import {
   applyEffectiveTokenBindings,
   applyNodeOverrides,
   componentCombinationSnapshot,
+  defaultTokenThemeIds,
   fail,
   INSTANCE_OVERRIDE_FIELDS,
+  bindingTargetField,
+  CORNER_BINDINGS,
+  PENPOT_TOKEN_BINDINGS,
+  canvasLayout,
+  explicitCanvases,
+  listTokenThemes,
   overrideTouchedGroups,
   projectScreen,
   resolveEffectiveToken,
   SMALLPEN_FORMAT_CAPABILITIES,
+  tokenLibraryOf,
 } from "@smallpen/core";
+
+import {
+  compileComponentSetState,
+  compileInstanceVariantSwitches,
+} from "./variants.mjs";
 
 const PENPOT_WRITE = SMALLPEN_FORMAT_CAPABILITIES.penpotWrite;
 const PENPOT_ATTRIBUTES = new Set(PENPOT_WRITE.attributes);
@@ -416,19 +429,14 @@ function compileStrokes(value, snapshot) {
       .filter(([field, fieldValue]) => {
         // The width input writes every side along with stroke-width; only
         // sides that differ from it are a per-side width.
-        if (
-          PENPOT_STROKE_SIDE_FIELDS.includes(field) &&
-          fieldValue === stroke["stroke-width"]
-        ) {
-          return false;
-        }
+        if (PENPOT_STROKE_SIDE_FIELDS.includes(field)) return false;
         return !PENPOT_STROKE_FIELDS.has(field) && fieldValue !== null;
       })
       .map(([field]) => field);
     if (unsupported.length > 0) {
       fail(
         "unsupported_penpot_stroke",
-        "Penpot stroke contains an image, reference, or per-side width",
+        "Penpot stroke contains an unsupported image or reference",
         { fields: unsupported, index },
       );
     }
@@ -474,6 +482,16 @@ function compileStrokes(value, snapshot) {
           ? normalizeType(stroke[source])
           : stroke[source];
       }
+    }
+    // A side that differs from the stroke width is its own width.
+    for (const [attribute, field] of [
+      ["stroke-width-top", "widthTop"],
+      ["stroke-width-right", "widthRight"],
+      ["stroke-width-bottom", "widthBottom"],
+      ["stroke-width-left", "widthLeft"],
+    ]) {
+      const side = stroke[attribute];
+      if (side !== undefined && side !== null && side !== stroke["stroke-width"]) result[field] = side;
     }
     const colorRef = compileColorReference(
       snapshot,
@@ -962,10 +980,10 @@ function compileAttribute(operation, attr, value, node, snapshot) {
   if (attr === "applied-tokens") {
     const applied = compileAppliedTokens(value);
     compileAppliedTokenBindings(operation, applied, node, snapshot);
-    // A stroke color Token alone is a binding, not a local applied name.
-    if (Object.keys(applied).length > 0 || node.appliedTokens !== undefined) {
-      operation.changes.appliedTokens = applied;
-    }
+    // Applied Tokens are bindings now; only an attribute the format cannot
+    // bind stays a name. Older names give way to the bindings.
+    if (Object.keys(applied).length > 0) operation.changes.appliedTokens = applied;
+    else if (node.appliedTokens !== undefined) operation.changes.appliedTokens = null;
     return;
   }
   const cornerIndex = PENPOT_CORNER_ATTRIBUTES.get(attr);
@@ -1339,6 +1357,12 @@ function runtimeComponentId(runtimeId) {
 
 function pageDescriptorById(snapshot, pageId) {
   const descriptor = snapshot.runtime.reversePages?.[String(pageId)];
+  if (!descriptor && snapshot.addedPages?.has(String(pageId))) {
+    fail(
+      "duplicate_canvas_unsupported",
+      "Copying a whole canvas is not supported yet; ask the agent to copy the pages with the CLI (page draw)",
+    );
+  }
   if (!descriptor) {
     fail(
       "unknown_runtime_page",
@@ -1348,9 +1372,89 @@ function pageDescriptorById(snapshot, pageId) {
   return descriptor;
 }
 
+const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+
+// A canvas holds several page versions (boards). An edit belongs to the
+// board of the shape it touches, of its parent, or of the frame it is in;
+// a canvas with one board answers for it directly, as a page did.
+function pageWithBoard(snapshot, page, ids) {
+  if (page.screenId !== undefined) return page;
+  for (const id of ids) {
+    if (id === undefined || id === null || String(id) === ZERO_UUID) continue;
+    const board = snapshot.runtime.reverseNodes?.[String(id)] ?? snapshot.addedBoards?.get(String(id));
+    if (board?.screenId)
+      return { ...page, presentationId: board.presentationId, screenId: board.screenId };
+  }
+  fail(
+    "canvas_board_unknown",
+    "This edit is on a canvas with several pages and belongs to none of them. Draw a new page with the CLI (page draw); App edits work inside the pages",
+    { canvas: page.canvasName },
+  );
+}
+
+// Where a board's top-level shapes sit on the canvas versus where they are
+// stored: the canvas layout's shift (none when the layout was not applied).
+function boardOffset(snapshot, board) {
+  const placed = snapshot.canvases?.flatMap((canvas) => canvas.boards)
+    .find((item) => item.screenId === board.screenId && item.presentationId === board.presentationId);
+  return { dx: placed?.dx ?? 0, dy: placed?.dy ?? 0 };
+}
+
+// A shape dropped outside every board on a shared canvas belongs to the
+// board nearest to where it landed, and moves with that board.
+function nearestBoard(snapshot, page, x, y) {
+  let best;
+  for (const board of page.boards ?? []) {
+    const presentation = snapshotPresentation(snapshot, board);
+    const roots = (Array.isArray(presentation?.rootIds) ? presentation.rootIds : [presentation?.rootId])
+      .map((id) => presentation?.nodes?.[id]).filter(Boolean);
+    for (const root of roots) {
+      const dx = Math.max(root.x - x, 0, x - (root.x + root.width));
+      const dy = Math.max(root.y - y, 0, y - (root.y + root.height));
+      const distance = Math.hypot(dx, dy);
+      if (!best || distance < best.distance) best = { board, distance };
+    }
+  }
+  return best?.board;
+}
+
 function pageDescriptor(snapshot, change) {
   const pageId = change.pageId ?? change["page-id"];
-  return pageDescriptorById(snapshot, pageId);
+  const page = pageDescriptorById(snapshot, pageId);
+  const parent = String(change["parent-id"] ?? change.parentId ?? change.obj?.["parent-id"] ?? "");
+  if (page.screenId === undefined && normalizeType(change.type) === "add-obj" && parent === ZERO_UUID) {
+    const board = snapshot.addedBoards?.get(String(change.id ?? change.obj?.id)) ??
+      nearestBoard(snapshot, page, change.obj?.x ?? 0, change.obj?.y ?? 0);
+    if (board) return { ...page, presentationId: board.presentationId, screenId: board.screenId, loose: true };
+  }
+  return pageWithBoard(snapshot, page, [
+    change.id,
+    change.obj?.id,
+    change["parent-id"],
+    change.parentId,
+    change.obj?.["parent-id"],
+    change["frame-id"],
+    change.obj?.["frame-id"],
+    change.params?.["starting-frame"],
+    ...(change.shapes ?? []),
+  ]);
+}
+
+// The board each shape a commit adds belongs to, from its parent, in order.
+function addedShapeBoards(snapshot, changes) {
+  const boards = new Map();
+  for (const change of changes) {
+    if (normalizeType(change?.type) !== "add-obj") continue;
+    const id = String(change.id ?? change.obj?.id);
+    const parent = String(change["parent-id"] ?? change.parentId ?? change.obj?.["parent-id"] ?? ZERO_UUID);
+    let board = snapshot.runtime.reverseNodes?.[parent] ?? boards.get(parent);
+    if (!board && parent === ZERO_UUID) {
+      const page = snapshot.runtime.reversePages?.[String(change.pageId ?? change["page-id"])];
+      board = page && page.screenId === undefined ? nearestBoard(snapshot, page, change.obj?.x ?? 0, change.obj?.y ?? 0) : undefined;
+    }
+    if (board?.screenId) boards.set(id, { presentationId: board.presentationId, screenId: board.screenId });
+  }
+  return boards;
 }
 
 function nodeDescriptor(snapshot, runtimeId, page, allowNew = false) {
@@ -1808,6 +1912,14 @@ function penpotGeometryContext(changes) {
       }
     }
   }
+  // Where a commit does not move a layer's parent, the parent's current
+  // geometry the frontend sends along still places it (Components page).
+  for (const change of changes) {
+    const parent = change?.["smallpen-parent"];
+    if (isRecord(parent?.geometry) && !values.has(String(parent.id))) {
+      values.set(String(parent.id), parent.geometry);
+    }
+  }
   return { added, parents, values };
 }
 
@@ -1988,13 +2100,12 @@ function compileAppliedTokens(value) {
 }
 
 // Applied Token attributes that are canonical Token bindings. The Web
-// projection shows a shadow or stroke color binding to a Token of this
-// Package as that applied Token (projection.cljs binding-applied-tokens),
+// projection shows local bindings as applied Tokens
+// (projection.cljs binding-applied-tokens),
 // so applying one binds the field and removing it clears the binding.
-const APPLIED_TOKEN_BINDINGS = new Map([
-  ["shadow", ["shadow"]],
-  ["stroke-color", ["stroke", "strokes.0"]],
-]);
+// Every Token the App applies becomes a Canonical binding (core
+// token-attributes.mjs); gaps and corners are grouped below.
+const APPLIED_TOKEN_BINDINGS = new Map(PENPOT_TOKEN_BINDINGS);
 
 // The Tokens the Web token library holds: the Form A sets (the active ones
 // first, so a name shared by Light and Dark finds the applied one), then the
@@ -2021,12 +2132,106 @@ function webLibraryTokens(snapshot) {
   ];
 }
 
+// Text and visibility bound to a string or boolean Token follow that Token.
+// A person who edits them in the App sets their own value: the binding goes,
+// as Penpot drops an applied Token when its attribute is edited by hand.
+function detachEditedValueBindings(operation, node) {
+  for (const field of ["text", "visible"]) {
+    if (!Object.hasOwn(operation.changes, field) || !node?.tokenBindings?.[field]) continue;
+    if (sameJsonValue(operation.changes[field], node[field])) continue;
+    const base =
+      operation.changes.tokenBindings === undefined
+        ? node.tokenBindings
+        : (operation.changes.tokenBindings ?? {});
+    const bindings = structuredClone(base);
+    delete bindings[field];
+    operation.changes.tokenBindings =
+      Object.keys(bindings).length > 0 || node.instance ? bindings : null;
+  }
+}
+
 function compileAppliedTokenBindings(operation, applied, node, snapshot) {
   const packageId = snapshot.manifest.packageId;
   const current = node.tokenBindings ?? {};
   const bindings = structuredClone(current);
   let tokens;
   const libraryTokens = () => (tokens ??= webLibraryTokens(snapshot));
+  const localToken = (reference) =>
+    reference?.packageId === packageId
+      ? libraryTokens().find(({ id }) => id === reference.assetId)
+      : undefined;
+  const tokenReference = (name, attribute) => {
+    const token = libraryTokens().find((token) => token.name === name);
+    if (!token) {
+      fail("missing_applied_token", `Applied Token does not exist: ${name}`, {
+        attribute,
+        nodeId: node.id,
+        tokenName: name,
+      });
+    }
+    return { assetId: token.id, packageId };
+  };
+  // itemSpacing shows as two independently editable Penpot attributes.
+  // Split it only when an axis changes; a repeated application stays a no-op.
+  const gapBindings = {
+    rowGap: current.rowGap ?? current.itemSpacing,
+    columnGap: current.columnGap ?? current.itemSpacing,
+  };
+  const nextGapBindings = { ...gapBindings };
+  let detachedGap = false;
+  for (const [attribute, field] of [
+    ["row-gap", "rowGap"],
+    ["column-gap", "columnGap"],
+  ]) {
+    const name = applied[attribute];
+    delete applied[attribute];
+    const shown = localToken(gapBindings[field]);
+    if (name === undefined) {
+      if (shown) {
+        delete nextGapBindings[field];
+        detachedGap = true;
+      }
+    } else if (shown?.name !== name) {
+      nextGapBindings[field] = tokenReference(name, attribute);
+    }
+  }
+  if (!sameJsonValue(gapBindings, nextGapBindings)) {
+    for (const field of ["itemSpacing", "rowGap", "columnGap"]) {
+      delete bindings[field];
+    }
+    const { rowGap, columnGap } = nextGapBindings;
+    if (rowGap && columnGap && sameJsonValue(rowGap, columnGap)) {
+      bindings.itemSpacing = rowGap;
+    } else {
+      if (rowGap) bindings.rowGap = rowGap;
+      if (columnGap) bindings.columnGap = columnGap;
+    }
+    // A detach keeps the number the editor showed, even when the stored
+    // fallback predates the Token. A manual edit later in the commit wins.
+    if (detachedGap) {
+      operation.changes["layout-gap"] ??= structuredClone(node["layout-gap"]);
+    }
+  }
+  // The four corners show as r1..r4; one Token on all four is cornerRadius.
+  const cornerShown = Object.fromEntries(
+    CORNER_BINDINGS.map(([attribute, field]) => [attribute, localToken(current[field] ?? current.cornerRadius)?.name]),
+  );
+  const cornerNext = Object.fromEntries(CORNER_BINDINGS.map(([attribute]) => [attribute, applied[attribute]]));
+  for (const [attribute] of CORNER_BINDINGS) delete applied[attribute];
+  if (!sameJsonValue(cornerShown, cornerNext)) {
+    for (const field of ["cornerRadius", ...CORNER_BINDINGS.map(([, field]) => field)]) delete bindings[field];
+    const names = CORNER_BINDINGS.map(([attribute]) => cornerNext[attribute]);
+    if (names[0] !== undefined && names.every((name) => name === names[0])) {
+      bindings.cornerRadius = tokenReference(names[0], "r1");
+    } else {
+      CORNER_BINDINGS.forEach(([attribute, field]) => {
+        if (cornerNext[attribute] !== undefined) bindings[field] = tokenReference(cornerNext[attribute], attribute);
+      });
+    }
+    // A detach keeps the radius the editor showed.
+    if (names.some((name, index) => name === undefined && Object.values(cornerShown)[index] !== undefined))
+      operation.changes.cornerRadius ??= structuredClone(node.cornerRadius);
+  }
   for (const [attribute, fields] of APPLIED_TOKEN_BINDINGS) {
     const tokenName = applied[attribute];
     delete applied[attribute];
@@ -2041,20 +2246,22 @@ function compileAppliedTokenBindings(operation, applied, node, snapshot) {
       continue;
     }
     for (const field of shown) delete bindings[field];
-    if (tokenName === undefined) continue;
-    const token = libraryTokens().find(({ name }) => name === tokenName);
-    if (!token) {
-      fail(
-        "missing_applied_token",
-        `Applied Token does not exist: ${tokenName}`,
-        { attribute, nodeId: node.id, tokenName },
-      );
+    if (tokenName === undefined) {
+      if (shown.length > 0 && attribute.startsWith("p")) {
+        operation.changes["layout-padding"] ??= structuredClone(
+          node["layout-padding"],
+        );
+      } else if (shown.length > 0 && node.instance) {
+        const field = attribute === "stroke-color" ? "strokes" : "shadow";
+        operation.changes[field] ??= structuredClone(node[field]);
+      }
+      continue;
     }
-    bindings[fields[0]] = { assetId: token.id, packageId };
+    bindings[fields[0]] = tokenReference(tokenName, attribute);
   }
   if (!sameJsonValue(bindings, current)) {
     operation.changes.tokenBindings =
-      Object.keys(bindings).length > 0 ? bindings : null;
+      Object.keys(bindings).length > 0 || node.instance ? bindings : null;
   }
 }
 
@@ -2335,6 +2542,11 @@ function compileAddedNode(snapshot, change, geometry, movedChildIds, domain) {
         parentPlacement,
         movedChildIds,
       );
+  if (parent.nodeId === null) {
+    // A top-level shape is stored where its board's layout shift puts it back.
+    const { dx, dy } = boardOffset(snapshot, page);
+    if (dx || dy) Object.assign(node, { x: (node.x ?? 0) - dx, y: (node.y ?? 0) - dy });
+  }
   return {
     index: change.index,
     node: requireCanonicalNodeFields(node),
@@ -2652,12 +2864,18 @@ function canonicalDomainInstance(
       overrideFieldValue(field, base),
       overrideFieldValue(field, value),
     );
+  // The root keeps its own placement, size and bindings.
   for (const field of INSTANCE_OVERRIDE_FIELDS) {
-    if (field === "name") continue;
+    if (["name", "tokenBindings", "variant", "width", "height"].includes(field)) continue;
     if (differs(field, projected[node.id], located)) {
       node[field] = overrideFieldValue(field, located);
     }
   }
+  // Bindings the copy root holds beyond its source's.
+  const rootBindings = Object.fromEntries(
+    Object.entries(bindingDiff(projected[node.id]?.tokenBindings, located.tokenBindings)).filter(([, reference]) => reference),
+  );
+  if (Object.keys(rootBindings).length) node.tokenBindings = rootBindings;
   const overrides = {};
   for (const [childRuntimeId, child] of domain.children) {
     if (child.rootId !== runtimeId) continue;
@@ -2682,6 +2900,12 @@ function canonicalDomainInstance(
       childRuntimeId,
     );
     for (const field of INSTANCE_OVERRIDE_FIELDS) {
+      if (field === "variant") continue;
+      if (field === "tokenBindings") {
+        const diff = bindingDiff(base.tokenBindings, value.tokenBindings);
+        if (Object.keys(diff).length) overrides[`${sourcePath}:tokenBindings`] = diff;
+        continue;
+      }
       if (differs(field, base, value)) {
         overrides[`${sourcePath}:${field}`] = overrideFieldValue(field, value);
       }
@@ -2729,7 +2953,7 @@ function compileAddedComponent(snapshot, change) {
       `Penpot component already exists: ${change.id}`,
     );
   }
-  const page = pageDescriptorById(snapshot, change["main-instance-page"]);
+  const page = pageWithBoard(snapshot, pageDescriptorById(snapshot, change["main-instance-page"]), [change["main-instance-id"]]);
   // Penpot's create-component flow adds the main shape in the same commit, so
   // the main-instance id is not yet in the runtime mapping here.
   const main = nodeDescriptor(snapshot, change["main-instance-id"], page, true);
@@ -2878,7 +3102,7 @@ function componentMetadataNodes(snapshot, changes) {
   const result = new Map();
   for (const change of changes) {
     if (normalizeType(change?.type) !== "add-component") continue;
-    const page = pageDescriptorById(snapshot, change["main-instance-page"]);
+    const page = pageWithBoard(snapshot, pageDescriptorById(snapshot, change["main-instance-page"]), [change["main-instance-id"]]);
     const mainInstanceIsNew =
       snapshot.runtime.reverseNodes?.[String(change["main-instance-id"])] ===
       undefined;
@@ -3486,7 +3710,160 @@ function compileTokenLibraryChanges(snapshot, changes) {
     else if (type === "rename-token-set-group")
       applyRenameTokenSetGroup(state, change);
   }
+  if (state.library.defaultThemeIds) {
+    state.library.defaultThemeIds = state.library.defaultThemeIds.filter((id) =>
+      state.library.themes.some((theme) => theme.id === id));
+    state.library.defaultThemeIds = defaultTokenThemeIds(state.library);
+  }
+  if (state.library.defaultSetIds) state.library.defaultSetIds = state.library.defaultSetIds.filter((id) => state.library.sets.some((set) => set.id === id));
   return { library: state.library, type: "replace-token-library" };
+}
+
+const TOKEN_STATUS_CHANGE_TYPES = new Set([
+  "set-active-token-themes",
+  "set-tokens-status",
+]);
+
+// The Foundation whose Form A library a Product's Web token manager shows
+// beside its own (projection.cljs project-token-parts), or undefined.
+function productTokenFoundation(snapshot) {
+  for (const dependency of snapshot.manifest.dependencies ?? []) {
+    const foundation = snapshot.libraries.find(
+      (library) => library.manifest.packageId === dependency.packageId,
+    );
+    if (foundation && tokenLibraryOf(foundation)) return foundation;
+  }
+  return undefined;
+}
+
+// A Product's token manager holds its Foundation's sets and themes, which
+// belong to the Foundation: editing them from the Product fails. Its theme
+// selection, the Foundation's themes included, is one
+// set-active-token-themes with every active path (docs/TOKEN-THEMES.md 3.5).
+function compileProductTokenChanges(snapshot, foundation, changes) {
+  const runtime = foundation.runtime ?? {};
+  const foundationIds = new Set([
+    ...Object.keys(runtime.reverseTokenSets ?? {}),
+    ...Object.keys(runtime.reverseTokenThemes ?? {}),
+    ...Object.keys(runtime.reverseTokens ?? {}),
+  ]);
+  const foundationSetNames = new Set(
+    tokenLibraryOf(foundation).sets.map(({ name }) => name),
+  );
+  const pathNames = (change) =>
+    ["from-path", "to-path", "before-path", "set-group-path"]
+      .filter((field) => Array.isArray(change[field]))
+      .map((field) => change[field].join("/"));
+  const edits = [];
+  let status;
+  for (const change of changes) {
+    const type = normalizeType(change.type);
+    if (TOKEN_STATUS_CHANGE_TYPES.has(type)) {
+      status = change;
+      continue;
+    }
+    const names = pathNames(change);
+    if (
+      ["id", "set-id", "token-id"].some((field) =>
+        foundationIds.has(String(change[field] ?? "")),
+      ) ||
+      names.some(
+        (name) =>
+          foundationSetNames.has(name) ||
+          [...foundationSetNames].some((setName) => setName.startsWith(`${name}/`)),
+      )
+    ) {
+      fail(
+        "foundation_tokens_read_only",
+        `Token sets and themes of the Foundation ${foundation.manifest.name} are read-only in this Product; edit them in the Foundation`,
+        { changeType: type, foundationPackageId: foundation.manifest.packageId },
+      );
+    }
+    edits.push(change);
+  }
+  const operations =
+    edits.length > 0 ? [compileTokenLibraryChanges(snapshot, edits)] : [];
+  if (status) {
+    const selection = productThemeSelection(snapshot, foundation, status);
+    if (selection) operations.push(selection);
+  }
+  return operations;
+}
+
+// The set-active-token-themes a Product's status change asks for, or null
+// when it keeps the current selection.
+function productThemeSelection(snapshot, foundation, change) {
+  const themes = listTokenThemes(snapshot, foundation);
+  const ownRuntime = snapshot.runtime.reverseTokenThemes ?? {};
+  const foundationRuntime = foundation.runtime?.reverseTokenThemes ?? {};
+  const themeOf = (runtimeId) => {
+    const own = ownRuntime[runtimeId];
+    const inFoundation = foundationRuntime[runtimeId];
+    const match = own
+      ? themes.find((theme) => theme.owner === "package" && theme.id === own.tokenThemeId)
+      : inFoundation
+        ? themes.find((theme) => theme.owner === "foundation" && theme.id === inFoundation.tokenThemeId)
+        : undefined;
+    if (!match) fail("missing_token_theme", `Unknown Token Theme identity: ${runtimeId}`);
+    return match;
+  };
+  let selected;
+  if (normalizeType(change.type) === "set-tokens-status") {
+    selected = listValue(
+      change["theme-ids"],
+      "invalid_active_token_themes",
+      "theme-ids must be an array",
+    )
+      .map(String)
+      .filter((id) => id !== "00000000-0000-0000-0000-000000000000")
+      .map(themeOf);
+  } else {
+    selected = listValue(
+      change["theme-paths"],
+      "invalid_active_token_themes",
+      "Penpot active Token Theme paths must be an array",
+    )
+      .filter((path) => path !== HIDDEN_TOKEN_THEME_PATH)
+      .map((path) => {
+        const match = themes.find((theme) => theme.path === path);
+        if (!match) fail("missing_token_theme", `Token Theme path does not exist: ${path}`);
+        return match;
+      });
+  }
+  const setSelectionFails = () =>
+    fail(
+      "token_set_selection_unsupported",
+      "A Product selects token themes; choose a theme instead of switching token sets",
+    );
+  if (selected.length === 0) setSelectionFails();
+  if (Array.isArray(change["set-ids"])) {
+    // The sets a status may name: those of the chosen themes, plus the
+    // activeSetIds of a library none of whose themes is chosen.
+    const allowed = new Set();
+    for (const [owner, source] of [["package", snapshot], ["foundation", foundation]]) {
+      const library = tokenLibraryOf(source);
+      if (!library) continue;
+      const chosen = selected.filter((theme) => theme.owner === owner);
+      const setIds = chosen.length > 0
+        ? chosen.flatMap((theme) => theme.setIds)
+        : library.activeSetIds;
+      for (const id of setIds) {
+        const runtimeId = source.runtime?.tokenSets?.[id];
+        if (runtimeId) allowed.add(String(runtimeId));
+      }
+    }
+    if (change["set-ids"].some((id) => !allowed.has(String(id)))) setSelectionFails();
+  }
+  const key = ({ owner, id }) => `${owner}\0${id}`;
+  const current = new Set(themes.filter(({ active }) => active).map(key));
+  const next = new Set(selected.map(key));
+  if (current.size === next.size && [...next].every((item) => current.has(item))) {
+    return null;
+  }
+  return {
+    themePaths: [...new Set(selected.map(({ path }) => path))],
+    type: "set-active-token-themes",
+  };
 }
 
 function currentAssetLibrary(snapshot) {
@@ -3779,6 +4156,140 @@ function applyPresentationRoots(presentation, rootIds) {
   presentation.rootId = rootIds[0] ?? null;
   if (rootIds.length !== 1) presentation.rootIds = rootIds;
   return presentation;
+}
+
+// --- canvases ----------------------------------------------------------
+// A Penpot page is a canvas; its boards are page versions. Adding, renaming,
+// moving and deleting a page change the canvas list (put-canvases).
+
+function canvasDescriptor(snapshot, runtimeId) {
+  const page = pageDescriptorById(snapshot, runtimeId);
+  return { ...page, canvas: explicitCanvases(snapshot.manifest, snapshot.entries).find(({ id }) => id === page.canvasId) };
+}
+
+function compileAddedCanvas(snapshot, change) {
+  const runtimeId = change.id ?? change.page?.id;
+  if (snapshot.runtime.reversePages?.[String(runtimeId)]) {
+    fail("duplicate_runtime_page", `Penpot page already exists: ${String(runtimeId)}`);
+  }
+  const name = change.name ?? change.page?.name;
+  if (typeof name !== "string" || name.length === 0) {
+    fail("invalid_presentation_name", "Penpot page name must be non-empty");
+  }
+  // A page that arrives with shapes is a copy of a canvas and its pages.
+  const objects = Object.keys(change.page?.objects ?? {}).filter((key) => key !== ZERO_UUID);
+  if (objects.length > 0) {
+    fail(
+      "duplicate_canvas_unsupported",
+      "Copying a whole canvas is not supported yet; ask the agent to copy the pages with the CLI (page draw)",
+    );
+  }
+  // The canvas keeps the page's identity: its id carries the page UUID.
+  const id = runtimePresentationId(runtimeId).replace(/^pres_/, "cnv_");
+  return {
+    canvases: [...explicitCanvases(snapshot.manifest, snapshot.entries), { id, name, screens: [] }],
+    type: "put-canvases",
+  };
+}
+
+// Deleting a page deletes what is on it, as in Penpot: each page whose every
+// version is there, or just the versions that are, then the canvas.
+function compileDeletedCanvas(snapshot, change) {
+  const { boards = [], canvasId } = canvasDescriptor(snapshot, change.id);
+  const operations = [];
+  const deletedScreens = new Set();
+  for (const { screenId, presentationId } of boards) {
+    if (deletedScreens.has(screenId)) continue;
+    const entry = snapshot.manifest.entries.screens.find((name) => snapshot.entries[name].id === screenId);
+    const screen = snapshot.entries[entry];
+    const here = boards.filter((board) => board.screenId === screenId).map((board) => board.presentationId);
+    if (screen.presentations.every(({ id }) => here.includes(id))) {
+      operations.push({ screenId, type: "delete-screen" });
+      deletedScreens.add(screenId);
+    } else {
+      operations.push({ presentationId, screenId, type: "delete-presentation" });
+    }
+  }
+  const remaining = explicitCanvases(snapshot.manifest, snapshot.entries)
+    .filter(({ id }) => id !== canvasId)
+    .map((canvas) => ({ ...canvas, screens: canvas.screens.filter((id) => !deletedScreens.has(id)) }));
+  operations.push({ canvases: remaining, type: "put-canvases" });
+  return operations;
+}
+
+function compileRenamedCanvas(snapshot, change) {
+  const { canvasId, canvasName } = canvasDescriptor(snapshot, change.id);
+  if (typeof change.name !== "string" || change.name.length === 0)
+    fail("invalid_presentation_name", "Penpot page name must be non-empty");
+  if (change.name === canvasName) return undefined;
+  return {
+    canvases: explicitCanvases(snapshot.manifest, snapshot.entries).map((canvas) =>
+      canvas.id === canvasId ? { ...canvas, name: change.name } : canvas),
+    type: "put-canvases",
+  };
+}
+
+function compileMovedCanvas(snapshot, change) {
+  const { canvasId } = canvasDescriptor(snapshot, change.id);
+  const canvases = explicitCanvases(snapshot.manifest, snapshot.entries);
+  if (!Number.isInteger(change.index) || change.index < 0)
+    fail("invalid_page_index", "Penpot page index is outside the file");
+  const moved = canvases.find(({ id }) => id === canvasId);
+  const rest = canvases.filter(({ id }) => id !== canvasId);
+  // Generated pages (Components, Design System) always follow the canvases.
+  rest.splice(Math.min(change.index, rest.length), 0, moved);
+  return { canvases: rest, type: "put-canvases" };
+}
+
+// A board dragged on its canvas changes the order of its business flow's
+// pages, by where it was dropped; the CLI lays the canvas out again.
+function boardMovesAsOrder(snapshot, operations) {
+  const moves = [];
+  const kept = [];
+  for (const operation of operations) {
+    if (operation.type !== "update-presentation-node" || !("x" in (operation.changes ?? {}) || "y" in (operation.changes ?? {}))) {
+      kept.push(operation);
+      continue;
+    }
+    const presentation = presentationNodes(snapshot, operation) && snapshotPresentation(snapshot, operation);
+    const roots = presentation ? (Array.isArray(presentation.rootIds) ? presentation.rootIds : [presentation.rootId]) : [];
+    if (!roots.includes(operation.nodeId)) {
+      kept.push(operation);
+      continue;
+    }
+    if (roots.length > 1) {
+      // Several top-level shapes (a board and loose shapes beside it): a
+      // move is a move, stored without the layout shift.
+      const { dx, dy } = boardOffset(snapshot, operation);
+      const changes = { ...operation.changes };
+      if (changes.x !== undefined) changes.x -= dx;
+      if (changes.y !== undefined) changes.y -= dy;
+      kept.push({ ...operation, changes });
+      continue;
+    }
+    const { x, y: _y, ...changes } = operation.changes;
+    if (x !== undefined) moves.push({ screenId: operation.screenId, presentationId: operation.presentationId, x });
+    if (Object.keys(changes).length) kept.push({ ...operation, changes });
+  }
+  if (!moves.length) return operations;
+  const layout = canvasLayout(snapshot.manifest, snapshot.entries, snapshot.runtime);
+  const canvases = explicitCanvases(snapshot.manifest, snapshot.entries);
+  for (const move of moves) {
+    const canvas = layout.find((candidate) => candidate.boards.some((board) => board.screenId === move.screenId));
+    const board = canvas.boards.find((candidate) => candidate.screenId === move.screenId && candidate.presentationId === move.presentationId);
+    const row = canvas.boards.filter((candidate) => candidate.flow === board.flow && candidate.platform === board.platform);
+    const order = row
+      .map((candidate) => ({ screenId: candidate.screenId, x: candidate.screenId === move.screenId ? move.x : candidate.x }))
+      .sort((left, right) => left.x - right.x)
+      .map(({ screenId }) => screenId);
+    const target = canvases.find(({ id }) => id === canvas.id);
+    // Pages of this flow take the dropped order; other pages keep theirs.
+    const flowPages = target.screens.filter((id) => order.includes(id));
+    let index = 0;
+    target.screens = target.screens.map((id) => (flowPages.includes(id) ? order[index++] : id));
+  }
+  kept.push({ canvases, type: "put-canvases" });
+  return kept;
 }
 
 function compileAddedPresentation(snapshot, change) {
@@ -4332,7 +4843,14 @@ function compileNodeUpdate(
       attr,
       itemValue,
       {
-        ...node,
+        // A domain Instance's root inherits the source's bindings and
+        // layout. Applied Token edits act on what the editor actually shows.
+        ...(attr === "applied-tokens" && domainRoot
+          ? {
+              ...projectedNode(snapshot, descriptor, projections),
+              instance: node.instance,
+            }
+          : node),
         ...operation.changes,
       },
       snapshot,
@@ -4351,6 +4869,7 @@ function compileNodeUpdate(
       }
     }
   }
+  if (!instanceChild) detachEditedValueBindings(operation, node);
   if (placed && canonicalNode !== undefined) {
     compileImpliedPlacement(operation, canonicalNode, relative, {
       height: placement.height,
@@ -4393,8 +4912,10 @@ function owningInstance(snapshot, descriptor) {
 }
 
 // The projected nodes of a presentation as they would be without any
-// override of the given Instance: what Penpot's main component holds.
-function unoverriddenNodes(snapshot, descriptor, owner, cache) {
+// override of the given Instance: what Penpot's main component holds, laid
+// out at the size and place the commit gives the Instance (a resized copy
+// moves and stretches its children by their constraints).
+function unoverriddenNodes(snapshot, descriptor, owner, cache, operations = []) {
   const key = `${descriptor.screenId}\0${descriptor.presentationId}\0${owner.id}`;
   if (!cache.has(key)) {
     const entry = snapshot.manifest.entries.screens.find(
@@ -4405,6 +4926,20 @@ function unoverriddenNodes(snapshot, descriptor, owner, cache) {
       ({ id }) => id === descriptor.presentationId,
     );
     delete presentation.nodes[owner.id].instance.overrides;
+    for (const operation of operations) {
+      if (
+        operation.type === "update-presentation-node" &&
+        operation.nodeId === owner.id &&
+        operation.screenId === descriptor.screenId &&
+        operation.presentationId === descriptor.presentationId
+      ) {
+        for (const field of ["height", "rotation", "width", "x", "y"]) {
+          if (Object.hasOwn(operation.changes, field)) {
+            presentation.nodes[owner.id][field] = operation.changes[field];
+          }
+        }
+      }
+    }
     cache.set(
       key,
       projectedSnapshotNodes(
@@ -4421,6 +4956,19 @@ const TEXT_CONTENT_GROUPS = [
   "text-content-structure",
   "text-content-text",
 ];
+
+const GEOMETRY_OVERRIDES = new Set(["width", "height"]);
+
+// The bindings of a copy that differ from its source's: a reference where it
+// binds something else, null where it dropped one.
+function bindingDiff(source = {}, copy = {}) {
+  const diff = {};
+  for (const [field, reference] of Object.entries(copy ?? {}))
+    if (!sameJsonValue(source?.[field], reference)) diff[field] = reference;
+  for (const field of Object.keys(source ?? {}))
+    if (!Object.hasOwn(copy ?? {}, field)) diff[field] = null;
+  return diff;
+}
 
 // Whether Penpot's touched groups keep `field` overridden. A content group
 // without any text sub-group (older Penpot) covers text and fills alike; a
@@ -4498,7 +5046,7 @@ function compileInstanceOverrides(snapshot, updateStatesByNode, operations) {
     const touched = new Set(
       child.touched ??
         Object.keys(current).flatMap((field) =>
-          overrideTouchedGroups(field, node.type),
+          overrideTouchedGroups(field, node.type, current[field]),
         ),
     );
     const edited = new Set(
@@ -4508,21 +5056,38 @@ function compileInstanceOverrides(snapshot, updateStatesByNode, operations) {
       ),
     );
     for (const field of edited) {
-      for (const group of overrideTouchedGroups(field, node.type)) {
+      for (const group of overrideTouchedGroups(field, node.type, changes[field])) {
         touched.add(group);
       }
     }
-    const base = unoverriddenNodes(snapshot, descriptor, owner, cache)[
+    const base = unoverriddenNodes(snapshot, descriptor, owner, cache, operations)[
       descriptor.nodeId
     ];
     const next = {};
+    // The copy's own Token bindings: what differs from its source, a
+    // reference per field or null where it dropped the source's binding.
+    // A value edited by hand stops following its Token, as in Penpot.
+    const ownBindings = Object.hasOwn(changes, "tokenBindings")
+      ? bindingDiff(base.tokenBindings, changes.tokenBindings)
+      : { ...(current.tokenBindings ?? {}) };
+    for (const field of edited)
+      for (const binding of Object.keys(ownBindings))
+        if (field !== "tokenBindings" && bindingTargetField(binding) === field && !Object.hasOwn(changes, "tokenBindings"))
+          delete ownBindings[binding];
+    if (Object.keys(ownBindings).length) next.tokenBindings = ownBindings;
     for (const field of INSTANCE_OVERRIDE_FIELDS) {
+      if (field === "tokenBindings" || field === "variant") continue;
       if (!overrideTouched(field, node.type, touched)) continue;
       if (Object.hasOwn(changes, field)) {
         // A touched group can cover more than one field (a TEXT node's
         // content holds text and fills). An undo or sync that writes the
         // source value back leaves no override; a user edit always does.
-        if (
+        // Geometry is laid out again on every projection (constraints
+        // stretch a copy's children): only a size the projection would not
+        // give is the copy's own.
+        if (GEOMETRY_OVERRIDES.has(field)) {
+          if (!sameChildField(field, base[field], changes[field])) next[field] = changes[field];
+        } else if (
           edited.has(field) ||
           !sameChildField(field, base[field], changes[field])
         ) {
@@ -4552,7 +5117,7 @@ function compileInstanceOverrides(snapshot, updateStatesByNode, operations) {
     if (fields.length > 0) {
       fail(
         "component_instance_override_unsupported",
-        "Edit the Component source before changing these fields of a projected child; Instance overrides hold only fills, name, opacity, text and visibility",
+        "Edit the Component source before changing these fields of a projected child; Instance overrides hold what Penpot lets a copy change: fill, stroke, text and its style, size, radius, shadow, opacity, name, visibility and Token bindings",
         { fields, instanceNodeId: descriptor.nodeId },
       );
     }
@@ -4562,6 +5127,7 @@ function compileInstanceOverrides(snapshot, updateStatesByNode, operations) {
       screenId: descriptor.screenId,
     };
     for (const field of INSTANCE_OVERRIDE_FIELDS) {
+      if (field === "variant") continue;
       const overridePath = `${sourcePath}:${field}`;
       if (Object.hasOwn(next, field)) {
         if (
@@ -4621,10 +5187,11 @@ function sameJsonValue(left, right) {
 
 function sameNodeField(field, current, value) {
   const fallback = NODE_FIELD_DEFAULTS.get(field);
-  return sameJsonValue(
-    current === undefined || current === null ? fallback : current,
-    value === null ? fallback : value,
-  );
+  const left = current === undefined || current === null ? fallback : current;
+  const right = value === null ? fallback : value;
+  // One radius is the same as four equal corners.
+  if (field === "cornerRadius") return sameJsonValue(cornerRadii(left ?? 0), cornerRadii(right ?? 0));
+  return sameJsonValue(left, right);
 }
 
 function projectedPresentationNodes(snapshot, descriptor, projections) {
@@ -4989,7 +5556,21 @@ function extractTextContent(value) {
   return collect(value, []).join("");
 }
 
+// A Product's Design System page shows its Foundation's Token Cells; they
+// belong to the Foundation and are edited there.
+function foundationTokenReadOnly(snapshot, ref) {
+  const owner = snapshot.libraries.find(
+    (library) => library.manifest.packageId === ref.ownerPackageId,
+  );
+  fail(
+    "foundation_tokens_read_only",
+    `Token ${ref.path} belongs to the Foundation ${owner?.manifest.name ?? ref.ownerPackageId} and is read-only in this Product; edit it in the Foundation`,
+    { foundationPackageId: ref.ownerPackageId, tokenId: ref.tokenId },
+  );
+}
+
 function tokenCellUpdate(snapshot, ref, change, operationsByToken) {
+  if (ref.readOnly === true) foundationTokenReadOnly(snapshot, ref);
   const key = String(ref.tokenId);
   let operation = operationsByToken.get(key);
   if (!operation) {
@@ -5439,7 +6020,7 @@ function componentNodeUpdate(
   if (!operation) {
     operation = {
       changes: {},
-      componentSetId: componentId,
+      componentId,
       nodeId,
       type: "update-component-node",
       unset: [],
@@ -5453,9 +6034,12 @@ function componentNodeUpdate(
   // against the composed tree (x/y stay locked below).
   const variantNodes = { ...variant.nodes, [nodeId]: canonicalNode };
   const parentNodeId = canonicalParentIndex(variantNodes).get(nodeId);
+  // On the Components page the parent may move in the same commit (the
+  // main is dragged or reflowed): variants.mjs passes its final placement.
   const parentPlacement =
-    (parentNodeId && canonicalTreePlacement(variantNodes, parentNodeId)) ||
-    ROOT_PLACEMENT;
+    snapshot.variantParentPlacements?.get(String(change.id)) ??
+    ((parentNodeId && canonicalTreePlacement(variantNodes, parentNodeId)) ||
+      ROOT_PLACEMENT);
   const provided = {};
   for (const item of change.operations ?? []) {
     const itemAttr = normalizeType(item?.attr);
@@ -5463,9 +6047,14 @@ function componentNodeUpdate(
       provided[itemAttr] = item.val;
     }
   }
+  // The layer as Penpot holds it now (Components page) completes what the
+  // change leaves out; else its canonical place.
+  const current = change["smallpen-parent"]?.child;
   const placement = penpotPlacement(
     provided,
-    canonicalTreePlacement(variantNodes, nodeId) ?? ROOT_PLACEMENT,
+    isRecord(current) && Object.keys(current).length > 0
+      ? penpotPlacement(current, ROOT_PLACEMENT, canonicalNode.type === "PATH")
+      : (canonicalTreePlacement(variantNodes, nodeId) ?? ROOT_PLACEMENT),
     canonicalNode.type === "PATH",
   );
   const relative = relativePlacement(parentPlacement, placement, [
@@ -5503,6 +6092,18 @@ function componentNodeUpdate(
     }
     if (!PENPOT_ATTRIBUTES.has(attr)) {
       fail("unsupported_penpot_attribute", `Phase 0 cannot compile Penpot attribute: ${attr}`);
+    }
+    if ((attr === "x" || attr === "y") && descriptor.kind === undefined) {
+      // A variant node on the Components page: its place inside its parent
+      // is the edit. The main's own place is presentation only.
+      if (nodeId !== variant.rootId) {
+        for (const axis of ["x", "y"]) {
+          if (relative[axis] !== (canonicalNode[axis] ?? 0)) {
+            operation.changes[axis] = relative[axis];
+          }
+        }
+      }
+      continue;
     }
     if (attr === "x" || attr === "y") {
       if ((change.operations ?? []).some((item) => ["width", "height"].includes(normalizeType(item.attr)))) continue;
@@ -5544,13 +6145,20 @@ function componentNodeUpdate(
   }
   if (descriptor.occurrencePath) {
     // An expanded child is an occurrence override in its owning family,
-    // never a write into the shared child definition.
+    // never a write into the shared child definition. A change with only
+    // derived attributes (the renderer's text measuring) overrides nothing.
+    if (
+      operation.unset.length === 0 &&
+      Object.keys(operation.changes).every((field) => field === "instance")
+    ) {
+      return;
+    }
     const instance = structuredClone(operation.changes.instance ?? sourceNode.instance);
     instance.overrides ??= {};
     if (operation.unset.length) fail("component_override_unsupported", "Cannot clear an inherited field from this specimen");
     for (const [field, value] of Object.entries(operation.changes)) {
       if (field === "instance") continue;
-      if (!["fills", "name", "opacity", "text", "visible"].includes(field)) {
+      if (!INSTANCE_OVERRIDE_FIELDS.has(field) || field === "variant") {
         fail("component_override_unsupported", `Nested occurrence cannot override ${field}; edit the child component source explicitly`, { ...descriptor, field });
       }
       instance.overrides[`${descriptor.overrideNodeId}:${field}`] = value;
@@ -6108,16 +6716,18 @@ function withoutLayoutOffset(snapshot, change) {
     delete unshifted["smallpen-layout-offset"];
     return unshifted;
   }
+  const added =
+    normalizeType(change.type) === "add-obj" && isRecord(change.obj);
   if (
-    normalizeType(change.type) !== "mod-obj" ||
+    !(added || normalizeType(change.type) === "mod-obj") ||
     !isRecord(offset) ||
     !Number.isFinite(offset.x) ||
     !Number.isFinite(offset.y) ||
-    !Array.isArray(change.operations)
+    !(added || Array.isArray(change.operations))
   ) {
     fail(
       "invalid_penpot_change",
-      "smallpen-layout-offset must be a finite {x, y} on a mod-obj change",
+      "smallpen-layout-offset must be a finite {x, y} on a mod-obj or add-obj change",
       { offset },
     );
   }
@@ -6160,8 +6770,33 @@ function withoutLayoutOffset(snapshot, change) {
     }
     return value;
   };
+  // The parent's current geometry (Components page, see variants.mjs) is in
+  // the same drawn frame as the edit.
+  const shiftGeometry = (geometry) =>
+    isRecord(geometry)
+      ? Object.fromEntries(
+          Object.entries(geometry).map(([attr, value]) => [attr, shiftValue(attr, value)]),
+        )
+      : geometry;
+  const parent = isRecord(change["smallpen-parent"])
+    ? {
+        ...change["smallpen-parent"],
+        child: shiftGeometry(change["smallpen-parent"].child),
+        geometry: shiftGeometry(change["smallpen-parent"].geometry),
+      }
+    : change["smallpen-parent"];
+  if (added) {
+    // A shape added inside a tree drawn away from its source (a new layer in
+    // a variant main): its whole geometry moves back to the source frame.
+    const obj = { ...change.obj };
+    for (const attr of ["x", "y", "selrect", "points", "content"]) {
+      if (obj[attr] !== undefined) obj[attr] = shiftValue(attr, obj[attr]);
+    }
+    return { ...change, obj, ...(parent ? { "smallpen-parent": parent } : {}) };
+  }
   return {
     ...change,
+    ...(parent ? { "smallpen-parent": parent } : {}),
     operations: change.operations.map((item) =>
       isRecord(item) && normalizeType(item.type) === "set"
         ? { ...item, val: shiftValue(normalizeType(item.attr), item.val) }
@@ -6189,7 +6824,7 @@ function isEmptyMove(change) {
 }
 
 export function compilePenpotChanges(snapshotValue, commit, options = {}) {
-  const snapshot = {
+  let snapshot = {
     ...snapshotValue,
     libraries: options.libraries ?? [],
   };
@@ -6199,11 +6834,29 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
   if (typeof commit.commitId !== "string" || commit.commitId.length === 0) {
     fail("invalid_penpot_commit", "Penpot commit must contain a commitId");
   }
-  const unshiftedChanges = commit.changes.map((change) =>
+  const shiftedChanges = commit.changes.map((change) =>
     withoutLayoutOffset(snapshot, change),
   );
+  // Native variants: a variant switch on a copy, and every structural edit
+  // of a Component Set on the Components page (state based, variants.mjs).
+  const switches = compileInstanceVariantSwitches(
+    snapshot,
+    shiftedChanges,
+    options,
+  );
+  const componentSetState = compileComponentSetState(
+    snapshot,
+    switches.changes,
+    options,
+  );
+  snapshot = componentSetState.snapshot;
+  const unshiftedChanges = componentSetState.changes;
   const domainInstances = domainInstanceAdds(snapshot, unshiftedChanges);
   snapshot.addedNodeIds = domainInstances.nodeIds;
+  snapshot.addedBoards = addedShapeBoards(snapshot, unshiftedChanges);
+  snapshot.addedPages = new Set(
+    unshiftedChanges.filter((change) => normalizeType(change?.type) === "add-page").map((change) => String(change.id ?? change.page?.id)),
+  );
   const commitChanges = withoutProjectedCopyChanges(
     unshiftedChanges,
     domainInstances,
@@ -6222,7 +6875,10 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
     }
   }
 
-  const operations = [];
+  const operations = [
+    ...switches.operations,
+    ...componentSetState.operations,
+  ];
   const movedChildIds = new Set();
   for (const change of commitChanges) {
     if (normalizeType(change?.type) === "mov-objects" && Array.isArray(change.shapes)) {
@@ -6236,7 +6892,8 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
   const placedRuntimeIds = new Set();
   const addedNodes = new Map();
   const childOrderSpecs = new Map();
-  let acceptedNoOp = false;
+  let acceptedNoOp =
+    switches.operations.length > 0 || componentSetState.accepted === true;
   // DSE-004/005: split the commit into generated-page changes (translated or
   // rejected) and everything else. Structural mutations of the generated
   // Design System page never reach the canonical Package.
@@ -6309,7 +6966,14 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
     TOKEN_CHANGE_TYPES.has(normalizeType(change?.type)),
   );
   if (tokenChanges.length > 0) {
-    operations.push(compileTokenLibraryChanges(snapshot, tokenChanges));
+    const foundation = productTokenFoundation(snapshot);
+    if (foundation) {
+      const compiled = compileProductTokenChanges(snapshot, foundation, tokenChanges);
+      operations.push(...compiled);
+      if (compiled.length === 0) acceptedNoOp = true;
+    } else {
+      operations.push(compileTokenLibraryChanges(snapshot, tokenChanges));
+    }
   }
   const assetChanges = commitChanges.filter((change) =>
     ASSET_CHANGE_TYPES.has(normalizeType(change?.type)),
@@ -6357,15 +7021,22 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
       );
     }
     if (type === "add-page") {
-      operations.push(compileAddedPresentation(snapshot, change));
+      operations.push(compileAddedCanvas(snapshot, change));
     } else if (type === "del-page") {
-      operations.push(compileDeletedPresentation(snapshot, change));
+      operations.push(...compileDeletedCanvas(snapshot, change));
     } else if (type === "mod-page") {
-      const operation = compileUpdatedPresentation(snapshot, change);
+      // The page name is the canvas name; a one-board canvas still takes
+      // the page's other settings (background, pixel grid) as before.
+      const { name, ...settings } = change;
+      const renamed = name !== undefined ? compileRenamedCanvas(snapshot, change) : undefined;
+      const others = Object.keys(settings).some((key) => ["background", "pixel-grid-color", "pixel-grid-opacity"].includes(key));
+      const page = pageDescriptorById(snapshot, change.id);
+      const operation = others && page.screenId !== undefined ? compileUpdatedPresentation(snapshot, settings) : undefined;
+      if (renamed) operations.push(renamed);
       if (operation) operations.push(operation);
-      else acceptedNoOp = true;
+      if (!renamed && !operation) acceptedNoOp = true;
     } else if (type === "mov-page") {
-      operations.push(compileMovedPresentation(snapshot, change));
+      operations.push(compileMovedCanvas(snapshot, change));
     } else if (type === "set-flow") {
       operations.push(compilePrototypeFlow(snapshot, change));
     } else if (type === "mod-obj") {
@@ -6393,6 +7064,14 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
         const targetId = String(change.id);
         const componentRef = reverseComponentNodes[targetId];
         const designRef = reverseDesignSystem[targetId];
+        if (designRef?.kind === "component-sample" && designRef.readOnly === true) {
+          // A Product's page shows its Foundation's components read-only.
+          fail(
+            "foundation_components_read_only",
+            `Component ${designRef.familyName ?? designRef.componentId} belongs to the Foundation and is read-only in this Product; edit it in the Foundation`,
+            { componentId: designRef.componentId, foundationPackageId: designRef.ownerPackageId },
+          );
+        }
         if (componentRef || designRef?.kind === "component-sample") {
           // DSE-004: a component variant node projected on the Components
           // page or the Design System board writes its definition.
@@ -6414,6 +7093,8 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
             );
           if (renderBookkeepingOnly) {
             acceptedNoOp = true;
+          } else if (designRef.readOnly === true) {
+            foundationTokenReadOnly(snapshot, designRef);
           } else if (
             designRef.writable === false &&
             !cellOps.some(
@@ -6709,9 +7390,31 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
   for (const [runtimeId, descriptor] of domainInstances.childNodeIds) {
     options.projectedRuntimeIds?.set(runtimeId, descriptor);
   }
+  const ordered = boardMovesAsOrder(snapshot, completed);
+  if (ordered.length === 0)
+    return { baseRevision: snapshot.revision, batchId: `penpot_${commit.commitId}`, operations: [] };
   return {
     baseRevision: snapshot.revision,
     batchId: `penpot_${commit.commitId}`,
-    operations: completed,
+    operations: ordered,
   };
 }
+
+// Shared with variants.mjs (native Penpot variants).
+export {
+  canonicalAddedNode,
+  canonicalDomainInstance,
+  canonicalTreePlacement,
+  domainInstanceSource,
+  isRecord,
+  normalizeType,
+  parentAbsolutePlacement,
+  penpotGeometryContext,
+  penpotPlacement,
+  PENPOT_DERIVED_ATTRIBUTES,
+  PLACEMENT_ATTRIBUTES,
+  presentationNodes,
+  relativePlacement,
+  ROOT_PLACEMENT,
+  runtimeNodeId,
+};

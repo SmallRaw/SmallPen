@@ -1,0 +1,4763 @@
+{
+ "button": {
+  "addVariant": [
+   {
+    "index": null,
+    "obj": {
+     "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+     "proportion-lock": false,
+     "width": 96,
+     "height": 32,
+     "flip-x": null,
+     "fills": [
+      {
+       "fill-opacity": 1,
+       "fill-color": "#4f46e5"
+      }
+     ],
+     "r1": 8,
+     "strokes": [],
+     "points": [
+      {
+       "x": 176,
+       "y": 366
+      },
+      {
+       "x": 272,
+       "y": 366
+      },
+      {
+       "x": 272,
+       "y": 398
+      },
+      {
+       "x": 176,
+       "y": 398
+      }
+     ],
+     "plugin-data": {
+      "smallpen": {
+       "component-id": "cmp_button",
+       "node-id": "node_button_root",
+       "variant-id": "var_button_primary_sm",
+       "layout-offset": "30 366"
+      }
+     },
+     "x": 176,
+     "id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+     "transform": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "selrect": {
+      "x": 176,
+      "y": 366,
+      "width": 96,
+      "height": 32,
+      "x1": 176,
+      "y1": 366,
+      "x2": 272,
+      "y2": 398
+     },
+     "component-root": true,
+     "frame-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+     "name": "Button",
+     "main-instance": true,
+     "variant-name": "primary, sm",
+     "shapes": [
+      "855759be-e7eb-80d3-8008-ba3c5c46dda5"
+     ],
+     "r2": 8,
+     "rotation": 0,
+     "hide-fill-on-export": false,
+     "interactions": [],
+     "transform-inverse": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "type": "frame",
+     "r3": 8,
+     "y": 366,
+     "component-file": "__FILE__",
+     "component-id": "855759be-e7eb-80d3-8008-ba3c5c469329",
+     "proportion": 1,
+     "flip-y": null,
+     "r4": 8,
+     "parent-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846"
+    },
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "ignore-touched": true,
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 366
+    },
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "frame-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "type": "add-obj",
+    "parent-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846"
+   },
+   {
+    "index": null,
+    "obj": {
+     "width": 96,
+     "height": 32,
+     "flip-x": null,
+     "points": [
+      {
+       "x": 176,
+       "y": 366
+      },
+      {
+       "x": 272,
+       "y": 366
+      },
+      {
+       "x": 272,
+       "y": 398
+      },
+      {
+       "x": 176,
+       "y": 398
+      }
+     ],
+     "plugin-data": {
+      "smallpen": {
+       "component-id": "cmp_button",
+       "node-id": "node_button_label",
+       "variant-id": "var_button_primary_sm",
+       "layout-offset": "30 366"
+      }
+     },
+     "grow-type": "fixed",
+     "x": 176,
+     "id": "855759be-e7eb-80d3-8008-ba3c5c46dda5",
+     "transform": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "selrect": {
+      "x": 176,
+      "y": 366,
+      "width": 96,
+      "height": 32,
+      "x1": 176,
+      "y1": 366,
+      "x2": 272,
+      "y2": 398
+     },
+     "frame-id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+     "name": "Label",
+     "content": {
+      "type": "root",
+      "vertical-align": "center",
+      "children": [
+       {
+        "type": "paragraph-set",
+        "children": [
+         {
+          "type": "paragraph",
+          "line-height": "1.35",
+          "text-align": "center",
+          "text-direction": "ltr",
+          "children": [
+           {
+            "line-height": "1.35",
+            "font-family": "Source Sans Pro",
+            "fills": [
+             {
+              "fill-opacity": 1,
+              "fill-color": "#ffffff"
+             }
+            ],
+            "text-transform": "none",
+            "text": "Button",
+            "font-weight": "600",
+            "text-decoration": "none",
+            "font-size": "12",
+            "letter-spacing": "0",
+            "font-style": "normal",
+            "font-id": "sourcesanspro",
+            "font-variant-id": "600"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "rotation": 0,
+     "interactions": [],
+     "transform-inverse": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "type": "text",
+     "y": 366,
+     "position-data": [
+      {
+       "y1": 7.90625,
+       "width": 35.671875,
+       "x1": 30.15625,
+       "font-family": "sourcesanspro",
+       "height": 16,
+       "fills": [
+        {
+         "fill-opacity": 1,
+         "fill-color": "#ffffff"
+        }
+       ],
+       "text-transform": "none",
+       "x": 206.15625,
+       "direction": "ltr",
+       "text": "Button",
+       "font-weight": "600",
+       "text-decoration": "none",
+       "font-size": "12px",
+       "y": 389.90625,
+       "x2": 65.828125,
+       "letter-spacing": "normal",
+       "y2": 23.90625,
+       "font-style": "normal"
+      }
+     ],
+     "flip-y": null,
+     "parent-id": "855759be-e7eb-80d3-8008-ba3c5c46932a"
+    },
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "ignore-touched": true,
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 366
+    },
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46dda5",
+    "frame-id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "type": "add-obj",
+    "parent-id": "855759be-e7eb-80d3-8008-ba3c5c46932a"
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "path": "",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c469329",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "add-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "path": "",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c469329",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "Value 3"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": "2026-10-02T09:10:25.316Z",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "primary, Value 3",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 366
+    }
+   },
+   {
+    "type": "mov-objects",
+    "parent-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "shapes": [
+     "855759be-e7eb-80d3-8008-ba3c5c46932a"
+    ],
+    "index": 0
+   },
+   {
+    "type": "mod-obj",
+    "id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "width",
+      "val": 652,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": 0,
+        "y": 336
+       },
+       {
+        "x": 652,
+        "y": 336
+       },
+       {
+        "x": 652,
+        "y": 496
+       },
+       {
+        "x": 0,
+        "y": 496
+       }
+      ],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": 0,
+       "y": 336,
+       "width": 652,
+       "height": 160,
+       "x1": 0,
+       "y1": 336,
+       "x2": 652,
+       "y2": 496
+      },
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": 526,
+        "y": 366
+       },
+       {
+        "x": 622,
+        "y": 366
+       },
+       {
+        "x": 622,
+        "y": 398
+       },
+       {
+        "x": 526,
+        "y": 398
+       }
+      ],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "x",
+      "val": 526,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": 526,
+       "y": 366,
+       "width": 96,
+       "height": 32,
+       "x1": 526,
+       "y1": 366,
+       "x2": 622,
+       "y2": 398
+      },
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 366
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46dda5",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": 526,
+        "y": 366
+       },
+       {
+        "x": 622,
+        "y": 366
+       },
+       {
+        "x": 622,
+        "y": 398
+       },
+       {
+        "x": 526,
+        "y": 398
+       }
+      ],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "position-data",
+      "val": [
+       {
+        "y1": 7.90625,
+        "width": 35.671875,
+        "x1": 30.15625,
+        "font-family": "sourcesanspro",
+        "height": 16,
+        "fills": [
+         {
+          "fill-opacity": 1,
+          "fill-color": "#ffffff"
+         }
+        ],
+        "text-transform": "none",
+        "x": 556.15625,
+        "direction": "ltr",
+        "text": "Button",
+        "font-weight": "600",
+        "text-decoration": "none",
+        "font-size": "12px",
+        "y": 389.90625,
+        "x2": 65.828125,
+        "letter-spacing": "normal",
+        "y2": 23.90625,
+        "font-style": "normal"
+       }
+      ],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "x",
+      "val": 526,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": 526,
+       "y": 366,
+       "width": 96,
+       "height": 32,
+       "x1": 526,
+       "y1": 366,
+       "x2": 622,
+       "y2": 398
+      },
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "path": "",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c469329",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "Value 3"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": "2026-10-02T09:10:25.354Z",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "path": "",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c469329",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "Value 3"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": "2026-10-02T09:10:25.360Z",
+    "type": "mod-component",
+    "annotation": null
+   }
+  ],
+  "undoAddVariant": [
+   {
+    "type": "mod-obj",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46dda5",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": 176,
+       "y": 366,
+       "width": 96,
+       "height": 32,
+       "x1": 176,
+       "y1": 366,
+       "x2": 272,
+       "y2": 398
+      },
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "x",
+      "val": 176,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "position-data",
+      "val": [
+       {
+        "y1": 7.90625,
+        "width": 35.671875,
+        "x1": 30.15625,
+        "font-family": "sourcesanspro",
+        "height": 16,
+        "fills": [
+         {
+          "fill-opacity": 1,
+          "fill-color": "#ffffff"
+         }
+        ],
+        "text-transform": "none",
+        "x": 206.15625,
+        "direction": "ltr",
+        "text": "Button",
+        "font-weight": "600",
+        "text-decoration": "none",
+        "font-size": "12px",
+        "y": 389.90625,
+        "x2": 65.828125,
+        "letter-spacing": "normal",
+        "y2": 23.90625,
+        "font-style": "normal"
+       }
+      ],
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": 176,
+        "y": 366
+       },
+       {
+        "x": 272,
+        "y": 366
+       },
+       {
+        "x": 272,
+        "y": 398
+       },
+       {
+        "x": 176,
+        "y": 398
+       }
+      ],
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": 176,
+       "y": 366,
+       "width": 96,
+       "height": 32,
+       "x1": 176,
+       "y1": 366,
+       "x2": 272,
+       "y2": 398
+      },
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "x",
+      "val": 176,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": 176,
+        "y": 366
+       },
+       {
+        "x": 272,
+        "y": 366
+       },
+       {
+        "x": 272,
+        "y": 398
+       },
+       {
+        "x": 176,
+        "y": 398
+       }
+      ],
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": 0,
+       "y": 336,
+       "width": 536,
+       "height": 160,
+       "x1": 0,
+       "y1": 336,
+       "x2": 536,
+       "y2": 496
+      },
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": 0,
+        "y": 336
+       },
+       {
+        "x": 536,
+        "y": 336
+       },
+       {
+        "x": 536,
+        "y": 496
+       },
+       {
+        "x": 0,
+        "y": 496
+       }
+      ],
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "width",
+      "val": 536,
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "parent-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "shapes": [
+     "855759be-e7eb-80d3-8008-ba3c5c46932a"
+    ],
+    "after-shape": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "index": 0
+   },
+   {
+    "type": "mod-obj",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "primary, sm",
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "path": "",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c469329",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "del-component",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c469329",
+    "skip-undelete?": true
+   },
+   {
+    "type": "del-obj",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46dda5",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f"
+   },
+   {
+    "type": "del-obj",
+    "id": "855759be-e7eb-80d3-8008-ba3c5c46932a",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f"
+   }
+  ],
+  "deleteVariant": [
+   {
+    "type": "del-component",
+    "id": "42206668-cdf2-56f4-8004-6b66b074ed9c"
+   },
+   {
+    "type": "del-obj",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "id": "4faa6f13-54d9-5d06-8ec0-14d1653495f5",
+    "ignore-touched": true
+   },
+   {
+    "type": "del-obj",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5"
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "path": "",
+    "id": "42206668-cdf2-56f4-8004-6b66b074ed9c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     }
+    ],
+    "objects": {
+     "79cf67c4-0740-5108-a8d9-59d4e1efddd5": {
+      "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+      "proportion-lock": false,
+      "width": 112,
+      "height": 40,
+      "flip-x": null,
+      "fills": [
+       {
+        "fill-opacity": 1,
+        "fill-color": "#4f46e5"
+       }
+      ],
+      "r1": 8,
+      "strokes": [],
+      "points": [
+       {
+        "x": 146,
+        "y": 366
+       },
+       {
+        "x": 258,
+        "y": 366
+       },
+       {
+        "x": 258,
+        "y": 406
+       },
+       {
+        "x": 146,
+        "y": 406
+       }
+      ],
+      "plugin-data": {
+       "smallpen": {
+        "component-id": "cmp_button",
+        "node-id": "node_button_root",
+        "variant-id": "var_button_primary_md",
+        "layout-offset": "146 366"
+       }
+      },
+      "x": 146,
+      "id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+      "transform": {
+       "a": 1,
+       "b": 0,
+       "c": 0,
+       "d": 1,
+       "e": 0,
+       "f": 0
+      },
+      "selrect": {
+       "x": 146,
+       "y": 366,
+       "width": 112,
+       "height": 40,
+       "x1": 146,
+       "y1": 366,
+       "x2": 258,
+       "y2": 406
+      },
+      "component-root": true,
+      "frame-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+      "name": "Button",
+      "main-instance": true,
+      "variant-name": "primary, md",
+      "shapes": [
+       "4faa6f13-54d9-5d06-8ec0-14d1653495f5"
+      ],
+      "r2": 8,
+      "rotation": 0,
+      "hide-fill-on-export": false,
+      "interactions": [],
+      "transform-inverse": {
+       "a": 1,
+       "b": 0,
+       "c": 0,
+       "d": 1,
+       "e": 0,
+       "f": 0
+      },
+      "type": "frame",
+      "r3": 8,
+      "y": 366,
+      "component-file": "__FILE__",
+      "component-id": "42206668-cdf2-56f4-8004-6b66b074ed9c",
+      "proportion": 1,
+      "flip-y": null,
+      "r4": 8,
+      "parent-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846"
+     },
+     "4faa6f13-54d9-5d06-8ec0-14d1653495f5": {
+      "width": 112,
+      "height": 40,
+      "flip-x": null,
+      "points": [
+       {
+        "x": 146,
+        "y": 366
+       },
+       {
+        "x": 258,
+        "y": 366
+       },
+       {
+        "x": 258,
+        "y": 406
+       },
+       {
+        "x": 146,
+        "y": 406
+       }
+      ],
+      "plugin-data": {
+       "smallpen": {
+        "component-id": "cmp_button",
+        "node-id": "node_button_label",
+        "variant-id": "var_button_primary_md",
+        "layout-offset": "146 366"
+       }
+      },
+      "grow-type": "fixed",
+      "x": 146,
+      "id": "4faa6f13-54d9-5d06-8ec0-14d1653495f5",
+      "transform": {
+       "a": 1,
+       "b": 0,
+       "c": 0,
+       "d": 1,
+       "e": 0,
+       "f": 0
+      },
+      "selrect": {
+       "x": 146,
+       "y": 366,
+       "width": 112,
+       "height": 40,
+       "x1": 146,
+       "y1": 366,
+       "x2": 258,
+       "y2": 406
+      },
+      "frame-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+      "name": "Label",
+      "content": {
+       "type": "root",
+       "vertical-align": "center",
+       "children": [
+        {
+         "type": "paragraph-set",
+         "children": [
+          {
+           "type": "paragraph",
+           "line-height": "1.35",
+           "text-align": "center",
+           "text-direction": "ltr",
+           "children": [
+            {
+             "line-height": "1.35",
+             "font-family": "Source Sans Pro",
+             "fills": [
+              {
+               "fill-opacity": 1,
+               "fill-color": "#ffffff"
+              }
+             ],
+             "text-transform": "none",
+             "text": "Button",
+             "font-weight": "600",
+             "text-decoration": "none",
+             "font-size": "12",
+             "letter-spacing": "0",
+             "font-style": "normal",
+             "font-id": "sourcesanspro",
+             "font-variant-id": "600"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      "rotation": 0,
+      "interactions": [],
+      "transform-inverse": {
+       "a": 1,
+       "b": 0,
+       "c": 0,
+       "d": 1,
+       "e": 0,
+       "f": 0
+      },
+      "type": "text",
+      "y": 366,
+      "position-data": [
+       {
+        "y1": 11.90625,
+        "width": 35.671875,
+        "x1": 38.15625,
+        "font-family": "sourcesanspro",
+        "height": 16,
+        "fills": [
+         {
+          "fill-opacity": 1,
+          "fill-color": "#ffffff"
+         }
+        ],
+        "text-transform": "none",
+        "x": 184.15625,
+        "direction": "ltr",
+        "text": "Button",
+        "font-weight": "600",
+        "text-decoration": "none",
+        "font-size": "12px",
+        "y": 393.90625,
+        "x2": 73.828125,
+        "letter-spacing": "normal",
+        "y2": 27.90625,
+        "font-style": "normal"
+       }
+      ],
+      "flip-y": null,
+      "parent-id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5"
+     }
+    },
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": "2026-10-02T09:10:41.221Z",
+    "type": "mod-component",
+    "annotation": null
+   }
+  ],
+  "undoDeleteVariant": [
+   {
+    "type": "add-obj",
+    "id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "parent-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "frame-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "index": 6,
+    "obj": {
+     "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+     "proportion-lock": false,
+     "width": 112,
+     "height": 40,
+     "flip-x": null,
+     "fills": [
+      {
+       "fill-opacity": 1,
+       "fill-color": "#4f46e5"
+      }
+     ],
+     "r1": 8,
+     "strokes": [],
+     "points": [
+      {
+       "x": 146,
+       "y": 366
+      },
+      {
+       "x": 258,
+       "y": 366
+      },
+      {
+       "x": 258,
+       "y": 406
+      },
+      {
+       "x": 146,
+       "y": 406
+      }
+     ],
+     "plugin-data": {
+      "smallpen": {
+       "component-id": "cmp_button",
+       "node-id": "node_button_root",
+       "variant-id": "var_button_primary_md",
+       "layout-offset": "146 366"
+      }
+     },
+     "x": 146,
+     "id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+     "transform": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "selrect": {
+      "x": 146,
+      "y": 366,
+      "width": 112,
+      "height": 40,
+      "x1": 146,
+      "y1": 366,
+      "x2": 258,
+      "y2": 406
+     },
+     "component-root": true,
+     "frame-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+     "name": "Button",
+     "main-instance": true,
+     "variant-name": "primary, md",
+     "shapes": [],
+     "r2": 8,
+     "rotation": 0,
+     "hide-fill-on-export": false,
+     "interactions": [],
+     "transform-inverse": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "type": "frame",
+     "r3": 8,
+     "y": 366,
+     "component-file": "__FILE__",
+     "component-id": "42206668-cdf2-56f4-8004-6b66b074ed9c",
+     "proportion": 1,
+     "flip-y": null,
+     "r4": 8,
+     "parent-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846"
+    },
+    "smallpen-layout-offset": {
+     "x": 146,
+     "y": 366
+    }
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "parent-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "shapes": [
+     "79cf67c4-0740-5108-a8d9-59d4e1efddd5"
+    ],
+    "after-shape": "39280d3a-9a56-5098-bf31-9f611eb6981f",
+    "index": 0,
+    "ignore-touched": true
+   },
+   {
+    "type": "add-obj",
+    "id": "4faa6f13-54d9-5d06-8ec0-14d1653495f5",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "parent-id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "frame-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "index": 0,
+    "obj": {
+     "width": 112,
+     "height": 40,
+     "flip-x": null,
+     "points": [
+      {
+       "x": 146,
+       "y": 366
+      },
+      {
+       "x": 258,
+       "y": 366
+      },
+      {
+       "x": 258,
+       "y": 406
+      },
+      {
+       "x": 146,
+       "y": 406
+      }
+     ],
+     "plugin-data": {
+      "smallpen": {
+       "component-id": "cmp_button",
+       "node-id": "node_button_label",
+       "variant-id": "var_button_primary_md",
+       "layout-offset": "146 366"
+      }
+     },
+     "grow-type": "fixed",
+     "x": 146,
+     "id": "4faa6f13-54d9-5d06-8ec0-14d1653495f5",
+     "transform": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "selrect": {
+      "x": 146,
+      "y": 366,
+      "width": 112,
+      "height": 40,
+      "x1": 146,
+      "y1": 366,
+      "x2": 258,
+      "y2": 406
+     },
+     "frame-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+     "name": "Label",
+     "content": {
+      "type": "root",
+      "vertical-align": "center",
+      "children": [
+       {
+        "type": "paragraph-set",
+        "children": [
+         {
+          "type": "paragraph",
+          "line-height": "1.35",
+          "text-align": "center",
+          "text-direction": "ltr",
+          "children": [
+           {
+            "line-height": "1.35",
+            "font-family": "Source Sans Pro",
+            "fills": [
+             {
+              "fill-opacity": 1,
+              "fill-color": "#ffffff"
+             }
+            ],
+            "text-transform": "none",
+            "text": "Button",
+            "font-weight": "600",
+            "text-decoration": "none",
+            "font-size": "12",
+            "letter-spacing": "0",
+            "font-style": "normal",
+            "font-id": "sourcesanspro",
+            "font-variant-id": "600"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "rotation": 0,
+     "interactions": [],
+     "transform-inverse": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "type": "text",
+     "y": 366,
+     "position-data": [
+      {
+       "y1": 11.90625,
+       "width": 35.671875,
+       "x1": 38.15625,
+       "font-family": "sourcesanspro",
+       "height": 16,
+       "fills": [
+        {
+         "fill-opacity": 1,
+         "fill-color": "#ffffff"
+        }
+       ],
+       "text-transform": "none",
+       "x": 184.15625,
+       "direction": "ltr",
+       "text": "Button",
+       "font-weight": "600",
+       "text-decoration": "none",
+       "font-size": "12px",
+       "y": 393.90625,
+       "x2": 73.828125,
+       "letter-spacing": "normal",
+       "y2": 27.90625,
+       "font-style": "normal"
+      }
+     ],
+     "flip-y": null,
+     "parent-id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5"
+    },
+    "smallpen-layout-offset": {
+     "x": 146,
+     "y": 366
+    }
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "parent-id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "shapes": [
+     "4faa6f13-54d9-5d06-8ec0-14d1653495f5"
+    ],
+    "after-shape": null,
+    "index": 0,
+    "ignore-touched": true
+   },
+   {
+    "type": "restore-component",
+    "id": "42206668-cdf2-56f4-8004-6b66b074ed9c",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f"
+   }
+  ],
+  "changeValue": [
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "path": "",
+    "id": "09387ff6-002d-5acc-8527-afabb347ddb0",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "brand"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "brand, sm",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "path": "",
+    "id": "09387ff6-002d-5acc-8527-afabb347ddb0",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "brand"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   }
+  ],
+  "renameProperty": [
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "path": "",
+    "id": "09387ff6-002d-5acc-8527-afabb347ddb0",
+    "variant-properties": [
+     {
+      "name": "Kind",
+      "value": "brand"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "path": "",
+    "id": "42206668-cdf2-56f4-8004-6b66b074ed9c",
+    "variant-properties": [
+     {
+      "name": "Kind",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "39280d3a-9a56-5098-bf31-9f611eb6981f",
+    "path": "",
+    "id": "53b55d89-e58f-5c71-b1e1-5e3735da31a4",
+    "variant-properties": [
+     {
+      "name": "Kind",
+      "value": "secondary"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "9b62ebc3-9c6f-5363-8cf9-aefb10fca16b",
+    "path": "",
+    "id": "681b9707-3f3f-5cfc-b2e2-856afb2e9d6b",
+    "variant-properties": [
+     {
+      "name": "Kind",
+      "value": "secondary"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "59708d8d-5031-5635-a970-ea38be966d0f",
+    "path": "",
+    "id": "b3ae977e-5229-59dd-baee-c8b25d8d05a4",
+    "variant-properties": [
+     {
+      "name": "Kind",
+      "value": "ghost"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "9884a5d8-051f-5239-ab8b-9b2a8f32d55e",
+    "path": "",
+    "id": "a1e64a47-c4da-54cf-a6ad-7acabbc85e0c",
+    "variant-properties": [
+     {
+      "name": "Kind",
+      "value": "ghost"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "aee53da9-1c96-51bf-989b-c6246bfc23dc",
+    "path": "",
+    "id": "e96c9e98-a30c-54f9-8cd7-697e22cdf47a",
+    "variant-properties": [
+     {
+      "name": "Kind",
+      "value": "danger"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "833dbe3e-9bd1-5316-b35f-6e6e40c566dc",
+    "path": "",
+    "id": "87d60b7f-ec47-50eb-bc1d-f77bb43a2f1c",
+    "variant-properties": [
+     {
+      "name": "Kind",
+      "value": "danger"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   }
+  ],
+  "undoRenameProperty": [
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "833dbe3e-9bd1-5316-b35f-6e6e40c566dc",
+    "path": "",
+    "id": "87d60b7f-ec47-50eb-bc1d-f77bb43a2f1c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "danger"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "aee53da9-1c96-51bf-989b-c6246bfc23dc",
+    "path": "",
+    "id": "e96c9e98-a30c-54f9-8cd7-697e22cdf47a",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "danger"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "9884a5d8-051f-5239-ab8b-9b2a8f32d55e",
+    "path": "",
+    "id": "a1e64a47-c4da-54cf-a6ad-7acabbc85e0c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "ghost"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "59708d8d-5031-5635-a970-ea38be966d0f",
+    "path": "",
+    "id": "b3ae977e-5229-59dd-baee-c8b25d8d05a4",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "ghost"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "9b62ebc3-9c6f-5363-8cf9-aefb10fca16b",
+    "path": "",
+    "id": "681b9707-3f3f-5cfc-b2e2-856afb2e9d6b",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "secondary"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "39280d3a-9a56-5098-bf31-9f611eb6981f",
+    "path": "",
+    "id": "53b55d89-e58f-5c71-b1e1-5e3735da31a4",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "secondary"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "path": "",
+    "id": "42206668-cdf2-56f4-8004-6b66b074ed9c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "path": "",
+    "id": "09387ff6-002d-5acc-8527-afabb347ddb0",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "brand"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "type": "mod-component",
+    "annotation": null
+   }
+  ],
+  "removeProperty": [
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "path": "",
+    "id": "09387ff6-002d-5acc-8527-afabb347ddb0",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "brand"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "brand",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "path": "",
+    "id": "42206668-cdf2-56f4-8004-6b66b074ed9c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "primary",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 146,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "39280d3a-9a56-5098-bf31-9f611eb6981f",
+    "path": "",
+    "id": "53b55d89-e58f-5c71-b1e1-5e3735da31a4",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "secondary"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "39280d3a-9a56-5098-bf31-9f611eb6981f",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "secondary",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 278,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "9b62ebc3-9c6f-5363-8cf9-aefb10fca16b",
+    "path": "",
+    "id": "681b9707-3f3f-5cfc-b2e2-856afb2e9d6b",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "secondary"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "9b62ebc3-9c6f-5363-8cf9-aefb10fca16b",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "secondary",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 394,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "59708d8d-5031-5635-a970-ea38be966d0f",
+    "path": "",
+    "id": "b3ae977e-5229-59dd-baee-c8b25d8d05a4",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "ghost"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "59708d8d-5031-5635-a970-ea38be966d0f",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "ghost",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 426
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "9884a5d8-051f-5239-ab8b-9b2a8f32d55e",
+    "path": "",
+    "id": "a1e64a47-c4da-54cf-a6ad-7acabbc85e0c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "ghost"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "9884a5d8-051f-5239-ab8b-9b2a8f32d55e",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "ghost",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 146,
+     "y": 426
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "aee53da9-1c96-51bf-989b-c6246bfc23dc",
+    "path": "",
+    "id": "e96c9e98-a30c-54f9-8cd7-697e22cdf47a",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "danger"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "aee53da9-1c96-51bf-989b-c6246bfc23dc",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "danger",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 278,
+     "y": 426
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "833dbe3e-9bd1-5316-b35f-6e6e40c566dc",
+    "path": "",
+    "id": "87d60b7f-ec47-50eb-bc1d-f77bb43a2f1c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "danger"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "833dbe3e-9bd1-5316-b35f-6e6e40c566dc",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "danger",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 394,
+     "y": 426
+    }
+   }
+  ],
+  "addProperty": [
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "path": "",
+    "id": "09387ff6-002d-5acc-8527-afabb347ddb0",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     },
+     {
+      "name": "Property 3",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "f8851809-a6b8-5a69-bfc0-aa911667cb1a",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "primary, sm, Value 1",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "path": "",
+    "id": "42206668-cdf2-56f4-8004-6b66b074ed9c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "primary"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     },
+     {
+      "name": "Property 3",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "79cf67c4-0740-5108-a8d9-59d4e1efddd5",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "primary, md, Value 1",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 146,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "39280d3a-9a56-5098-bf31-9f611eb6981f",
+    "path": "",
+    "id": "53b55d89-e58f-5c71-b1e1-5e3735da31a4",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "secondary"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     },
+     {
+      "name": "Property 3",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "39280d3a-9a56-5098-bf31-9f611eb6981f",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "secondary, sm, Value 1",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 278,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "9b62ebc3-9c6f-5363-8cf9-aefb10fca16b",
+    "path": "",
+    "id": "681b9707-3f3f-5cfc-b2e2-856afb2e9d6b",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "secondary"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     },
+     {
+      "name": "Property 3",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "9b62ebc3-9c6f-5363-8cf9-aefb10fca16b",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "secondary, md, Value 1",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 394,
+     "y": 366
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "59708d8d-5031-5635-a970-ea38be966d0f",
+    "path": "",
+    "id": "b3ae977e-5229-59dd-baee-c8b25d8d05a4",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "ghost"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     },
+     {
+      "name": "Property 3",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "59708d8d-5031-5635-a970-ea38be966d0f",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "ghost, sm, Value 1",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 426
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "9884a5d8-051f-5239-ab8b-9b2a8f32d55e",
+    "path": "",
+    "id": "a1e64a47-c4da-54cf-a6ad-7acabbc85e0c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "ghost"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     },
+     {
+      "name": "Property 3",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "9884a5d8-051f-5239-ab8b-9b2a8f32d55e",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "ghost, md, Value 1",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 146,
+     "y": 426
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "aee53da9-1c96-51bf-989b-c6246bfc23dc",
+    "path": "",
+    "id": "e96c9e98-a30c-54f9-8cd7-697e22cdf47a",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "danger"
+     },
+     {
+      "name": "Size",
+      "value": "sm"
+     },
+     {
+      "name": "Property 3",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "aee53da9-1c96-51bf-989b-c6246bfc23dc",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "danger, sm, Value 1",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 278,
+     "y": 426
+    }
+   },
+   {
+    "variant-id": "0ce59a1e-d39c-579d-bfc2-47a279f6c846",
+    "main-instance-id": "833dbe3e-9bd1-5316-b35f-6e6e40c566dc",
+    "path": "",
+    "id": "87d60b7f-ec47-50eb-bc1d-f77bb43a2f1c",
+    "variant-properties": [
+     {
+      "name": "Style",
+      "value": "danger"
+     },
+     {
+      "name": "Size",
+      "value": "md"
+     },
+     {
+      "name": "Property 3",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "833dbe3e-9bd1-5316-b35f-6e6e40c566dc",
+    "page-id": "fa7acbc7-d645-52f7-b42b-f82de66bc42f",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "danger, md, Value 1",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 394,
+     "y": 426
+    }
+   }
+  ]
+ },
+ "acme": {
+  "switchVariant": [
+   {
+    "type": "del-obj",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "id": "8a3c3213-7f50-588b-b1bc-a6bd08565e5e",
+    "ignore-touched": true
+   },
+   {
+    "type": "del-obj",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab"
+   },
+   {
+    "index": null,
+    "obj": {
+     "proportion-lock": false,
+     "width": 96,
+     "height": 32,
+     "flip-x": null,
+     "fills": [
+      {
+       "fill-opacity": 1,
+       "fill-color": "#6750a4"
+      }
+     ],
+     "r1": 16,
+     "strokes": [],
+     "points": [
+      {
+       "x": 24,
+       "y": 120
+      },
+      {
+       "x": 120,
+       "y": 120
+      },
+      {
+       "x": 120,
+       "y": 152
+      },
+      {
+       "x": 24,
+       "y": 152
+      }
+     ],
+     "plugin-data": {},
+     "x": 24,
+     "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+     "transform": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "selrect": {
+      "x": 24,
+      "y": 120,
+      "width": 96,
+      "height": 32,
+      "x1": 24,
+      "y1": 120,
+      "x2": 120,
+      "y2": 152
+     },
+     "component-root": true,
+     "frame-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "name": "Chip",
+     "shapes": [
+      "678b4a58-062d-80d3-8008-ba3b673bbad7"
+     ],
+     "r2": 16,
+     "rotation": 0,
+     "hide-fill-on-export": false,
+     "transform-inverse": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "type": "frame",
+     "r3": 16,
+     "y": 120,
+     "component-file": "__FILE__",
+     "component-id": "0cbe6ada-de5d-5e7c-b201-7085709eeae0",
+     "proportion": 1,
+     "shape-ref": "e3e519b7-c221-5ebf-9407-9a2625e6d3ad",
+     "flip-y": null,
+     "r4": 16,
+     "parent-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02"
+    },
+    "old-id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "ignore-touched": true,
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "frame-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+    "type": "add-obj",
+    "parent-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02"
+   },
+   {
+    "type": "add-obj",
+    "id": "678b4a58-062d-80d3-8008-ba3b673bbad7",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "parent-id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "frame-id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "index": null,
+    "ignore-touched": true,
+    "obj": {
+     "width": 96,
+     "height": 20,
+     "flip-x": null,
+     "points": [
+      {
+       "x": 24,
+       "y": 126
+      },
+      {
+       "x": 120,
+       "y": 126
+      },
+      {
+       "x": 120,
+       "y": 146
+      },
+      {
+       "x": 24,
+       "y": 146
+      }
+     ],
+     "plugin-data": {},
+     "grow-type": "fixed",
+     "x": 24,
+     "id": "678b4a58-062d-80d3-8008-ba3b673bbad7",
+     "transform": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "selrect": {
+      "x": 24,
+      "y": 126,
+      "width": 96,
+      "height": 20,
+      "x1": 24,
+      "y1": 126,
+      "x2": 120,
+      "y2": 146
+     },
+     "frame-id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+     "name": "Label",
+     "content": {
+      "type": "root",
+      "vertical-align": "top",
+      "children": [
+       {
+        "type": "paragraph-set",
+        "children": [
+         {
+          "type": "paragraph",
+          "line-height": "1.2",
+          "text-align": "center",
+          "text-direction": "ltr",
+          "children": [
+           {
+            "line-height": "1.2",
+            "font-family": "sourcesanspro",
+            "fills": [
+             {
+              "fill-opacity": 1,
+              "fill-color": "#ffffff"
+             }
+            ],
+            "text-transform": "none",
+            "text": "Chip",
+            "font-weight": "400",
+            "text-decoration": "none",
+            "font-size": "13",
+            "letter-spacing": "0",
+            "font-style": "normal",
+            "font-id": "sourcesanspro",
+            "font-variant-id": "regular"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "rotation": 0,
+     "interactions": [],
+     "transform-inverse": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "type": "text",
+     "y": 126,
+     "shape-ref": "cedad254-cf8f-5c18-823b-a0fd91d62d8d",
+     "flip-y": null,
+     "parent-id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab"
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "interactions",
+      "val": [],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ]
+   },
+   {
+    "type": "mov-objects",
+    "parent-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "shapes": [
+     "dc5aedce-1302-5b12-98e4-f6a7323d86ab"
+    ],
+    "index": 0,
+    "allow-altering-copies": true,
+    "ignore-touched": true
+   },
+   {
+    "type": "mod-obj",
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "mod-obj",
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": [
+       "name-group"
+      ]
+     },
+     {
+      "type": "set",
+      "attr": "name",
+      "val": "Chip one",
+      "ignore-touched": true
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [
+     "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "00000000-0000-0000-0000-000000000000"
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "mod-obj",
+    "id": "678b4a58-062d-80d3-8008-ba3b673bbad7",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": [
+       "text-content-text",
+       "content-group"
+      ]
+     },
+     {
+      "type": "set",
+      "attr": "position-data",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "content",
+      "val": {
+       "type": "root",
+       "vertical-align": "top",
+       "children": [
+        {
+         "type": "paragraph-set",
+         "children": [
+          {
+           "type": "paragraph",
+           "line-height": "1.2",
+           "text-align": "center",
+           "text-direction": "ltr",
+           "children": [
+            {
+             "line-height": "1.2",
+             "font-family": "sourcesanspro",
+             "fills": [
+              {
+               "fill-opacity": 1,
+               "fill-color": "#ffffff"
+              }
+             ],
+             "text-transform": "none",
+             "text": "Hello",
+             "font-weight": "400",
+             "text-decoration": "none",
+             "font-size": "13",
+             "letter-spacing": "0",
+             "font-style": "normal",
+             "font-id": "sourcesanspro",
+             "font-variant-id": "regular"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      "ignore-touched": true
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   }
+  ],
+  "undoSwitchVariant": [
+   {
+    "type": "mod-obj",
+    "id": "678b4a58-062d-80d3-8008-ba3b673bbad7",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": [
+       "text-content-text",
+       "content-group"
+      ]
+     },
+     {
+      "type": "set",
+      "attr": "position-data",
+      "val": null,
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "678b4a58-062d-80d3-8008-ba3b673bbad7",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "position-data",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "content",
+      "val": {
+       "type": "root",
+       "vertical-align": "top",
+       "children": [
+        {
+         "type": "paragraph-set",
+         "children": [
+          {
+           "type": "paragraph",
+           "line-height": "1.2",
+           "text-align": "center",
+           "text-direction": "ltr",
+           "children": [
+            {
+             "line-height": "1.2",
+             "font-family": "sourcesanspro",
+             "fills": [
+              {
+               "fill-opacity": 1,
+               "fill-color": "#ffffff"
+              }
+             ],
+             "text-transform": "none",
+             "text": "Chip",
+             "font-weight": "400",
+             "text-decoration": "none",
+             "font-size": "13",
+             "letter-spacing": "0",
+             "font-style": "normal",
+             "font-id": "sourcesanspro",
+             "font-variant-id": "regular"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      "ignore-touched": true
+     },
+     {
+      "type": "set-touched",
+      "touched": null
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "mod-obj",
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "name",
+      "val": "Chip",
+      "ignore-touched": true
+     },
+     {
+      "type": "set-touched",
+      "touched": null
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "mod-obj",
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "parent-id": "00000000-0000-0000-0000-000000000000",
+    "shapes": [
+     "dc5aedce-1302-5b12-98e4-f6a7323d86ab"
+    ],
+    "after-shape": "dccc5e24-4ac7-5f75-9aee-3462aef44e13",
+    "index": 0,
+    "allow-altering-copies": true
+   },
+   {
+    "type": "mod-obj",
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "interactions",
+      "val": null,
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "del-obj",
+    "id": "678b4a58-062d-80d3-8008-ba3b673bbad7",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "del-obj",
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "add-obj",
+    "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "parent-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+    "frame-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+    "index": 0,
+    "obj": {
+     "touched": [
+      "name-group"
+     ],
+     "proportion-lock": false,
+     "width": 96,
+     "height": 32,
+     "flip-x": null,
+     "fills": [
+      {
+       "fill-opacity": 1,
+       "fill-color": "#e5e7eb"
+      }
+     ],
+     "r1": 16,
+     "strokes": [],
+     "points": [
+      {
+       "x": 24,
+       "y": 120
+      },
+      {
+       "x": 120,
+       "y": 120
+      },
+      {
+       "x": 120,
+       "y": 152
+      },
+      {
+       "x": 24,
+       "y": 152
+      }
+     ],
+     "plugin-data": {
+      "smallpen": {
+       "node-id": "node_chip_one",
+       "presentation-id": "pres_home_mobile",
+       "screen-id": "scr_home"
+      }
+     },
+     "x": 24,
+     "id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+     "transform": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "selrect": {
+      "x": 24,
+      "y": 120,
+      "width": 96,
+      "height": 32,
+      "x1": 24,
+      "y1": 120,
+      "x2": 120,
+      "y2": 152
+     },
+     "component-root": true,
+     "frame-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "name": "Chip one",
+     "shapes": [],
+     "r2": 16,
+     "rotation": 0,
+     "hide-fill-on-export": false,
+     "interactions": [],
+     "transform-inverse": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "type": "frame",
+     "r3": 16,
+     "y": 120,
+     "component-file": "__FILE__",
+     "component-id": "87585ae5-5eb3-597c-97e0-d6bbf3ed7673",
+     "proportion": 1,
+     "shape-ref": "f05b9b43-c394-5548-a19e-a4e9be3d7d25",
+     "hide-in-viewer": true,
+     "flip-y": null,
+     "r4": 16,
+     "parent-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02"
+    }
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "parent-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+    "shapes": [
+     "dc5aedce-1302-5b12-98e4-f6a7323d86ab"
+    ],
+    "after-shape": null,
+    "index": 0,
+    "ignore-touched": true
+   },
+   {
+    "type": "add-obj",
+    "id": "8a3c3213-7f50-588b-b1bc-a6bd08565e5e",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "parent-id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "frame-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+    "index": 0,
+    "obj": {
+     "touched": [
+      "content-group",
+      "text-content-text"
+     ],
+     "width": 96,
+     "height": 20,
+     "flip-x": null,
+     "points": [
+      {
+       "x": 24,
+       "y": 126
+      },
+      {
+       "x": 120,
+       "y": 126
+      },
+      {
+       "x": 120,
+       "y": 146
+      },
+      {
+       "x": 24,
+       "y": 146
+      }
+     ],
+     "plugin-data": {
+      "smallpen": {
+       "node-id": "node_chip_one__node_chip_label",
+       "presentation-id": "pres_home_mobile",
+       "screen-id": "scr_home"
+      }
+     },
+     "grow-type": "fixed",
+     "x": 24,
+     "id": "8a3c3213-7f50-588b-b1bc-a6bd08565e5e",
+     "transform": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "selrect": {
+      "x": 24,
+      "y": 126,
+      "width": 96,
+      "height": 20,
+      "x1": 24,
+      "y1": 126,
+      "x2": 120,
+      "y2": 146
+     },
+     "frame-id": "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "name": "Label",
+     "content": {
+      "type": "root",
+      "vertical-align": "top",
+      "children": [
+       {
+        "type": "paragraph-set",
+        "children": [
+         {
+          "type": "paragraph",
+          "line-height": "1.2",
+          "text-align": "center",
+          "text-direction": "ltr",
+          "children": [
+           {
+            "line-height": "1.2",
+            "font-family": "sourcesanspro",
+            "fills": [
+             {
+              "fill-opacity": 1,
+              "fill-color": "#111827"
+             }
+            ],
+            "text-transform": "none",
+            "text": "Hello",
+            "font-weight": "400",
+            "text-decoration": "none",
+            "font-size": "13",
+            "letter-spacing": "0",
+            "font-style": "normal",
+            "font-id": "sourcesanspro",
+            "font-variant-id": "regular"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "rotation": 0,
+     "interactions": [],
+     "transform-inverse": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "type": "text",
+     "y": 126,
+     "shape-ref": "85cd02c0-654f-56f1-b40c-c50f4af98944",
+     "position-data": [
+      {
+       "y1": -1,
+       "width": 28.59375,
+       "x1": 33.703125,
+       "font-family": "sourcesanspro",
+       "height": 16,
+       "fills": [
+        {
+         "fill-opacity": 1,
+         "fill-color": "#111827"
+        }
+       ],
+       "text-transform": "none",
+       "x": 57.703125,
+       "direction": "ltr",
+       "text": "Hello",
+       "font-weight": "400",
+       "text-decoration": "none",
+       "font-size": "13px",
+       "y": 141,
+       "x2": 62.296875,
+       "letter-spacing": "normal",
+       "y2": 15,
+       "font-style": "normal"
+      }
+     ],
+     "flip-y": null,
+     "parent-id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab"
+    }
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99",
+    "parent-id": "dc5aedce-1302-5b12-98e4-f6a7323d86ab",
+    "shapes": [
+     "8a3c3213-7f50-588b-b1bc-a6bd08565e5e"
+    ],
+    "after-shape": null,
+    "index": 0,
+    "ignore-touched": true
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [
+     "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "00000000-0000-0000-0000-000000000000"
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   }
+  ],
+  "combine": [
+   {
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "path": "",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "add-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "parent-id": "00000000-0000-0000-0000-000000000000",
+    "frame-id": "00000000-0000-0000-0000-000000000000",
+    "index": 1,
+    "ignore-touched": false,
+    "obj": {
+     "proportion-lock": false,
+     "width": 72,
+     "height": 24,
+     "flip-x": null,
+     "fills": [
+      {
+       "fill-color": "#FFFFFF",
+       "fill-opacity": 1
+      }
+     ],
+     "r1": 0,
+     "strokes": [],
+     "points": [
+      {
+       "x": -30,
+       "y": -30
+      },
+      {
+       "x": 42,
+       "y": -30
+      },
+      {
+       "x": 42,
+       "y": -6
+      },
+      {
+       "x": -30,
+       "y": -6
+      }
+     ],
+     "x": -30,
+     "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+     "transform": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "selrect": {
+      "x": -30,
+      "y": -30,
+      "width": 72,
+      "height": 24,
+      "x1": -30,
+      "y1": -30,
+      "x2": 42,
+      "y2": -6
+     },
+     "frame-id": "00000000-0000-0000-0000-000000000000",
+     "name": "Board",
+     "shapes": [
+      "4394b246-6369-53bc-b26d-cbf8abcb6181"
+     ],
+     "r2": 0,
+     "rotation": 0,
+     "hide-fill-on-export": false,
+     "transform-inverse": {
+      "a": 1,
+      "b": 0,
+      "c": 0,
+      "d": 1,
+      "e": 0,
+      "f": 0
+     },
+     "type": "frame",
+     "r3": 0,
+     "y": -30,
+     "proportion": 1,
+     "flip-y": null,
+     "r4": 0,
+     "parent-id": "00000000-0000-0000-0000-000000000000"
+    }
+   },
+   {
+    "type": "mov-objects",
+    "parent-id": "00000000-0000-0000-0000-000000000000",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "shapes": [
+     "b73b8dc4-9888-80fa-8008-ba3d52a99946"
+    ],
+    "index": 1
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "hide-in-viewer",
+      "val": true,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 0
+    }
+   },
+   {
+    "type": "mov-objects",
+    "parent-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "shapes": [
+     "4394b246-6369-53bc-b26d-cbf8abcb6181"
+    ],
+    "index": 0
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "fills",
+      "val": [],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "layout-item-absolute",
+      "val": true,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "is-variant-container",
+      "val": true,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "name",
+      "val": "Component",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "r2",
+      "val": 20,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "r3",
+      "val": 20,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "r1",
+      "val": 20,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "r4",
+      "val": 20,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "name",
+      "val": "Component",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "variant-id",
+      "val": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 0
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "strokes",
+      "val": [
+       {
+        "stroke-alignment": "inner",
+        "stroke-style": "solid",
+        "stroke-color": "#bb97d8",
+        "stroke-opacity": 1,
+        "stroke-width": 2
+       }
+      ],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ]
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "path": "",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": "2026-10-02T09:14:37.607Z",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "path": "",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "variant-properties": [
+     {
+      "name": "Property 1",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": "2026-10-02T09:14:37.607Z",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "Value 1",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 0
+    }
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "path": "",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "variant-properties": [
+     {
+      "name": "Property 1",
+      "value": "Badge"
+     }
+    ],
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": "2026-10-02T09:14:37.607Z",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "Badge",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 0
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "layout-item-absolute",
+      "val": null,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "hide-in-viewer",
+      "val": true,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 104
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "touched",
+      "val": [],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 104
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "name",
+      "val": "Component",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "variant-id",
+      "val": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 104
+    }
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "path": "",
+    "id": "12d9630e-e79a-5252-9981-4bfdbaef5063",
+    "variant-properties": [
+     {
+      "name": "Property 1",
+      "value": "Button"
+     }
+    ],
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": null,
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "Button",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 104
+    }
+   },
+   {
+    "type": "mov-objects",
+    "parent-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "shapes": [
+     "3ca9e05c-1a34-5cf7-b1de-e48574a09145"
+    ],
+    "index": 0
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "constraints-v",
+      "val": "top",
+      "ignore-geometry": false,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "constraints-h",
+      "val": "left",
+      "ignore-geometry": false,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 104
+    }
+   },
+   {
+    "type": "mov-objects",
+    "parent-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "shapes": [
+     "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+     "4394b246-6369-53bc-b26d-cbf8abcb6181"
+    ],
+    "index": 0
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "fixed-scroll",
+      "val": false,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "constraints-v",
+      "val": "top",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "constraints-h",
+      "val": "left",
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 0
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "fixed-scroll",
+      "val": false,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 104
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "touched",
+      "val": [],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 0,
+     "y": 0
+    }
+   },
+   {
+    "type": "mov-objects",
+    "parent-id": "00000000-0000-0000-0000-000000000000",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "shapes": [
+     "b73b8dc4-9888-80fa-8008-ba3d52a99946"
+    ],
+    "index": 4
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "width",
+      "val": 180,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": -30,
+        "y": -30
+       },
+       {
+        "x": 150,
+        "y": -30
+       },
+       {
+        "x": 150,
+        "y": -6
+       },
+       {
+        "x": -30,
+        "y": -6
+       }
+      ],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": -30,
+       "y": -30,
+       "width": 180,
+       "height": 24,
+       "x1": -30,
+       "y1": -30,
+       "x2": 150,
+       "y2": -6
+      },
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": -30,
+        "y": -30
+       },
+       {
+        "x": 150,
+        "y": -30
+       },
+       {
+        "x": 150,
+        "y": 174
+       },
+       {
+        "x": -30,
+        "y": 174
+       }
+      ],
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": -30,
+       "y": -30,
+       "width": 180,
+       "height": 204,
+       "x1": -30,
+       "y1": -30,
+       "x2": 150,
+       "y2": 174
+      },
+      "ignore-geometry": false,
+      "ignore-touched": false
+     },
+     {
+      "type": "set",
+      "attr": "height",
+      "val": 204,
+      "ignore-geometry": false,
+      "ignore-touched": false
+     }
+    ]
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "path": "",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "variant-properties": [
+     {
+      "name": "Property 1",
+      "value": "Badge"
+     }
+    ],
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": "2026-10-02T09:14:37.651Z",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "4aaf3e2e-d708-5496-b957-c995f88b5fc0",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "fixed-scroll",
+      "val": false,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "constraints-v",
+      "val": "top",
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "constraints-h",
+      "val": "left",
+      "ignore-touched": true
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [
+     "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "00000000-0000-0000-0000-000000000000"
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [
+     "4aaf3e2e-d708-5496-b957-c995f88b5fc0",
+     "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "00000000-0000-0000-0000-000000000000"
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "path": "",
+    "id": "12d9630e-e79a-5252-9981-4bfdbaef5063",
+    "variant-properties": [
+     {
+      "name": "Property 1",
+      "value": "Button"
+     }
+    ],
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": "2026-10-02T09:14:37.655Z",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "dccc5e24-4ac7-5f75-9aee-3462aef44e13",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "fixed-scroll",
+      "val": false,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "constraints-v",
+      "val": "top",
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "constraints-h",
+      "val": "left",
+      "ignore-touched": true
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [
+     "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "00000000-0000-0000-0000-000000000000"
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "path": "",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "variant-properties": [
+     {
+      "name": "Property 1",
+      "value": "Badge"
+     }
+    ],
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": "2026-10-02T09:14:37.657Z",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "path": "",
+    "id": "12d9630e-e79a-5252-9981-4bfdbaef5063",
+    "variant-properties": [
+     {
+      "name": "Property 1",
+      "value": "Button"
+     }
+    ],
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": "2026-10-02T09:14:37.658Z",
+    "type": "mod-component",
+    "annotation": null
+   }
+  ],
+  "undoCombine": [
+   {
+    "type": "mod-obj",
+    "id": "dccc5e24-4ac7-5f75-9aee-3462aef44e13",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "constraints-h",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "constraints-v",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "fixed-scroll",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [
+     "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "00000000-0000-0000-0000-000000000000"
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "mod-obj",
+    "id": "4aaf3e2e-d708-5496-b957-c995f88b5fc0",
+    "operations": [
+     {
+      "type": "set",
+      "attr": "constraints-h",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "constraints-v",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "fixed-scroll",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [
+     "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "00000000-0000-0000-0000-000000000000"
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "reg-objects",
+    "shapes": [
+     "4aaf3e2e-d708-5496-b957-c995f88b5fc0",
+     "2259ab3c-97be-5e69-8f3e-0b60312e5a02",
+     "00000000-0000-0000-0000-000000000000"
+    ],
+    "page-id": "1d0fa0a8-0d77-5d52-8460-61366b9f8e99"
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "height",
+      "val": 24,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": -30,
+       "y": -30,
+       "width": 180,
+       "height": 24,
+       "x1": -30,
+       "y1": -30,
+       "x2": 150,
+       "y2": -6
+      },
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": -30,
+        "y": -30
+       },
+       {
+        "x": 150,
+        "y": -30
+       },
+       {
+        "x": 150,
+        "y": -6
+       },
+       {
+        "x": -30,
+        "y": -6
+       }
+      ],
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "selrect",
+      "val": {
+       "x": -30,
+       "y": -30,
+       "width": 72,
+       "height": 24,
+       "x1": -30,
+       "y1": -30,
+       "x2": 42,
+       "y2": -6
+      },
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "points",
+      "val": [
+       {
+        "x": -30,
+        "y": -30
+       },
+       {
+        "x": 42,
+        "y": -30
+       },
+       {
+        "x": 42,
+        "y": -6
+       },
+       {
+        "x": -30,
+        "y": -6
+       }
+      ],
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "width",
+      "val": 72,
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "parent-id": "00000000-0000-0000-0000-000000000000",
+    "shapes": [
+     "b73b8dc4-9888-80fa-8008-ba3d52a99946"
+    ],
+    "after-shape": null,
+    "index": 0
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "touched",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 30
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": []
+     },
+     {
+      "type": "set",
+      "attr": "fixed-scroll",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 122,
+     "y": 30
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "constraints-h",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "constraints-v",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "fixed-scroll",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 30
+    }
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "parent-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "shapes": [
+     "3ca9e05c-1a34-5cf7-b1de-e48574a09145"
+    ],
+    "after-shape": null,
+    "index": 0
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "parent-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "shapes": [
+     "4394b246-6369-53bc-b26d-cbf8abcb6181"
+    ],
+    "after-shape": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "index": 0
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": []
+     },
+     {
+      "type": "set",
+      "attr": "constraints-h",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "constraints-v",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 122,
+     "y": 30
+    }
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "parent-id": "00000000-0000-0000-0000-000000000000",
+    "shapes": [
+     "3ca9e05c-1a34-5cf7-b1de-e48574a09145"
+    ],
+    "after-shape": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "index": 0
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": []
+     },
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 122,
+     "y": 30
+    }
+   },
+   {
+    "type": "mod-component",
+    "id": "12d9630e-e79a-5252-9981-4bfdbaef5063",
+    "name": "Button",
+    "path": "",
+    "main-instance-id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "annotation": null,
+    "objects": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": []
+     },
+     {
+      "type": "set",
+      "attr": "variant-id",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "name",
+      "val": "Button",
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 122,
+     "y": 30
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "touched",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 122,
+     "y": 30
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "hide-in-viewer",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 122,
+     "y": 30
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "layout-item-absolute",
+      "val": true,
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": "Value 1",
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 30
+    }
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "path": "",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "variant-properties": [
+     {
+      "name": "Property 1",
+      "value": "Value 1"
+     }
+    ],
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "variant-name",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 30
+    }
+   },
+   {
+    "variant-id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "path": "",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "objects": null,
+    "name": "Component",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "type": "mod-component",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "name": "Component",
+    "path": "",
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "annotation": null,
+    "objects": null
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "strokes",
+      "val": [],
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "variant-id",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "name",
+      "val": "Badge",
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 30
+    }
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "r4",
+      "val": 0,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "r1",
+      "val": 0,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "r3",
+      "val": 0,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "r2",
+      "val": 0,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "name",
+      "val": "Board",
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "is-variant-container",
+      "val": null,
+      "ignore-touched": true
+     },
+     {
+      "type": "set",
+      "attr": "layout-item-absolute",
+      "val": null,
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mod-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "fills",
+      "val": [
+       {
+        "fill-color": "#FFFFFF",
+        "fill-opacity": 1
+       }
+      ],
+      "ignore-touched": true
+     }
+    ]
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "parent-id": "00000000-0000-0000-0000-000000000000",
+    "shapes": [
+     "4394b246-6369-53bc-b26d-cbf8abcb6181"
+    ],
+    "after-shape": null,
+    "index": 0
+   },
+   {
+    "type": "mod-obj",
+    "id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "operations": [
+     {
+      "type": "set-touched",
+      "touched": null
+     },
+     {
+      "type": "set",
+      "attr": "hide-in-viewer",
+      "val": null,
+      "ignore-touched": true
+     }
+    ],
+    "smallpen-layout-offset": {
+     "x": 30,
+     "y": 30
+    }
+   },
+   {
+    "type": "mov-objects",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "parent-id": "00000000-0000-0000-0000-000000000000",
+    "shapes": [
+     "b73b8dc4-9888-80fa-8008-ba3d52a99946"
+    ],
+    "after-shape": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "index": 0
+   },
+   {
+    "type": "del-obj",
+    "id": "b73b8dc4-9888-80fa-8008-ba3d52a99946",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71"
+   },
+   {
+    "type": "mod-component",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "name": "Badge",
+    "path": "",
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "annotation": null,
+    "objects": null
+   },
+   {
+    "main-instance-id": "3ca9e05c-1a34-5cf7-b1de-e48574a09145",
+    "path": "",
+    "id": "12d9630e-e79a-5252-9981-4bfdbaef5063",
+    "objects": null,
+    "name": "Button",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": "2026-10-02T09:14:46.222Z",
+    "type": "mod-component",
+    "annotation": null
+   },
+   {
+    "main-instance-id": "4394b246-6369-53bc-b26d-cbf8abcb6181",
+    "path": "",
+    "id": "774ef45b-a6ce-5922-9751-e8f49ff2c90a",
+    "objects": null,
+    "name": "Badge",
+    "main-instance-page": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "modified-at": "2026-10-02T09:14:46.222Z",
+    "type": "mod-component",
+    "annotation": null
+   }
+  ],
+  "reorder": [
+   {
+    "type": "mov-objects",
+    "parent-id": "e178631b-f732-5fab-8644-5c444de1851c",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "shapes": [
+     "f05b9b43-c394-5548-a19e-a4e9be3d7d25"
+    ],
+    "index": 0
+   }
+  ],
+  "undoReorder": [
+   {
+    "type": "mov-objects",
+    "page-id": "0d7d3c17-eb1b-5c47-9e3e-f6f820ce3e71",
+    "parent-id": "e178631b-f732-5fab-8644-5c444de1851c",
+    "shapes": [
+     "f05b9b43-c394-5548-a19e-a4e9be3d7d25"
+    ],
+    "after-shape": "e3e519b7-c221-5ebf-9407-9a2625e6d3ad",
+    "index": 0
+   }
+  ]
+ }
+}

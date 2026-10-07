@@ -66,6 +66,15 @@ node apps/web/bin/smallpen-web.mjs \
 
 Open the emitted `frontend` URL. The root origin is always the SmallPen Home entry. Background and package-session details never appear in the address bar.
 
+On supported browsers, **Open Package** selects a local folder and saves edits
+there. Other browsers offer **Upload folder…**, which opens a copy under
+`imports/` beside the App's state file. Select the folder containing
+`manifest.json`; the limit is 50 MB and 2000 files. Both appear in recent
+Packages. You can also enter a Package path on the SmallPen server.
+Desktop opens and saves the original directory.
+On macOS, if the browser disables a `.smallpen` package, select its parent
+folder containing just that Package.
+
 The equivalent route shape is:
 
 ```text
@@ -224,60 +233,56 @@ artifacts require a new build. npm cannot atomically publish four packages,
 so a failed run can leave some dependencies published; versions are never
 overwritten or automatically unpublished.
 
-Run `node apps/cli/bin/smallpen.mjs --help` for the full contract. Every main command supports stable JSON output and actionable errors.
-
-`smallpen schema` prints the JSON every write takes: `schema operations` lists
-each operation type with its Package and required fields, `schema operation
-TYPE` gives fields, allowed values, a valid example, and the inverse, and the
-`node`, `token`, `token-types`, `component-set`, `instance`, `presentation`,
-`screen`, `scenario`, `context`, `batch`, and `init` topics describe the
-nested shapes. Field lists come from the validators, and a test applies every
-example to a workspace made by `smallpen init`. Writes reject unknown operation
-types and unknown fields with the allowed names and a suggestion, and a batch
-that changes nothing returns `changed: false` with a `noChange` notice.
-
-Tokens, Context Axes, and shared Component Sets belong to the Foundation
-package; Screens, nodes, Instances, and Scenarios belong to the Product, which
-`read-view`, `render`, `evidence`, `tokens`, and `search-*` take. A
-Presentation renders at the size of its root node; `update-presentation`
-`{viewport}` and `put-scenario` keep the declared sizes in step.
-
-`init --confirm` returns the Package ids and paths, the default Screen,
-Presentation, and root node ids, and the starter Tokens and Component Sets it
-seeded (one per `initialTokens` and `initialComponents` answer, such as
-`tok_color_brand` and `cmp_button`). `put-token` and `put-component-set` with
-an existing id replace it whole. In a `page` or `flow` intent an INSTANCE node
-may carry `overrides` (`{"node_button_label:text": "Add task"}`); each becomes a
-checked `set-instance-override` in the same batch.
-
-Write replies include `inverseBatch`, the exact undo, by default.
-`--inverse-out FILE` saves it to a file, and `--compact` drops it (and
-`guidance`) from the reply in favour of a one-line `summary`. Localized labels
-follow `--locale` where a command offers it, else `LC_ALL`, `LC_MESSAGES`, or
-`LANG`: `zh*` selects Chinese, anything else English.
+Run `node apps/cli/bin/smallpen.mjs --help` for the object groups and shared
+commands. Expand one step at a time:
 
 ```sh
-# Guided Foundation + Product creation
-node apps/cli/bin/smallpen.mjs init ./workspace --json
-
-# Validate, inspect, discover, and render the same Canonical model
-node apps/cli/bin/smallpen.mjs validate ./workspace/product.smallpen --json
-node apps/cli/bin/smallpen.mjs read-view ./workspace/product.smallpen --json
-node apps/cli/bin/smallpen.mjs discover ./workspace/product.smallpen --json
-node apps/cli/bin/smallpen.mjs catalog ./workspace/product.smallpen --json
-node apps/cli/bin/smallpen.mjs search-tokens ./workspace/product.smallpen --color '#6750a4' --json
-node apps/cli/bin/smallpen.mjs search-components ./workspace/product.smallpen --query button --json
-# AI view: PNG base64 and structure in stdout, without image files
-node apps/cli/bin/smallpen.mjs inspect-view ./workspace/product.smallpen --include-image --json
-# Intentional persistent export for a human review
-node apps/cli/bin/smallpen.mjs evidence ./workspace/product.smallpen --output review --json
-
-# Apply one reviewed current-revision batch atomically
-node apps/cli/bin/smallpen.mjs apply ./workspace/product.smallpen --batch batch.json --json
-node apps/cli/bin/smallpen.mjs repair ./workspace/product.smallpen --json
+smallpen help token
+smallpen help token show
+smallpen schema command token show --json
+smallpen token show PACKAGE --token-id ID
 ```
 
-Other public reads include `inspect`, `list`, `read`, `compare`, `tokens`, `search-tokens`, `search-components`, `effective-token`, `explain-token`, and `render`. Public binary entries for an existing Product are `import-media` (PNG/JPEG/GIF/WebP/SVG with content-addressed blobs), `remove-media`, and `import-font` (TTF/OTF convert to WOFF; WOFF imports as-is; WOFF2 reaches an explicit conversion boundary). `library-refresh` re-fetches one declared URL Library into its verified cache (URL Libraries must resolve to public addresses; set `SMALLPEN_ALLOW_PRIVATE_LIBRARY_HOSTS=1` to serve one from localhost or a private network during development), `watch` streams NDJSON revision events for local changes, and `apply --explain` previews every write with per-operation targets and a canonical before/after diff without writing. Token search includes visible Foundation Tokens, searches every finite Web/Desktop/theme Context unless one is explicit, and ranks exact or nearby color and numeric values. Component search includes complete Product and public Foundation candidates with legal variants. Write results contain non-blocking `design_token_not_used` plus an exact `recommendedBinding` when a value resolves to a Token, or `design_token_value_unmatched` when no Token resolves to the raw value and the hard-coding requires confirmation. Raw width and height values are listed only when a Token resolves to them or lies within 10%; the rest are counted in `warningSummary.suppressed`. This advice does not make a write invalid, and `validate` does not repeat it. When a text node uses a font that is neither bundled (Source Sans Pro) nor imported, `render` reports one `font_render_fallback` per missing family with its node ids, the available fonts, and the `import-font` command.
+Project, theme, Token, component, page, configuration, asset, media, font and
+prototype flow commands use `OBJECT ACTION PACKAGE`. `view`, `export` and
+`validate` are the shared design reads, exports and checks. Advanced batches,
+drafts and remote library operations are under `advanced`. Previous flat
+commands remain compatibility aliases, outside ordinary discovery.
+
+The CLI's help/schema explains its operations without a Skill. The independently
+installable [application design Skill](skills/README.md) supplies requirements,
+design-system reuse and review rules. Run `npm run build:skills` to generate it
+from `skill-src` and the CLI contract; `build:cli` also includes it. Animation
+materials and character boards remain drafts for later work. See
+[CLI and Skill responsibilities](docs/CLI-SKILLS.md).
+
+
+`theme list` frequently reads groups/options/defaults. Unspecified groups use
+project defaults; explicit `--theme GROUP/OPTION` only selects that call. The
+App and CLI share those rules. CLI reads never change App selection or save a
+combination. `token set` writes Tokens by name and `theme add|rename|default|
+delete` edit options named `Group/Option`; no IDs or token Sets are needed.
+
+`view` looks at anything by name (`--page`, `--component`, `--token`,
+`--canvas`) as text, wireframe, PNG or issues. `export` saves a wireframe or,
+with `--format png`, a PNG. Image inspection requires an image-capable caller.
+`validate` checks every version of a page or variant of a component unless one
+is named. Read skipped coverage.
+
+No command takes an ID except `advanced apply` (an exact batch, such as the
+undo batch a write returns; `schema operation TYPE` documents its operations)
+and `project repair`. Writes use the same atomic engine and revision checks.
+Choose `--batch-id` before retryable writes; reverse edits are explicit new
+writes, not history rollback.
+
+JSON is compact, with an 8 KiB stdout budget. `--full` expands data; large
+results use searchable temporary files with hashes. `--stdout` permits large
+stdout. Random names in one OS temporary folder prevent concurrent calls from
+colliding; each call cleans recognized files older than 30 minutes. `--output`
+retains deliverables outside that temporary tree.
+
+See [CLI reference](CLI-AI-TOPIC.md) for the command groups, selectors, writes,
+prototype interactions and output rules.
 
 ## Figma Draft workflow
 
@@ -298,13 +303,33 @@ Reimport writes another Draft file and never overwrites Product or Foundation. `
 
 ## Evidence
 
-Image commands (`render`, `evidence`, `inspect-view --include-image`, and `render-matrix`) return one JSON response with bare PNG base64 by default, even without `--json`. They do not create image files, evidence JSON files, matrix directories, or temporary images unless `--output` explicitly requests an export. `render` returns the image at the top level, `evidence` and `inspect-view` use `image`, and `render-matrix` uses an ordered `images` array. `inspect-view --base64` is only needed when an explicit `--output` requests a file and the client also wants inline bytes.
+Image commands (`view --as png` and `export --format png`) return randomly
+named temporary artifact paths by default.
+`--output` chooses durable caller-owned files. `--base64` explicitly requests
+inline PNG bytes; `--full` expands data and keeps PNG files. Only explicit
+`--stdout` or `--base64` bypasses the stdout budget. Open the artifact only
+when visual inspection is needed. Files live in one private folder under the Linux/macOS/Windows system temp
+folder. Names use `smallpen-TIMESTAMP-UUID-KIND.ext`, with a fresh UUID per call.
+Concurrent calls retain separate results. Every invocation cleans recognized CLI
+files whose modification time is older than 30 minutes, skipping active calls.
+Consume within 30 minutes and verify current hashes. Caller-owned exports remain
+intact.
+Temporary artifacts may also be removed by the OS;
+use `--output` or `--inverse-out` for records that must survive cleanup.
 
 The CLI `evidence` command returns a PNG and evidence from the same deterministic projection; `--output PREFIX` exports them as `PREFIX.png` and `PREFIX.json`. JSON includes the Package ID, revision/package hash, resolved selector, render hash, viewport, node-to-image regions, Semantic Tree, and renderer diagnostics. Evidence is suitable for an external Review workflow; it does not add comments or approval state to `.smallpen`.
 
-An image-capable client should decode the current response and verify the decoded PNG's SHA-256 against `renderHash`, keeping its revision and selector attached. Base64 text is not itself visual QA. On an error, do not reuse a previous response or file; explicit exports can leave older files in place and multi-file export is not transactional. Exported files are caller-owned and are not automatically cleaned. This image-delivery contract does not disable independent remote-library package caching or prevent a caller from deliberately saving stdout.
+An image-capable client should open the current artifact or decode explicitly
+requested bytes and verify the PNG's SHA-256 against `renderHash`, keeping its
+revision and selector attached. Base64 text is not itself visual QA. On an error,
+do not reuse a previous response or file; exports can leave older files in place
+and multi-file export is not transactional. Explicit exports are caller-owned.
+Remote-library package caching remains independent.
 
-Package reads retain the existing concurrency guard: a reusable empty sibling `.<package>.write-lock` directory remains after its temporary ownership records are released. It contains no rendered image and does not grow per preview. Inline image delivery does not bypass package locking or interrupted-commit recovery.
+Package reads retain the existing concurrency guard: a reusable empty sibling
+`.<package>.write-lock` directory remains after its temporary ownership records
+are released. It contains no rendered image and does not grow per preview.
+Artifact and inline delivery use the same package locking and commit recovery.
 
 Where the lock cannot be created, as on a read-only volume, reads proceed without it, and writes fail `package_not_writable` without touching the Package. An interrupted commit there still needs a writable location. A symlinked lock path fails `invalid_write_lock`.
 
@@ -320,3 +345,8 @@ npm run test:desktop
 ```
 
 The Web E2E loads the real Penpot frontend, asserts the original workspace component surfaces, edits opacity through Penpot's layer panel, verifies the Canonical file write, and proves the workspace remains alive after persistence. The Desktop smoke takes an already built Electron app (`apps/desktop/dist` by default, or a path argument), starts it once on Home and once on a copy of a real package, waits for each to report ready, and confirms that the shared service process has stopped after exit.
+
+`--output` and `--inverse-out` must name paths outside the CLI temporary tree,
+which is reserved for expiring CLI files. Windows uses the current user SID and
+Windows ACLs; it requires Windows PowerShell and a temporary filesystem that
+supports ACLs. Unsupported or inaccessible directories fail explicitly.

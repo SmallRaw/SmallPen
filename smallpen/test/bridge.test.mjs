@@ -172,6 +172,12 @@ function minimalTtf() {
 }
 
 function runCli(args, input) {
+  // Schema and full-value checks opt into stdout; fixed-file transport is tested separately.
+  if (
+    (args[0] === "schema" || args.includes("--full")) &&
+    !args.includes("--stdout")
+  )
+    args = [...args, "--stdout"];
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
       stdio: ["pipe", "pipe", "pipe"],
@@ -298,14 +304,11 @@ test("CLI Token changes reload into Web with resolved bound attributes", async (
   const intentPath = join(dirname(packagePath), "set-token.json");
   await writeFile(
     intentPath,
-    JSON.stringify({
-      operations: [
-        { path: "color.primary", type: "set-token-value", value: "#db2777" },
-      ],
-    }),
+    JSON.stringify({ tokens: [{ name: "color.primary", value: "#db2777" }] }),
   );
   const changed = await runCli([
     "token",
+    "set",
     packagePath,
     "--intent",
     intentPath,
@@ -478,10 +481,7 @@ test("the workspace bridge exposes Foundation assets and persists their referenc
   );
   assert.equal(mediaResponse.status, 200);
   assert.equal(mediaResponse.headers.get("content-type"), "image/png");
-  assert.deepEqual(
-    Buffer.from(await mediaResponse.arrayBuffer()),
-    mediaBytes,
-  );
+  assert.deepEqual(Buffer.from(await mediaResponse.arrayBuffer()), mediaBytes);
 
   const response = await fetch(`${service.url}/v1/penpot/commit`, {
     body: JSON.stringify({
@@ -547,7 +547,11 @@ test("the Library bridge links and unlinks a local Package source", async (conte
 
   // Machine-specific paths are refused before anything is committed, so a
   // typed absolute path cannot link and then put the Product into Repair.
-  for (const path of [libraryPath, "C:\\libs\\icons.smallpen", "..\\icons.smallpen"]) {
+  for (const path of [
+    libraryPath,
+    "C:\\libs\\icons.smallpen",
+    "..\\icons.smallpen",
+  ]) {
     const refused = await fetch(`${service.url}/v1/libraries/link`, {
       body: JSON.stringify({ source: { path, type: "local" } }),
       headers: { "content-type": "application/json" },
@@ -1313,7 +1317,7 @@ test("the local HTTP bridge preserves a newly added node identity across commits
   assert.equal(screen.presentations[0].nodes[nodeId].name, "Edited After Add");
 });
 
-test("the local HTTP bridge persists a new Penpot page across reloads", async (context) => {
+test("a Penpot page made in the App is a new canvas that persists across reloads", async (context) => {
   const packagePath = await copyFixture();
   const service = await serveLocalPackage({ packagePath, port: 0 });
   context.after(() => service.close());
@@ -1321,7 +1325,6 @@ test("the local HTTP bridge persists a new Penpot page across reloads", async (c
     response.json(),
   );
   const runtimeId = "77777777-7777-4777-8777-777777777777";
-  const presentationId = "pres_77777777777747778777777777777777";
 
   const added = await fetch(`${service.url}/v1/penpot/commit`, {
     body: JSON.stringify({
@@ -1337,20 +1340,8 @@ test("the local HTTP bridge persists a new Penpot page across reloads", async (c
   const reloaded = await fetch(`${service.url}/v1/workspace`).then((response) =>
     response.json(),
   );
-  assert.equal(reloaded.runtime.pages.scr_roundtrip[presentationId], runtimeId);
-  assert.deepEqual(
-    reloaded.entries["screens/roundtrip.json"].presentations[1],
-    {
-      id: presentationId,
-      interactions: [],
-      name: "Second Page",
-      nodes: {},
-      platform: "desktop",
-      rootId: null,
-      rootIds: [],
-      viewport: { height: 600, width: 800 },
-    },
-  );
+  const canvas = reloaded.runtime.canvases.find(({ pageId }) => pageId === runtimeId);
+  assert.deepEqual([canvas.name, canvas.boards], ["Second Page", []], "the page keeps its Penpot id");
 
   const renamed = await fetch(`${service.url}/v1/penpot/commit`, {
     body: JSON.stringify({
@@ -1362,19 +1353,13 @@ test("the local HTTP bridge persists a new Penpot page across reloads", async (c
     method: "POST",
   });
   assert.equal(renamed.status, 200);
-
-  const screen = JSON.parse(
-    await readFile(join(packagePath, "screens/roundtrip.json"), "utf8"),
-  );
-  assert.equal(screen.presentations[1].id, presentationId);
-  assert.equal(screen.presentations[1].name, "Renamed Page");
+  const manifest = JSON.parse(await readFile(join(packagePath, "manifest.json"), "utf8"));
+  assert.equal(manifest.canvases.find(({ id }) => id === "cnv_77777777777747778777777777777777").name, "Renamed Page");
 });
 
-test("the CLI reads and applies the same typed operation contract", async () => {
+test("the CLI applies the typed operation contract and inspects the result", async () => {
   const packagePath = await copyFixture();
-  const readResult = await runCli(["read", packagePath, "--json"]);
-  assert.equal(readResult.code, 0, readResult.stderr);
-  const opened = JSON.parse(readResult.stdout);
+  const opened = await openPackage(packagePath);
   const batchPath = join(dirname(packagePath), "batch.json");
   await writeFile(
     batchPath,
@@ -1394,6 +1379,7 @@ test("the CLI reads and applies the same typed operation contract", async () => 
   );
 
   const applyResult = await runCli([
+    "advanced",
     "apply",
     packagePath,
     "--batch",
@@ -1413,7 +1399,13 @@ test("the CLI reads and applies the same typed operation contract", async () => 
   assert.equal(validateResult.code, 0, validateResult.stderr);
   assert.equal(JSON.parse(validateResult.stdout).status, "valid");
 
-  const inspectResult = await runCli(["inspect", packagePath, "--json"]);
+  const inspectResult = await runCli([
+    "project",
+    "show",
+    packagePath,
+    "--full",
+    "--json",
+  ]);
   assert.equal(inspectResult.code, 0, inspectResult.stderr);
   const inspected = JSON.parse(inspectResult.stdout);
   assert.equal(inspected.package.id, "pkg_roundtrip");

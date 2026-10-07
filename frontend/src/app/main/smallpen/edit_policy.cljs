@@ -32,12 +32,22 @@
   [shape]
   (= "source" (get-in shape [:plugin-data :smallpen "design-system"])))
 
+(defn- read-only-source?
+  "A Product's Design System page shows its Foundation's Token Cells; their
+  source ref says they are read-only there."
+  [shape]
+  (some-> (get-in shape [:plugin-data :smallpen "design-system-ref"])
+          (js/JSON.parse)
+          (unchecked-get "readOnly")
+          (true?)))
+
 (defn shape-editable?
   "Edition mode (text, path) is limited to source shapes on DS pages, which
   also avoids a refused commit on every keystroke."
   [state shape]
   (or (not (current-page-locked? state))
-      (source-shape? shape)))
+      (and (source-shape? shape)
+           (not (read-only-source? shape)))))
 
 (defn- smallpen-file?
   "Only SmallPen projections carry file-level SmallPen plugin data, so every
@@ -87,18 +97,59 @@
         (cond
           (not= :mod-obj (:type change)) :structure
           (not (source-shape? shape)) :decoration
+          (read-only-source? shape) :foundation
           (some #(or (#{:shapes :parent-id :frame-id :component-id :component-file
                         :component-root :main-instance :shape-ref} %)
                      (str/starts-with? (name (or % :none)) "layout")) attrs) :structure
           (and (some attrs [:x :y])
                (not (some attrs [:width :height]))) :position)))))
 
+(defn- blocked-decoration-change
+  "The labels of the Components page are generated: only renderer
+  bookkeeping may touch them, never a user edit."
+  [pages change]
+  (let [page (change-page pages change)]
+    (when (and (true? (get-in page [:plugin-data :smallpen "components-page"]))
+               (not (bookkeeping? change derived-attributes))
+               (some #(= "decoration"
+                         (get-in page [:objects % :plugin-data :smallpen "components-page"]))
+                     (into [(:id change) (:parent-id change)] (:shapes change))))
+      :decoration)))
+
+(def ^:private token-edit-types
+  #{:set-token :set-token-set :set-token-theme :move-token-set
+    :move-token-set-group :rename-token-set-group})
+
+(defn- foundation-tokens
+  "The runtime ids and set names of the Foundation token sets, themes and
+  tokens a Product's token library shows (projection.cljs), or nil."
+  [file]
+  (when-let [value (get-in file [:data :plugin-data :smallpen "foundation-tokens"])]
+    (let [{:keys [ids sets]} (js->clj (js/JSON.parse value) :keywordize-keys true)]
+      {:ids (set ids) :sets (set sets)})))
+
+(defn- foundation-token-change?
+  [{:keys [ids sets]} change]
+  (and (contains? token-edit-types (:type change))
+       (or (some #(contains? ids (some-> (get change %) str)) [:id :set-id :token-id])
+           (some (fn [path]
+                   (let [name (str/join "/" path)]
+                     (some #(or (= name %) (str/starts-with? % (str name "/"))) sets)))
+                 (keep #(get change %) [:from-path :to-path :before-path :set-group-path])))))
+
 (defn- blocked-change
-  [pages propagation? change]
-  (if (and (#{:mod-page :del-page :mov-page} (:type change))
-           (generated-page? (change-page pages change)))
+  [pages foundation propagation? change]
+  (cond
+    (and (#{:mod-page :del-page :mov-page} (:type change))
+         (generated-page? (change-page pages change)))
     :generated-page
-    (blocked-shape-change pages propagation? change)))
+
+    (and foundation (foundation-token-change? foundation change))
+    :foundation
+
+    :else
+    (or (blocked-decoration-change pages change)
+        (blocked-shape-change pages propagation? change))))
 
 (defn commit-block-reason
   "Gate BEFORE the local commit, undo stack and persistence buffer. Reject
@@ -110,10 +161,12 @@
   ([file changes origin]
    (when (smallpen-file? file)
      (let [pages        (get-in file [:data :pages-index])
+           foundation   (when (some #(contains? token-edit-types (:type %)) changes)
+                          (foundation-tokens file))
            propagation? (propagation? origin)]
        ;; Preserve renderer measurement commits: they update local text geometry
        ;; and are already accepted as canonical no-ops by the adapter.
-       (some #(blocked-change pages propagation? %) changes)))))
+       (some #(blocked-change pages foundation propagation? %) changes)))))
 
 (defn- copied-shape?
   "Duplicate and paste mark each new shape's add-obj with the id it was
@@ -188,4 +241,5 @@
     :decoration (tr "smallpen.design-system.blocked-decoration")
     :position (tr "smallpen.design-system.blocked-position")
     :generated-page (tr "smallpen.design-system.blocked-generated-page")
+    :foundation (tr "smallpen.design-system.blocked-foundation")
     (tr "smallpen.design-system.blocked-structure")))

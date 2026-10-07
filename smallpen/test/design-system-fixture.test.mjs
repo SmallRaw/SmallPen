@@ -41,7 +41,8 @@ test("design-system fixture is a legal package with fixed readable ids", async (
   );
   const validated = JSON.parse(stdout);
   assert.equal(validated.status, "valid");
-  assert.equal(validated.packageId, "pkg_design_system");
+  // Replies leave out ids; the stored manifest is checked below.
+  assert.equal(validated.packageId, undefined);
 
   const snapshot = await loadPackageFromValues(
     "memory://design-system.smallpen",

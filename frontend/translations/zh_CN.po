@@ -8315,6 +8315,7 @@ msgstr "如需提高此上限，请发送邮件至 [support@penpot.app](%s) 联�
 msgid "workspace.versions.warning.text"
 msgstr "自动保存的版本将保留 %s 天。"
 
+
 #: src/app/main/ui/workspace/sidebar/assets/tokens.cljs
 msgid "workspace.assets.tokens"
 msgstr "令牌"
@@ -8349,27 +8350,35 @@ msgid_plural "workspace.libraries.smallpen.tokens"
 msgstr[0] "1 个令牌"
 msgstr[1] "%s 个令牌"
 
+#: src/app/main/ui/workspace/sidebar/history.cljs:144
 msgid "workspace.undo.entry.multiple.token"
 msgstr "令牌"
 
+#: src/app/main/ui/workspace/sidebar/history.cljs:145
 msgid "workspace.undo.entry.multiple.token-set"
 msgstr "令牌集"
 
+#: src/app/main/ui/workspace/sidebar/history.cljs:146
 msgid "workspace.undo.entry.multiple.token-theme"
 msgstr "令牌主题"
 
+#: src/app/main/ui/workspace/sidebar/history.cljs:162
 msgid "workspace.undo.entry.single.token"
 msgstr "令牌"
 
+#: src/app/main/ui/workspace/sidebar/history.cljs:163
 msgid "workspace.undo.entry.single.token-set"
 msgstr "令牌集"
 
+#: src/app/main/ui/workspace/sidebar/history.cljs:164
 msgid "workspace.undo.entry.single.token-theme"
 msgstr "令牌主题"
 
+#: src/app/main/smallpen/home.cljs:236
 msgid "smallpen.home.empty-subtitle"
 msgstr "新建一个 .smallpen Package，或打开已有文件。"
 
+#: src/app/main/smallpen/home.cljs:235
 msgid "smallpen.home.empty-title"
 msgstr "没有最近使用的 Package"
 
@@ -8395,24 +8404,31 @@ msgstr "找不到这个文件：它可能已被移动、重命名或删除。请
 msgid "smallpen.home.notice.link-unavailable"
 msgstr "SmallPen 无法打开这个链接。请从下面的列表重新打开，或新建一个 Package。"
 
+#: src/app/main/smallpen/home.cljs:80
 msgid "smallpen.home.open"
 msgstr "已打开"
 
+#: src/app/main/smallpen/home.cljs:188, src/app/main/smallpen/home.cljs:217
 msgid "smallpen.home.open-package"
 msgstr "打开 Package…"
 
+#: src/app/main/smallpen/home.cljs:192
 msgid "smallpen.home.open-prompt"
 msgstr "输入本地 .smallpen Package 路径"
 
+#: src/app/main/smallpen/home.cljs:224
 msgid "smallpen.home.recent"
 msgstr "最近使用的 Package"
 
+#: src/app/main/smallpen/home.cljs:79
 msgid "smallpen.home.repair"
 msgstr "需要修复"
 
+#: src/app/main/smallpen/home.cljs:210
 msgid "smallpen.home.subtitle"
 msgstr "本地工作区"
 
+#: src/app/main/ui/workspace/main_menu.cljs:1048
 msgid "smallpen.home.navigation"
 msgstr "首页"
 
@@ -8485,144 +8501,201 @@ msgstr "描述"
 msgid "smallpen.tokens.import.field-type"
 msgstr "类型"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1148
 msgid "workspace.tokens.matrix.axes"
 msgstr "设计模式"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:721,
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1316,
+#: src/app/main/ui/workspace/tokens/quick_panel.cljs:109
 msgid "workspace.tokens.matrix.current-combination"
 msgstr "当前主题组合"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:661
 msgid "workspace.tokens.matrix.current-domain"
 msgstr "选择 %s 当前使用的选项"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1219
 msgid "workspace.tokens.matrix.activate-variant"
 msgstr "启用 %s"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:182,
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1203
 msgid "workspace.tokens.matrix.name"
 msgstr "名称"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:173,
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1179,
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1302
 msgid "workspace.tokens.matrix.add-axis"
 msgstr "添加模式"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1247
 msgid "workspace.tokens.matrix.add-variant"
 msgstr "添加细分项"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1312
 msgid "workspace.tokens.matrix.add-variable"
 msgstr "添加变量"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:559
 msgid "workspace.tokens.matrix.reference-options"
 msgstr "引用令牌"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:531
 msgid "workspace.tokens.matrix.no-reference-results"
 msgstr "没有匹配的令牌引用"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:528
 msgid "workspace.tokens.matrix.reference-unset"
 msgstr "%s 中未设置"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:964
 msgid "workspace.tokens.matrix.reference-missing"
 msgstr "令牌 %s 不存在"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:553,
+#: src/app/main/ui/workspace/tokens/matrix.cljs:633
 msgid "workspace.tokens.matrix.unset"
 msgstr "未设置"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:630
 msgid "workspace.tokens.matrix.set-value"
 msgstr "设置 %s（%s）"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1297
 msgid "workspace.tokens.matrix.empty"
 msgstr "添加模式或变量，开始定义设计令牌。"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1206
 msgid "workspace.tokens.matrix.global-contract"
 msgstr "按令牌类型设置 Key 规则"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1229
 msgid "workspace.tokens.matrix.variant-menu"
 msgstr "打开 %s 细分项菜单"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1293
 msgid "workspace.tokens.matrix.token-menu"
 msgstr "打开 %s 令牌菜单"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:171
 msgid "workspace.tokens.matrix.rename-axis"
 msgstr "重命名模式"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:172
 msgid "workspace.tokens.matrix.rename-variant"
 msgstr "重命名细分项"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:174
 msgid "workspace.tokens.matrix.rename-token"
 msgstr "重命名令牌"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1264,
+#: src/app/main/ui/workspace/tokens/matrix.cljs:1265
 msgid "workspace.tokens.matrix.rename-token-menu"
 msgstr "重命名 %s"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:805
 msgid "workspace.tokens.matrix.rename-empty"
 msgstr "名称不能为空。"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:809
 msgid "workspace.tokens.matrix.rename-separator"
 msgstr "名称不能包含 /，它用于分隔令牌集层级。"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:812
 msgid "workspace.tokens.matrix.rename-conflict"
 msgstr "这个名称已被使用。"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:857
 msgid "workspace.tokens.matrix.delete-axis"
 msgstr "删除模式"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:858
 msgid "workspace.tokens.matrix.delete-axis-message"
 msgstr "删除 %s 及其全部细分项？对应的令牌集和配对主题也会删除。"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:870
 msgid "workspace.tokens.matrix.delete-variant"
 msgstr "删除细分项"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:871
 msgid "workspace.tokens.matrix.delete-variant-message"
 msgstr "删除 %s 细分项？对应的令牌集和配对主题也会删除。"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:117
 msgid "workspace.tokens.matrix.override-warning"
 msgstr "由 %s 定义。%s 在令牌集顺序中更靠后，因此使用它。"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:287
 msgid "workspace.tokens.matrix.contract"
 msgstr "令牌 Key 规则"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:313
 msgid "workspace.tokens.matrix.contract.global"
 msgstr "全局规则"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:295
 msgid "workspace.tokens.matrix.contract-description"
 msgstr "先设置全局默认值，也可按每种令牌类型单独覆盖。“开放”表示不限制名称。"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:289
 msgid "workspace.tokens.matrix.contract.type-table"
 msgstr "按令牌类型设置规则"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:302
 msgid "workspace.tokens.matrix.contract.type-column"
 msgstr "令牌类型"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:254,
+#: src/app/main/ui/workspace/tokens/matrix.cljs:304
 msgid "workspace.tokens.matrix.contract-mode"
 msgstr "处理方式"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:259
 msgid "workspace.tokens.matrix.contract.open"
 msgstr "开放"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:258
 msgid "workspace.tokens.matrix.contract.inherit"
 msgstr "跟随全局"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:260
 msgid "workspace.tokens.matrix.contract.warn"
 msgstr "警告"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:261
 msgid "workspace.tokens.matrix.contract.enforce"
 msgstr "强制"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:265,
+#: src/app/main/ui/workspace/tokens/matrix.cljs:306
 msgid "workspace.tokens.matrix.contract-prefix"
 msgstr "必需前缀"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:270,
+#: src/app/main/ui/workspace/tokens/matrix.cljs:308
 msgid "workspace.tokens.matrix.contract-separator"
 msgstr "分隔符"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:272
 msgid "workspace.tokens.matrix.separator.hyphen"
 msgstr "连字符（-）"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:273
 msgid "workspace.tokens.matrix.separator.dot"
 msgstr "点号（.）"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:274
 msgid "workspace.tokens.matrix.separator.underscore"
 msgstr "下划线（_）"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:310
 msgid "workspace.tokens.matrix.contract-preview"
 msgstr "预览"
 
+#: src/app/main/ui/workspace/tokens/matrix.cljs:325
 msgid "workspace.tokens.matrix.contract-draft-note"
 msgstr "本次评审草稿只保存在面板本地，暂不改变 Package 格式。"
 
@@ -8964,7 +9037,7 @@ msgstr "暂无组件"
 
 #: src/app/main/smallpen/projection.cljs
 msgid "smallpen.design-system.components-source"
-msgstr "组件源"
+msgstr "组件"
 
 #: src/app/main/smallpen/projection.cljs
 msgid "smallpen.design-system.summary"
@@ -9189,3 +9262,146 @@ msgstr "该 Cell 是引用：提交将写入新的引用表达式（当前 %s）
 #: src/app/main/smallpen/token_inspector.cljs
 msgid "smallpen.dse.inspector.apply"
 msgstr "应用到源 Cell"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.divider"
+msgstr "分隔线"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.edit-note"
+msgstr "在这里用 Penpot 原生方式编辑变体和属性。标签由系统生成，会随属性自动更新。"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.labels-layer"
+msgstr "%s · 标签"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.located-note"
+msgstr "这些组件的主组件在画面页面上，请到对应页面修改。在素材面板中右键组件，选择“显示主组件”即可跳过去。"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.located-page"
+msgstr "主组件在“%s”页面"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.located-title"
+msgstr "画面中的组件"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.no-properties"
+msgstr "没有属性"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.properties"
+msgstr "属性：%s · %s 个变体"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.summary"
+msgstr "%s 个组件集 · %s 个变体 · %s 个画面内组件"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.theme-note"
+msgstr "组件按当前启用的主题显示。主题对整个文件生效，可在 TOKENS 面板的主题菜单中切换。"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.title"
+msgstr "组件"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.uncategorized"
+msgstr "未分类"
+
+#: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-foundation"
+msgstr "这属于 Foundation，在这里只读。请在 Foundation 中修改。"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.choose-folder"
+msgstr "选择 Package 文件夹…"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.local-directory"
+msgstr "本地：%s"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.open-server-prompt"
+msgstr "Package 路径"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.upload-help"
+msgstr "上传包含 manifest.json 的 .smallpen 文件夹，编辑会保存到上传后的副本。上限：50 MB、2000 个文件。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.stale-instances"
+msgstr ""
+"%s 个实例使用的变体已不在其 Foundation 组件中。它们暂时显示为最接近的变体，修复前此 Package 保持只读：对它运行 "
+"smallpen repair，为每个实例选择变体或将其删除。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.local.file-conflict"
+msgstr "文件已被其他程序修改，未覆盖。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.local.permission-required"
+msgstr "没有写入权限，请重新打开文件夹。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.local.save-failed"
+msgstr "保存失败，请检查权限和磁盘空间。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.container-content"
+msgstr "组件的变体画板中只能放置该组件的变体。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.duplicate-selection"
+msgstr "两个变体的属性值会完全相同。请为每个变体设置不同的属性值组合。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.save.renamed"
+msgstr "名称已被使用，已自动改为：%s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.save.duplicate-name"
+msgstr "已有同名对象“%s”。名称不能重复，请换一个名称。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.in-use"
+msgstr "仍有实例在使用这个变体。请先切换或删除该实例。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.nested-instance"
+msgstr "SmallPen 暂不支持在变体中放置组件副本。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.outside-container"
+msgstr "变体必须留在其组件的变体画板内。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.page-shape"
+msgstr "组件页面上只能放置组件。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.properties-mismatch"
+msgstr "同一组件的所有变体必须具有相同的属性。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.property-name-invalid"
+msgstr "属性名称不能为空，且不能重复。"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.value-missing"
+msgstr "每个变体的每个属性都需要一个值。"
+
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.local.folder-too-large"
+msgstr "文件夹超过 50 MB 或 2000 个文件。"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.upload-folder"
+msgstr "上传文件夹…"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.local.invalid-folder"
+msgstr "请选择 Package 文件夹。"

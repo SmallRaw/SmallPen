@@ -23,7 +23,7 @@
    [app.main.smallpen.projection :as projection]
    [app.main.smallpen.session :as local-session]
    [app.main.store :as st]
-   [app.util.i18n :refer [tr]]
+   [app.util.i18n :as i18n :refer [tr]]
    [app.util.timers :as tm]
    [beicon.v2.core :as rx]
    [clojure.string :as str]
@@ -173,19 +173,83 @@
                                 :details (:details error)
                                 :status (.-status response)})))))))))
 
+(defn native-directory-supported?
+  []
+  (and (not (desktop-runtime?))
+       (true? (unchecked-get js/globalThis "isSecureContext"))
+       (fn? (unchecked-get js/globalThis "showDirectoryPicker"))
+       (some? (unchecked-get js/globalThis "smallpenNativeFilesReady"))))
+
+(defn- native-files-call
+  [method & args]
+  (if-let [ready (unchecked-get js/globalThis "smallpenNativeFilesReady")]
+    (.then ready (fn [module]
+                   (.apply (unchecked-get module method) nil (to-array args))))
+    (js/Promise.resolve nil)))
+
+(defn local-directories
+  []
+  (-> (native-files-call "localDirectories")
+      (.then #(js->clj % :keywordize-keys true))))
+
+(defn open-local-directory!
+  []
+  ;; Call the picker directly in the button gesture, before any promise wait.
+  (-> (.showDirectoryPicker js/window #js {:mode "readwrite"})
+      (.then #(native-files-call "openDirectory" % @backend-url))
+      (.then #(js->clj % :keywordize-keys true))))
+
+(defn local-file-error
+  [cause]
+  (case (unchecked-get cause "code")
+    "native_permission_required" (tr "smallpen.local.permission-required")
+    "native_file_conflict" (tr "smallpen.local.file-conflict")
+    "native_missing_manifest" (tr "smallpen.local.invalid-folder")
+    "native_upload_limit" (tr "smallpen.local.folder-too-large")
+    (or (ex-message cause) (tr "smallpen.local.save-failed"))))
+
+(defn- sync-local-directory!
+  [file-id & [revision]]
+  (-> (native-files-call "syncPackage" file-id @backend-url
+                         #js {:onCommit (fn []
+                                          (when revision
+                                            (swap! own-revisions #(->> (conj % revision) (take-last 64) vec))
+                                            (when (= file-id (:file-id @workspace-state))
+                                              (swap! workspace-state assoc :revision revision)
+                                              (reset! workspace-promise nil))))})
+      (.catch
+       (fn [cause]
+         (let [message (local-file-error cause)]
+           (st/emit! (ntf/show {:content message :level :error :timeout nil}))
+           (throw (ex-info message {:type :persistence
+                                    :code :local-directory-save-failed}
+                           cause)))))))
+
 (defn- request
   ([path]
    (request path nil))
   ([path options]
    (let [options (or options #js {})
-         headers (js/Headers. (unchecked-get options "headers"))]
-     (when-let [file-id (:file-id @workspace-state)]
+         headers (js/Headers. (unchecked-get options "headers"))
+         file-id (:file-id @workspace-state)]
+     (when file-id
        (.set headers "x-smallpen-file" file-id))
      (when-let [session-id (:package-session-id @workspace-state)]
        (.set headers "x-smallpen-package" session-id))
      (unchecked-set options "headers" headers)
-     (-> (js/fetch (endpoint path) options)
-         (.then response-json)))))
+     (-> (if (and file-id (= path "/v1/workspace"))
+           (sync-local-directory! file-id)
+           (js/Promise.resolve nil))
+         (.then (fn [_] (js/fetch (endpoint path) options)))
+         (.then response-json)
+         (.then (fn [value]
+                  (if (and file-id (:revision value)
+                           (= "POST" (unchecked-get options "method")))
+                    ;; The service commit is durable even if browser writeback
+                    ;; fails. Only a bound directory adopts it before the ack.
+                    (-> (sync-local-directory! file-id (:revision value))
+                        (.then (constantly value)))
+                    value)))))))
 
 (defn application-state
   []
@@ -193,10 +257,11 @@
 
 (defn open-package
   [locator]
-  (-> (js/fetch "/desktop/open-package"
-                #js {:method "POST"
-                     :headers #js {"content-type" "application/json"}
-                     :body (js/JSON.stringify #js {:locator locator})})
+  (-> (native-files-call "prepareOpen" locator @backend-url)
+      (.then (fn [_] (js/fetch "/desktop/open-package"
+                               #js {:method "POST"
+                                    :headers #js {"content-type" "application/json"}
+                                    :body (js/JSON.stringify #js {:locator locator})})))
       (.then response-json)))
 
 (defn create-package
@@ -205,6 +270,21 @@
                 #js {:method "POST"
                      :headers #js {"content-type" "application/json"}
                      :body (js/JSON.stringify #js {:locator locator})})
+      (.then response-json)))
+
+(defn directory-upload-form
+  [files]
+  (let [form (js/FormData.)]
+    (doseq [file files
+            :when (not-any? #(str/starts-with? % ".")
+                            (str/split (.-webkitRelativePath file) #"/"))]
+      (.append form (.-webkitRelativePath file) file (.-name file)))
+    form))
+
+(defn import-package!
+  [files]
+  (-> (js/fetch "/packages/import"
+                #js {:method "POST" :body (directory-upload-form files)})
       (.then response-json)))
 
 (defn open-packages
@@ -286,10 +366,76 @@
         ;; A full navigation also recovers a failed workspace bootstrap.
         (.replace js/location target)))))
 
+(defn- key-text
+  [k]
+  (if (keyword? k) (subs (str k) 1) (str k)))
+
+(defn- expand-design-system-refs
+  "Merge the compact wire form (\"compact-1\", web-projection.mjs
+  compactDesignSystemRefs) back into full component sample sources."
+  [{:keys [componentAxes componentBindings] :as refs}]
+  (if (not= "compact-1" (:format refs))
+    refs
+    (-> refs
+        (dissoc :componentAxes :componentBindings :format)
+        (update :componentSamples
+                (fn [samples]
+                  (mapv
+                   (fn [{:keys [ownerPackageId sources] :as compact}]
+                     (let [sample (-> compact
+                                      (dissoc :ownerPackageId :sources)
+                                      (assoc :axes (get componentAxes (keyword (:componentSetId compact)))))]
+                       (assoc sample :sources
+                              (into {}
+                                    (map (fn [[k item]]
+                                           (let [node-id (key-text k)]
+                                             [k (cond-> {:kind "component-sample"
+                                                         :componentId (:componentSetId sample)
+                                                         :variantId (:variantId sample)
+                                                         :ownerPackageId ownerPackageId
+                                                         :nodeId (or (:nodeId item) node-id)
+                                                         :displayNodeId node-id
+                                                         :combinationId (:combinationId sample)
+                                                         :combinationLabel (:combinationLabel sample)
+                                                         :familyName (:familyName sample)
+                                                         :selection (:selection sample)
+                                                         :occurrencePath (when (:occurrence item) node-id)
+                                                         :bindings (into {}
+                                                                         (map (fn [[field index]]
+                                                                                [field (nth componentBindings index)]))
+                                                                         (:bindings item))}
+                                                  (:allCombinations sample)
+                                                  (assoc :allCombinations true)
+
+                                                  (not (:occurrence item))
+                                                  (assoc :overrideNodeId nil)
+
+                                                  (and (:occurrence item) (some? (:overrideNodeId item)))
+                                                  (assoc :overrideNodeId (:overrideNodeId item)))])))
+                                    sources))))
+                   samples))))))
+
+(defn- with-design-system-refs
+  "The Background serves the generated Design System page data on its own
+  route; merge it into the snapshot the projection reads."
+  [snapshot]
+  (if (and (get-in snapshot [:runtime :designSystemRefsDeferred])
+           (some? (get-in snapshot [:runtime :designSystemPage])))
+    (-> (request (str "/v1/design-system-refs?revision="
+                      (js/encodeURIComponent (str (:revision snapshot)))
+                      "&locale="
+                      (js/encodeURIComponent (str i18n/*current-locale*))))
+        (.then (fn [{:keys [designSystemRefs designSystemPage]}]
+                 (-> snapshot
+                     (assoc-in [:runtime :designSystemRefs]
+                               (expand-design-system-refs designSystemRefs))
+                     (assoc-in [:runtime :designSystemTree] designSystemPage)))))
+    (js/Promise.resolve snapshot)))
+
 (defn- workspace
   []
   (or @workspace-promise
-      (let [pending (request "/v1/workspace")]
+      (let [pending (.then (request "/v1/workspace") with-design-system-refs)]
         (reset! workspace-promise pending)
         (.catch pending
                 (fn [cause]
@@ -407,6 +553,16 @@
       (.removeItem storage history-cleared-key)
       true)))
 
+(defn- stale-instances-notice
+  "The Repair notice of a Package opened read-only. When the only Repair is
+  Instances whose variant their Foundation renamed or deleted, the file
+  still opens: say they show the closest variant until they are repaired."
+  [status]
+  (let [conflicts (:conflicts status)]
+    (if (and (seq conflicts) (every? #(true? (:degraded %)) conflicts))
+      (tr "smallpen.load.stale-instances" (count conflicts))
+      (tr "smallpen.load.repair-read-only"))))
+
 (defn- project-workspace-file
   [snapshot id]
   (let [project-id (-> snapshot :runtime :project uuid/parse)
@@ -430,7 +586,7 @@
       (st/emit! (dwc/set-workspace-read-only true))
       (st/emit!
        (ntf/show
-        {:content (tr "smallpen.load.repair-read-only")
+        {:content (stale-instances-notice (:packageStatus snapshot))
          :level :error
          :timeout 30000
          :type :toast})))
@@ -503,13 +659,8 @@
 
 (defn import-local-library!
   [files]
-  (let [form (js/FormData.)]
-    (doseq [file files
-            :when (not-any? #(str/starts-with? % ".")
-                            (str/split (.-webkitRelativePath file) #"/"))]
-      (.append form (.-webkitRelativePath file) file (.-name file)))
-    (request "/v1/libraries/import-local"
-             #js {:method "POST" :body form})))
+  (request "/v1/libraries/import-local"
+           #js {:method "POST" :body (directory-upload-form files)}))
 
 (defn unlink-library!
   [package-id]
@@ -702,10 +853,10 @@
                                                    snapshot
                                                    (uuid/parse (str file-id))
                                                    (or (:libraries snapshot) []))))
-                                       ;; Same pointer resolution as the boot path
-                                       ;; (data.workspace/resolve-file): projected
-                                       ;; files carry lazy pointers that must be
-                                       ;; materialized before entering the store.
+                                               ;; Same pointer resolution as the boot path
+                                               ;; (data.workspace/resolve-file): projected
+                                               ;; files carry lazy pointers that must be
+                                               ;; materialized before entering the store.
                                                (rx/mapcat
                                                 (fn [file]
                                                   (->> (fpmap/resolve-file file)
@@ -741,13 +892,36 @@
                     {:type :persistence :code :invalid-save-response})))
   (assoc response :revn (inc (or revn 0))))
 
-(defn- no-op-change?
-  "Penpot emits a `mov-objects` without shapes when a drag ends inside the
-  shapes' own parent. Penpot applies it as a no-op; the Background rejects
-  an empty node move, so it is never sent."
+(defn- text-layout-change?
+  "The renderer re-measures every text it lays out (on open, on a page
+  switch, after a font loads) and saves the result as `position-data`.
+  The Package derives text layout itself and stores none of it."
   [change]
-  (and (= "mov-objects" (some-> (:type change) name))
-       (empty? (:shapes change))))
+  (and (= "mod-obj" (some-> (:type change) name))
+       (seq (:operations change))
+       (every? (fn [operation]
+                 (and (= "set" (some-> (:type operation) name))
+                      (= "position-data" (some-> (:attr operation) name))))
+               (:operations change))))
+
+(defn- no-op-change?
+  "Changes the Package has nothing to write for, never sent: Penpot emits a
+  `mov-objects` without shapes when a drag ends inside the shapes' own
+  parent (the Background rejects an empty node move), and text layout
+  measurements."
+  [change]
+  (or (and (= "mov-objects" (some-> (:type change) name))
+           (empty? (:shapes change)))
+      (text-layout-change? change)))
+
+(defn- decoration-change?
+  "Renderer bookkeeping on a Components page label: labels exist only in
+  the projection, so the Package has nothing to write for them."
+  [state change]
+  (and (= "mod-obj" (some-> (:type change) name))
+       (= "decoration"
+          (-> (dsh/lookup-page state (:page-id change))
+              (get-in [:objects (:id change) :plugin-data :smallpen "components-page"])))))
 
 (defn- shape-layout-offset
   "The shift a generated page draws a source tree with (projection.cljs
@@ -760,22 +934,65 @@
 
 (declare generated-page?)
 
+(defn- tree-layout-offset
+  "The layout offset of a shape's tree: its own, else the nearest
+  ancestor's (a layer just added inside a variant main has none yet)."
+  [objects id]
+  (loop [id id]
+    (when-let [shape (get objects id)]
+      (or (shape-layout-offset shape)
+          (when-not (= id (:parent-id shape))
+            (recur (:parent-id shape)))))))
+
+(def ^:private parent-geometry-keys
+  [:x :y :width :height :rotation :transform :flip-x :flip-y :selrect])
+
+(defn- variant-parent
+  "On the Components page, the parent of an edited or added layer of a
+  variant main as Penpot holds it now, and the layer itself. Mains move
+  freely there (their place is not saved), so the adapter reads a layer's
+  place against these, not against where the projection drew them."
+  [page change]
+  (when (true? (get-in page [:plugin-data :smallpen "components-page"]))
+    (let [objects   (:objects page)
+          shape     (get objects (:id change))
+          parent-id (or (:parent-id shape) (:parent-id change))
+          parent    (get objects parent-id)]
+      (when (shape-layout-offset parent)
+        (cond-> {:id parent-id
+                 :geometry (select-keys parent parent-geometry-keys)}
+          (some? shape)
+          (assoc :child (select-keys shape parent-geometry-keys)))))))
+
 (defn with-layout-offsets
   "Attach to each shape edit on a generated page the layout offset its tree
   is drawn with. Penpot reports that copy's page-absolute geometry; the
   adapter removes the offset to map the edit back to the source node. A
+  shape added on the Components page (a layer in a variant main) takes its
+  tree's offset, and edits there carry their parent's current geometry. A
   shape elsewhere can still carry an offset it inherited from a main, which
   means nothing there."
   [state changes]
   (mapv (fn [change]
-          (let [page   (when (= "mod-obj" (some-> (:type change) name))
+          (let [type   (some-> (:type change) name)
+                page   (when (contains? #{"mod-obj" "add-obj"} type)
                          (dsh/lookup-page state (:page-id change)))
-                offset (when (generated-page? page)
+                offset (cond
+                         (not (generated-page? page))
+                         nil
+
+                         (= "mod-obj" type)
                          (-> (:objects page)
                              (get (:id change))
-                             (shape-layout-offset)))]
+                             (shape-layout-offset))
+
+                         (true? (get-in page [:plugin-data :smallpen "components-page"]))
+                         (or (tree-layout-offset (:objects page) (:id change))
+                             (tree-layout-offset (:objects page) (:parent-id change))))
+                parent (when (some? offset) (variant-parent page change))]
             (cond-> change
-              (some? offset) (assoc :smallpen-layout-offset offset))))
+              (some? offset) (assoc :smallpen-layout-offset offset)
+              (some? parent) (assoc :smallpen-parent parent))))
         changes))
 
 (defn- rejected-commit?
@@ -787,6 +1004,23 @@
     (and (= :smallpen-backend type)
          (= 422 status))))
 
+(defn- rejection-reason
+  "Why the Background refused a change, in the user's language when the
+  refusal is one a Penpot variant edit can run into."
+  [cause]
+  (case (some-> (:code (ex-data cause)) name)
+    "variant_duplicate_selection" (tr "smallpen.variants.duplicate-selection")
+    "variant_value_missing" (tr "smallpen.variants.value-missing")
+    "variant_property_name_invalid" (tr "smallpen.variants.property-name-invalid")
+    "variant_properties_mismatch" (tr "smallpen.variants.properties-mismatch")
+    "variant_in_use" (tr "smallpen.variants.in-use")
+    "variant_nested_instance_unsupported" (tr "smallpen.variants.nested-instance")
+    "variant_outside_container" (tr "smallpen.variants.outside-container")
+    "variant_container_content_unsupported" (tr "smallpen.variants.container-content")
+    "component_page_shape_unsupported" (tr "smallpen.variants.page-shape")
+    "duplicate_name" (tr "smallpen.save.duplicate-name" (str (get-in (ex-data cause) [:details :name])))
+    (str (ex-message cause))))
+
 (defn- drop-rejected-commit
   "Penpot halts autosave for the session after a failed save, so every
   later edit would be lost. A rejected change exists only locally: say so,
@@ -797,7 +1031,7 @@
     ptk/WatchEvent
     (watch [_ _ _]
       (rx/of (ntf/show
-              {:content (tr "smallpen.save.change-rejected" (str (ex-message cause)))
+              {:content (tr "smallpen.save.change-rejected" (rejection-reason cause))
                :level :error
                :timeout 15000
                :type :toast})
@@ -836,10 +1070,34 @@
                      (rx/of nil))))
     (rx/of nil)))
 
+(defn- reprojection-options
+  "One refresh per save. Token changes preserve the viewport, including
+  mixed batches. An explicit empty operation list confirms a canonical
+  no-op; older Backgrounds that omit the field keep their sync behavior."
+  [structural? generated? operation-types]
+  (cond
+    (= [] operation-types)
+    nil
+
+    (some token-operation-types operation-types)
+    {:recenter? false}
+
+    ;; A board dragged on a shared canvas reorders its business flow; the
+    ;; canvas layout moves every board to its new slot.
+    (some #{"put-canvases"} operation-types)
+    {:recenter? false}
+
+    (and structural? generated?)
+    {}
+
+    (and generated? (some #{"put-component-set"} operation-types))
+    {:recenter? false}))
+
 (defn- commit-workspace
   [{:keys [changes commit-id revn]}]
   (if-let [changes (not-empty (->> changes
-                                   (into [] (remove no-op-change?))
+                                   (into [] (comp (remove no-op-change?)
+                                                  (remove (partial decoration-change? @st/state))))
                                    (with-layout-offsets @st/state)))]
     (let [{:keys [file-id]} @workspace-state
           structural? (boolean
@@ -858,20 +1116,24 @@
                      (when (= file-id (:file-id @workspace-state))
                        (swap! local-media #(reduce disj % (referenced-local-media changes)))
                        (update-revision! response)
-                       ;; DSE-R11: structural source changes (create/undo/redo/
-                       ;; delete of components or source objects) make the
-                       ;; generated pages stale; while one is open, re-derive
-                       ;; the projection so the change is visible in place.
-                       (when (and structural? (generated-page-open?))
-                         (st/async-emit! (reproject-generated-page {})))
-                       ;; DSE-R26: token edits keep the viewport but resync
-                       ;; every bound specimen through a fresh projection.
-                       (when (and (generated-page-open?)
-                                  (seq (->> (or (:operationTypes response) [])
-                                            (filter token-operation-types)
-                                            (distinct))))
-                         (st/async-emit! (reproject-generated-page
-                                          {:recenter? false}))))))
+                       ;; Structural edits resync generated pages; component
+                       ;; properties refresh their labels. Token edits resync
+                       ;; bound content on screen pages too (DSE-R11/R26).
+                       (when-let [options (reprojection-options
+                                           structural? (generated-page-open?)
+                                           (:operationTypes response))]
+                         (st/async-emit! (reproject-generated-page options)))
+                       ;; A name the edit repeated was numbered ("Card 2"):
+                       ;; show the stored name and say so.
+                       (when-let [renamed (seq (:renamed response))]
+                         (st/async-emit!
+                          (reproject-generated-page {:recenter? false})
+                          (ntf/show
+                           {:content (tr "smallpen.save.renamed"
+                                         (str/join ", " (map (fn [{:keys [from to]}] (str from " → " to)) renamed)))
+                            :level :info
+                            :timeout 6000
+                            :type :toast}))))))
            ;; Acknowledge a rejected change as a no-op save so the queue
            ;; moves on; the workspace drops it locally.
            (rx/catch (fn [cause]

@@ -429,12 +429,11 @@ test("the CLI exposes Effective Token and explain reads from the shared resolver
   await writeValues(productPath, productValues());
 
   const effectiveResult = await runCli([
-    "effective-token",
+    "token",
+    "show",
     productPath,
-    "--package-id",
-    "pkg_foundation",
-    "--token-id",
-    "tok_color_button",
+    "--path",
+    "color.button",
     "--context",
     "axis_viewport=mobile",
     "--json",
@@ -442,10 +441,14 @@ test("the CLI exposes Effective Token and explain reads from the shared resolver
   assert.equal(effectiveResult.code, 0, effectiveResult.stderr);
   const effective = JSON.parse(effectiveResult.stdout);
   assert.equal(effective.value, "#e53935");
-  assert.equal(effective.sourcePackageId, "pkg_product");
+  // The reply names the Product override that wins, without ids.
+  assert.equal(effective.sourcePackageId, undefined);
+  assert.equal(effective.token.path, "color.buttonOverride");
+  assert.equal(effective.token.filePath, "tokens/product.json");
 
   const searchResult = await runCli([
-    "search-tokens",
+    "token",
+    "search",
     productPath,
     "--color",
     "#6750a4",
@@ -454,16 +457,30 @@ test("the CLI exposes Effective Token and explain reads from the shared resolver
   assert.equal(searchResult.code, 0, searchResult.stderr);
   const search = JSON.parse(searchResult.stdout);
   assert.equal(search.items[0].path, "color.brand");
-  assert.equal(search.items[0].packageId, "pkg_foundation");
+  assert.equal(search.items[0].packageId, undefined);
   assert.equal(search.items[0].exactValue, true);
+  // --full keeps the owning package id.
+  const fullSearchResult = await runCli([
+    "token",
+    "search",
+    productPath,
+    "--color",
+    "#6750a4",
+    "--full",
+    "--stdout",
+    "--json",
+  ]);
+  assert.equal(fullSearchResult.code, 0, fullSearchResult.stderr);
+  const fullSearch = JSON.parse(fullSearchResult.stdout);
+  assert.equal(fullSearch.items[0].path, "color.brand");
+  assert.equal(fullSearch.items[0].packageId, "pkg_foundation");
 
   const explainResult = await runCli([
-    "explain-token",
+    "token",
+    "explain",
     productPath,
-    "--package-id",
-    "pkg_foundation",
-    "--token-id",
-    "tok_color_button",
+    "--path",
+    "color.button",
     "--context",
     "axis_theme=dark",
     "--context",

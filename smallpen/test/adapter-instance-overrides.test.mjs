@@ -221,7 +221,7 @@ test("instance override operations reject invalid targets, fields, and values", 
     [{ overridePath: ":text" }, "invalid_component_override_path"],
     [{ overridePath: "node_missing:text" }, "missing_component_override_target"],
     [{ overridePath: "node_card_idle_root:text" }, "component_override_type_mismatch"],
-    [{ overridePath: "node_card_idle_label:strokes" }, "unsupported_component_override"],
+    [{ overridePath: "node_card_idle_label:layout" }, "unsupported_component_override"],
     [{ overridePath: "__proto__:text" }, "invalid_component_override"],
     [{ value: 3 }, "invalid_text_content"],
     [{ value: null }, "invalid_component_override"],
@@ -500,22 +500,56 @@ test("Penpot edits of an instance child become overrides and render", async () =
   assert.equal(await render(reset.snapshot), baseRender);
 });
 
+test("an instance label bound to a string Token shows its value and a person's edit replaces the binding", async () => {
+  const base = await served(
+    await product((values) => {
+      const library = values.get("tokens/tokens.json");
+      library.sets
+        .find(({ id }) => id === "tset_color_light")
+        .tokens.push({ description: "", id: "tok_label_text", name: "text.card.label", type: "string", value: "Open card" });
+      instanceNode({ entries: { "screens/screen.json": values.get("screens/screen.json") } }).instance.overrides = {
+        "node_card_idle_label:tokenBindings": { text: { assetId: "tok_label_text", packageId: "pkg_design_system" } },
+      };
+    }),
+  );
+  assert.equal(projectedNodes(base)[LABEL].text, "Open card", "the label shows the Token's text");
+  const typed = await commit(base, [labelChange(base, [userSet("content", labelContent("Hello"))])]);
+  assert.deepEqual(
+    typed.compiled.operations.map(({ overridePath, type }) => [type, overridePath]).sort(),
+    [
+      ["clear-instance-override", "node_card_idle_label:tokenBindings"],
+      ["set-instance-override", LABEL_TEXT],
+    ],
+  );
+  assert.deepEqual(instanceNode(typed.snapshot).instance.overrides, { [LABEL_TEXT]: "Hello" });
+  assert.equal(projectedNodes(typed.snapshot)[LABEL].text, "Hello");
+});
+
+test("a Token the App applies to a copy's child is the copy's own binding until edited by hand", async () => {
+  const base = await served(await product());
+  const applied = await commit(base, [
+    labelChange(base, [userSet("applied-tokens", { fill: "primary" })]),
+  ]);
+  const bindings = instanceNode(applied.snapshot).instance.overrides["node_card_idle_label:tokenBindings"];
+  assert.deepEqual(Object.keys(bindings), ["fill"], "the same binding the CLI writes");
+  assert.equal(bindings.fill.packageId, "pkg_design_system");
+  // Editing the fill by hand: Penpot drops the applied Token, the copy keeps
+  // its own colour and no longer follows the Token.
+  const edited = await commit(applied.snapshot, [
+    labelChange(applied.snapshot, [
+      userSet("applied-tokens", {}),
+      userSet("content", labelContent("Card", "#ff0000")),
+    ]),
+  ]);
+  const overrides = instanceNode(edited.snapshot).instance.overrides;
+  assert.equal(overrides["node_card_idle_label:tokenBindings"], undefined);
+  assert.deepEqual(overrides["node_card_idle_label:fills"], [{ color: "#ff0000", type: "solid" }]);
+});
+
 test("instance child edits the format cannot hold still fail explicitly", async () => {
   const base = await served(await product());
-  for (const operations of [
-    [userSet("x", 260)],
-    [
-      userSet("strokes", [
-        {
-          "stroke-alignment": "inner",
-          "stroke-color": "#000000",
-          "stroke-opacity": 1,
-          "stroke-style": "solid",
-          "stroke-width": 1,
-        },
-      ]),
-    ],
-  ]) {
+  // Moving a copy's child has no override yet; a stroke now has one.
+  for (const operations of [[userSet("x", 260)]]) {
     assert.throws(
       () =>
         compilePenpotChanges(base, {
@@ -643,14 +677,14 @@ test("Penpot's measured box for an auto-sized overridden label is accepted", asy
     commitId: "measure",
   });
   assert.deepEqual(measured.operations, []);
-  // A user resize of the same label is still no override.
-  assert.throws(
-    () =>
-      compilePenpotChanges(typed.snapshot, {
-        changes: [labelChange(typed.snapshot, [userSet("width", 120)])],
-        commitId: "resize",
-      }),
-    (error) => error.code === "component_instance_override_unsupported",
+  // A user resize of the same label is the copy's own size, as in Penpot.
+  const resized = compilePenpotChanges(typed.snapshot, {
+    changes: [labelChange(typed.snapshot, [userSet("width", 120)])],
+    commitId: "resize",
+  });
+  assert.deepEqual(
+    resized.operations.map(({ overridePath, type, value }) => [type, overridePath, value]),
+    [["set-instance-override", "node_card_idle_label:width", 120]],
   );
 });
 

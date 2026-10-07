@@ -66,13 +66,13 @@ test("library-refresh reports why a failed refresh fell back to the cache", asyn
   ];
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-  const online = await runCli(["library-refresh", product, "--json"], root);
+  const online = await runCli(["advanced", "library-refresh", product, "--json"], root);
   assert.equal(online.code, 0, JSON.stringify(online.json));
   assert.equal(online.json.after.cache, "refreshed");
   assert.equal(online.json.after.warning, undefined);
 
   await new Promise((resolve) => server.close(resolve));
-  const offline = await runCli(["library-refresh", product, "--json"], root);
+  const offline = await runCli(["advanced", "library-refresh", product, "--json"], root);
   assert.equal(offline.code, 0, JSON.stringify(offline.json));
   assert.equal(offline.json.after.cache, "stale");
   assert.equal(offline.json.after.revision, online.json.after.revision);

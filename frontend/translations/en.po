@@ -10299,7 +10299,7 @@ msgstr "No components yet"
 
 #: src/app/main/smallpen/projection.cljs
 msgid "smallpen.design-system.components-source"
-msgstr "Component sources"
+msgstr "Components"
 
 #: src/app/main/smallpen/projection.cljs
 msgid "smallpen.design-system.summary"
@@ -10524,3 +10524,145 @@ msgstr "This Cell is an alias: applying writes a new alias expression (currently
 #: src/app/main/smallpen/token_inspector.cljs
 msgid "smallpen.dse.inspector.apply"
 msgstr "Apply to source Cell"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.divider"
+msgstr "Divider"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.edit-note"
+msgstr "Edit variants and properties here with Penpot's own tools. The labels are generated and follow the properties."
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.labels-layer"
+msgstr "%s · labels"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.located-note"
+msgstr "Their main components live on screen pages: edit them there. In the Assets panel, right-click one and choose \"Show main component\" to go to it."
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.located-page"
+msgstr "Main component on page \"%s\""
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.located-title"
+msgstr "Components on screens"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.no-properties"
+msgstr "No properties"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.properties"
+msgstr "Properties: %s · %s variants"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.summary"
+msgstr "%s component sets · %s variants · %s components on screens"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.theme-note"
+msgstr "Components show the active theme. Themes apply to the whole file: switch them in the theme menu of the TOKENS panel."
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.title"
+msgstr "Components"
+
+#: src/app/main/smallpen/projection.cljs
+msgid "smallpen.components-page.uncategorized"
+msgstr "Uncategorized"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.choose-folder"
+msgstr "Select Package folder…"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.upload-help"
+msgstr "Upload the .smallpen folder containing manifest.json. Edits save to the uploaded copy. Limit: 50 MB, 2000 files."
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.open-server-prompt"
+msgstr "Package path"
+
+#: src/app/main/smallpen/edit_policy.cljs
+msgid "smallpen.design-system.blocked-foundation"
+msgstr "This belongs to the Foundation and is read-only here. Edit it in the Foundation."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.duplicate-selection"
+msgstr "Two variants would have the same property values. Give each variant its own combination of values."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.value-missing"
+msgstr "Every variant needs a value for each property."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.property-name-invalid"
+msgstr "Property names must be unique and not empty."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.properties-mismatch"
+msgstr "Every variant of a component must have the same properties."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.save.renamed"
+msgstr "The name was already taken, so it is now: %s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.save.duplicate-name"
+msgstr "Another item is already named \"%s\". Names do not repeat; choose another name."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.in-use"
+msgstr "An instance still uses this variant. Switch or delete that instance first."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.nested-instance"
+msgstr "SmallPen cannot yet place a component copy inside a variant."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.outside-container"
+msgstr "A variant must stay inside the board of its component's variants."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.container-content"
+msgstr "The board of a component's variants can only hold those variants."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.variants.page-shape"
+msgstr "Only components can be placed on the Components page."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.load.stale-instances"
+msgstr "%s instances use a variant their Foundation component no longer has. They show the closest variant, and this Package stays read-only until you repair them: run smallpen repair on it to pick a variant or remove each instance."
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.local-directory"
+msgstr "Local: %s"
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.local.permission-required"
+msgstr "No write access. Reopen the folder to grant access."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.local.file-conflict"
+msgstr "The file changed outside SmallPen. It was not overwritten."
+
+#: src/app/main/smallpen.cljs
+msgid "smallpen.local.save-failed"
+msgstr "Save failed. Check permissions and disk space."
+
+
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.local.folder-too-large"
+msgstr "Folder exceeds 50 MB or 2000 files."
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.home.upload-folder"
+msgstr "Upload folder…"
+
+#: src/app/main/smallpen/home.cljs
+msgid "smallpen.local.invalid-folder"
+msgstr "Select a Package folder."

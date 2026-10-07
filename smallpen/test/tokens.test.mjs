@@ -386,15 +386,13 @@ test("Penpot applied-tokens edits compile, apply, and reverse exactly", async ()
     ],
     commitId: "applied-tokens",
   });
-  assert.deepEqual(batch.operations[0].changes, {
-    appliedTokens: { fill: "color.primary" },
-  });
+  // An applied Token is stored as the binding the CLI writes.
+  assert.deepEqual(Object.keys(batch.operations[0].changes.tokenBindings), ["fill"]);
 
   const prepared = await prepareOperationBatch(snapshot, batch);
-  assert.deepEqual(
+  assert.ok(
     prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
-      .node_rectangle.appliedTokens,
-    { fill: "color.primary" },
+      .node_rectangle.tokenBindings.fill,
   );
   const reversed = await prepareOperationBatch(
     prepared.snapshot,

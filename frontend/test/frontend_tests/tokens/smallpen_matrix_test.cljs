@@ -15,6 +15,7 @@
    [app.main.data.workspace.tokens.library-edit :as dwtl]
    [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.data.workspace.undo :as dwu]
+   [app.main.smallpen.token-authoring :as spta]
    [app.main.smallpen.token-matrix :as sptm]
    [app.main.smallpen.token-state :as spts]
    [beicon.v2.core :as rx]
@@ -109,6 +110,20 @@
                                   "radius.card")]
            (t/is (= [12 12] (mapv :value [mobile-token desktop-token])))
            (t/is (not= (:id mobile-token) (:id desktop-token)))))))))
+
+(t/deftest shared-authoring-preserves-opaque-composite-values
+  (let [lib (current-tokens-library (setup-file-with-matrix-token-lib))
+        value {"fontFamily" "Brand Sans" "fontSize" {"value" 16 "unit" "px"}}
+        token (ctob/make-token :name "type.body" :type :typography :value value)
+        created (spta/create-row lib [(cthi/id :mobile-set) (cthi/id :desktop-set)] token)
+        filled (spta/write-cell lib (cthi/id :desktop-set) token value)
+        template (ctob/get-token lib (cthi/id :mobile-set) (cthi/id :mobile-space))
+        scalar (spta/write-cell lib (cthi/id :desktop-set) template false)]
+    (t/is (= [value value] (mapv (comp :value :token) created)))
+    (t/is (= value (get-in filled [:token :value])))
+    (t/is (false? (get-in scalar [:token :value])))
+    (t/is (every? #(string? (first %)) (get-in filled [:token :value])))
+    (t/is (not= (get-in created [0 :token :id]) (get-in created [1 :token :id])))))
 
 (t/deftest duplicate-matrix-variant-copies-the-first-column-independently
   (t/async
@@ -326,6 +341,59 @@
                           stack-undo?))
                   (rx/empty))))
              (rx/take-until stopper-s))))))
+
+(t/deftest shared-cell-write-preserves-the-existing-cell-and-other-options
+  (t/async
+    done
+    (let [file (setup-file-with-matrix-token-lib)
+          store (ths/setup-store file)
+          lib (current-tokens-library file)
+          template (ctob/get-token lib (cthi/id :mobile-set) (cthi/id :mobile-space))
+          selected (ctob/get-token lib (cthi/id :desktop-set) (cthi/id :desktop-space))]
+      (tohs/run-store-async
+       store done
+       [(sptm/set-token-matrix-value (cthi/id :desktop-set) template 42)]
+       (fn [state]
+         (let [lib' (current-tokens-library (ths/get-file-from-state state))
+               updated (ctob/get-token lib' (cthi/id :desktop-set) (cthi/id :desktop-space))]
+           (t/is (= 42 (:value updated)))
+           (t/is (= (select-keys selected [:id :name :type :description])
+                    (select-keys updated [:id :name :type :description])))
+           (t/is (= template (ctob/get-token lib' (cthi/id :mobile-set) (cthi/id :mobile-space))))
+           (t/is (= (spts/get-active-theme-paths lib) (spts/get-active-theme-paths lib')))))))))
+
+(t/deftest shared-empty-cell-write-copies-row-metadata-and-is-undoable
+  (t/async
+    done
+    (let [file (-> (setup-file-with-matrix-token-lib)
+                   (update-in [:data :tokens-lib] ctob/delete-token
+                              (cthi/id :desktop-set) (cthi/id :desktop-space)))
+          store (ths/setup-store file)
+          lib (current-tokens-library file)
+          template (ctob/get-token lib (cthi/id :mobile-set) (cthi/id :mobile-space))]
+      (ptk/emit! store (watch-undo-stack))
+      (tohs/run-store-async
+       store (fn [])
+       [(sptm/set-token-matrix-value (cthi/id :desktop-set) template 32)]
+       (fn [state]
+         (let [lib' (current-tokens-library (ths/get-file-from-state state))
+               filled (get (ctob/get-tokens lib' (cthi/id :desktop-set)) "space.page")]
+           (t/is (= 32 (:value filled)))
+           (t/is (not= (:id template) (:id filled)))
+           (t/is (= (select-keys template [:name :type :description])
+                    (select-keys filled [:name :type :description])))
+           (t/is (= template (ctob/get-token lib' (cthi/id :mobile-set) (cthi/id :mobile-space))))
+           (t/is (= 1 (count (get-in state [:workspace-undo :items]))))
+           (tohs/run-store-async
+            store (fn []) [dwu/undo]
+            (fn [undone]
+              (t/is (nil? (get (ctob/get-tokens (current-tokens-library (ths/get-file-from-state undone))
+                                                (cthi/id :desktop-set)) "space.page")))
+              (tohs/run-store-async
+               store done [dwu/redo]
+               (fn [redone]
+                 (t/is (= filled (get (ctob/get-tokens (current-tokens-library (ths/get-file-from-state redone))
+                                                       (cthi/id :desktop-set)) "space.page")))))))))))))
 
 (defn- setup-file-with-matrix-row-legacy
   []

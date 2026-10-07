@@ -276,10 +276,10 @@ test("Token, Component Variant, instance selection, and Repair Operations are re
         tokenId: "tok_accent",
         type: "put-token",
       },
-      { componentSetId: "cmp_button", type: "put-variant", variant },
+      { componentId: "cmp_button", type: "put-variant", variant },
       {
         changes: { name: "Pressed Button" },
-        componentSetId: "cmp_button",
+        componentId: "cmp_button",
         nodeId: "node_button_pressed",
         type: "update-component-node",
         variantId: "var_button_pressed",
@@ -509,7 +509,7 @@ test("domain deletes protect live references and reverse the complete lifecycle"
   for (const [batchId, operation, code] of [
     [
       "batch_delete_used_component",
-      { componentSetId: "cmp_button", type: "delete-component-set" },
+      { componentId: "cmp_button", type: "delete-component-set" },
       "missing_component",
     ],
     [
@@ -548,13 +548,13 @@ test("domain deletes protect live references and reverse the complete lifecycle"
       },
       {
         changes: {},
-        componentSetId: "cmp_button",
+        componentId: "cmp_button",
         nodeId: "node_button_source",
         type: "update-component-node",
         unset: ["tokenBindings"],
         variantId: "var_button_idle",
       },
-      { componentSetId: "cmp_button", type: "delete-component-set" },
+      { componentId: "cmp_button", type: "delete-component-set" },
       { entry: "contexts/design.json", type: "delete-context-file" },
       { tokenId: "tok_brand", type: "remove-token" },
     ],

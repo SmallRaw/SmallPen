@@ -1,0 +1,647 @@
+{
+  "componentSets": [
+    {
+      "axes": [
+        {
+          "domain": [
+            "primary",
+            "secondary",
+            "ghost",
+            "danger"
+          ],
+          "id": "axis_style",
+          "name": "Style",
+          "role": "configuration"
+        },
+        {
+          "domain": [
+            "sm",
+            "md"
+          ],
+          "id": "axis_size",
+          "name": "Size",
+          "role": "configuration"
+        }
+      ],
+      "category": "Actions",
+      "description": "Primary, secondary, ghost and danger actions in two sizes",
+      "id": "cmp_button",
+      "name": "Button",
+      "variants": [
+        {
+          "id": "var_button_primary_sm",
+          "nodes": {
+            "node_button_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#ffffff",
+                  "type": "solid"
+                }
+              ],
+              "growType": "fixed",
+              "height": 32,
+              "id": "node_button_label",
+              "name": "Label",
+              "text": "Button",
+              "textStyle": {
+                "fontFamily": "Source Sans Pro",
+                "fontSize": 12,
+                "fontWeight": 600,
+                "lineHeight": 1.35,
+                "textAlign": "center",
+                "verticalAlign": "center"
+              },
+              "tokenBindings": {
+                "fill": {
+                  "assetId": "tok_color_brand_onBrand",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "typography": {
+                  "assetId": "tok_type_label",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "TEXT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            },
+            "node_button_root": {
+              "children": [
+                "node_button_label"
+              ],
+              "cornerRadius": 8,
+              "fills": [
+                {
+                  "color": "#4f46e5",
+                  "type": "solid"
+                }
+              ],
+              "height": 32,
+              "id": "node_button_root",
+              "name": "Button",
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "fill": {
+                  "assetId": "tok_color_brand_base",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_button_root",
+          "selection": {
+            "axis_size": "sm",
+            "axis_style": "primary"
+          }
+        },
+        {
+          "id": "var_button_primary_md",
+          "nodes": {
+            "node_button_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#ffffff",
+                  "type": "solid"
+                }
+              ],
+              "growType": "fixed",
+              "height": 40,
+              "id": "node_button_label",
+              "name": "Label",
+              "text": "Button",
+              "textStyle": {
+                "fontFamily": "Source Sans Pro",
+                "fontSize": 12,
+                "fontWeight": 600,
+                "lineHeight": 1.35,
+                "textAlign": "center",
+                "verticalAlign": "center"
+              },
+              "tokenBindings": {
+                "fill": {
+                  "assetId": "tok_color_brand_onBrand",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "typography": {
+                  "assetId": "tok_type_label",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "TEXT",
+              "width": 112,
+              "x": 0,
+              "y": 0
+            },
+            "node_button_root": {
+              "children": [
+                "node_button_label"
+              ],
+              "cornerRadius": 8,
+              "fills": [
+                {
+                  "color": "#4f46e5",
+                  "type": "solid"
+                }
+              ],
+              "height": 40,
+              "id": "node_button_root",
+              "name": "Button",
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "fill": {
+                  "assetId": "tok_color_brand_base",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 112,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_button_root",
+          "selection": {
+            "axis_size": "md",
+            "axis_style": "primary"
+          }
+        },
+        {
+          "id": "var_button_secondary_sm",
+          "nodes": {
+            "node_button_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#101828",
+                  "type": "solid"
+                }
+              ],
+              "growType": "fixed",
+              "height": 32,
+              "id": "node_button_label",
+              "name": "Label",
+              "text": "Button",
+              "textStyle": {
+                "fontFamily": "Source Sans Pro",
+                "fontSize": 12,
+                "fontWeight": 600,
+                "lineHeight": 1.35,
+                "textAlign": "center",
+                "verticalAlign": "center"
+              },
+              "tokenBindings": {
+                "fill": {
+                  "assetId": "tok_color_text_primary",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "typography": {
+                  "assetId": "tok_type_label",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "TEXT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            },
+            "node_button_root": {
+              "children": [
+                "node_button_label"
+              ],
+              "cornerRadius": 8,
+              "fills": [
+                {
+                  "color": "#ffffff",
+                  "type": "solid"
+                }
+              ],
+              "height": 32,
+              "id": "node_button_root",
+              "name": "Button",
+              "strokes": [
+                {
+                  "alignment": "inner",
+                  "color": "#d0d5dd",
+                  "type": "solid",
+                  "width": 1
+                }
+              ],
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "fill": {
+                  "assetId": "tok_color_bg_surface",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "stroke": {
+                  "assetId": "tok_color_border_strong",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "strokeWidth": {
+                  "assetId": "tok_border_width_thin",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_button_root",
+          "selection": {
+            "axis_size": "sm",
+            "axis_style": "secondary"
+          }
+        },
+        {
+          "id": "var_button_secondary_md",
+          "nodes": {
+            "node_button_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#101828",
+                  "type": "solid"
+                }
+              ],
+              "growType": "fixed",
+              "height": 40,
+              "id": "node_button_label",
+              "name": "Label",
+              "text": "Button",
+              "textStyle": {
+                "fontFamily": "Source Sans Pro",
+                "fontSize": 12,
+                "fontWeight": 600,
+                "lineHeight": 1.35,
+                "textAlign": "center",
+                "verticalAlign": "center"
+              },
+              "tokenBindings": {
+                "fill": {
+                  "assetId": "tok_color_text_primary",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "typography": {
+                  "assetId": "tok_type_label",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "TEXT",
+              "width": 112,
+              "x": 0,
+              "y": 0
+            },
+            "node_button_root": {
+              "children": [
+                "node_button_label"
+              ],
+              "cornerRadius": 8,
+              "fills": [
+                {
+                  "color": "#ffffff",
+                  "type": "solid"
+                }
+              ],
+              "height": 40,
+              "id": "node_button_root",
+              "name": "Button",
+              "strokes": [
+                {
+                  "alignment": "inner",
+                  "color": "#d0d5dd",
+                  "type": "solid",
+                  "width": 1
+                }
+              ],
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "fill": {
+                  "assetId": "tok_color_bg_surface",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "stroke": {
+                  "assetId": "tok_color_border_strong",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "strokeWidth": {
+                  "assetId": "tok_border_width_thin",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 112,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_button_root",
+          "selection": {
+            "axis_size": "md",
+            "axis_style": "secondary"
+          }
+        },
+        {
+          "id": "var_button_ghost_sm",
+          "nodes": {
+            "node_button_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#4f46e5",
+                  "type": "solid"
+                }
+              ],
+              "growType": "fixed",
+              "height": 32,
+              "id": "node_button_label",
+              "name": "Label",
+              "text": "Button",
+              "textStyle": {
+                "fontFamily": "Source Sans Pro",
+                "fontSize": 12,
+                "fontWeight": 600,
+                "lineHeight": 1.35,
+                "textAlign": "center",
+                "verticalAlign": "center"
+              },
+              "tokenBindings": {
+                "fill": {
+                  "assetId": "tok_color_brand_base",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "typography": {
+                  "assetId": "tok_type_label",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "TEXT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            },
+            "node_button_root": {
+              "children": [
+                "node_button_label"
+              ],
+              "cornerRadius": 8,
+              "height": 32,
+              "id": "node_button_root",
+              "name": "Button",
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_button_root",
+          "selection": {
+            "axis_size": "sm",
+            "axis_style": "ghost"
+          }
+        },
+        {
+          "id": "var_button_ghost_md",
+          "nodes": {
+            "node_button_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#4f46e5",
+                  "type": "solid"
+                }
+              ],
+              "growType": "fixed",
+              "height": 40,
+              "id": "node_button_label",
+              "name": "Label",
+              "text": "Button",
+              "textStyle": {
+                "fontFamily": "Source Sans Pro",
+                "fontSize": 12,
+                "fontWeight": 600,
+                "lineHeight": 1.35,
+                "textAlign": "center",
+                "verticalAlign": "center"
+              },
+              "tokenBindings": {
+                "fill": {
+                  "assetId": "tok_color_brand_base",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "typography": {
+                  "assetId": "tok_type_label",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "TEXT",
+              "width": 112,
+              "x": 0,
+              "y": 0
+            },
+            "node_button_root": {
+              "children": [
+                "node_button_label"
+              ],
+              "cornerRadius": 8,
+              "height": 40,
+              "id": "node_button_root",
+              "name": "Button",
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 112,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_button_root",
+          "selection": {
+            "axis_size": "md",
+            "axis_style": "ghost"
+          }
+        },
+        {
+          "id": "var_button_danger_sm",
+          "nodes": {
+            "node_button_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#ffffff",
+                  "type": "solid"
+                }
+              ],
+              "growType": "fixed",
+              "height": 32,
+              "id": "node_button_label",
+              "name": "Label",
+              "text": "Button",
+              "textStyle": {
+                "fontFamily": "Source Sans Pro",
+                "fontSize": 12,
+                "fontWeight": 600,
+                "lineHeight": 1.35,
+                "textAlign": "center",
+                "verticalAlign": "center"
+              },
+              "tokenBindings": {
+                "fill": {
+                  "assetId": "tok_color_brand_onBrand",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "typography": {
+                  "assetId": "tok_type_label",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "TEXT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            },
+            "node_button_root": {
+              "children": [
+                "node_button_label"
+              ],
+              "cornerRadius": 8,
+              "fills": [
+                {
+                  "color": "#d92d20",
+                  "type": "solid"
+                }
+              ],
+              "height": 32,
+              "id": "node_button_root",
+              "name": "Button",
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "fill": {
+                  "assetId": "tok_color_danger_base",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_button_root",
+          "selection": {
+            "axis_size": "sm",
+            "axis_style": "danger"
+          }
+        },
+        {
+          "id": "var_button_danger_md",
+          "nodes": {
+            "node_button_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#ffffff",
+                  "type": "solid"
+                }
+              ],
+              "growType": "fixed",
+              "height": 40,
+              "id": "node_button_label",
+              "name": "Label",
+              "text": "Button",
+              "textStyle": {
+                "fontFamily": "Source Sans Pro",
+                "fontSize": 12,
+                "fontWeight": 600,
+                "lineHeight": 1.35,
+                "textAlign": "center",
+                "verticalAlign": "center"
+              },
+              "tokenBindings": {
+                "fill": {
+                  "assetId": "tok_color_brand_onBrand",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "typography": {
+                  "assetId": "tok_type_label",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "TEXT",
+              "width": 112,
+              "x": 0,
+              "y": 0
+            },
+            "node_button_root": {
+              "children": [
+                "node_button_label"
+              ],
+              "cornerRadius": 8,
+              "fills": [
+                {
+                  "color": "#d92d20",
+                  "type": "solid"
+                }
+              ],
+              "height": 40,
+              "id": "node_button_root",
+              "name": "Button",
+              "tokenBindings": {
+                "cornerRadius": {
+                  "assetId": "tok_radius_md",
+                  "packageId": "pkg_flowboard_foundation"
+                },
+                "fill": {
+                  "assetId": "tok_color_danger_base",
+                  "packageId": "pkg_flowboard_foundation"
+                }
+              },
+              "type": "COMPONENT",
+              "width": 112,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_button_root",
+          "selection": {
+            "axis_size": "md",
+            "axis_style": "danger"
+          }
+        }
+      ],
+      "visibility": "public"
+    }
+  ]
+}

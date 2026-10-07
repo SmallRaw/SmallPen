@@ -404,7 +404,18 @@ test("a missing external Component variant is detected by workspace projection",
   const resolution = await resolveWorkspace(paths.productPath);
   assert.equal(resolution.status, "repair");
   assert.equal(resolution.conflicts[0].code, "missing_variant");
+  assert.equal(resolution.conflicts[0].degraded, true);
   assert.deepEqual(resolution.conflicts[0].choices, [
+    {
+      action: "select-instance-variant",
+      nodeId: "node_rectangle",
+      presentationId: "pres_desktop",
+      referencePath:
+        "screens/roundtrip.json.presentations[0].nodes.node_rectangle.instance",
+      screenId: "scr_roundtrip",
+      selection: { axis_size: "sm" },
+      validSelections: [{ axis_size: "sm" }],
+    },
     {
       action: "retarget-reference",
       reference: {

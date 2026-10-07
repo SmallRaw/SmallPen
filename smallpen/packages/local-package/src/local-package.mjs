@@ -23,6 +23,7 @@ import { promisify } from "node:util";
 
 import {
   canonicalJSON,
+  checkOperationShape,
   fail,
   listPackageEntries,
   loadPackageFromValues,
@@ -692,7 +693,29 @@ async function commitCandidate(originalPath, candidatePath, transactionPath) {
   await cleanup([backupPath, transactionPath, journalPath]);
 }
 
-async function applyOperationBatchLocked(locator, batch) {
+// A Product's set-active-token-themes may name its Foundation's themes; a
+// caller that did not load the Foundation (the Web backend) gets it here.
+async function themeSelectionDependencies(locator, before, batch, dependencies) {
+  if (
+    dependencies.foundation ||
+    before.manifest.role !== "product" ||
+    !batch?.operations?.some?.((operation) => operation?.type === "set-active-token-themes")
+  ) {
+    return dependencies;
+  }
+  const dependency = before.manifest.dependencies[0];
+  try {
+    const foundation = await openPackageUnlocked(join(dirname(locator), dependency.path));
+    return foundation.manifest.packageId === dependency.packageId
+      ? { ...dependencies, foundation }
+      : dependencies;
+  } catch (error) {
+    if (error instanceof SmallPenError) return dependencies;
+    throw error;
+  }
+}
+
+async function applyOperationBatchLocked(locator, batch, dependencies = {}) {
   const before = await openPackageUnlocked(locator);
   const blobWrites = batch.blobs ?? new Map();
   if (!(blobWrites instanceof Map)) {
@@ -701,7 +724,11 @@ async function applyOperationBatchLocked(locator, batch) {
   for (const [entry, bytes] of blobWrites) {
     before.blobs.set(entry, bytes);
   }
-  const prepared = await prepareOperationBatch(before, batch);
+  const prepared = await prepareOperationBatch(
+    before,
+    batch,
+    await themeSelectionDependencies(locator, before, batch, dependencies),
+  );
   const referencedBlobs = new Set(
     prepared.snapshot.manifest.entries.assets.flatMap((entry) =>
       [
@@ -826,12 +853,13 @@ function hashCanonical(value) {
 function batchIdentityHash(batch) {
   return hashCanonical({
     baseRevision: batch.baseRevision ?? null,
-    operations: batch.operations ?? [],
+    operations: batch.operations,
+    ...(batch.cliIntent ? { cliIntent: batch.cliIntent } : {}),
   });
 }
 
 function batchOperationsHash(batch) {
-  return hashCanonical({ operations: batch.operations ?? [] });
+  return hashCanonical({ operations: batch.operations });
 }
 
 // SP-039/040: a batch ledger beside the Package gives the public CLI stable
@@ -854,15 +882,13 @@ async function recordedBatchReplay(ledger, batch, readRevision, options = {}) {
   const recorded = ledger[batchId];
   if (!recorded || typeof recorded !== "object") return undefined;
   const operationsHash = await batchOperationsHash(batch);
-  const sameBatch =
-    typeof recorded.identityHash === "string"
-      ? recorded.identityHash === (await batchIdentityHash(batch))
-      : // Entries written before identities carried the base revision.
-        recorded.operationsHash === operationsHash;
+  const sameBatch = recorded.identityHash === (await batchIdentityHash(batch));
   const sameCommandRetry =
+    typeof recorded.identityHash === "string" &&
     options.rebuilt === true &&
-    recorded.operationsHash === operationsHash &&
-    batch.baseRevision === recorded.revision;
+    (recorded.operationsHash === operationsHash ||
+      (batch.cliIntent && recorded.cliIntentHash === await hashCanonical(batch.cliIntent))) &&
+    typeof batch.baseRevision === "string";
   if (!sameBatch && !sameCommandRetry) {
     fail(
       "batch_id_conflict",
@@ -877,9 +903,13 @@ async function recordedBatchReplay(ledger, batch, readRevision, options = {}) {
   }
   const currentRevision = await readRevision();
   if (currentRevision === recorded.revision) {
+    batch.operations.forEach(checkOperationShape);
     return { ...recorded.result, alreadyApplied: true };
   }
-  if (sameBatch && currentRevision === batch.baseRevision) return undefined;
+  if (
+    (sameBatch && currentRevision === batch.baseRevision) ||
+    (sameCommandRetry && recorded.baseRevision === currentRevision && batch.baseRevision === currentRevision)
+  ) return undefined;
   fail(
     "batch_superseded",
     "Batch ID was already committed, and later writes changed the Package",
@@ -895,6 +925,26 @@ async function recordedBatchReplay(ledger, batch, readRevision, options = {}) {
 
 function currentRevisionReader(packagePath) {
   return async () => (await openPackageUnlocked(packagePath)).revision;
+}
+
+// The committed batches, oldest first: what each changed, when, from which
+// revision, and the inverse that restores the revision before it. Read
+// only; `smallpen changes` rebuilds an earlier revision from it.
+export async function readBatchHistory(locator) {
+  const resolvedPackagePath = await resolvePackageRoot(await lockTarget(locator));
+  const ledger = await readBatchLedger(resolvedPackagePath);
+  return Object.entries(ledger)
+    .map(([batchId, entry]) => ({
+      affectedIds: entry?.result?.affectedIds ?? [],
+      baseRevision: entry?.baseRevision,
+      batchId,
+      committedAt: entry?.committedAt,
+      inverseBatch: entry?.result?.inverseBatch,
+      revision: entry?.revision ?? entry?.result?.revision,
+      // CLI writes carry the intent that produced them; App edits do not.
+      source: entry?.cliIntentHash ? "cli" : "app",
+    }))
+    .sort((left, right) => String(left.committedAt ?? "").localeCompare(String(right.committedAt ?? "")));
 }
 
 // Public replay check used by the CLI before stale-revision validation and
@@ -947,13 +997,19 @@ export async function applyOperationBatch(locator, batch, options = {}) {
       currentRevisionReader(resolvedPackagePath),
     );
     if (!result) {
-      result = await applyOperationBatchLocked(resolvedPackagePath, batch);
+      result = await applyOperationBatchLocked(
+        resolvedPackagePath,
+        batch,
+        options.dependencies,
+      );
       if (Array.isArray(batch?.operations)) {
         try {
           ledger[batch.batchId] = {
+            baseRevision: batch.baseRevision,
             committedAt: new Date().toISOString(),
             identityHash: await batchIdentityHash(batch),
             operationsHash: await batchOperationsHash(batch),
+            ...(batch.cliIntent ? { cliIntentHash: await hashCanonical(batch.cliIntent) } : {}),
             result,
             revision: result.revision,
           };

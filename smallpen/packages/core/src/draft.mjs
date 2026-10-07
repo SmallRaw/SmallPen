@@ -193,6 +193,30 @@ function variantValues(node, definitions) {
   return Object.keys(fromSpecs).length > 0 ? fromSpecs : variantNameValues(node.name);
 }
 
+// Figma line heights carry a unit (`units` in clipboard Kiwi data, `unit` in
+// the plugin API); Canonical lineHeight is always a multiple of fontSize, as
+// Penpot reads it. Auto and unknown units fall back to 1.2.
+function lineHeightMultiplier(lineHeight, fontSize) {
+  const value = finite(lineHeight?.value, undefined);
+  const unit = lineHeight?.units ?? lineHeight?.unit;
+  if (value === undefined || value <= 0) return 1.2;
+  if (unit === "PIXELS") return fontSize > 0 ? value / fontSize : 1.2;
+  if (unit === "PERCENT") return value / 100;
+  if (unit === "RAW") return value;
+  return 1.2;
+}
+
+// Figma letter spacing in px: a percent is of the font size. Without a
+// known unit the value is dropped rather than guessed to be px.
+function letterSpacingPixels(letterSpacing, fontSize) {
+  const value = finite(letterSpacing?.value, undefined);
+  const unit = letterSpacing?.units ?? letterSpacing?.unit;
+  if (value === undefined) return 0;
+  if (unit === "PIXELS") return value;
+  if (unit === "PERCENT") return (value / 100) * fontSize;
+  return 0;
+}
+
 function textStyle(node) {
   const result = {
     fontFamily: node.fontName?.family ?? "Inter",
@@ -201,8 +225,8 @@ function textStyle(node) {
       ? "italic"
       : "normal",
     fontWeight: /bold/i.test(node.fontName?.style ?? "") ? 700 : 400,
-    letterSpacing: finite(node.letterSpacing?.value, 0),
-    lineHeight: finite(node.lineHeight?.value, finite(node.fontSize, 14) * 1.2),
+    letterSpacing: letterSpacingPixels(node.letterSpacing, finite(node.fontSize, 14)),
+    lineHeight: lineHeightMultiplier(node.lineHeight, finite(node.fontSize, 14)),
     textAlign: String(node.textAlignHorizontal ?? "LEFT").toLowerCase(),
     textDecoration: "none",
     textDirection: "ltr",

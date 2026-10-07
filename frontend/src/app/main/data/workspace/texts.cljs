@@ -986,7 +986,7 @@
                 ;; SmallPen re-measures texts whenever generated pages are
                 ;; re-projected; an undo entry here would drop the redo tail.
                 (if (smallpen/enabled?)
-                  {:save-undo? false :reg-objects? false}
+                  {:save-undo? false :reg-objects? false :skip-component-sync? true}
                   {:stack-undo? true :reg-objects? false})))))))
 
 (defn update-position-data

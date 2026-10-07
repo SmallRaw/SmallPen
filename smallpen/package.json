@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/workspace",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -8,6 +8,10 @@
     "packages/*"
   ],
   "scripts": {
+    "build:skills": "node scripts/build-skills.mjs",
+    "check:skills": "node scripts/build-skills.mjs --check",
+    "build:web-capabilities": "node scripts/build-web-capabilities.mjs",
+    "check:web-capabilities": "node scripts/build-web-capabilities.mjs --check",
     "build:cli": "node scripts/build-cli.mjs",
     "pack:check": "npm pack --workspaces --dry-run --ignore-scripts",
     "test": "node --test --test-timeout=120000",

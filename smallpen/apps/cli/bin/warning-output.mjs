@@ -39,7 +39,7 @@ export function warningOutput(warnings, detail, { confirmUnmatched = false, supp
 
   const groups = new Map();
   for (const [warningIndex, warning] of warnings.entries()) {
-    const { nodeId, operationIndex, value, contextScope, ...shared } = warning;
+    const { nodeId, element, operationIndex, value, contextScope, ...shared } = warning;
     const key = JSON.stringify(shared);
     let group = groups.get(key);
     if (!group) {
@@ -47,7 +47,7 @@ export function warningOutput(warnings, detail, { confirmUnmatched = false, supp
       groups.set(key, group);
     }
     group.count += 1;
-    group.locations.push({ warningIndex, operationIndex, nodeId, value });
+    group.locations.push({ warningIndex, operationIndex, nodeId, ...(element !== undefined ? { element } : {}), value });
   }
   const grouped = [...groups.values()].sort(
     (left, right) => rank(left) - rank(right),

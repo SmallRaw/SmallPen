@@ -1,14 +1,12 @@
 import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  mkdtemp,
-  rename,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { canonicalJSON, SmallPenError } from "@smallpen/core";
+import {
+  canonicalJSON,
+  initializationTokenThemes,
+  SmallPenError,
+} from "@smallpen/core";
 
 import { pathExists } from "./fs-utils.mjs";
 import { openPackage } from "./local-package.mjs";
@@ -43,7 +41,9 @@ function tokenDescriptor(name) {
   if (prefix === "color") return { path, type: "color", value: "#6750a4" };
   if (prefix === "opacity") return { path, type: "opacity", value: 1 };
   if (prefix === "radius") return { path, type: "border-radius", value: 8 };
-  if (prefix === "font") return { path, type: "font-family", value: "Inter" };
+  if (prefix === "font") {
+    return { path, type: "font-family", value: "Source Sans Pro" };
+  }
   return {
     path,
     type: prefix === "spacing" ? "spacing" : "number",
@@ -51,29 +51,59 @@ function tokenDescriptor(name) {
   };
 }
 
-function setToken(root, descriptor, usedIds) {
-  const segments = descriptor.path.split(".");
-  let parent = root;
-  for (const segment of segments.slice(0, -1)) {
-    parent[segment] ??= {};
-    parent = parent[segment];
+// The starter token library: initial Tokens in the base set, and the token
+// themes the theme-kind axes describe (see initializationTokenThemes).
+function tokenLibrary(brief, libraryId) {
+  const usedIds = new Set();
+  const usedNames = new Set();
+  const baseTokens = [];
+  for (const name of brief.initialTokens) {
+    const descriptor = tokenDescriptor(name);
+    if (usedNames.has(descriptor.path)) continue;
+    usedNames.add(descriptor.path);
+    let id = `tok_${slug(descriptor.path)}`;
+    let suffix = 2;
+    while (usedIds.has(id)) {
+      id = `tok_${slug(descriptor.path)}_${suffix}`;
+      suffix += 1;
+    }
+    usedIds.add(id);
+    baseTokens.push({
+      description: "",
+      id,
+      name: descriptor.path,
+      type: descriptor.type,
+      value: descriptor.value,
+    });
   }
-  let id = `tok_${slug(descriptor.path)}`;
-  let suffix = 2;
-  while (usedIds.has(id)) {
-    id = `tok_${slug(descriptor.path)}_${suffix}`;
-    suffix += 1;
-  }
-  usedIds.add(id);
-  parent[segments.at(-1)] = {
-    $extensions: { smallpen: { id, visibility: "public" } },
-    $type: descriptor.type,
-    $value: descriptor.value,
+  const { sets, themes } = initializationTokenThemes(brief.contextAxes);
+  return {
+    activeSetIds: ["tset_base"],
+    activeThemeIds: themes.filter(({ active }) => active).map(({ id }) => id),
+    defaultThemeIds: themes.filter(({ active }) => active).map(({ id }) => id),
+    defaultSetIds: ["tset_base"],
+    id: libraryId,
+    sets: sets.map(({ id, name }) => ({
+      description: "",
+      id,
+      name,
+      tokens: id === "tset_base" ? baseTokens : [],
+    })),
+    themes: themes.map(({ group, id, name, setIds }) => ({
+      description: "",
+      externalId: "",
+      group,
+      id,
+      isSource: false,
+      name,
+      setIds,
+    })),
   };
 }
 
-function foundationFiles(proposal) {
-  const brief = proposal.brief;
+// Context axes: the platform viewport plus every non-theme axis. Theme-kind
+// axes are token themes instead.
+function contextFile(brief) {
   const platformValues = brief.platforms.map((value) => ({
     id: slug(value),
     name: value,
@@ -87,18 +117,30 @@ function foundationFiles(proposal) {
       values: platformValues,
     },
     ...brief.contextAxes
-      .filter(({ id }) => id !== "axis_platform")
+      .filter(({ id, kind }) => id !== "axis_platform" && kind !== "theme")
       .map(contextAxis),
   ];
-  const defaults = Object.fromEntries(
-    axes.map((axis) => [axis.id, axis.defaultValue]),
-  );
-  const tokens = {};
-  const usedTokenIds = new Set();
-  for (const token of brief.initialTokens) {
-    setToken(tokens, tokenDescriptor(token), usedTokenIds);
-  }
-  const componentSets = brief.initialComponents.map((name) => {
+  return {
+    axes,
+    profiles: [
+      {
+        default: true,
+        id: `ctx_${slug(brief.platforms[0])}`,
+        name: brief.platforms[0],
+        values: Object.fromEntries(
+          axes.map((axis) => [axis.id, axis.defaultValue]),
+        ),
+      },
+    ],
+  };
+}
+
+function contextDefaults(brief) {
+  return contextFile(brief).profiles[0].values;
+}
+
+function starterComponentSets(brief) {
+  return brief.initialComponents.map((name) => {
     const id = slug(name);
     const nodeId = `node_${id}_root`;
     return {
@@ -128,6 +170,10 @@ function foundationFiles(proposal) {
       visibility: "public",
     };
   });
+}
+
+function foundationFiles(proposal) {
+  const brief = proposal.brief;
   return new Map([
     [
       "manifest.json",
@@ -147,64 +193,27 @@ function foundationFiles(proposal) {
         role: "foundation",
       },
     ],
-    ["components/foundation.json", { componentSets }],
     [
-      "contexts/foundation.json",
-      {
-        axes,
-        profiles: [
-          {
-            default: true,
-            id: `ctx_${slug(brief.platforms[0])}`,
-            name: brief.platforms[0],
-            values: defaults,
-          },
-        ],
-      },
+      "components/foundation.json",
+      { componentSets: starterComponentSets(brief) },
     ],
-    ["tokens/foundation.json", tokens],
+    ["contexts/foundation.json", contextFile(brief)],
+    ["tokens/foundation.json", tokenLibrary(brief, "tlib_foundation")],
   ]);
 }
 
-function productFiles(proposal) {
+// Screens, Scenarios and requirements of the first design; `owner` is the
+// Package that holds them.
+function designFiles(proposal, owner) {
   const { brief, firstDesign } = proposal;
   const rootId = `node_${slug(brief.firstScreen)}_root`;
-  const width = brief.platforms[0].toLowerCase().includes("mobile") ? 390 : 1024;
-  const height = brief.platforms[0].toLowerCase().includes("mobile") ? 844 : 768;
-  const defaults = {
-    axis_platform: slug(brief.platforms[0]),
-    ...Object.fromEntries(
-      brief.contextAxes
-        .filter(({ id }) => id !== "axis_platform")
-        .map((axis) => [axis.id, slug(axis.defaultValue)]),
-    ),
-  };
+  const width = brief.platforms[0].toLowerCase().includes("mobile")
+    ? 390
+    : 1024;
+  const height = brief.platforms[0].toLowerCase().includes("mobile")
+    ? 844
+    : 768;
   return new Map([
-    [
-      "manifest.json",
-      {
-        defaultScreenId: firstDesign.screenId,
-        dependencies: [
-          {
-            packageId: proposal.packages.foundation.packageId,
-            path: proposal.packages.foundation.directoryName,
-          },
-        ],
-        entries: {
-          assets: [],
-          components: [],
-          contexts: [],
-          requirements: ["requirements/product.json"],
-          scenarios: ["scenarios/product.json"],
-          screens: ["screens/first-design.json"],
-          tokens: ["tokens/product.json"],
-        },
-        formatVersion: 1,
-        name: proposal.packages.product.name,
-        packageId: proposal.packages.product.packageId,
-        role: "product",
-      },
-    ],
     [
       "requirements/product.json",
       {
@@ -232,7 +241,7 @@ function productFiles(proposal) {
         scenarios: [
           {
             actions: [],
-            context: defaults,
+            context: contextDefaults(brief),
             expectedVisibleNodeIds: [rootId],
             fixture: {},
             id: firstDesign.scenarioId,
@@ -242,7 +251,7 @@ function productFiles(proposal) {
               presentationId: firstDesign.presentationId,
               screen: {
                 assetId: firstDesign.screenId,
-                packageId: proposal.packages.product.packageId,
+                packageId: owner.packageId,
               },
             },
             viewport: { height, scale: 1, width },
@@ -282,32 +291,96 @@ function productFiles(proposal) {
         ],
       },
     ],
+  ]);
+}
+
+function productFiles(proposal) {
+  const { firstDesign } = proposal;
+  const foundationThemes = tokenLibrary(proposal.brief, "tlib_foundation");
+  return new Map([
+    [
+      "manifest.json",
+      {
+        defaultScreenId: firstDesign.screenId,
+        dependencies: [
+          {
+            // The Product's selection of the Foundation's token themes.
+            activeThemeIds: foundationThemes.activeThemeIds,
+            packageId: proposal.packages.foundation.packageId,
+            path: proposal.packages.foundation.directoryName,
+          },
+        ],
+        entries: {
+          assets: [],
+          components: [],
+          contexts: [],
+          requirements: ["requirements/product.json"],
+          scenarios: ["scenarios/product.json"],
+          screens: ["screens/first-design.json"],
+          tokens: ["tokens/product.json"],
+        },
+        formatVersion: 1,
+        name: proposal.packages.product.name,
+        packageId: proposal.packages.product.packageId,
+        role: "product",
+      },
+    ],
+    ...designFiles(proposal, proposal.packages.product),
     [
       "tokens/product.json",
       {
-        activeSetIds: [],
-        activeThemeIds: ["theme_default"],
+        // Product sets sit on top of the Foundation's active sets by name.
+        activeSetIds: ["tset_product"],
+        activeThemeIds: [],
         id: "tlib_product",
         sets: [
           {
             description: "",
-            id: "tset_theme_default",
-            name: "Theme/Default",
+            id: "tset_product",
+            name: "product",
             tokens: [],
           },
         ],
-        themes: [
-          {
-            description: "",
-            externalId: "",
-            group: "Theme",
-            id: "theme_default",
-            isSource: false,
-            name: "Default",
-            setIds: ["tset_theme_default"],
-          },
-        ],
+        themes: [],
       },
+    ],
+  ]);
+}
+
+// The default layout: one self-contained Package with token sets and
+// themes, Components and the first design.
+function singlePackageFiles(proposal) {
+  const { brief, firstDesign } = proposal;
+  const owner = proposal.packages.package;
+  return new Map([
+    [
+      "manifest.json",
+      {
+        defaultScreenId: firstDesign.screenId,
+        entries: {
+          assets: [],
+          components: ["components/components.json"],
+          contexts: ["contexts/contexts.json"],
+          requirements: ["requirements/product.json"],
+          scenarios: ["scenarios/product.json"],
+          screens: ["screens/first-design.json"],
+          tokens: ["tokens/tokens.json"],
+        },
+        formatVersion: 1,
+        name: owner.name,
+        packageId: owner.packageId,
+        role: "foundation",
+      },
+    ],
+    [
+      "components/components.json",
+      { componentSets: starterComponentSets(brief) },
+    ],
+    ["contexts/contexts.json", contextFile(brief)],
+    ...designFiles(proposal, owner),
+    [
+      "tokens/tokens.json",
+      tokenLibrary(brief, `tlib_${owner.packageId.replace(/^pkg_/, "")}`),
     ],
   ]);
 }
@@ -320,10 +393,10 @@ async function writeFiles(packagePath, files) {
   }
 }
 
-function blankPackageFiles(name) {
+function blankPackageFiles(name, { neutral = false } = {}) {
   const suffix = randomUUID().replaceAll("-", "");
   const screenId = `scr_${suffix}`;
-  const presentationId = `pres_${suffix}_desktop`;
+  const presentationId = `pres_${suffix}_${neutral ? "base" : "desktop"}`;
   const rootId = `node_${suffix}_root`;
   return new Map([
     [
@@ -356,7 +429,7 @@ function blankPackageFiles(name) {
           {
             id: presentationId,
             interactions: [],
-            name: "Desktop",
+            name: neutral ? "Base" : "Desktop",
             nodes: {
               [rootId]: {
                 children: [],
@@ -370,7 +443,7 @@ function blankPackageFiles(name) {
                 y: 0,
               },
             },
-            platform: "desktop",
+            ...(neutral ? {} : { platform: "desktop" }),
             rootId,
             viewport: { height: 768, width: 1024 },
           },
@@ -407,6 +480,112 @@ function blankPackageFiles(name) {
   ]);
 }
 
+// CLI creation has no business brief. Keep the same blank model as the App,
+// with one Base canvas; workspace publication remains an atomic rename.
+export async function initializeBlankWorkspace(locator, options = {}) {
+  const workspacePath = resolve(locator);
+  const layout = options.layout ?? "single";
+  if (!["single", "foundation-product"].includes(layout)) {
+    throw new SmallPenError("invalid_init_layout", "Unknown workspace layout", {
+      validValues: ["foundation-product", "single"],
+      value: layout,
+    });
+  }
+  if (workspacePath.toLowerCase().endsWith(".smallpen")) {
+    if (layout !== "single") {
+      throw new SmallPenError(
+        "invalid_init_layout",
+        "A paired workspace requires a directory, not a .smallpen path",
+      );
+    }
+    const created = await createBlankPackage(workspacePath, {
+      ...options,
+      neutral: true,
+    });
+    return { ...created, layout, status: "initialized" };
+  }
+  if (workspacePath === dirname(workspacePath)) {
+    throw new SmallPenError(
+      "invalid_workspace_path",
+      "Workspace cannot be a filesystem root",
+    );
+  }
+  if (await pathExists(workspacePath)) {
+    throw new SmallPenError(
+      "workspace_already_exists",
+      `Workspace target already exists: ${workspacePath}`,
+      { workspacePath },
+    );
+  }
+  const folder = basename(workspacePath);
+  const name = String(options.name ?? folder).trim() || "Untitled";
+  if (name.length > 255) {
+    throw new SmallPenError(
+      "invalid_package_name",
+      "Package name must contain at most 255 characters",
+    );
+  }
+  await mkdir(dirname(workspacePath), { recursive: true });
+  const transaction = await mkdtemp(
+    join(dirname(workspacePath), ".smallpen-init-"),
+  );
+  const candidate = join(transaction, folder);
+  try {
+    const files = blankPackageFiles(name, { neutral: true });
+    if (layout === "single") {
+      const filename = `${folder}.smallpen`;
+      await writeFiles(join(candidate, filename), files);
+      await openPackage(join(candidate, filename));
+      await rename(candidate, workspacePath);
+      return {
+        layout,
+        packagePath: join(workspacePath, filename),
+        status: "initialized",
+        workspacePath,
+      };
+    }
+    const foundationName = `${folder}-foundation.smallpen`;
+    const productName = `${folder}.smallpen`;
+    const foundationFiles = blankPackageFiles(`${name} Foundation`, {
+      neutral: true,
+    });
+    const foundationManifest = foundationFiles.get("manifest.json");
+    for (const entry of foundationManifest.entries.screens)
+      foundationFiles.delete(entry);
+    foundationManifest.entries.screens = [];
+    delete foundationManifest.defaultScreenId;
+    const manifest = files.get("manifest.json");
+    manifest.role = "product";
+    manifest.dependencies = [
+      {
+        packageId: foundationManifest.packageId,
+        path: foundationName,
+        activeThemeIds: ["theme_default"],
+      },
+    ];
+    files.set("tokens/tokens.json", {
+      id: "tlib_product",
+      sets: [],
+      themes: [],
+      activeSetIds: [],
+      activeThemeIds: [],
+    });
+    await writeFiles(join(candidate, foundationName), foundationFiles);
+    await writeFiles(join(candidate, productName), files);
+    await openWorkspace(join(candidate, productName));
+    await rename(candidate, workspacePath);
+    return {
+      foundationPath: join(workspacePath, foundationName),
+      layout,
+      productPath: join(workspacePath, productName),
+      status: "initialized",
+      workspacePath,
+    };
+  } finally {
+    await rm(transaction, { recursive: true, force: true });
+  }
+}
+
 export async function createBlankPackage(packageLocator, options = {}) {
   const packagePath = resolve(packageLocator);
   if (!packagePath.toLowerCase().endsWith(".smallpen")) {
@@ -436,7 +615,7 @@ export async function createBlankPackage(packageLocator, options = {}) {
   const transactionPath = await mkdtemp(join(parent, ".smallpen-create-"));
   const candidatePath = join(transactionPath, basename(packagePath));
   try {
-    await writeFiles(candidatePath, blankPackageFiles(name));
+    await writeFiles(candidatePath, blankPackageFiles(name, options));
     await openPackage(candidatePath);
     await rename(candidatePath, packagePath);
     await rm(transactionPath, { force: true, recursive: true });
@@ -447,7 +626,11 @@ export async function createBlankPackage(packageLocator, options = {}) {
   }
 }
 
-export async function initializeWorkspace(workspaceLocator, proposal, options = {}) {
+export async function initializeWorkspace(
+  workspaceLocator,
+  proposal,
+  options = {},
+) {
   if (options.confirmed !== true) {
     throw new SmallPenError(
       "initialization_confirmation_required",
@@ -474,14 +657,24 @@ export async function initializeWorkspace(workspaceLocator, proposal, options = 
   await mkdir(parent, { recursive: true });
   const transactionPath = await mkdtemp(join(parent, ".smallpen-init-"));
   const candidatePath = join(transactionPath, basename(workspacePath));
-  const foundationPath = join(
-    candidatePath,
-    proposal.packages.foundation.directoryName,
-  );
-  const productPath = join(candidatePath, proposal.packages.product.directoryName);
+  // Proposals written before layouts existed always describe the pair.
+  const single = (proposal.layout ?? "foundation-product") === "single";
   try {
-    await writeFiles(foundationPath, foundationFiles(proposal));
-    await writeFiles(productPath, productFiles(proposal));
+    if (single) {
+      await writeFiles(
+        join(candidatePath, proposal.packages.package.directoryName),
+        singlePackageFiles(proposal),
+      );
+    } else {
+      await writeFiles(
+        join(candidatePath, proposal.packages.foundation.directoryName),
+        foundationFiles(proposal),
+      );
+      await writeFiles(
+        join(candidatePath, proposal.packages.product.directoryName),
+        productFiles(proposal),
+      );
+    }
     await mkdir(join(candidatePath, "initialization"), { recursive: true });
     await writeFile(
       join(candidatePath, "initialization", "brief.json"),
@@ -493,15 +686,41 @@ export async function initializeWorkspace(workspaceLocator, proposal, options = 
       canonicalJSON(proposal),
       "utf8",
     );
-    await openPackage(foundationPath);
-    await openWorkspace(productPath);
+    if (single) {
+      await openWorkspace(
+        join(candidatePath, proposal.packages.package.directoryName),
+      );
+    } else {
+      await openPackage(
+        join(candidatePath, proposal.packages.foundation.directoryName),
+      );
+      await openWorkspace(
+        join(candidatePath, proposal.packages.product.directoryName),
+      );
+    }
     await rename(candidatePath, workspacePath);
     await rm(transactionPath, { force: true, recursive: true });
+    const paths = single
+      ? {
+          layout: "single",
+          packagePath: join(
+            workspacePath,
+            proposal.packages.package.directoryName,
+          ),
+        }
+      : {
+          foundationPath: join(
+            workspacePath,
+            proposal.packages.foundation.directoryName,
+          ),
+          layout: "foundation-product",
+          productPath: join(
+            workspacePath,
+            proposal.packages.product.directoryName,
+          ),
+        };
     return {
-      foundationPath: join(
-        workspacePath,
-        proposal.packages.foundation.directoryName,
-      ),
+      ...paths,
       initializationBriefPath: join(
         workspacePath,
         "initialization",
@@ -512,7 +731,6 @@ export async function initializeWorkspace(workspaceLocator, proposal, options = 
         "initialization",
         "proposal.json",
       ),
-      productPath: join(workspacePath, proposal.packages.product.directoryName),
       status: "initialized",
       workspacePath,
     };

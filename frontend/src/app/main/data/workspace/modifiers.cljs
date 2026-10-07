@@ -183,55 +183,49 @@
          (mth/close? (:height selrect) (:height transformed-selrect))
          orientation-unchanged?)))
 
+(defn- calculate-ignore-tree*
+  [ids objects transform-shape]
+  (let [transformed-shape
+        (memoize (fn [id] (transform-shape (get objects id))))
+
+        ignore-geometry?
+        (memoize
+         (fn [id root-id]
+           (check-delta (get objects id) (get objects root-id)
+                        (transformed-shape id) (transformed-shape root-id))))]
+    (letfn [(walk-tree [ignore-tree shape root-id]
+              (let [id (:id shape)
+                    ignore-tree
+                    (cond-> ignore-tree
+                      (ctk/in-component-copy? shape)
+                      (assoc id (ignore-geometry? id root-id)))]
+                (reduce (fn [result child-id]
+                          (walk-tree result (get objects child-id) root-id))
+                        ignore-tree
+                        (:shapes shape))))]
+      ;; Expanded modifier maps contain both ancestors and descendants.
+      ;; Keep their traversal and overwrite order for nested components,
+      ;; but reuse geometry and deltas within this one operation.
+      (reduce (fn [ignore-tree id]
+                (let [shape (get objects id)
+                      root (if (:component-root shape)
+                             shape
+                             (ctn/get-component-shape objects shape {:allow-main? true}))]
+                  ;; A subtree with no component root writes no flags. Nested
+                  ;; copies in the modifier map still get their own entry below.
+                  (if (some? root)
+                    (walk-tree ignore-tree shape (:id root))
+                    ignore-tree)))
+              nil
+              ids))))
+
 (defn calculate-ignore-tree
   "Retrieves a map with the flag `ignore-geometry?` given a tree of modifiers"
   [modif-tree objects]
-
-  (letfn [(get-ignore-tree
-            ([ignore-tree shape]
-             (let [shape-id (dm/get-prop shape :id)
-                   transformed-shape (gsh/transform-shape shape (dm/get-in modif-tree [shape-id :modifiers]))
-
-                   root
-                   (if (:component-root shape)
-                     shape
-                     (ctn/get-component-shape objects shape {:allow-main? true}))
-
-                   transformed-root
-                   (if (:component-root shape)
-                     transformed-shape
-                     (gsh/transform-shape root (dm/get-in modif-tree [(:id root) :modifiers])))]
-
-               (get-ignore-tree ignore-tree shape transformed-shape root transformed-root)))
-
-            ([ignore-tree shape root transformed-root]
-             (let [shape-id (dm/get-prop shape :id)
-                   transformed-shape (gsh/transform-shape shape (dm/get-in modif-tree [shape-id :modifiers]))]
-               (get-ignore-tree ignore-tree shape transformed-shape root transformed-root)))
-
-            ([ignore-tree shape transformed-shape root transformed-root]
-             (let [shape-id (dm/get-prop shape :id)
-
-                   ignore-tree
-                   (cond-> ignore-tree
-                     (and (some? root) (ctk/in-component-copy? shape))
-                     (assoc
-                      shape-id
-                      (check-delta shape root transformed-shape transformed-root)))
-
-                   set-child
-                   (fn [ignore-tree child]
-                     (get-ignore-tree ignore-tree child root transformed-root))]
-
-               (->> (:shapes shape)
-                    (map (d/getf objects))
-                    (reduce set-child ignore-tree)))))]
-
-    ;; we check twice because we want only to search parents of components but once the
-    ;; tree is traversed we only want to process the objects in components
-    (->> (keys modif-tree)
-         (map #(get objects %))
-         (reduce get-ignore-tree nil))))
+  (calculate-ignore-tree*
+   (keys modif-tree) objects
+   (fn [shape]
+     (gsh/transform-shape shape (dm/get-in modif-tree [(:id shape) :modifiers])))))
 
 (defn- cached-transform
   [transforms]

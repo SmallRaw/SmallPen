@@ -1,0 +1,206 @@
+{
+  "componentSets": [
+    {
+      "axes": [],
+      "id": "cmp_button",
+      "name": "Button",
+      "variants": [
+        {
+          "id": "var_button_default",
+          "nodes": {
+            "node_button_root": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#6750a4",
+                  "type": "solid"
+                }
+              ],
+              "height": 40,
+              "id": "node_button_root",
+              "name": "Button",
+              "type": "COMPONENT",
+              "width": 120,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_button_root",
+          "selection": {}
+        }
+      ],
+      "visibility": "public"
+    },
+    {
+      "axes": [],
+      "id": "cmp_badge",
+      "name": "Badge",
+      "variants": [
+        {
+          "id": "var_badge_default",
+          "nodes": {
+            "node_badge_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#ffffff",
+                  "type": "solid"
+                }
+              ],
+              "height": 24,
+              "id": "node_badge_label",
+              "name": "Label",
+              "text": "Badge",
+              "textStyle": {
+                "fontSize": 12,
+                "textAlign": "center"
+              },
+              "type": "TEXT",
+              "width": 72,
+              "x": 0,
+              "y": 4
+            },
+            "node_badge_root": {
+              "children": [
+                "node_badge_label"
+              ],
+              "cornerRadius": 12,
+              "fills": [
+                {
+                  "color": "#16a34a",
+                  "type": "solid"
+                }
+              ],
+              "height": 24,
+              "id": "node_badge_root",
+              "name": "Badge",
+              "type": "COMPONENT",
+              "width": 72,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_badge_root",
+          "selection": {}
+        }
+      ],
+      "visibility": "public"
+    },
+    {
+      "axes": [
+        {
+          "domain": [
+            "neutral",
+            "brand"
+          ],
+          "id": "axis_tone",
+          "name": "Tone",
+          "role": "configuration"
+        }
+      ],
+      "id": "cmp_chip",
+      "name": "Chip",
+      "variants": [
+        {
+          "id": "var_chip_neutral",
+          "nodes": {
+            "node_chip_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#111827",
+                  "type": "solid"
+                }
+              ],
+              "height": 20,
+              "id": "node_chip_label",
+              "name": "Label",
+              "text": "Chip",
+              "textStyle": {
+                "fontSize": 13,
+                "textAlign": "center"
+              },
+              "type": "TEXT",
+              "width": 96,
+              "x": 0,
+              "y": 6
+            },
+            "node_chip_root": {
+              "children": [
+                "node_chip_label"
+              ],
+              "cornerRadius": 16,
+              "fills": [
+                {
+                  "color": "#e5e7eb",
+                  "type": "solid"
+                }
+              ],
+              "height": 32,
+              "id": "node_chip_root",
+              "name": "Chip",
+              "type": "COMPONENT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_chip_root",
+          "selection": {
+            "axis_tone": "neutral"
+          }
+        },
+        {
+          "id": "var_chip_brand",
+          "nodes": {
+            "node_chip_label": {
+              "children": [],
+              "fills": [
+                {
+                  "color": "#ffffff",
+                  "type": "solid"
+                }
+              ],
+              "height": 20,
+              "id": "node_chip_label",
+              "name": "Label",
+              "text": "Chip",
+              "textStyle": {
+                "fontSize": 13,
+                "textAlign": "center"
+              },
+              "type": "TEXT",
+              "width": 96,
+              "x": 0,
+              "y": 6
+            },
+            "node_chip_root": {
+              "children": [
+                "node_chip_label"
+              ],
+              "cornerRadius": 16,
+              "fills": [
+                {
+                  "color": "#6750a4",
+                  "type": "solid"
+                }
+              ],
+              "height": 32,
+              "id": "node_chip_root",
+              "name": "Chip",
+              "type": "COMPONENT",
+              "width": 96,
+              "x": 0,
+              "y": 0
+            }
+          },
+          "rootId": "node_chip_root",
+          "selection": {
+            "axis_tone": "brand"
+          }
+        }
+      ],
+      "visibility": "public"
+    }
+  ]
+}

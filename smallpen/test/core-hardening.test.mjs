@@ -232,7 +232,7 @@ test("operations with prototype ids fail without touching Object.prototype", asy
     apply(design, [
       {
         changes: JSON.parse('{"__proto__": {"polluted": true}}'),
-        componentSetId: "cmp_card_set",
+        componentId: "cmp_card_set",
         nodeId: "node_card_idle_label",
         type: "update-component-node",
         variantId: "var_card_idle",
@@ -244,7 +244,7 @@ test("operations with prototype ids fail without touching Object.prototype", asy
     apply(design, [
       {
         changes: {},
-        componentSetId: "cmp_card_set",
+        componentId: "cmp_card_set",
         nodeId: "constructor",
         type: "update-component-node",
         variantId: "var_card_idle",
@@ -586,7 +586,7 @@ test("every operation's inverse batch restores the original revision", async () 
     JSON.parse(
       JSON.stringify(
         values.get("components/components.json").componentSets[0],
-      ).replaceAll("card", "extra"),
+      ).replaceAll("card", "extra").replaceAll("Card", "Extra"),
     );
   const node = (id) => ({
     children: [],
@@ -794,12 +794,12 @@ test("every operation's inverse batch restores the original revision", async () 
       { componentId: "cmp_frame", type: "delete-component" },
     ]],
     ["update-component-node", design, () => [], () => [
-      { changes: { name: "Caption" }, componentSetId: "cmp_card_set", nodeId: "node_card_idle_label", type: "update-component-node", unset: ["fills"], variantId: "var_card_idle" },
+      { changes: { name: "Caption" }, componentId: "cmp_card_set", nodeId: "node_card_idle_label", type: "update-component-node", unset: ["fills"], variantId: "var_card_idle" },
     ]],
     ["put-variant", design, () => [], (values) => {
       const variant = structuredClone(values.get("components/components.json").componentSets[0].variants[0]);
       variant.nodes[variant.rootId].name = "Card / idle (edited)";
-      return [{ componentSetId: "cmp_card_set", type: "put-variant", variant }];
+      return [{ componentId: "cmp_card_set", type: "put-variant", variant }];
     }],
     ["put-component-set", design, () => [], (values) => {
       const componentSet = structuredClone(values.get("components/components.json").componentSets[0]);
@@ -815,12 +815,12 @@ test("every operation's inverse batch restores the original revision", async () 
     ["delete-variant", design, (values) => [
       { componentSet: extraSet(values), type: "put-component-set" },
     ], () => [
-      { componentSetId: "cmp_extra_set", type: "delete-variant", variantId: "var_extra_pressed" },
+      { componentId: "cmp_extra_set", type: "delete-variant", variantId: "var_extra_pressed" },
     ]],
     ["delete-component-set", design, (values) => [
       { componentSet: extraSet(values), type: "put-component-set" },
     ], () => [
-      { componentSetId: "cmp_extra_set", type: "delete-component-set" },
+      { componentId: "cmp_extra_set", type: "delete-component-set" },
     ]],
     ["set-foundation-dependency", product, () => [], () => [
       { dependency: { packageId: "pkg_other_base", path: "other" }, type: "set-foundation-dependency" },

@@ -64,10 +64,19 @@
     (catch :default _
       value)))
 
+(defn- short-locator
+  "The end of a Package path: copies of one Package share a name and a long
+  common prefix, so the folders next to the file tell them apart."
+  [locator]
+  (let [parts (str/split (str locator) #"/")]
+    (if (> (count parts) 4)
+      (str "…/" (str/join "/" (take-last 3 parts)))
+      locator)))
+
 (mf/defc package-card*
   {::mf/private true
    ::mf/props :obj}
-  [{:keys [active lastOpenedAt locator name open role status on-open opening]}]
+  [{:keys [active lastOpenedAt locator name nativeName open role status on-open opening]}]
   (let [opening?   (package-opening? opening locator)
         repair?    (= "repair" (:state status))
         role-label (package-role-label role)]
@@ -90,7 +99,9 @@
       [:> text* {:class (stl/css :path)
                  :title locator
                  :typography t/body-small}
-       locator]
+       (if nativeName
+         (tr "smallpen.home.local-directory" nativeName)
+         (short-locator locator))]
       [:div {:class (stl/css :metadata)}
        (when role-label
          [:> text* {:as "span" :typography t/body-small}
@@ -114,6 +125,10 @@
         package-dialog-open* (mf/use-state false)
         package-dialog-action* (mf/use-state :open)
         package-locator*     (mf/use-state "")
+        uploading*          (mf/use-state false)
+        uploading           @uploading*
+        native-directory?   (smallpen/native-directory-supported?)
+        directory-input-ref (mf/use-ref nil)
         package-dialog-open  @package-dialog-open*
         package-dialog-action @package-dialog-action*
         package-locator      @package-locator*
@@ -154,15 +169,49 @@
         show-package-dialog
         (mf/use-fn
          (fn [action]
+           (swap! state assoc :error nil)
            (reset! package-dialog-action* action)
            (reset! package-dialog-open* true)))
+
+        browse-package
+        (mf/use-fn
+         (fn [_]
+           (if native-directory?
+             (do
+               (reset! uploading* true)
+               (swap! state assoc :error nil)
+               (-> (smallpen/open-local-directory!)
+                   (.then (fn [{:keys [url]}] (set! (.-href globals/location) url)))
+                   (.catch (fn [cause]
+                             (when-not (= "AbortError" (.-name cause))
+                               (swap! state assoc :error (smallpen/local-file-error cause)))))
+                   (.finally #(reset! uploading* false))))
+             (.click (mf/ref-val directory-input-ref)))))
+
+        upload-package
+        (mf/use-fn
+         (fn [event]
+           (let [input (dom/get-target event)
+                 files (vec (array-seq (js/Array.from (.-files input))))]
+             (set! (.-value input) "")
+             (when (seq files)
+               (reset! uploading* true)
+               (swap! state assoc :error nil)
+               (-> (smallpen/import-package! files)
+                   (.then (fn [{:keys [url]}]
+                            (set! (.-href globals/location) url)))
+                   (.catch (fn [cause]
+                             (swap! state assoc :error (or (ex-message cause)
+                                                           (tr "errors.generic")))))
+                   (.finally #(reset! uploading* false)))))))
 
         choose-package
         (mf/use-fn
          (fn [_]
-           (if (smallpen/desktop-runtime?)
-             (smallpen/request-desktop-action! "open")
-             (show-package-dialog :open))))
+           (cond
+             (smallpen/desktop-runtime?) (smallpen/request-desktop-action! "open")
+             native-directory? (browse-package nil)
+             :else (show-package-dialog :open))))
 
         new-package
         (mf/use-fn
@@ -174,12 +223,14 @@
         close-package-dialog
         (mf/use-fn
          (fn []
-           (reset! package-dialog-open* false)))
+           (when-not @uploading*
+             (reset! package-dialog-open* false))))
 
         change-package-dialog
         (mf/use-fn
          (fn [open]
-           (reset! package-dialog-open* open)))
+           (when-not @uploading*
+             (reset! package-dialog-open* open))))
 
         change-package-locator
         (mf/use-fn
@@ -191,7 +242,8 @@
          (mf/deps package-dialog-action package-locator open-package create-package)
          (fn [event]
            (dom/prevent-default event)
-           (when-let [locator (some-> package-locator str/trim not-empty)]
+           (when-let [locator (when-not @uploading*
+                                (some-> package-locator str/trim not-empty))]
              (reset! package-dialog-open* false)
              (reset! package-locator* "")
              ((if (= package-dialog-action :create)
@@ -220,17 +272,20 @@
       (let [disposed (atom false)]
         (-> (js/Promise.all
              #js [(smallpen/application-state)
-                  (smallpen/open-packages)])
+                  (smallpen/open-packages)
+                  (smallpen/local-directories)])
             (.then
              (fn [values]
                (when-not @disposed
                  ;; 保留已暂存的 routing notice，不被应用状态拉取覆盖。
-                 (swap! state assoc
-                        :application (aget values 0)
-                        :error nil
-                        :loading false
-                        :opening nil
-                        :sessions (aget values 1)))))
+                 (let [names (into {} (map (juxt :locator :name)) (aget values 2))]
+                   (swap! state assoc
+                          :application (update (aget values 0) :recentPackages
+                                               #(mapv (fn [item] (assoc item :nativeName (get names (:locator item)))) %))
+                          :error nil
+                          :loading false
+                          :opening nil
+                          :sessions (aget values 1))))))
             (.catch
              (fn [cause]
                (when-not @disposed
@@ -270,19 +325,41 @@
                                    (tr "smallpen.home.new-package")
                                    (tr "smallpen.home.open-package"))}]
        [:> modal-content* {}
-        [:> input* {:auto-focus true
+        (when (= package-dialog-action :open)
+          [:div {:class (stl/css :upload-options)}
+           [:> button* {:type "button"
+                        :icon i/folder
+                        :disabled uploading
+                        :on-click browse-package}
+            (if uploading
+              (tr "labels.uploading")
+              (tr "smallpen.home.upload-folder"))]
+           [:input {:type "file"
+                    :hidden true
+                    :ref directory-input-ref
+                    :webkitdirectory "true"
+                    :multiple true
+                    :on-change upload-package}]])
+        [:> input* {:auto-focus (= package-dialog-action :create)
+                    :disabled uploading
                     :default-value ""
                     :label (if (= package-dialog-action :create)
                              (tr "smallpen.home.new-prompt")
-                             (tr "smallpen.home.open-prompt"))
+                             (tr "smallpen.home.open-server-prompt"))
                     :on-change change-package-locator
-                    :variant "comfortable"}]]
+                    :variant "comfortable"}]
+        (when error
+          [:> text* {:class (stl/css :error)
+                     :role "alert"
+                     :typography t/body-medium}
+           error])]
        [:> modal-footer* {}
         [:> button* {:on-click close-package-dialog
+                     :disabled uploading
                      :type "button"
                      :variant "secondary"}
          (tr "labels.cancel")]
-        [:> button* {:disabled (str/blank? package-locator)
+        [:> button* {:disabled (or uploading (str/blank? package-locator))
                      :on-click submit-package
                      :type "button"}
          (if (= package-dialog-action :create)
@@ -300,6 +377,7 @@
         (tr "smallpen.home.new-package")]
        [:> button* {:variant "secondary"
                     :icon i/folder
+                    :disabled uploading
                     :on-click choose-package}
         (tr "smallpen.home.open-package")]
        [:> button* {:variant "secondary"
@@ -314,7 +392,7 @@
                     :typography t/title-large}
        (tr "smallpen.home.recent")]
 
-      (when error
+      (when (and error (not package-dialog-open))
         [:> text* {:class (stl/css :error) :typography t/body-medium}
          error])
 
@@ -329,12 +407,13 @@
 
         :else
         [:div {:class (stl/css :package-grid)}
-         (for [{:keys [active lastOpenedAt locator name open role status]} packages]
+         (for [{:keys [active lastOpenedAt locator name nativeName open role status]} packages]
            [:> package-card* {:active active
                               :key locator
                               :lastOpenedAt lastOpenedAt
                               :locator locator
                               :name name
+                              :nativeName nativeName
                               :on-open open-package
                               :open open
                               :opening opening

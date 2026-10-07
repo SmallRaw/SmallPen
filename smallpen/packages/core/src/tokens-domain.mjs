@@ -19,7 +19,10 @@ export const TOKEN_VALUE_SHAPES = Object.freeze({
     shape: '"#rrggbb" or "#rrggbbaa", or {colorSpace:"srgb", components:[r,g,b] in 0..1, alpha?}',
   },
   dimensions: { example: 16, shape: "number (px)" },
-  "font-family": { example: "Inter", shape: "string" },
+  "font-family": {
+    example: "Source Sans Pro",
+    shape: "string; only Source Sans Pro is bundled, import other families with smallpen font import",
+  },
   "font-size": { example: 16, shape: "number (px), not a string" },
   "font-weight": { example: 700, shape: "number or string" },
   "letter-spacing": { example: 0.5, shape: "number" },
@@ -28,8 +31,9 @@ export const TOKEN_VALUE_SHAPES = Object.freeze({
   other: { example: "any text", shape: "string" },
   rotation: { example: 45, shape: "number (degrees)" },
   shadow: {
-    example: { blur: 8, color: "#00000033", spread: 0, x: 0, y: 2 },
-    shape: "object or array of objects",
+    example: { blur: 8, color: "#00000033", offsetX: 0, offsetY: 2, spread: 0 },
+    shape:
+      "object {offsetX, offsetY, blur, spread, color} (px numbers; blur is the CSS blur radius) or an array of them",
   },
   sizing: { example: 48, shape: "number (px)" },
   spacing: { example: 16, shape: "number (px)" },
@@ -38,9 +42,9 @@ export const TOKEN_VALUE_SHAPES = Object.freeze({
   "text-case": { example: "uppercase", shape: "string" },
   "text-decoration": { example: "underline", shape: "string" },
   typography: {
-    example: { fontFamily: "Inter", fontSize: 24, fontWeight: 700 },
+    example: { fontFamily: "Source Sans Pro", fontSize: 24, fontWeight: 700, lineHeight: 1.3 },
     shape:
-      "{fontFamily: string, fontSize: number, fontWeight: number, lineHeight?, letterSpacing?}",
+      "{fontFamily: string, fontSize: number (px), fontWeight: number, lineHeight?: multiplier of fontSize (1.3 = 130%, not px), letterSpacing?: number (px)}",
   },
 });
 
@@ -384,6 +388,73 @@ function addPenpotLibraryTokens(library, filePath, state) {
       claimTokenPath(state.byPath, token.path, token);
     }
   }
+}
+
+// Every Token name in a Package's token entries as {id, name, set?,
+// filePath}. It reads the raw entries, so it also sees a DTCG Token nested
+// inside another Token, which loading skips.
+export function listTokenNames(manifest, entries) {
+  const names = [];
+  const visit = (value, segments, filePath) => {
+    for (const [key, child] of Object.entries(value)) {
+      if (key.startsWith("$") || !isRecord(child)) continue;
+      const path = [...segments, key];
+      if (
+        Object.hasOwn(child, "$value") ||
+        Array.isArray(child.$extensions?.smallpen?.contextValues)
+      ) {
+        names.push({ filePath, id: child.$extensions?.smallpen?.id, name: path.join(".") });
+      }
+      visit(child, path, filePath);
+    }
+  };
+  for (const filePath of manifest.entries.tokens) {
+    const value = entries[filePath];
+    if (!isRecord(value)) continue;
+    if (Array.isArray(value.sets) && Array.isArray(value.themes)) {
+      for (const tokenSet of value.sets) {
+        for (const token of tokenSet?.tokens ?? []) {
+          if (typeof token?.name !== "string") continue;
+          names.push({ filePath, id: token.id, name: token.name, set: tokenSet.name });
+        }
+      }
+    } else {
+      visit(value, [], filePath);
+    }
+  }
+  return names;
+}
+
+// Penpot nests Tokens by name, so a name is either a Token or a group of
+// Tokens, never both: color.brand and color.brand.base cannot coexist
+// (Penpot's token-name-path-exists?; StyleDictionary drops one of them when
+// both are active). Returns the Tokens of `tokens` that collide with `name`.
+export function tokenNameCollisions(name, tokens, exceptId) {
+  return tokens.filter(
+    (token) =>
+      token.id !== exceptId &&
+      (token.name.startsWith(`${name}.`) || name.startsWith(`${token.name}.`)),
+  );
+}
+
+// Every colliding pair of a Package, for `smallpen validate`.
+export function packageTokenNameCollisions(manifest, entries) {
+  const tokens = listTokenNames(manifest, entries);
+  const byName = new Map();
+  for (const token of tokens) {
+    if (!byName.has(token.name)) byName.set(token.name, []);
+    byName.get(token.name).push(token);
+  }
+  const pairs = [];
+  for (const token of tokens) {
+    const segments = token.name.split(".");
+    for (let length = 1; length < segments.length; length += 1) {
+      for (const group of byName.get(segments.slice(0, length).join(".")) ?? []) {
+        pairs.push({ group, token });
+      }
+    }
+  }
+  return pairs;
 }
 
 // Alias targets resolve by path and the first declaration of a path wins:

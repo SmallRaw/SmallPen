@@ -1,3 +1,4 @@
+import { canvasLayout, resolveCanvases, validateCanvases } from "./canvases.mjs";
 import {
   canonicalJSON,
   hashCanonicalFiles,
@@ -11,7 +12,10 @@ import {
 } from "./components-domain.mjs";
 import { createComponentSamples } from "./component-samples.mjs";
 import { parseContextEntries } from "./contexts.mjs";
-import { validateDesignReferences } from "./design-validation.mjs";
+import {
+  staleInstanceDiagnostics,
+  validateDesignReferences,
+} from "./design-validation.mjs";
 import { fail, SmallPenError } from "./errors.mjs";
 import {
   assertValueDepth,
@@ -31,7 +35,13 @@ import {
 } from "./projection-values.mjs";
 import { parseRequirementEntries } from "./requirements-domain.mjs";
 import { parseScenarioEntries } from "./scenarios-domain.mjs";
-import { parseTokenEntries } from "./tokens-domain.mjs";
+import {
+  listTokenNames,
+  parseTokenEntries,
+  tokenNameCollisions,
+} from "./tokens-domain.mjs";
+import { activeTokenSetIds, productFoundationThemeIds } from "./token-themes.mjs";
+import { checkOperationShadows } from "./shadows.mjs";
 
 const ENTRY_KINDS = SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.entryKinds;
 const NODE_TYPES = new Set(
@@ -106,6 +116,7 @@ const APPLIED_TOKEN_ATTRIBUTES = new Set(
 const TOKEN_BINDING_FIELDS = new Set([
   "backgroundBlur",
   "blur",
+  "columnGap",
   "cornerRadius",
   "fill",
   "fontFamily",
@@ -118,11 +129,37 @@ const TOKEN_BINDING_FIELDS = new Set([
   "paddingLeft",
   "paddingRight",
   "paddingTop",
+  "rowGap",
   "shadow",
   "stroke",
   "strokeWidth",
+  "text",
   "typography",
+  "visible",
   "width",
+  "strokeWidthTop",
+  "strokeWidthRight",
+  "strokeWidthBottom",
+  "strokeWidthLeft",
+  "radiusTopLeft",
+  "radiusTopRight",
+  "radiusBottomRight",
+  "radiusBottomLeft",
+  "minWidth",
+  "maxWidth",
+  "minHeight",
+  "maxHeight",
+  "marginTop",
+  "marginRight",
+  "marginBottom",
+  "marginLeft",
+  "letterSpacing",
+  "lineHeight",
+  "textTransform",
+  "textDecoration",
+  "rotation",
+  "x",
+  "y",
 ]);
 // Per-paint bindings: fills.N and strokes.N bind the color of one paint.
 const INDEXED_TOKEN_BINDING_FIELD = /^(?:fills|strokes)\.\d+$/;
@@ -146,6 +183,22 @@ const COMPONENT_TOUCHED_GROUPS = new Set([
   "visibility-group",
 ]);
 const TEXT_GROW_TYPES = new Set(["auto-height", "auto-width", "fixed"]);
+const STROKE_ALIGNMENTS = Object.freeze(["center", "inner", "outer"]);
+const STROKE_CAPS = Object.freeze([
+  "circle-marker",
+  "diamond-marker",
+  "line-arrow",
+  "round",
+  "square",
+  "square-marker",
+  "triangle-arrow",
+]);
+const STROKE_STYLES = Object.freeze(["dashed", "dotted", "mixed", "solid"]);
+// Penpot's horizontal-constraint-types and vertical-constraint-types.
+const NODE_CONSTRAINTS = Object.freeze({
+  "constraints-h": Object.freeze(["left", "right", "leftright", "center", "scale"]),
+  "constraints-v": Object.freeze(["top", "bottom", "topbottom", "center", "scale"]),
+});
 const TEXT_STYLE_ENUMS = {
   fontStyle: new Set(["italic", "normal", "oblique"]),
   textAlign: new Set(["center", "justify", "left", "right"]),
@@ -202,18 +255,48 @@ const NODE_FIELD_ALIASES = {
   stroke: "strokes",
 };
 
-function failUnknownNodeField(operationType, field, allowed) {
+function failUnknownNodeField(operation, field, allowed) {
+  const operationType = operation.type;
+  if (field === "children") {
+    const component = operationType === "update-component-node";
+    const recoveryOperation = component
+      ? "put-variant"
+      : "reorder-presentation-children";
+    fail(
+      "unsupported_node_change",
+      `${operationType} cannot change children. Use ${recoveryOperation}.`,
+      {
+        field,
+        allowedFields: [...allowed],
+        recoveryOperation,
+        schemaCommand: `smallpen schema operation ${recoveryOperation}`,
+        nodeId: operation.nodeId,
+        ...(component
+          ? {
+              componentId: operation.componentId,
+              variantId: operation.variantId,
+            }
+          : {
+              screenId: operation.screenId,
+              presentationId: operation.presentationId,
+            }),
+        recovery: component
+          ? "Read the complete variant, edit its child IDs, then put-variant with the same variant ID and all its nodes. Preserve the other fields and nodes."
+          : "Read the parent node, then reorder-presentation-children with every current child ID exactly once. Use add/move/remove-presentation-node to change membership.",
+      },
+    );
+  }
   const suggestion = TEXT_STYLE_FIELDS.has(field)
     ? `textStyle.${field}`
     : suggestField(field, allowed, NODE_FIELD_ALIASES);
   fail(
     "unsupported_node_change",
     `${operationType} cannot change node field ${String(field)}.` +
-      `${suggestion ? ` Did you mean ${suggestion}?` : ""} Allowed fields: ` +
-      `${[...allowed].join(", ")}. See: smallpen schema node`,
+      `${suggestion ? ` Did you mean ${suggestion}?` : ""} See: smallpen schema node`,
     {
       allowedFields: [...allowed],
       field,
+      schemaCommand: "smallpen schema node",
       ...(suggestion ? { suggestion } : {}),
     },
   );
@@ -428,7 +511,9 @@ function validateManifest(value) {
     const path = `manifest.json.dependencies[${index}]`;
     if (
       !isRecord(dependency) ||
-      Object.keys(dependency).length !== 2 ||
+      Object.keys(dependency).some(
+        (field) => !["activeThemeIds", "packageId", "path"].includes(field),
+      ) ||
       typeof dependency.packageId !== "string" ||
       typeof dependency.path !== "string" ||
       dependency.path.length === 0 ||
@@ -453,6 +538,28 @@ function validateManifest(value) {
       "invalid_package_id",
       `${path}.packageId`,
     );
+    // The Product's selection of Foundation token themes (theme ids of the
+    // Foundation library); absent means the Foundation's own selection.
+    if (dependency.activeThemeIds !== undefined) {
+      if (
+        !Array.isArray(dependency.activeThemeIds) ||
+        new Set(dependency.activeThemeIds).size !==
+          dependency.activeThemeIds.length
+      ) {
+        fail(
+          "invalid_dependency_themes",
+          `${path}.activeThemeIds must be an array of unique Foundation theme ids`,
+        );
+      }
+      for (const [themeIndex, themeId] of dependency.activeThemeIds.entries()) {
+        stableId(
+          themeId,
+          "theme_",
+          "invalid_dependency_themes",
+          `${path}.activeThemeIds[${themeIndex}]`,
+        );
+      }
+    }
   }
   if (manifest.role === "foundation" && dependencies.length !== 0) {
     fail(
@@ -585,9 +692,27 @@ function validateManifest(value) {
   return manifest;
 }
 
+// What a write sent, for error messages: JSON drops undefined, so a
+// missing value would otherwise show nothing.
+function received(value) {
+  if (value === undefined) return "received nothing (the field is missing or undefined)";
+  if (typeof value === "number" && !Number.isFinite(value)) return `received ${value}`;
+  let text = JSON.stringify(value);
+  if (text.length > 80) text = `${text.slice(0, 77)}...`;
+  return `received ${text} (${Array.isArray(value) ? "array" : value === null ? "null" : typeof value})`;
+}
+
+function failEnum(code, path, value, allowedValues) {
+  fail(
+    code,
+    `${path} must be one of ${allowedValues.join(", ")}; ${received(value)}`,
+    { allowedValues: [...allowedValues], path, value },
+  );
+}
+
 function finiteNumber(value, path) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    fail("invalid_node_number", `${path} must be a finite number`, {
+    fail("invalid_node_number", `${path} must be a finite number; ${received(value)}`, {
       path,
       value,
     });
@@ -742,7 +867,10 @@ function validateDomainInstance(value, path) {
           `${path}.overrides.${overridePath} uses a reserved key`,
         );
       }
-      if (Array.isArray(override)) {
+      const field = overridePath.slice(overridePath.lastIndexOf(":") + 1);
+      if (["tokenBindings", "variant", "strokes", "textStyle", "width", "height", "cornerRadius", "shadow"].includes(field)) {
+        validateOverrideValue(field, override, `${path}.overrides.${overridePath}`);
+      } else if (Array.isArray(override)) {
         validateFills(override, `${path}.overrides.${overridePath}`);
       } else if (
         typeof override !== "boolean" &&
@@ -758,6 +886,26 @@ function validateDomainInstance(value, path) {
   }
 }
 
+// Values of the override fields a copy shares with Penpot's touched groups.
+function validateOverrideValue(field, value, path) {
+  if (field === "tokenBindings") {
+    const bindings = requireRecord(value, "invalid_component_override", `${path} must contain an object`);
+    for (const [binding, reference] of Object.entries(bindings)) {
+      if (!TOKEN_BINDING_FIELDS.has(binding) && !INDEXED_TOKEN_BINDING_FIELD.test(binding))
+        fail("unsupported_token_binding", `${path}.${binding} is unsupported. Bindable fields: ${BINDABLE_FIELDS}`, { field: binding });
+      if (reference !== null) validateAssetReference(reference, `${path}.${binding}`, "tok_");
+    }
+    return;
+  }
+  if (field === "variant") {
+    const selection = requireRecord(value, "invalid_component_override", `${path} must contain an object`);
+    for (const [axis, choice] of Object.entries(selection))
+      if (typeof choice !== "string") fail("invalid_component_override", `${path}.${axis} must be a string`);
+    return;
+  }
+  validateNodeChange(field, value, path);
+}
+
 function validateTokenLibrary(value, entry) {
   const library = requireRecord(
     value,
@@ -767,6 +915,8 @@ function validateTokenLibrary(value, entry) {
   const libraryFields = new Set([
     "activeSetIds",
     "activeThemeIds",
+    "defaultThemeIds",
+    "defaultSetIds",
     "id",
     "sets",
     "themes",
@@ -937,6 +1087,17 @@ function validateTokenLibrary(value, entry) {
       fail("invalid_token_activation", `${entry}.${field} is invalid`);
     }
   }
+  if (library.defaultThemeIds !== undefined) {
+    const defaults = library.defaultThemeIds;
+    if (!Array.isArray(defaults) || new Set(defaults).size !== defaults.length ||
+        defaults.some((id) => !themeIds.has(id)) ||
+        new Set(defaults.map((id) => library.themes.find((theme) => theme.id === id).group)).size !== defaults.length) {
+      fail("invalid_token_defaults", `${entry}.defaultThemeIds must select at most one valid theme per group`);
+    }
+  }
+  if (library.defaultSetIds !== undefined && (!Array.isArray(library.defaultSetIds) || new Set(library.defaultSetIds).size !== library.defaultSetIds.length || library.defaultSetIds.some((id) => !setIds.has(id)))) {
+    fail("invalid_token_defaults", `${entry}.defaultSetIds must contain valid unique Token Set ids`);
+  }
   return library;
 }
 
@@ -1010,7 +1171,7 @@ function validateTextStyle(value, path) {
         ["fontSize", "fontWeight", "lineHeight"].includes(field) &&
         fieldValue <= 0
       ) {
-        fail("invalid_text_style", `${path}.${field} must be positive`);
+        fail("invalid_text_style", `${path}.${field} must be positive; ${received(fieldValue)}`);
       }
     } else if (field === "typographyRef") {
       if (isRecord(fieldValue)) {
@@ -1025,12 +1186,12 @@ function validateTextStyle(value, path) {
       }
     } else if (["fontFamily", "fontId", "fontVariantId"].includes(field)) {
       if (typeof fieldValue !== "string" || fieldValue.length === 0) {
-        fail("invalid_text_style", `${path}.${field} must be non-empty`);
+        fail("invalid_text_style", `${path}.${field} must be a non-empty string; ${received(fieldValue)}`);
       }
     } else if (!TEXT_STYLE_ENUMS[field]?.has(fieldValue)) {
       fail(
         "invalid_text_style",
-        `${path}.${field} ${JSON.stringify(fieldValue)} is not supported. ` +
+        `${path}.${field} ${JSON.stringify(fieldValue) ?? "undefined"} is not supported. ` +
           `Values: ${[...TEXT_STYLE_ENUMS[field]].join(", ")}`,
         { allowedValues: [...TEXT_STYLE_ENUMS[field]], field },
       );
@@ -1116,7 +1277,7 @@ function validateCornerRadius(value, path) {
 
 function validateFills(value, path) {
   if (!Array.isArray(value)) {
-    fail("invalid_node_fills", `${path} must be an array`, { path, value });
+    fail("invalid_node_fills", `${path} must be an array; ${received(value)}`, { path, value });
   }
   for (const [index, fillValue] of value.entries()) {
     const fillPath = `${path}[${index}]`;
@@ -1136,7 +1297,10 @@ function validatePaintOpacity(value, path) {
     value < 0 ||
     value > 1
   ) {
-    fail("invalid_fill_opacity", `${path} must be between 0 and 1`);
+    fail("invalid_fill_opacity", `${path} must be a number from 0 to 1; ${received(value)}`, {
+      path,
+      value,
+    });
   }
 }
 
@@ -1232,7 +1396,11 @@ function validatePaint(paint, path, additionalFields = new Set()) {
         }
       }
       if (typeof stop.color !== "string" || stop.color.length === 0) {
-        fail("invalid_fill_color", `${stopPath}.color must be a string`);
+        fail(
+          "invalid_fill_color",
+          `${stopPath}.color must be a color string such as "#1d4ed8"; ${received(stop.color)}`,
+          { path: `${stopPath}.color`, value: stop.color },
+        );
       }
       finiteNumber(stop.offset, `${stopPath}.offset`);
       if (stop.offset < 0 || stop.offset > 1) {
@@ -1246,10 +1414,14 @@ function validatePaint(paint, path, additionalFields = new Set()) {
       }
     }
   } else if (typeof paint.color !== "string" || paint.color.length === 0) {
-    fail("invalid_fill_color", `${path}.color must be a string`, {
-      path,
-      value: paint.color,
-    });
+    fail(
+      "invalid_fill_color",
+      `${path}.color must be a color string such as "#1d4ed8"; ${received(paint.color)}` +
+        (paint.color === undefined && paint.colorRef === undefined
+          ? `. A ${paint.type} paint needs color (bind a Token with tokenBindings to make it follow one)`
+          : ""),
+      { path: `${path}.color`, value: paint.color },
+    );
   }
   if (paint.opacity !== undefined) {
     validatePaintOpacity(paint.opacity, `${path}.opacity`);
@@ -1534,7 +1706,7 @@ function validateAssetLibrary(value, entry) {
 
 function validateStrokes(value, path) {
   if (!Array.isArray(value)) {
-    fail("invalid_node_strokes", `${path} must be an array`);
+    fail("invalid_node_strokes", `${path} must be an array; ${received(value)}`, { path, value });
   }
   const strokeFields = new Set([
     "alignment",
@@ -1545,6 +1717,12 @@ function validateStrokes(value, path) {
     "hidden",
     "style",
     "width",
+    // Per-side widths of a rectangle or board, as Penpot's
+    // stroke-width-top/right/bottom/left; a missing side uses width.
+    "widthTop",
+    "widthRight",
+    "widthBottom",
+    "widthLeft",
   ]);
   for (const [index, strokeValue] of value.entries()) {
     const strokePath = `${path}[${index}]`;
@@ -1557,46 +1735,34 @@ function validateStrokes(value, path) {
     if (stroke.width !== undefined) {
       finiteNumber(stroke.width, `${strokePath}.width`);
       if (stroke.width < 0) {
-        fail("invalid_stroke_width", `${strokePath}.width cannot be negative`);
+        fail("invalid_stroke_width", `${strokePath}.width cannot be negative; ${received(stroke.width)}`);
       }
     }
     if (
       stroke.alignment !== undefined &&
-      !new Set(["center", "inner", "outer"]).has(stroke.alignment)
+      !STROKE_ALIGNMENTS.includes(stroke.alignment)
     ) {
-      fail(
-        "invalid_stroke_alignment",
-        `${strokePath}.alignment is unsupported`,
-      );
+      failEnum("invalid_stroke_alignment", `${strokePath}.alignment`, stroke.alignment, STROKE_ALIGNMENTS);
     }
-    if (
-      stroke.style !== undefined &&
-      !new Set(["dashed", "dotted", "mixed", "solid"]).has(stroke.style)
-    ) {
-      fail("invalid_stroke_style", `${strokePath}.style is unsupported`);
+    if (stroke.style !== undefined && !STROKE_STYLES.includes(stroke.style)) {
+      failEnum("invalid_stroke_style", `${strokePath}.style`, stroke.style, STROKE_STYLES);
     }
     for (const field of ["dash", "gap"]) {
       if (stroke[field] !== undefined)
         finiteNumber(stroke[field], `${strokePath}.${field}`);
     }
+    for (const field of ["widthTop", "widthRight", "widthBottom", "widthLeft"]) {
+      if (stroke[field] === undefined) continue;
+      finiteNumber(stroke[field], `${strokePath}.${field}`);
+      if (stroke[field] < 0) fail("invalid_stroke_width", `${strokePath}.${field} cannot be negative; ${received(stroke[field])}`);
+    }
     for (const field of ["capStart", "capEnd"]) {
-      if (
-        stroke[field] !== undefined &&
-        !new Set([
-          "circle-marker",
-          "diamond-marker",
-          "line-arrow",
-          "round",
-          "square",
-          "square-marker",
-          "triangle-arrow",
-        ]).has(stroke[field])
-      ) {
-        fail("invalid_stroke_cap", `${strokePath}.${field} is unsupported`);
+      if (stroke[field] !== undefined && !STROKE_CAPS.includes(stroke[field])) {
+        failEnum("invalid_stroke_cap", `${strokePath}.${field}`, stroke[field], STROKE_CAPS);
       }
     }
     if (stroke.hidden !== undefined && typeof stroke.hidden !== "boolean") {
-      fail("invalid_stroke_visibility", `${strokePath}.hidden must be boolean`);
+      fail("invalid_stroke_visibility", `${strokePath}.hidden must be boolean; ${received(stroke.hidden)}`);
     }
   }
 }
@@ -1612,14 +1778,14 @@ function validateNodeChange(field, value, nodeId) {
     validateFills(value, path);
   } else if (field === "flipX" || field === "flipY") {
     if (typeof value !== "boolean") {
-      fail("invalid_node_flip", `${path} must be boolean`);
+      fail("invalid_node_flip", `${path} must be boolean; ${received(value)}`);
     }
   } else if (field === "growType") {
     if (!TEXT_GROW_TYPES.has(value)) {
       fail(
         "invalid_text_grow_type",
-        `${path} is not a supported grow type. Values: ${[...TEXT_GROW_TYPES].join(", ")}`,
-        { allowedValues: [...TEXT_GROW_TYPES] },
+        `${path} is not a supported grow type. Values: ${[...TEXT_GROW_TYPES].join(", ")}; ${received(value)}`,
+        { allowedValues: [...TEXT_GROW_TYPES], path, value },
       );
     }
   } else if (
@@ -1631,7 +1797,7 @@ function validateNodeChange(field, value, nodeId) {
     ]).has(field)
   ) {
     if (typeof value !== "boolean") {
-      fail("invalid_node_boolean", `${path} must be boolean`);
+      fail("invalid_node_boolean", `${path} must be boolean; ${received(value)}`);
     }
   } else if (field === "blend-mode") {
     if (typeof value !== "string" || value.length === 0) {
@@ -1650,7 +1816,7 @@ function validateNodeChange(field, value, nodeId) {
     }
   } else if (field === "locked" || field === "proportionLock") {
     if (typeof value !== "boolean") {
-      fail("invalid_node_boolean", `${path} must be boolean`);
+      fail("invalid_node_boolean", `${path} must be boolean; ${received(value)}`);
     }
   } else if (field === "strokes") {
     validateStrokes(value, path);
@@ -1661,20 +1827,23 @@ function validateNodeChange(field, value, nodeId) {
     )) {
       fail(
         "invalid_node_effect",
-        `${path} must be an object or array of objects`,
+        `${path} must be an object or array of objects` +
+          (field === "shadow" ? " {offsetX, offsetY, blur, spread, color}" : "") +
+          `; ${received(value)}`,
+        { path, value },
       );
     }
   } else if (
     ["layout-gap", "layout-padding", "layout-item-margin"].includes(field)
   ) {
     if (!isRecord(value))
-      fail("invalid_node_layout", `${path} must be an object`);
+      fail("invalid_node_layout", `${path} must be an object; ${received(value)}`);
   } else if (field === "exports") {
     if (!Array.isArray(value))
-      fail("invalid_node_export", `${path} must be an array`);
+      fail("invalid_node_export", `${path} must be an array; ${received(value)}`);
   } else if (["layout-item-absolute", "fixed-scroll"].includes(field)) {
     if (typeof value !== "boolean")
-      fail("invalid_node_layout", `${path} must be boolean`);
+      fail("invalid_node_layout", `${path} must be boolean; ${received(value)}`);
   } else if (
     [
       "layout-item-max-h",
@@ -1686,11 +1855,13 @@ function validateNodeChange(field, value, nodeId) {
   ) {
     finiteNumber(value, path);
   } else if (["constraints-h", "constraints-v"].includes(field)) {
-    if (!(typeof value === "string" || isRecord(value)))
-      fail("invalid_node_constraints", `${path} must be a string or object`);
+    // Older packages may hold an object; Penpot takes only these names.
+    const allowed = NODE_CONSTRAINTS[field];
+    if (!(allowed.includes(value) || isRecord(value)))
+      failEnum("invalid_node_constraints", path, value, allowed);
   } else if (field.startsWith("layout")) {
     if (typeof value !== "string")
-      fail("invalid_node_layout", `${path} must be a string`);
+      fail("invalid_node_layout", `${path} must be a string; ${received(value)}`);
   } else if (["height", "width", "x", "y"].includes(field)) {
     finiteNumber(value, path);
   } else if (field === "mediaRef") {
@@ -1704,22 +1875,22 @@ function validateNodeChange(field, value, nodeId) {
   } else if (field === "opacity") {
     finiteNumber(value, path);
     if (value < 0 || value > 1) {
-      fail("invalid_opacity", "Node opacity must be between 0 and 1");
+      fail("invalid_opacity", `${path} must be between 0 and 1; ${received(value)}`, { path, value });
     }
   } else if (field === "rotation") {
     finiteNumber(value, path);
     if (value < 0 || value >= 360) {
-      fail("invalid_node_rotation", `${path} must be between 0 and 360`);
+      fail("invalid_node_rotation", `${path} must be at least 0 and below 360; ${received(value)}`);
     }
   } else if (field === "visible") {
     validateNodeVisibility(value, path);
   } else if (field === "text") {
     if (typeof value !== "string") {
-      fail("invalid_text_content", `${path} must be a string`);
+      fail("invalid_text_content", `${path} must be a string; ${received(value)}`);
     }
   } else if (field === "textBlocks") {
     if (!Array.isArray(value)) {
-      fail("invalid_text_blocks", `${path} must be an array`);
+      fail("invalid_text_blocks", `${path} must be an array; ${received(value)}`);
     }
   } else if (field === "textStyle") {
     validateTextStyle(value, path);
@@ -1956,7 +2127,8 @@ function validateNodeAttributes(node, nodeId, nodePath) {
     if (node.opacity < 0 || node.opacity > 1) {
       fail(
         "invalid_opacity",
-        `Node opacity must be between 0 and 1: ${nodeId}`,
+        `${nodePath}.opacity must be between 0 and 1; ${received(node.opacity)}`,
+        { path: `${nodePath}.opacity`, value: node.opacity },
       );
     }
   }
@@ -1965,13 +2137,13 @@ function validateNodeAttributes(node, nodeId, nodePath) {
     if (node.rotation < 0 || node.rotation >= 360) {
       fail(
         "invalid_node_rotation",
-        `Node rotation must be between 0 and 360: ${nodeId}`,
+        `${nodePath}.rotation must be at least 0 and below 360; ${received(node.rotation)}`,
       );
     }
   }
   for (const field of ["flipX", "flipY"]) {
     if (node[field] !== undefined && typeof node[field] !== "boolean") {
-      fail("invalid_node_flip", `${nodePath}.${field} must be boolean`);
+      fail("invalid_node_flip", `${nodePath}.${field} must be boolean; ${received(node[field])}`);
     }
   }
   if (node.visible !== undefined) {
@@ -1979,7 +2151,7 @@ function validateNodeAttributes(node, nodeId, nodePath) {
   }
   for (const field of ["locked", "proportionLock"]) {
     if (node[field] !== undefined && typeof node[field] !== "boolean") {
-      fail("invalid_node_boolean", `${nodePath}.${field} must be boolean`);
+      fail("invalid_node_boolean", `${nodePath}.${field} must be boolean; ${received(node[field])}`);
     }
   }
   for (const field of [
@@ -2011,13 +2183,10 @@ function validateNodeAttributes(node, nodeId, nodePath) {
   }
   if (node.type === "TEXT") {
     if (typeof node.text !== "string") {
-      fail("invalid_text_content", `${nodePath}.text must be a string`);
+      fail("invalid_text_content", `${nodePath}.text must be a string; ${received(node.text)}`);
     }
     if (node.growType !== undefined && !TEXT_GROW_TYPES.has(node.growType)) {
-      fail(
-        "invalid_text_grow_type",
-        `${nodePath}.growType is not supported`,
-      );
+      failEnum("invalid_text_grow_type", `${nodePath}.growType`, node.growType, [...TEXT_GROW_TYPES]);
     }
     if (node.textStyle !== undefined) {
       validateTextStyle(node.textStyle, `${nodePath}.textStyle`);
@@ -3042,13 +3211,66 @@ function resolveTokenCellAlias(library, raw) {
 // direct write targets; alias Cells and typography Cells are visible
 // displays that FAIL edits with a precise code (alias expressions must be
 // replaced via the Token tooling, DSE-016, never overwritten from a shape).
-function designSystemTokenRefs(manifest, entries) {
-  const library = tokenLibraryEntry(manifest, entries);
-  if (!library) return [];
+// The token library a generated Design System page shows. A Product of a
+// Foundation + Product pair shows the Foundation's sets first, then its own,
+// and the themes of both; the Foundation's sets active per the Product's
+// theme selection (docs/TOKEN-THEMES.md). Foundation Cells are read-only
+// there: they change in the Foundation.
+function designSystemLibrary(manifest, entries, foundation) {
+  const own = tokenLibraryEntry(manifest, entries);
+  const foundationLibrary = foundation
+    ? tokenLibraryEntry(foundation.manifest, foundation.entries)
+    : null;
+  if (!foundationLibrary) {
+    return own
+      ? { library: own, owners: new Map(own.sets.map((set) => [set.id, manifest.packageId])) }
+      : null;
+  }
+  const selected = productFoundationThemeIds({ entries, manifest }, foundation);
+  const foundationActive = activeTokenSetIds({
+    ...foundationLibrary,
+    activeThemeIds: selected,
+  });
+  const ownSets = own?.sets ?? [];
+  const ownActive = own ? activeTokenSetIds(own) : new Set();
+  // A Product theme with a Foundation theme's id or group/name is ambiguous
+  // (docs/TOKEN-THEMES.md); the page shows the Foundation's and says so.
+  const pathOf = (theme) => `${theme.group}/${theme.name}`;
+  const foundationIds = new Set(foundationLibrary.themes.map(({ id }) => id));
+  const foundationPaths = new Set(foundationLibrary.themes.map(pathOf));
+  const conflicts = (own?.themes ?? []).filter(
+    (theme) => foundationIds.has(theme.id) || foundationPaths.has(pathOf(theme)),
+  );
+  return {
+    diagnostics: conflicts.map((theme) => ({
+      code: "design_system_theme_conflict",
+      message: `Product theme ${pathOf(theme)} (${theme.id}) repeats a Foundation theme; the page shows the Foundation's`,
+      themeId: theme.id,
+    })),
+    library: {
+      activeSetIds: [...foundationActive, ...ownActive],
+      sets: [...foundationLibrary.sets, ...ownSets],
+      themes: [
+        ...foundationLibrary.themes,
+        ...(own?.themes ?? []).filter((theme) => !conflicts.includes(theme)),
+      ],
+    },
+    owners: new Map([
+      ...foundationLibrary.sets.map((set) => [set.id, foundation.manifest.packageId]),
+      ...ownSets.map((set) => [set.id, manifest.packageId]),
+    ]),
+  };
+}
+
+function designSystemTokenRefs(manifest, entries, source) {
+  if (!source) return [];
+  const { library, owners } = source;
   const refs = [];
   const activeSetIds = new Set(library.activeSetIds ?? []);
   let index = 0;
   for (const set of library.sets) {
+    const ownerPackageId = owners.get(set.id);
+    const readOnly = ownerPackageId !== manifest.packageId;
     for (const token of set.tokens ?? []) {
       const type = String(token.type ?? "");
       const value = token.$value ?? token.value;
@@ -3059,7 +3281,7 @@ function designSystemTokenRefs(manifest, entries) {
         typeof value === "string" && /^\{[^{}]+\}$/.test(value.trim());
       const attribute = designSystemTokenAttribute(type);
       refs.push({
-        ownerPackageId: manifest.packageId,
+        ownerPackageId,
         order: index,
         path: token.name,
         raw: value,
@@ -3072,8 +3294,9 @@ function designSystemTokenRefs(manifest, entries) {
         attribute,
         // Direct edits only for literal Cells whose type maps to an
         // editable shape attribute; everything else displays and fails.
-        writable: attribute !== null && !alias,
+        writable: attribute !== null && !alias && !readOnly,
         alias,
+        readOnly,
       });
       index += 1;
     }
@@ -3081,7 +3304,7 @@ function designSystemTokenRefs(manifest, entries) {
   return refs;
 }
 
-async function createRuntime(manifest, entries, domain, locator) {
+async function createRuntime(manifest, entries, domain, locator, options = {}) {
   const runtime = {
     colors: {},
     components: {},
@@ -3394,22 +3617,9 @@ async function createRuntime(manifest, entries, domain, locator) {
   for (const entry of manifest.entries.screens) {
     const screen = entries[entry];
     runtime.nodes[screen.id] = {};
-    runtime.pages[screen.id] = {};
+    runtime.pages[screen.id] ??= {};
     for (const presentation of screen.presentations) {
       runtime.nodes[screen.id][presentation.id] = {};
-      const pageRuntimeId =
-        runtimeUuidFromPresentationId(presentation.id) ??
-        (await stableRuntimeUuid(
-          manifest.packageId,
-          "presentation",
-          `${screen.id}\0${presentation.id}`,
-        ));
-      registerRuntimeId(pageRuntimeId, `presentation:${presentation.id}`);
-      runtime.pages[screen.id][presentation.id] = pageRuntimeId;
-      runtime.reversePages[pageRuntimeId] = {
-        presentationId: presentation.id,
-        screenId: screen.id,
-      };
       for (const nodeId of Object.keys(presentation.nodes)) {
         const runtimeId =
           runtimeUuidFromNodeId(nodeId) ??
@@ -3428,6 +3638,43 @@ async function createRuntime(manifest, entries, domain, locator) {
       }
     }
   }
+  // One Penpot page per canvas; every page version on it is a board there.
+  // The default canvas keeps the page identity the default page's first
+  // version always had, so an open App and a one-page package see the same
+  // page as before canvases. A listed canvas has its own stable identity (a
+  // page made in the App keeps its UUID).
+  runtime.canvases = [];
+  for (const canvas of canvasLayout(manifest, entries, runtime)) {
+    const listed = (manifest.canvases ?? []).some(({ id }) => id === canvas.id);
+    const anchor = listed
+      ? undefined
+      : (canvas.boards.find(({ screenId }) => screenId === manifest.defaultScreenId) ?? canvas.boards[0]);
+    const pageRuntimeId =
+      runtimeUuidFromNodeId(canvas.id.replace(/^cnv_/, "node_")) ??
+      (anchor && runtimeUuidFromPresentationId(anchor.presentationId)) ??
+      (anchor
+        ? await stableRuntimeUuid(manifest.packageId, "presentation", `${anchor.screenId}\0${anchor.presentationId}`)
+        : await stableRuntimeUuid(manifest.packageId, "canvas", canvas.id));
+    const single = canvas.boards.length === 1 ? canvas.boards[0] : undefined;
+    registerRuntimeId(pageRuntimeId, `canvas:${canvas.id}`);
+    runtime.canvases.push({
+      boards: canvas.boards.map(({ presentationId, screenId }) => ({ presentationId, screenId })),
+      id: canvas.id,
+      name: canvas.name,
+      pageId: pageRuntimeId,
+    });
+    runtime.reversePages[pageRuntimeId] = {
+      boards: canvas.boards.map(({ presentationId, screenId }) => ({ presentationId, screenId })),
+      canvasId: canvas.id,
+      canvasName: canvas.name,
+      ...(single ? { presentationId: single.presentationId, screenId: single.screenId } : {}),
+    };
+    for (const board of canvas.boards) {
+      runtime.pages[board.screenId] ??= {};
+      runtime.pages[board.screenId][board.presentationId] = pageRuntimeId;
+    }
+  }
+
   // DSE-004: register the generated Design System page's editable shapes so
   // the change adapter can translate native edits back to their source
   // (Token Cell / component definition). Decorations (board, label)
@@ -3442,8 +3689,9 @@ async function createRuntime(manifest, entries, domain, locator) {
     // 20-type catalog travel with the refs so the projection can lay out one
     // column per combination and one section per canonical type without
     // re-deriving any of it client-side.
-    const library = tokenLibraryEntry(manifest, entries);
-    const tokenRefs = designSystemTokenRefs(manifest, entries);
+    const source = designSystemLibrary(manifest, entries, options.foundation);
+    const library = source?.library;
+    const tokenRefs = designSystemTokenRefs(manifest, entries, source);
     let combinations = [];
     let combinationCellIndex = new Map();
     if (library) {
@@ -3458,6 +3706,9 @@ async function createRuntime(manifest, entries, domain, locator) {
             message: `Workbench Combination product exceeded ${MAX_WORKBENCH_COMBINATIONS}; the panorama keeps the first ${MAX_WORKBENCH_COMBINATIONS}.`,
           },
         ];
+      }
+      if (source.diagnostics?.length > 0) {
+        refs.diagnostics = [...(refs.diagnostics ?? []), ...source.diagnostics];
       }
       const domainSetIds = new Set(
         (library.themes ?? []).flatMap((theme) => theme.setIds ?? []),
@@ -3513,7 +3764,14 @@ async function createRuntime(manifest, entries, domain, locator) {
             : [null])
         : [null];
       for (const combinationId of combinationIds) {
-        const key = specimenKeyOf(candidate.tokenId, combinationId);
+        // Foundation Cells are keyed by their Package: its token ids may
+        // repeat the Product's.
+        const key = specimenKeyOf(
+          candidate.readOnly
+            ? `${candidate.ownerPackageId}:${candidate.tokenId}`
+            : candidate.tokenId,
+          combinationId,
+        );
         const shape = await stableRuntimeUuid(
           manifest.packageId,
           "design-system-specimen",
@@ -3540,13 +3798,14 @@ async function createRuntime(manifest, entries, domain, locator) {
           // write targets (attribute- or value-path); alias Cells keep their
           // expression display-only for shape edits — the expression itself
           // is edited through the token-value path (Token inspector).
-          writable: attribute !== null && !alias,
+          writable: candidate.writable,
           alias,
         };
-        if (attribute === "gap" && ref.writable) {
-          // Spacing specimens visualize the gap with two filler rects; the
-          // fillers are mapped as decoration so editing them is rejected with
-          // a precise message instead of an unknown-shape error.
+        if (attribute === "gap") {
+          // Spacing specimens visualize the gap with two filler rects, also
+          // for read-only (alias, Foundation) Cells; the fillers are mapped as
+          // decoration so editing them is rejected with a precise message
+          // instead of an unknown-shape error.
           ref.children = [];
           for (const childIndex of [0, 1]) {
             const child = await stableRuntimeUuid(
@@ -3758,6 +4017,72 @@ async function createRuntime(manifest, entries, domain, locator) {
     );
     refs.componentSamples = componentSamples.samples;
     Object.assign(runtime.reverseDesignSystem, componentSamples.reverse);
+    // A Product's page also shows the Foundation Component Sets its Screens
+    // use. They stay read-only here: they are edited in the Foundation.
+    const sharedFoundation = options.foundation;
+    if (
+      sharedFoundation &&
+      sharedFoundation.manifest.packageId !== manifest.packageId
+    ) {
+      const foundationId = sharedFoundation.manifest.packageId;
+      const used = new Set();
+      for (const entry of manifest.entries.screens) {
+        for (const presentation of entries[entry].presentations ?? []) {
+          for (const node of Object.values(presentation.nodes ?? {})) {
+            const reference = node.instance?.component;
+            if (reference?.packageId === foundationId) {
+              used.add(reference.assetId);
+            }
+          }
+        }
+      }
+      const usedSets = [...sharedFoundation.domain.componentSets.values()]
+        .filter((set) => used.has(set.id))
+        .sort((left, right) => (String(left.id) < String(right.id) ? -1 : 1));
+      const foundationFamilies = [];
+      for (const set of usedSets) {
+        for (const [variantIndex, variant] of (set.variants ?? []).entries()) {
+          foundationFamilies.push({
+            componentSetId: set.id,
+            kind: "variant",
+            label: familyLabel(set, variant),
+            rootId: variant.rootId,
+            variantId: variant.id,
+            variantIndex,
+          });
+        }
+      }
+      if (foundationFamilies.length > 0) {
+        const shared = await createComponentSamples(
+          sharedFoundation,
+          foundationFamilies,
+          combinations,
+        );
+        // Fresh ids in this Package, so the Product's page never reuses the
+        // Foundation file's shape ids. The cached samples stay unchanged.
+        const local = async (id) =>
+          stableRuntimeUuid(manifest.packageId, "foundation-sample", id);
+        for (const sample of shared.samples) {
+          const runtimeNodes = {};
+          const sources = {};
+          for (const [nodeId, runtimeId] of Object.entries(sample.runtimeNodes)) {
+            const id = await local(runtimeId);
+            runtimeNodes[nodeId] = id;
+            sources[nodeId] = { ...sample.sources[nodeId], readOnly: true };
+            runtime.reverseDesignSystem[id] = sources[nodeId];
+          }
+          const caption = await local(sample.caption);
+          runtime.reverseDesignSystem[caption] = { kind: "label" };
+          refs.componentSamples.push({
+            ...sample,
+            caption,
+            readOnly: true,
+            runtimeNodes,
+            sources,
+          });
+        }
+      }
+    }
     // DSE-R12: every screen presentation appears as a page-content entry.
     // Board copies reuse the source node runtime ids, so edits translate to
     // that occurrence on its own screen (instance overrides stay overrides —
@@ -3950,6 +4275,10 @@ export async function loadPackageFromValues(locator, values) {
       "defaultScreenId must reference one indexed Screen",
     );
   }
+  validateCanvases(
+    manifest.canvases,
+    new Set(manifest.entries.screens.map((entry) => entries[entry].id)),
+  );
   return {
     entries,
     blobs,
@@ -3959,6 +4288,29 @@ export async function loadPackageFromValues(locator, values) {
     revision: await hashCanonicalFiles(canonicalFiles),
     runtime: await createRuntime(manifest, entries, domain, locator),
   };
+}
+
+// The runtime of a Product as its workspace shows it: the generated Design
+// System page includes the Foundation's token sets and themes. Rebuild it
+// whenever the Foundation changes; runtime ids stay the same.
+export async function createWorkspaceRuntime(product, options = {}) {
+  const foundation = options.foundation;
+  if (
+    !foundation ||
+    foundation === product ||
+    !product.manifest.dependencies?.some(
+      ({ packageId }) => packageId === foundation.manifest.packageId,
+    )
+  ) {
+    return product.runtime;
+  }
+  return createRuntime(
+    product.manifest,
+    product.entries,
+    product.domain,
+    product.locator,
+    { foundation },
+  );
 }
 
 function findScreenEntry(snapshot, screenId) {
@@ -4251,10 +4603,32 @@ function applyReplaceTokenLibrary(snapshot, operation, inverseOperations) {
   };
 }
 
+function themePathOf(theme) {
+  return `${theme.group}/${theme.name}`;
+}
+
+// The Foundation library a Product's batch can select themes from, when the
+// caller loaded the Foundation (CLI writes do; see BATCH_DEPENDENCIES).
+function batchFoundationLibrary(snapshot) {
+  if (snapshot.manifest.role !== "product") return undefined;
+  const dependency = snapshot.manifest.dependencies?.[0];
+  const foundation = BATCH_DEPENDENCIES.get(snapshot)?.foundation;
+  if (!dependency || foundation?.manifest?.packageId !== dependency.packageId) {
+    return undefined;
+  }
+  const entry = penpotTokenLibraryEntry(foundation);
+  return entry ? { dependency, library: foundation.entries[entry] } : undefined;
+}
+
 function applySetActiveTokenThemes(snapshot, operation, inverseOperations) {
   const entry = penpotTokenLibraryEntry(snapshot);
-  if (!entry) {
-    fail("missing_token_library", "Token Library does not exist");
+  const library = entry ? snapshot.entries[entry] : undefined;
+  const foundation = batchFoundationLibrary(snapshot);
+  if (!library && !foundation) {
+    fail(
+      "missing_token_library",
+      "Token Library does not exist; create token sets and themes with put-token-set and put-token-theme",
+    );
   }
   if (
     !Array.isArray(operation.themePaths) ||
@@ -4268,38 +4642,328 @@ function applySetActiveTokenThemes(snapshot, operation, inverseOperations) {
       "set-active-token-themes themePaths must be unique non-empty strings",
     );
   }
-  const library = snapshot.entries[entry];
-  const themesByPath = new Map(
-    library.themes.map((theme) => [
-      `${theme.group}/${theme.name}`,
-      theme,
-    ]),
+  const ownByPath = new Map(
+    (library?.themes ?? []).map((theme) => [themePathOf(theme), theme]),
   );
+  const foundationByPath = new Map(
+    (foundation?.library.themes ?? []).map((theme) => [themePathOf(theme), theme]),
+  );
+  const validThemes = [...new Set([...ownByPath.keys(), ...foundationByPath.keys()])];
   const missingPaths = operation.themePaths.filter(
-    (path) => !themesByPath.has(path),
+    (path) => !ownByPath.has(path) && !foundationByPath.has(path),
   );
   if (missingPaths.length > 0) {
+    const foundationUnloaded =
+      snapshot.manifest.role === "product" && !foundation;
     fail(
       "missing_token_theme",
-      `Token Theme does not exist: ${missingPaths[0]}`,
-      { paths: missingPaths },
+      `Token Theme does not exist: ${missingPaths[0]}. Themes: ${validThemes.join(", ") || "(none)"}` +
+        (foundationUnloaded
+          ? ". Foundation themes can be selected only when the write loads the Foundation (smallpen apply on the Product does)"
+          : ""),
+      { paths: missingPaths, validThemes },
     );
   }
-  const previousPaths = library.activeThemeIds.map((id) => {
-    const theme = library.themes.find((candidate) => candidate.id === id);
-    return `${theme.group}/${theme.name}`;
-  });
-  restoreEntryInverse(snapshot, "tokens", entry, inverseOperations);
-  library.activeThemeIds = operation.themePaths.map(
-    (path) => themesByPath.get(path).id,
+  const ambiguous = operation.themePaths.filter(
+    (path) => ownByPath.has(path) && foundationByPath.has(path),
   );
-  return {
-    affectedIds: [...new Set([
-      ...library.activeThemeIds,
-      ...previousPaths.map((path) => themesByPath.get(path).id),
-    ])],
-    entries: [entry],
+  if (ambiguous.length > 0) {
+    fail(
+      "ambiguous_token_theme",
+      `Token Theme ${ambiguous[0]} exists in the Product and in its Foundation; rename one of them`,
+      { paths: ambiguous },
+    );
+  }
+  const affectedIds = new Set();
+  if (library) {
+    restoreEntryInverse(snapshot, "tokens", entry, inverseOperations);
+    for (const id of library.activeThemeIds) affectedIds.add(id);
+    library.activeThemeIds = operation.themePaths
+      .filter((path) => ownByPath.has(path))
+      .map((path) => ownByPath.get(path).id);
+    for (const id of library.activeThemeIds) affectedIds.add(id);
+  }
+  const entries = library ? [entry] : [];
+  if (foundation) {
+    const dependency = snapshot.manifest.dependencies[0];
+    inverseOperations.unshift({
+      dependency: structuredClone(dependency),
+      type: "set-foundation-dependency",
+    });
+    for (const id of dependency.activeThemeIds ?? []) affectedIds.add(id);
+    dependency.activeThemeIds = operation.themePaths
+      .filter((path) => foundationByPath.has(path))
+      .map((path) => foundationByPath.get(path).id);
+    for (const id of dependency.activeThemeIds) affectedIds.add(id);
+    entries.push("manifest.json");
+  }
+  return { affectedIds: [...affectedIds], entries };
+}
+
+// The Package's token library for a write; put-token-set may create it.
+function writableTokenLibrary(snapshot, operation, inverseOperations, create) {
+  const entry = penpotTokenLibraryEntry(snapshot);
+  if (entry) {
+    restoreEntryInverse(snapshot, "tokens", entry, inverseOperations);
+    return { created: false, entry, library: snapshot.entries[entry] };
+  }
+  if (!create) {
+    fail(
+      "missing_token_library",
+      "This Package has no token library (sets and themes); create a set with put-token-set first",
+    );
+  }
+  const created = operation.entry ?? "tokens/tokens.json";
+  safeEntry(created);
+  if (snapshot.manifest.entries.tokens.includes(created)) {
+    fail(
+      "entry_kind_mismatch",
+      `${created} is a DTCG token file; choose another entry for the token library`,
+      { entry: created },
+    );
+  }
+  restoreEntryInverse(snapshot, "tokens", created, inverseOperations);
+  snapshot.manifest.entries.tokens.push(created);
+  snapshot.entries[created] = {
+    activeSetIds: [],
+    activeThemeIds: [],
+    id: `tlib_${snapshot.manifest.packageId.replace(/^pkg_/, "")}`,
+    sets: [],
+    themes: [],
   };
+  return { created: true, entry: created, library: snapshot.entries[created] };
+}
+
+function writtenEntries(target) {
+  return target.created ? ["manifest.json", target.entry] : [target.entry];
+}
+
+function formATokenValue(token, path) {
+  const value = requireRecord(token, "invalid_token", `${path} must contain an object`);
+  return {
+    ...value,
+    description: value.description ?? "",
+  };
+}
+
+function findTokenSet(library, setId) {
+  const tokenSet = library.sets.find(({ id }) => id === setId);
+  if (!tokenSet) {
+    fail(
+      "missing_token_set",
+      `Token set does not exist: ${setId}. Sets: ${library.sets.map(({ id, name }) => `${id} (${name})`).join(", ") || "(none)"}`,
+      { setId, validSetIds: library.sets.map(({ id }) => id) },
+    );
+  }
+  return tokenSet;
+}
+
+function applyPutTokenSet(snapshot, operation, inverseOperations) {
+  const value = requireRecord(
+    operation.set,
+    "invalid_token_set",
+    "put-token-set set must contain an object",
+  );
+  stableId(value.id, "tset_", "invalid_token_set_id", "operation.set.id");
+  if (!Array.isArray(value.tokens)) {
+    fail("invalid_tokens", "put-token-set set.tokens must be an array (it may be empty)");
+  }
+  const target = writableTokenLibrary(snapshot, operation, inverseOperations, true);
+  const { library } = target;
+  const tokenSet = {
+    ...value,
+    description: value.description ?? "",
+    tokens: value.tokens.map((token, index) =>
+      formATokenValue(token, `operation.set.tokens[${index}]`),
+    ),
+  };
+  const sameName = library.sets.find(
+    (candidate) => candidate.name === tokenSet.name && candidate.id !== tokenSet.id,
+  );
+  if (sameName) {
+    fail(
+      "duplicate_token_set_name",
+      `Token set name ${tokenSet.name} belongs to ${sameName.id}; use that id to replace it`,
+      { name: tokenSet.name, setId: sameName.id },
+    );
+  }
+  const replaced = new Set(
+    (library.sets.find(({ id }) => id === tokenSet.id)?.tokens ?? []).map(({ id }) => id),
+  );
+  const others = listTokenNames(snapshot.manifest, snapshot.entries).filter(
+    ({ id }) => !replaced.has(id),
+  );
+  const incoming = tokenSet.tokens
+    .filter(({ name }) => typeof name === "string")
+    .map(({ id, name }) => ({ filePath: target.entry, id, name, set: tokenSet.name }));
+  for (const token of incoming) {
+    checkTokenNameCollision(token.name, token.id, [...others, ...incoming]);
+  }
+  const index = library.sets.findIndex(({ id }) => id === tokenSet.id);
+  if (index >= 0) {
+    library.sets[index] = tokenSet;
+  } else {
+    library.sets.splice(
+      insertionIndex(operation.index, library.sets.length),
+      0,
+      tokenSet,
+    );
+    // Without themes Penpot uses the active sets; a new set of such a
+    // library starts active so its tokens resolve.
+    if (library.themes.length === 0) library.activeSetIds.push(tokenSet.id);
+  }
+  return {
+    affectedIds: [tokenSet.id, ...tokenSet.tokens.map(({ id }) => id)],
+    entries: writtenEntries(target),
+  };
+}
+
+function applyDeleteTokenSet(snapshot, operation, inverseOperations) {
+  const target = writableTokenLibrary(snapshot, operation, inverseOperations, false);
+  const { library } = target;
+  const tokenSet = findTokenSet(library, operation.setId);
+  library.sets = library.sets.filter(({ id }) => id !== tokenSet.id);
+  library.activeSetIds = library.activeSetIds.filter((id) => id !== tokenSet.id);
+  if (library.defaultSetIds) library.defaultSetIds = library.defaultSetIds.filter((id) => id !== tokenSet.id);
+  for (const theme of library.themes) {
+    theme.setIds = theme.setIds.filter((id) => id !== tokenSet.id);
+  }
+  return {
+    affectedIds: [tokenSet.id, ...tokenSet.tokens.map(({ id }) => id)],
+    entries: [target.entry],
+  };
+}
+
+function tokenLabel(token) {
+  return `${token.name} (${token.id ?? "no id"}${token.set ? `, set ${token.set}` : `, ${token.filePath}`})`;
+}
+
+// A Token write may not make a name both a Token and a group of Tokens.
+// `tokens` lists the Package's other Tokens (listTokenNames).
+function checkTokenNameCollision(name, tokenId, tokens) {
+  const collisions = tokenNameCollisions(name, tokens, tokenId);
+  if (collisions.length === 0) return;
+  const parent = collisions.find((token) => name.startsWith(`${token.name}.`));
+  const suggestions = parent
+    ? [
+        `name this Token ${parent.name}-${name.slice(parent.name.length + 1).replaceAll(".", "-")}`,
+        `or first rename ${parent.id ?? parent.name} to ${parent.name}.default (put-set-token / put-token with its id; bindings follow the id)`,
+      ]
+    : [`name this Token ${name}.default`];
+  fail(
+    "token_name_collision",
+    (parent
+      ? `Token name ${name} would put a Token inside Token ${tokenLabel(parent)}. `
+      : `Token name ${name} is already a group of Tokens: ` +
+        `${collisions.slice(0, 3).map(tokenLabel).join(", ")}${collisions.length > 3 ? ", ..." : ""}. `) +
+      "A name is either a Token or a group of Tokens, never both (as in Penpot); " +
+      `the inner Tokens would not resolve. Rename: ${suggestions.join(", ")}`,
+    {
+      collidesWith: collisions.slice(0, 10).map(({ filePath, id, name: otherName, set }) => ({
+        filePath,
+        id,
+        name: otherName,
+        ...(set ? { set } : {}),
+      })),
+      name,
+      suggestions,
+      tokenId,
+    },
+  );
+}
+
+function applyPutSetToken(snapshot, operation, inverseOperations) {
+  const target = writableTokenLibrary(snapshot, operation, inverseOperations, false);
+  const tokenSet = findTokenSet(target.library, operation.setId);
+  const token = formATokenValue(operation.token, "operation.token");
+  stableId(token.id, "tok_", "invalid_token_id", "operation.token.id");
+  const sameName = tokenSet.tokens.find(
+    (candidate) => candidate.name === token.name && candidate.id !== token.id,
+  );
+  if (sameName) {
+    fail(
+      "duplicate_token_name",
+      `Token set ${tokenSet.name} already has ${token.name} as ${sameName.id}; use that id to replace it, ` +
+        "or put the override in another set (a later active set overrides an earlier one by name)",
+      { name: token.name, setId: tokenSet.id, tokenId: sameName.id },
+    );
+  }
+  if (typeof token.name === "string") {
+    checkTokenNameCollision(
+      token.name,
+      token.id,
+      listTokenNames(snapshot.manifest, snapshot.entries),
+    );
+  }
+  const index = tokenSet.tokens.findIndex(({ id }) => id === token.id);
+  if (index >= 0) tokenSet.tokens[index] = token;
+  else tokenSet.tokens.push(token);
+  return { affectedIds: [token.id], entries: [target.entry] };
+}
+
+function applyPutTokenTheme(snapshot, operation, inverseOperations) {
+  const value = requireRecord(
+    operation.theme,
+    "invalid_token_theme",
+    "put-token-theme theme must contain an object",
+  );
+  stableId(value.id, "theme_", "invalid_token_theme_id", "operation.theme.id");
+  const target = writableTokenLibrary(snapshot, operation, inverseOperations, false);
+  const { library } = target;
+  const theme = {
+    description: "",
+    externalId: "",
+    isSource: false,
+    ...value,
+  };
+  if (!Array.isArray(theme.setIds)) {
+    fail("invalid_token_theme", "put-token-theme theme.setIds must be an array of tset_ ids");
+  }
+  const unknownSets = theme.setIds.filter(
+    (id) => !library.sets.some((candidate) => candidate.id === id),
+  );
+  if (unknownSets.length > 0) {
+    fail(
+      "invalid_token_theme_sets",
+      `put-token-theme names unknown token sets: ${unknownSets.join(", ")}. Sets: ` +
+        `${library.sets.map(({ id, name }) => `${id} (${name})`).join(", ") || "(none)"}`,
+      { setIds: unknownSets, validSetIds: library.sets.map(({ id }) => id) },
+    );
+  }
+  const samePath = library.themes.find(
+    (candidate) =>
+      themePathOf(candidate) === themePathOf(theme) && candidate.id !== theme.id,
+  );
+  if (samePath) {
+    fail(
+      "duplicate_token_theme",
+      `Token theme ${themePathOf(theme)} belongs to ${samePath.id}; use that id to replace it`,
+      { themeId: samePath.id, themePath: themePathOf(theme) },
+    );
+  }
+  const index = library.themes.findIndex(({ id }) => id === theme.id);
+  if (index >= 0) library.themes[index] = theme;
+  else library.themes.push(theme);
+  return { affectedIds: [theme.id], entries: [target.entry] };
+}
+
+function applyDeleteTokenTheme(snapshot, operation, inverseOperations) {
+  const target = writableTokenLibrary(snapshot, operation, inverseOperations, false);
+  const { library } = target;
+  if (!library.themes.some(({ id }) => id === operation.themeId)) {
+    fail(
+      "missing_token_theme",
+      `Token theme does not exist: ${operation.themeId}. Themes: ` +
+        `${library.themes.map((theme) => `${theme.id} (${themePathOf(theme)})`).join(", ") || "(none)"}`,
+      { themeId: operation.themeId, validThemeIds: library.themes.map(({ id }) => id) },
+    );
+  }
+  library.themes = library.themes.filter(({ id }) => id !== operation.themeId);
+  library.activeThemeIds = library.activeThemeIds.filter(
+    (id) => id !== operation.themeId,
+  );
+  if (library.defaultThemeIds) library.defaultThemeIds = library.defaultThemeIds.filter((id) => id !== operation.themeId);
+  return { affectedIds: [operation.themeId], entries: [target.entry] };
 }
 
 function assetLibraryAffectedIds(library) {
@@ -4868,7 +5532,7 @@ function applyUpdatePresentationNode(snapshot, operation, inverseOperations) {
   );
   for (const field of Object.keys(changes)) {
     if (!NODE_CHANGE_FIELDS.has(field)) {
-      failUnknownNodeField(operation.type, field, NODE_CHANGE_FIELDS);
+      failUnknownNodeField(operation, field, NODE_CHANGE_FIELDS);
     }
     if (
       (field === "text" ||
@@ -5037,6 +5701,7 @@ function putCollectionItem(
   return {
     affectedIds: [id],
     entries: target.created ? ["manifest.json", target.entry] : [target.entry],
+    replaced: index >= 0,
   };
 }
 
@@ -5069,13 +5734,25 @@ function applyPutComponentSet(snapshot, operation, inverseOperations) {
     "invalid_component_id",
     "operation.componentSet.id",
   );
-  const applied = putCollectionItem(snapshot, operation, inverseOperations, {
-    defaultEntry: "components/components.json",
-    field: "componentSets",
-    id: componentSet.id,
-    item: componentSet,
-    kind: "components",
-  });
+  const { replaced, ...applied } = putCollectionItem(
+    snapshot,
+    operation,
+    inverseOperations,
+    {
+      defaultEntry: "components/components.json",
+      field: "componentSets",
+      id: componentSet.id,
+      item: componentSet,
+      kind: "components",
+    },
+  );
+  if (!replaced && operation.index !== undefined && operation.index !== null) {
+    // A new set lands where it is asked to (an undo puts a set back in its
+    // old place); a replaced set keeps its place.
+    const sets = snapshot.entries[applied.entries.at(-1)].componentSets;
+    const index = insertionIndex(operation.index, sets.length - 1);
+    sets.splice(index, 0, sets.pop());
+  }
   return {
     ...applied,
     affectedIds: componentSetAffectedIds(componentSet),
@@ -5083,10 +5760,10 @@ function applyPutComponentSet(snapshot, operation, inverseOperations) {
 }
 
 function applyDeleteComponentSet(snapshot, operation, inverseOperations) {
-  const { componentSet } = componentSetRaw(snapshot, operation.componentSetId);
+  const { componentSet } = componentSetRaw(snapshot, operation.componentId);
   const applied = deleteCollectionItem(snapshot, operation, inverseOperations, {
     field: "componentSets",
-    id: operation.componentSetId,
+    id: operation.componentId,
     kind: "components",
     missingCode: "missing_component",
   });
@@ -5128,7 +5805,7 @@ function componentSetAffectedIds(componentSet) {
 function applyPutVariant(snapshot, operation, inverseOperations) {
   const { componentSet, entry } = componentSetRaw(
     snapshot,
-    operation.componentSetId,
+    operation.componentId,
   );
   const variant = requireRecord(
     operation.variant,
@@ -5149,7 +5826,7 @@ function applyPutVariant(snapshot, operation, inverseOperations) {
 function applyDeleteVariant(snapshot, operation, inverseOperations) {
   const { componentSet, entry } = componentSetRaw(
     snapshot,
-    operation.componentSetId,
+    operation.componentId,
   );
   const index = componentSet.variants.findIndex(
     ({ id }) => id === operation.variantId,
@@ -5172,7 +5849,7 @@ function applyDeleteVariant(snapshot, operation, inverseOperations) {
 function applyUpdateComponentNode(snapshot, operation, inverseOperations) {
   const { componentSet, entry } = componentSetRaw(
     snapshot,
-    operation.componentSetId,
+    operation.componentId,
   );
   const variant = componentSet.variants.find(
     ({ id }) => id === operation.variantId,
@@ -5215,11 +5892,7 @@ function applyUpdateComponentNode(snapshot, operation, inverseOperations) {
     // A variant node keeps the same attributes as a Presentation node, plus
     // the instance of a nested component.
     if (!COMPONENT_NODE_CHANGE_FIELDS.has(field)) {
-      failUnknownNodeField(
-        "update-component-node",
-        field,
-        COMPONENT_NODE_CHANGE_FIELDS,
-      );
+      failUnknownNodeField(operation, field, COMPONENT_NODE_CHANGE_FIELDS);
     }
     if (TEXT_ATTRIBUTES.has(field) && node.type !== "TEXT") {
       fail(
@@ -5392,16 +6065,20 @@ function applyPutScreen(snapshot, operation, inverseOperations) {
   };
 }
 
+// Ids a written Screen touches. The Screen is not validated yet (the whole
+// candidate is, after the batch), so a missing list reports through that
+// validation instead of crashing here.
 function screenAffectedIds(screen) {
+  const list = (value) => (Array.isArray(value) ? value : []);
   return [
     screen.id,
-    ...screen.counterparts.map(({ id }) => id),
-    ...screen.presentations.flatMap((presentation) => [
-      presentation.id,
-      ...presentation.interactions.map(({ id }) => id),
-      ...Object.keys(presentation.nodes),
+    ...list(screen.counterparts).map((item) => item?.id),
+    ...list(screen.presentations).flatMap((presentation) => [
+      presentation?.id,
+      ...list(presentation?.interactions).map((item) => item?.id),
+      ...Object.keys(isRecord(presentation?.nodes) ? presentation.nodes : {}),
     ]),
-  ];
+  ].filter((id) => typeof id === "string");
 }
 
 function applyDeleteScreen(snapshot, operation, inverseOperations) {
@@ -5421,6 +6098,14 @@ function applyDeleteScreen(snapshot, operation, inverseOperations) {
     (candidate) => candidate !== entry,
   );
   delete snapshot.entries[entry];
+  // A deleted page leaves its canvas.
+  if (snapshot.manifest.canvases?.some((canvas) => canvas.screens.includes(operation.screenId))) {
+    inverseOperations.splice(1, 0, { canvases: structuredClone(snapshot.manifest.canvases), type: "put-canvases" });
+    snapshot.manifest.canvases = snapshot.manifest.canvases.map((canvas) => ({
+      ...canvas,
+      screens: canvas.screens.filter((id) => id !== operation.screenId),
+    }));
+  }
   if (snapshot.manifest.defaultScreenId === operation.screenId) {
     snapshot.manifest.defaultScreenId = snapshot.manifest.entries.screens[0]
       ? snapshot.entries[snapshot.manifest.entries.screens[0]].id
@@ -5431,6 +6116,22 @@ function applyDeleteScreen(snapshot, operation, inverseOperations) {
     deletedEntries: [entry],
     entries: ["manifest.json"],
   };
+}
+
+// The whole canvas list: which pages sit on which canvas, in what order.
+function applyPutCanvases(snapshot, operation, inverseOperations) {
+  validateCanvases(
+    operation.canvases,
+    new Set(snapshot.manifest.entries.screens.map((entry) => snapshot.entries[entry].id)),
+  );
+  inverseOperations.unshift(
+    snapshot.manifest.canvases === undefined
+      ? { type: "put-canvases" }
+      : { type: "put-canvases", canvases: structuredClone(snapshot.manifest.canvases) },
+  );
+  if (operation.canvases === undefined || operation.canvases === null) delete snapshot.manifest.canvases;
+  else snapshot.manifest.canvases = structuredClone(operation.canvases);
+  return { affectedIds: ["canvases"], entries: ["manifest.json"] };
 }
 
 function applySetDefaultScreen(snapshot, operation, inverseOperations) {
@@ -5466,14 +6167,16 @@ function applySetFoundationDependency(snapshot, operation, inverseOperations) {
     "set-foundation-dependency requires dependency",
   );
   if (
-    Object.keys(dependency).length !== 2 ||
+    Object.keys(dependency).some(
+      (field) => !["activeThemeIds", "packageId", "path"].includes(field),
+    ) ||
     typeof dependency.packageId !== "string" ||
     !dependency.packageId.startsWith("pkg_") ||
     typeof dependency.path !== "string"
   ) {
     fail(
       "invalid_dependency",
-      "Foundation dependency requires packageId and relative path",
+      "Foundation dependency requires packageId and relative path (and optional activeThemeIds)",
     );
   }
   inverseOperations.unshift({
@@ -5668,6 +6371,23 @@ function applyPutToken(snapshot, operation, inverseOperations) {
   const created = !snapshot.manifest.entries.tokens.includes(
     operation.filePath,
   );
+  const existing = snapshot.entries[operation.filePath];
+  if (!created && Array.isArray(existing?.sets) && Array.isArray(existing?.themes)) {
+    fail(
+      "token_library_entry",
+      `${operation.filePath} is a token library (sets and themes); add the Token with ` +
+        `put-set-token {setId, token:{id, name:"${operation.path}", type, value}} instead`,
+      {
+        filePath: operation.filePath,
+        nextOperations: [{ operation: "smallpen.schema", args: ["operation", "put-set-token"] }],
+      },
+    );
+  }
+  checkTokenNameCollision(
+    operation.path,
+    operation.tokenId,
+    listTokenNames(snapshot.manifest, snapshot.entries),
+  );
   restoreEntryInverse(
     snapshot,
     "tokens",
@@ -5699,12 +6419,26 @@ function applyPutToken(snapshot, operation, inverseOperations) {
 function applyRemoveToken(snapshot, operation, inverseOperations) {
   const location = dtcgTokenLocation(snapshot, operation.tokenId);
   restoreEntryInverse(snapshot, "tokens", location.entry, inverseOperations);
-  delete location.parent[location.key];
+  if (location.format === "penpot") {
+    for (const tokenSet of snapshot.entries[location.entry].sets) {
+      tokenSet.tokens = tokenSet.tokens.filter(({ id }) => id !== operation.tokenId);
+    }
+  } else {
+    delete location.parent[location.key];
+  }
   return { affectedIds: [operation.tokenId], entries: [location.entry] };
 }
 
 function applyDeprecateToken(snapshot, operation, inverseOperations) {
   const location = dtcgTokenLocation(snapshot, operation.tokenId);
+  if (location.format === "penpot") {
+    fail(
+      "unsupported_token_deprecation",
+      `${operation.tokenId} is in a token set; token sets have no deprecation flag. ` +
+        "Rename or remove it (put-set-token, remove-token)",
+      { tokenId: operation.tokenId },
+    );
+  }
   restoreEntryInverse(snapshot, "tokens", location.entry, inverseOperations);
   const extension = location.definition.$extensions?.smallpen;
   if (!isRecord(extension)) {
@@ -5925,7 +6659,9 @@ function applySetInstanceOverride(snapshot, operation, inverseOperations) {
       { overridePath },
     );
   }
-  validateNodeChange(field, operation.value, `${node.id}.${overridePath}`);
+  if (["tokenBindings", "variant"].includes(field))
+    validateOverrideValue(field, operation.value, `${node.id}.${overridePath}`);
+  else validateNodeChange(field, operation.value, `${node.id}.${overridePath}`);
   const source = overrideSourceNode(snapshot, node.instance, sourcePath);
   if (source === null) {
     fail(
@@ -6143,6 +6879,140 @@ function validateComponentAcyclicity(snapshot) {
   for (const componentId of graph.keys()) visit(componentId, []);
 }
 
+// Pre-commit protection: reject a batch that leaves an Instance selecting a
+// variant its Component Set no longer has (a deleted variant, changed Axes).
+// Instances that were already stale before the batch do not block it, so a
+// Package can be repaired one Instance at a time.
+// Pages, components and canvases are found by name, so a write may not
+// give two of them one name. Names a package already repeats stay
+// (validate reports them); only a new repeat is refused.
+function repeatedNames(snapshot) {
+  const repeated = new Map();
+  const add = (kind, names) => {
+    const seen = new Set();
+    for (const name of names) {
+      const key = `${kind}\0${String(name).trim().toLowerCase()}`;
+      if (seen.has(key)) repeated.set(key, { kind, name });
+      seen.add(key);
+    }
+  };
+  add("page", snapshot.manifest.entries.screens.map((entry) => snapshot.entries[entry].name));
+  add("component", [...snapshot.domain.componentSets.values()].map((set) => set.name));
+  add("canvas", resolveCanvases(snapshot.manifest, snapshot.entries).map((canvas) => canvas.name));
+  return repeated;
+}
+
+// The App names a copy the way a file manager does: a name already taken
+// gets " 2", " 3", ... ("Card 2" copied is "Card 3"). Only objects that are
+// new or renamed in this batch are numbered; names an older file repeats
+// stay. Pages, components, canvases and sibling elements; the CLI instead
+// refuses an explicit repeat. Returns what was renamed.
+function numberNewRepeats(before, candidate, changedFiles) {
+  const renamed = [];
+  const key = (name) => String(name ?? "").trim().toLowerCase();
+  const settle = (kind, items, where) => {
+    const taken = new Set(items.filter((item) => !item.fresh).map((item) => key(item.name)));
+    for (const item of items.filter((candidateItem) => candidateItem.fresh)) {
+      if (taken.has(key(item.name))) {
+        const base = String(item.name).trim().replace(/ \d+$/, "") || String(item.name);
+        let number = 2;
+        while (taken.has(key(`${base} ${number}`))) number += 1;
+        const to = `${base} ${number}`;
+        renamed.push({ kind, from: item.name, to, ...(where ? { where } : {}) });
+        item.rename(to);
+        if (item.entry) changedFiles.add(item.entry);
+        taken.add(key(to));
+      } else taken.add(key(item.name));
+    }
+  };
+  const beforeScreens = new Map(before.manifest.entries.screens.map((entry) => [before.entries[entry]?.id, before.entries[entry]]));
+  const siblings = (nodes, oldNodes, entry, where) => {
+    const oldParent = new Map();
+    for (const [id, node] of Object.entries(oldNodes ?? {})) for (const child of node.children ?? []) oldParent.set(child, id);
+    for (const [parentId, parent] of Object.entries(nodes ?? {})) {
+      const items = (parent.children ?? []).filter((id) => nodes[id]).map((id) => ({
+        name: nodes[id].name ?? "",
+        fresh: !oldNodes?.[id] || oldNodes[id].name !== nodes[id].name || oldParent.get(id) !== parentId,
+        entry,
+        rename: (to) => { nodes[id].name = to; },
+      }));
+      if (items.some((item) => item.fresh)) settle("element", items, `${where} / ${parent.name ?? parentId}`);
+    }
+  };
+  const screens = candidate.manifest.entries.screens.map((entry) => ({ entry, screen: candidate.entries[entry] })).filter(({ screen }) => screen);
+  settle("page", screens.map(({ entry, screen }) => ({
+    name: screen.name,
+    fresh: beforeScreens.get(screen.id)?.name !== screen.name,
+    entry,
+    rename: (to) => {
+      // Boards named after the page ("List · desktop") follow its number.
+      const short = (name) => String(name).split(" / ").at(-1);
+      for (const presentation of screen.presentations ?? []) {
+        const root = presentation.nodes?.[presentation.rootId];
+        const platform = presentation.platform ?? presentation.name;
+        if (root?.name === `${short(screen.name)} · ${platform}`) root.name = `${short(to)} · ${platform}`;
+      }
+      screen.name = to;
+    },
+  })));
+  for (const { entry, screen } of screens)
+    for (const presentation of screen.presentations ?? []) {
+      const old = beforeScreens.get(screen.id)?.presentations?.find(({ id }) => id === presentation.id);
+      siblings(presentation.nodes, old?.nodes, entry, screen.name);
+    }
+  const beforeSets = new Map();
+  for (const entry of before.manifest.entries.components ?? [])
+    for (const set of before.entries[entry]?.componentSets ?? []) beforeSets.set(set.id, set);
+  const sets = (candidate.manifest.entries.components ?? []).flatMap((entry) =>
+    (candidate.entries[entry]?.componentSets ?? []).map((set) => ({ entry, set })));
+  settle("component", sets.map(({ entry, set }) => ({
+    name: set.name,
+    fresh: beforeSets.get(set.id)?.name !== set.name,
+    entry,
+    rename: (to) => { set.name = to; },
+  })));
+  for (const { entry, set } of sets)
+    for (const variant of set.variants ?? []) {
+      const old = beforeSets.get(set.id)?.variants?.find(({ id }) => id === variant.id);
+      const label = (set.axes ?? []).map((axis) => `${axis.name}=${variant.selection?.[axis.id]}`).join(", ");
+      siblings(variant.nodes, old?.nodes, entry, label ? `${set.name} (${label})` : set.name);
+    }
+  if (Array.isArray(candidate.manifest.canvases)) {
+    const oldCanvases = new Map(resolveCanvases(before.manifest, before.entries).map((canvas) => [canvas.id, canvas.name]));
+    settle("canvas", candidate.manifest.canvases.map((canvas) => ({
+      name: canvas.name,
+      fresh: oldCanvases.get(canvas.id) !== canvas.name,
+      entry: "manifest.json",
+      rename: (to) => { canvas.name = to; },
+    })));
+  }
+  return renamed;
+}
+
+function validateNoNewDuplicateNames(before, after, operations) {
+  if (operations.every((operation) => operation.type === "restore-canonical-entry")) return;
+  const old = repeatedNames(before);
+  for (const [key, { kind, name }] of repeatedNames(after))
+    if (!old.has(key))
+      fail("duplicate_name", `Another ${kind} is already named ${name}; names do not repeat`, { kind, name });
+}
+
+function validateNoNewStaleInstances(before, after, options) {
+  const known = new Set(
+    staleInstanceDiagnostics(before, options).map(({ path }) => path),
+  );
+  const stale = staleInstanceDiagnostics(after, options).filter(
+    ({ path }) => !known.has(path),
+  );
+  if (stale.length === 0) return;
+  fail(
+    "stale_instance_variant",
+    `This batch leaves ${stale.length} Instance(s) selecting a variant their Component Set does not have. ` +
+      `${stale[0].message}. Fix: ${stale[0].fix}, or keep the variant`,
+    { instances: stale.slice(0, 20), count: stale.length },
+  );
+}
+
 // options.foundation and options.libraries let operations check what they
 // reference in those Packages (an Instance override path, for example).
 // Without them such references are taken as written.
@@ -6205,269 +7075,309 @@ export async function prepareOperationBatch(before, batch, options = {}) {
   const deletedFiles = new Set();
   const inverseOperations = [];
   for (const [operationIndex, operation] of batch.operations.entries()) {
-    if (!isRecord(operation)) {
-      fail("invalid_operation", "Canonical operation must contain an object", {
-        operationIndex,
-      });
-    }
     checkOperationShape(operation, operationIndex);
+    // Inverse batches restore whole entries as they were, legacy shadows
+    // included; every other write uses the canonical shadow shape.
+    if (operation.type !== "restore-canonical-entry") {
+      checkOperationShadows(operation, operationIndex, (tokenId, path) =>
+        (typeof tokenId === "string"
+          ? before.domain.tokens.get(tokenId)
+          : [...before.domain.tokens.values()].find(
+              (token) => token.path === path,
+            ))?.type,
+      );
+    }
     let applied;
-    switch (operation.type) {
-      case "add-component":
-        applied = applyAddComponent(candidate, operation, inverseOperations);
-        break;
-      case "add-presentation":
-        applied = applyAddPresentation(candidate, operation, inverseOperations);
-        break;
-      case "add-presentation-node":
-        applied = applyAddPresentationNode(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "clear-instance-override":
-        applied = applyClearInstanceOverride(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "clear-token-binding":
-        applied = applyClearTokenBinding(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "delete-component-set":
-        applied = applyDeleteComponentSet(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "delete-context-file":
-        applied = applyDeleteContextFile(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "delete-interaction":
-        applied = applyDeleteInteraction(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "delete-requirement-file":
-        applied = applyDeleteRequirementFile(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "delete-scenario":
-        applied = applyDeleteScenario(candidate, operation, inverseOperations);
-        break;
-      case "delete-screen":
-        applied = applyDeleteScreen(candidate, operation, inverseOperations);
-        break;
-      case "delete-variant":
-        applied = applyDeleteVariant(candidate, operation, inverseOperations);
-        break;
-      case "deprecate-token":
-        applied = applyDeprecateToken(candidate, operation, inverseOperations);
-        break;
-      case "delete-presentation":
-        applied = applyDeletePresentation(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "delete-presentation-node":
-        applied = applyDeletePresentationNode(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "delete-component":
-        applied = applyDeleteComponent(candidate, operation, inverseOperations);
-        break;
-      case "move-presentation":
-        applied = applyMovePresentation(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "move-presentation-nodes":
-        applied = applyMovePresentationNodes(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "put-component-set":
-        applied = applyPutComponentSet(candidate, operation, inverseOperations);
-        break;
-      case "put-context-file":
-        applied = applyPutContextFile(candidate, operation, inverseOperations);
-        break;
-      case "put-interaction":
-        applied = applyPutInteraction(candidate, operation, inverseOperations);
-        break;
-      case "put-library":
-        applied = applyPutLibrary(candidate, operation, inverseOperations);
-        break;
-      case "put-requirement-file":
-        applied = applyPutRequirementFile(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "put-scenario":
-        applied = applyPutScenario(candidate, operation, inverseOperations);
-        break;
-      case "put-screen":
-        applied = applyPutScreen(candidate, operation, inverseOperations);
-        break;
-      case "put-token":
-        applied = applyPutToken(candidate, operation, inverseOperations);
-        break;
-      case "put-variant":
-        applied = applyPutVariant(candidate, operation, inverseOperations);
-        break;
-      case "remove-token":
-        applied = applyRemoveToken(candidate, operation, inverseOperations);
-        break;
-      case "remove-library":
-        applied = applyRemoveLibrary(candidate, operation, inverseOperations);
-        break;
-      case "repair-reference":
-        applied = applyRepairReference(candidate, operation, inverseOperations);
-        break;
-      case "restore-canonical-entry":
-        applied = applyRestoreCanonicalEntry(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "update-presentation":
-        applied = applyUpdatePresentation(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "reorder-presentation-children":
-        applied = applyReorderPresentationChildren(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "replace-asset-library":
-        applied = applyReplaceAssetLibrary(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "replace-token-library":
-        applied = applyReplaceTokenLibrary(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "select-instance-variant":
-        applied = applySelectInstanceVariant(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "set-default-screen":
-        applied = applySetDefaultScreen(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "set-foundation-dependency":
-        applied = applySetFoundationDependency(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "set-active-token-themes":
-        applied = applySetActiveTokenThemes(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "set-instance-override":
-        applied = applySetInstanceOverride(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "set-token-binding":
-        applied = applySetTokenBinding(candidate, operation, inverseOperations);
-        break;
-      case "set-token-value":
-        applied = applySetTokenValue(candidate, operation, inverseOperations);
-        break;
-      case "update-component-node":
-        applied = applyUpdateComponentNode(
-          candidate,
-          operation,
-          inverseOperations,
-        );
-        break;
-      case "update-node": {
-        const { screen } = findScreenContext(candidate, operation.screenId);
-        applied = {
-          affectedIds: [operation.nodeId],
-          entry: applyUpdatePresentationNode(
-            candidate,
-            {
-              ...operation,
-              presentationId: screen.basePresentationId,
-              type: "update-presentation-node",
-            },
-            inverseOperations,
-          ),
-        };
-        break;
-      }
-      case "update-presentation-node":
-        applied = {
-          affectedIds: [operation.nodeId],
-          entry: applyUpdatePresentationNode(
+    try {
+      switch (operation.type) {
+        case "add-component":
+          applied = applyAddComponent(candidate, operation, inverseOperations);
+          break;
+        case "add-presentation":
+          applied = applyAddPresentation(candidate, operation, inverseOperations);
+          break;
+        case "add-presentation-node":
+          applied = applyAddPresentationNode(
             candidate,
             operation,
             inverseOperations,
-          ),
+          );
+          break;
+        case "clear-instance-override":
+          applied = applyClearInstanceOverride(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "clear-token-binding":
+          applied = applyClearTokenBinding(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "delete-component-set":
+          applied = applyDeleteComponentSet(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "delete-context-file":
+          applied = applyDeleteContextFile(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "delete-interaction":
+          applied = applyDeleteInteraction(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "delete-requirement-file":
+          applied = applyDeleteRequirementFile(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "delete-scenario":
+          applied = applyDeleteScenario(candidate, operation, inverseOperations);
+          break;
+        case "delete-screen":
+          applied = applyDeleteScreen(candidate, operation, inverseOperations);
+          break;
+        case "delete-variant":
+          applied = applyDeleteVariant(candidate, operation, inverseOperations);
+          break;
+        case "deprecate-token":
+          applied = applyDeprecateToken(candidate, operation, inverseOperations);
+          break;
+        case "delete-presentation":
+          applied = applyDeletePresentation(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "delete-presentation-node":
+          applied = applyDeletePresentationNode(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "delete-component":
+          applied = applyDeleteComponent(candidate, operation, inverseOperations);
+          break;
+        case "move-presentation":
+          applied = applyMovePresentation(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "move-presentation-nodes":
+          applied = applyMovePresentationNodes(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "put-component-set":
+          applied = applyPutComponentSet(candidate, operation, inverseOperations);
+          break;
+        case "put-context-file":
+          applied = applyPutContextFile(candidate, operation, inverseOperations);
+          break;
+        case "put-interaction":
+          applied = applyPutInteraction(candidate, operation, inverseOperations);
+          break;
+        case "put-library":
+          applied = applyPutLibrary(candidate, operation, inverseOperations);
+          break;
+        case "put-requirement-file":
+          applied = applyPutRequirementFile(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "put-scenario":
+          applied = applyPutScenario(candidate, operation, inverseOperations);
+          break;
+        case "put-screen":
+          applied = applyPutScreen(candidate, operation, inverseOperations);
+          break;
+        case "put-token":
+          applied = applyPutToken(candidate, operation, inverseOperations);
+          break;
+        case "put-variant":
+          applied = applyPutVariant(candidate, operation, inverseOperations);
+          break;
+        case "remove-token":
+          applied = applyRemoveToken(candidate, operation, inverseOperations);
+          break;
+        case "remove-library":
+          applied = applyRemoveLibrary(candidate, operation, inverseOperations);
+          break;
+        case "repair-reference":
+          applied = applyRepairReference(candidate, operation, inverseOperations);
+          break;
+        case "restore-canonical-entry":
+          applied = applyRestoreCanonicalEntry(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "update-presentation":
+          applied = applyUpdatePresentation(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "reorder-presentation-children":
+          applied = applyReorderPresentationChildren(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "replace-asset-library":
+          applied = applyReplaceAssetLibrary(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "replace-token-library":
+          applied = applyReplaceTokenLibrary(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "select-instance-variant":
+          applied = applySelectInstanceVariant(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "put-canvases":
+          applied = applyPutCanvases(candidate, operation, inverseOperations);
+          break;
+        case "set-default-screen":
+          applied = applySetDefaultScreen(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "set-foundation-dependency":
+          applied = applySetFoundationDependency(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "put-token-set":
+          applied = applyPutTokenSet(candidate, operation, inverseOperations);
+          break;
+        case "put-set-token":
+          applied = applyPutSetToken(candidate, operation, inverseOperations);
+          break;
+        case "put-token-theme":
+          applied = applyPutTokenTheme(candidate, operation, inverseOperations);
+          break;
+        case "delete-token-set":
+          applied = applyDeleteTokenSet(candidate, operation, inverseOperations);
+          break;
+        case "delete-token-theme":
+          applied = applyDeleteTokenTheme(candidate, operation, inverseOperations);
+          break;
+        case "set-active-token-themes":
+          applied = applySetActiveTokenThemes(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "set-instance-override":
+          applied = applySetInstanceOverride(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "set-token-binding":
+          applied = applySetTokenBinding(candidate, operation, inverseOperations);
+          break;
+        case "set-token-value":
+          applied = applySetTokenValue(candidate, operation, inverseOperations);
+          break;
+        case "update-component-node":
+          applied = applyUpdateComponentNode(
+            candidate,
+            operation,
+            inverseOperations,
+          );
+          break;
+        case "update-node": {
+          const { screen } = findScreenContext(candidate, operation.screenId);
+          applied = {
+            affectedIds: [operation.nodeId],
+            entry: applyUpdatePresentationNode(
+              candidate,
+              {
+                ...operation,
+                presentationId: screen.basePresentationId,
+                type: "update-presentation-node",
+              },
+              inverseOperations,
+            ),
+          };
+          break;
+        }
+        case "update-presentation-node":
+          applied = {
+            affectedIds: [operation.nodeId],
+            entry: applyUpdatePresentationNode(
+              candidate,
+              operation,
+              inverseOperations,
+            ),
+          };
+          break;
+        case "update-component":
+          applied = applyUpdateComponent(candidate, operation, inverseOperations);
+          break;
+        default:
+          fail(
+            "unsupported_operation",
+            `Phase 0 cannot apply operation: ${String(operation?.type)}`,
+          );
+      }
+    } catch (error) {
+      if (error instanceof SmallPenError) {
+        const changeField = isRecord(operation.changes) && Object.hasOwn(operation.changes, error.details.field);
+        error.details = {
+          operationIndex,
+          operationType: operation.type,
+          schemaCommand: `smallpen schema operation ${operation.type}`,
+          ...error.details,
+          ...(changeField && !error.details.path
+            ? { path: `operations[${operationIndex}].changes.${error.details.field}` }
+            : {}),
         };
-        break;
-      case "update-component":
-        applied = applyUpdateComponent(candidate, operation, inverseOperations);
-        break;
-      default:
-        fail(
-          "unsupported_operation",
-          `Phase 0 cannot apply operation: ${String(operation?.type)}`,
-        );
+      }
+      throw error;
     }
     for (const entry of applied.entries ?? [applied.entry]) {
       changedFiles.add(entry);
@@ -6509,6 +7419,7 @@ export async function prepareOperationBatch(before, batch, options = {}) {
     };
   }
 
+  const renamed = batch.repeatedNames === "number" ? numberNewRepeats(before, candidate, changedFiles) : [];
   const values = new Map([["manifest.json", candidate.manifest]]);
   for (const [entry, value] of Object.entries(candidate.entries)) {
     values.set(entry, value);
@@ -6518,6 +7429,8 @@ export async function prepareOperationBatch(before, batch, options = {}) {
   }
   const validated = await loadPackageFromValues(before.locator, values);
   validateComponentAcyclicity(validated);
+  validateNoNewStaleInstances(before, validated, options);
+  validateNoNewDuplicateNames(before, validated, batch.operations);
   const normalizedAffectedIds = [...affectedIds].sort();
   const inverseBatch = {
     baseRevision: validated.revision,
@@ -6530,6 +7443,7 @@ export async function prepareOperationBatch(before, batch, options = {}) {
       batchId: batch.batchId,
       changedFiles: [...changedFiles].sort(),
       deletedFiles: [...deletedFiles].sort(),
+      ...(renamed.length ? { renamed } : {}),
       guidance: {
         refresh: {
           args: {
@@ -6553,6 +7467,10 @@ export async function prepareOperationBatch(before, batch, options = {}) {
 // Node and Presentation rules enforced above, for `smallpen schema`.
 export const CANONICAL_SCHEMA_RULES = Object.freeze({
   componentNodeChangeFields: Object.freeze([...COMPONENT_NODE_CHANGE_FIELDS]),
+  constraints: NODE_CONSTRAINTS,
+  strokeAlignments: STROKE_ALIGNMENTS,
+  strokeCaps: STROKE_CAPS,
+  strokeStyles: STROKE_STYLES,
   nodeChangeFields: Object.freeze([...NODE_CHANGE_FIELDS]),
   nodeTypes: Object.freeze([...NODE_TYPES]),
   presentationChangeFields: Object.freeze([...PRESENTATION_CHANGE_FIELDS]),
@@ -6566,4 +7484,5 @@ export const CANONICAL_SCHEMA_RULES = Object.freeze({
     ),
   ),
   textStyleFields: Object.freeze([...TEXT_STYLE_FIELDS]),
+  typographyStyleFields: Object.freeze([...TYPOGRAPHY_STYLE_FIELDS]),
 });

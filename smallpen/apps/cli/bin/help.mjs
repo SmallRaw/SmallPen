@@ -1,69 +1,124 @@
-import { workedExampleText } from "./schema.mjs";
+import {
+  COMMAND_CONTRACTS,
+  commandContract,
+  commandHelp,
+} from "./command-contract.mjs";
+import { commandOverview, printBriefHelp } from "./help-topics.mjs";
+import { printText } from "./result-files.mjs";
+import { COMMAND_GROUPS, publicArgv } from "./command-tree.mjs";
 
-const COMMANDS = [
-  ["version", "Print the CLI package version without opening a workspace"],
-  ["schema", "Print the JSON shape and a valid example of every write input"],
-  ["init", "Persist a guided Brief/Proposal and create Foundation + Product"],
-  ["validate", "Validate a package and its same-workspace Foundation"],
-  ["inspect", "Inspect package identity, capabilities, and domain summary"],
-  ["list", "List stable domain objects by kind"],
-  ["read", "Read the complete validated Canonical Snapshot"],
-  ["read-view", "Read the deterministic default or selected Design View"],
-  ["discover", "Discover exact selectors and executable next reads"],
-  ["catalog", "Derive the Design System Catalog and requirement coverage"],
-  ["search-components", "Find reusable Product and Foundation components"],
-  ["component", "Inspect a Component Set and its legal variants"],
-  ["compare", "Compare two to four explicitly selected Design Views"],
-  ["tokens", "List Effective Tokens for a Context"],
-  ["search-tokens", "Find reusable Tokens by name, type, or design value"],
-  ["effective-token", "Resolve one Effective Token"],
-  ["explain-token", "Explain one Effective Token resolution decision"],
-  ["render", "Render the selected Design View to deterministic PNG"],
-  ["inspect-view", "Return wireframe, semanticTree, optional image, and supporting context"],
-  ["render-matrix", "Render multiple design contexts for AI comparison"],
-  ["evidence", "Return PNG plus deterministic review evidence; --output exports files"],
-  ["import-draft", "Import Figma clipboard, SVG, or PNG as a separate Draft file"],
-  ["import-media", "Import binary Media (PNG/JPEG/GIF/WebP/SVG) into a Product Asset Library"],
-  ["remove-media", "Remove an imported Media descriptor from the Asset Library"],
-  ["import-font", "Import a TTF/OTF/WOFF font and convert SFNT to WOFF"],
-  ["import-tokens", "Review and import a DTCG / Tokens Studio token file into the Token Library"],
-  ["library-refresh", "Re-fetch a declared URL Library into its verified cache"],
-  ["draft-diff", "Compare two independent Draft files without changing Canonical"],
-  ["draft-compile", "Compile selected Draft fields into a current-revision batch"],
-  ["flow", "Create flowchart nodes from a declarative intent"],
-  ["page", "Create page nodes from a declarative intent"],
-  ["token", "Apply declarative Token operations atomically"],
-  ["impact", "Find every node and component using a Token"],
-  ["apply", "Atomically apply one typed Operation Batch"],
-  ["watch", "Emit NDJSON revision events for local external changes"],
-  ["repair", "Inspect or execute one explicit Repair choice"],
+const COMMANDS = Object.entries(COMMAND_CONTRACTS).map(
+  ([name, { purpose }]) => [name, purpose],
+);
+// What help lists: every grouped action and the shared commands.
+const PUBLIC_PATHS = [
+  ...Object.entries(COMMAND_GROUPS).flatMap(([group, { actions }]) =>
+    Object.entries(actions).map(([action, { purpose }]) => [`${group} ${action}`, purpose]),
+  ),
+  ...["view", "changes", "export", "validate", "help", "schema", "version"].map((name) => [name, COMMAND_CONTRACTS[name].purpose]),
 ];
-
-const DESIGN_SELECTORS = `Design selectors:
-  --screen ID                 Screen; default: manifest defaultScreenId
-  --presentation ID           Presentation; default: Screen Base Presentation
-  --scenario ID               Reproducible Scenario; default: canonical initial state
-  --context-profile ID        Named Context profile
-  --context AXIS=VALUE        Repeatable finite Context selection`;
+// Help texts are kept per engine; they print with the grouped path a caller
+// types ("smallpen apply" reads "smallpen advanced apply").
+const publicName = (name) => publicArgv([name]).join(" ");
+const publicText = (text) =>
+  text.replace(/\b(smallpen|SmallPen) ([a-z][a-z-]*)/g, (match, word, name) =>
+    Object.hasOwn(COMMAND_CONTRACTS, name) ? `${word} ${publicName(name)}` : match);
 
 const WRITE_REPLY = `Reply size:
-  The default reply includes inverseBatch (also repeated in guidance.undo), the
-  exact undo for the write; it can run to thousands of lines. --inverse-out FILE
-  saves inverseBatch to FILE (only when the batch commits) and returns
-  inverseBatchPath. --compact drops inverseBatch and guidance from the reply and
-  adds summary and inverseOperationCount; combine both to keep undo:
-  smallpen apply PACKAGE --batch FILE --inverse-out FILE.undo.json`;
-
-const VIEW_SELECTORS = `${DESIGN_SELECTORS}
-  --format FORMAT             structure|semantic|wireframe|screenshot`;
+  Default: batchId, revision, changed/alreadyApplied/dryRun, counts, warnings,
+  and summary. changeReportPath records exact before/after values. reverseEdit
+  describes an explicit new write at the confirmed revision; inverseBatchPath
+  locates its JSON. This does not rewind history. --inverse-out FILE chooses a
+  durable caller-owned file (only when the batch commits). --compact is default.
+  --full includes inverseBatch, guidance, and exact before/after diff values.
+  After later edits, read current values and restore intended fields in a new
+  scoped edit. Never force an old snapshot by replacing its baseRevision.
+  For safe retries choose batchId before the first call and reuse it with the
+  same input. The local ledger retains at most 500 batch identities.
+  smallpen apply PACKAGE --batch FILE --inverse-out FILE.reverse.json`;
 
 const HELP = {
+  assets: `Usage:
+  smallpen asset list PACKAGE [--kind colors|fonts|media|typographies]
+                 [--limit N] [--offset N] [--json]
+
+Read stored colors, typographies, fonts (families, variants, files) and media.
+Write shared assets in their owning package.
+Next: asset set/delete edit colors and typographies by name; font import and
+media import add files; media delete and font delete remove them by name.`,
+  help: `Usage:
+  smallpen help [OBJECT [ACTION]|rules [TOPIC]] [--json]
+
+Use COMMAND --help for options, or schema for JSON input shapes. Use help rules for shared operation rules; schema command OBJECT ACTION
+describes one command at a time.`,
+  themes: `Usage:
+  smallpen theme list PACKAGE [--theme GROUP/NAME]... [--json]
+
+Read project-defined groups, options (named Group/Option), defaults and this
+call's selection. This is a lightweight settings query, with no Token inventory.
+selection and option active flags mean this command's parameters and defaults,
+never a previous CLI call. The stored App selection is unrelated to this query
+and omitted by default; --full includes appSelection for explicit inspection.
+It never supplies the CLI defaults.
+No --theme uses project defaults; App current selection is independent.
+--theme overrides only named groups. No data or App state is written.
+Write: theme add|rename|default|delete --theme Group/Option.`,
+  view: `Usage:
+  smallpen view PACKAGE [what] [--as text|wireframe|png|issues] [--theme G/O]...
+
+Look at anything by name; no IDs. What:
+  (nothing)                      the whole package: themes, Tokens, components, pages
+  --tokens | --token color       every Token, or those under a name
+  --components                   every component
+  --component Button             one component: every variant
+    [--variant "Style=secondary"] [--element Label]   one variant, one part of it
+  --pages [--platform mobile]    every page
+  --page Board                   one page ("Board" or "Tasks / Board")
+    [--platform mobile] [--element "Top bar"]          one version, one part of it
+--as text (default) is a compact outline; wireframe is a text drawing of regions;
+png writes an image (inspect it only if you can see images); issues lists layout,
+text and contrast problems by element. Tokens have text, wireframe and png.
+--theme Group/Option shows values under that option for this call only.
+Large results go to a file. Unknown names fail with the names that exist;
+"Name [2]" picks one of a name stored twice.
+Next: changes PACKAGE --since REVISION after someone edits the design.`,
+  "token-export": `Usage:
+  smallpen token export PACKAGE [--type TYPE] [--token PREFIX] [--by GROUP]
+                        [--format json|flat] [--theme G/O]... [--output DIR] [--json]
+
+Write Token values to files for application code. --by GROUP writes one file
+per option of that theme group (--type string --by Language -> en.json,
+zh-CN.json); without it one file holds the default values. json nests by name
+(text.task.new -> {"text":{"task":{"new":...}}}); flat keeps one key per name.
+Other groups use the project defaults or --theme. Code owns switching at run
+time; export again after the design changes.`,
+  changes: `Usage:
+  smallpen changes PACKAGE [--since REVISION] [--limit N] [--full] [--json]
+
+What changed since a revision you saw, by name: themes, Tokens (with values),
+components (per variant and element) and pages (per platform and element),
+including edits a person made in the App. Every read and write reports a
+revision; keep the latest one and pass it as --since to align code with the
+design. Without --since: the most recent edits, who made them (app or cli) and
+the revision before each. --full adds the structured list. Nothing is stored
+for the caller.`,
+  export: `Usage:
+  smallpen export PACKAGE [--page P [--platform X] [--element E]]
+                  [--component C [--variant V] [--element E]] [--design-system]
+                  [--format text|wireframe|png] [--output FILE] [--scale N] [--json]
+
+Save a page, component or region as a text wireframe (default) or a PNG file,
+named the way view names it. Nothing named is the main page. Request PNG with
+--format png; read text and wireframes first, and inspect PNG only when the
+caller can see images. Text files contain LF newlines and alignment spaces.
+Missing --output uses a temporary file. Returns path, hash, bytes, target,
+themes and revisions. --design-system exports the generated Token/component
+page; do not draw a copy. --evidence adds review evidence to a page PNG.`,
   version: `Usage:
-  smallpen --version
   smallpen version [--json]
 
 Output:
-  The installed CLI package version, or {name,version} with --json.
+  JSON {name,version} for the installed CLI package.
   No package path is required; design files are unchanged and no services start.`,
   schema: `Usage:
   smallpen schema [TOPIC] [--json]
@@ -76,209 +131,137 @@ Purpose:
   example is tested against a workspace made by smallpen init.
 
 Topics:
+  command NAME   one command: parameters, types, defaults and constraints
+  commands       command names and purposes
   operations     every operation type, its purpose, Package, required fields
-  operation TYPE one operation in full (smallpen schema put-token also works)
+  operation TYPE one operation in full
   batch          batch contract, Foundation vs Product, worked example
   node           node fields, textStyle, tokenBindings
   node-types     what each node type requires
-  token          Token definition, contextValues, bindings
+  token          Tokens in token sets, DTCG files, bindings
+  theme          token sets and themes, --theme, Foundation + Product themes
   token-types    the value each Token type accepts
   component-set  Component Set, Axis roles (configuration, state), variants
   instance       INSTANCE nodes and overrides
   presentation   Presentation fields, size, and resizing
   screen         Screen fields
   scenario       Scenario fields and viewport
-  context        Context Axes and theme values (alias: theme)
-  init           every init question and a complete --answers file
+  context        Context Axes (viewport, density, locale, ...)
+  init           blank package paths, layouts and creation behavior
 
 Examples:
   smallpen schema operations
   smallpen schema operation update-component-node
   smallpen schema component-set`,
   init: `Usage:
-  smallpen init <workspace-directory> [--state FILE] [--answers FILE]
-                [--answer QUESTION_ID=JSON]... [--confirm] [--locale LOCALE] [--json]
+  smallpen project init PATH [--name NAME] [--layout single|foundation-product] [--json]
 
-Purpose:
-  Persist a progressively completed Initialization Brief and validated Proposal.
-  No hidden conversational state is used. --confirm atomically creates one local
-  Foundation and one Product; an existing target is never overwritten.
-
-Defaults and values:
-  --state defaults to <workspace-directory>.smallpen-init.json. Answers build up
-  only when every call passes the same --state; a call without --state starts
-  from no answers (the reply then carries stateNotice).
-  --answers FILE answers every question at once: smallpen schema init prints all
-  questions and a complete file.
-  --locale defaults to the environment (LC_ALL, LC_MESSAGES, LANG): zh* selects
-  Chinese labels, anything else English.
-  Project kinds: application|motion|custom. Foundation choice: create-new.
-  --answer values are JSON (for example projectKind=\"application\").
+Create a blank package immediately. PATH ending in .smallpen creates that
+package; a directory creates a new workspace containing a package. The default
+is one self-contained package with one canvas and Theme/Default, no Tokens,
+components, business flows or platform copies. Existing targets are rejected.
+--layout foundation-product creates two blank packages with a local dependency.
+No business questionnaire, saved selection or initialization state is required.
 
 Examples:
-  smallpen init ./quincy --json
-  smallpen init ./quincy --state ./quincy-init.json --answer projectKind=\"application\" --json
-  smallpen init ./quincy --answers ./answers.json --confirm --json
+  smallpen project init ./acme.smallpen --name Acme --json
+  smallpen project init ./acme --layout foundation-product --json
 
-Output:
-  status needs_input returns a stable question id, localized label, schema,
-  optional recommendation, and continuation args with an answer placeholder. Replace
-  <JSON> with your schema-valid answer; if no recommendation is present, supply the
-  project's own purpose, audience, or deliverable. status proposal returns the
-  persisted Proposal and confirmation args. Only --confirm creates the packages;
-  status initialized returns both package paths plus every id the first writes
-  need: packages.{foundation,product}.{packageId,path,revision},
-  start.{screenId,presentationId,rootNode,scenarioIds,contextAxes}, and seeded
-  (the starter Tokens and Component Sets with ids and paths).
+Next: smallpen schema command project init --json`,
 
-Seeded content (from the answers):
-  Foundation: each initialTokens name becomes a Token tok_<path with _>, for
-  example color.brand -> tok_color_brand (#6750a4), spacing.md -> tok_spacing_md
-  (8), radius.md -> tok_radius_md (8). Each initialComponents name becomes a
-  Component Set cmp_<name> with one plain variant var_<name>_default, no axes
-  (Button -> cmp_button). platforms become Context Axis axis_platform, next to
-  your contextAxes. Product: Screen scr_<firstScreen> with Presentation
-  pres_<firstScreen>_<platform>, root FRAME node_<firstScreen>_root, and one
-  Scenario. put-token or put-component-set with a seeded id replaces it whole.
-
-Errors and next commands:
-  Malformed --answer JSON identifies the question; schema-invalid values also return
-  its schema. Correct the answer and retry with the same --state. After confirming:
-  smallpen validate <product.smallpen> --json`,
   validate: `Usage:
-  smallpen validate <product.smallpen> [--json]
+  smallpen validate PACKAGE [--page P [--platform X] [--element E]]
+                    [--component C [--variant V] [--element E]] [--design-system]
+                    [--theme G/O]... [--limit N] [--offset N] [--json]
 
 Purpose:
-  Validate Canonical JSON, IDs, references, Product/Foundation dependency, all Context
-  combinations used by projections, and strict Scenario/component selections.
+  Validate the stored data, references and the Product/Foundation dependency,
+  and check text fit, bounds, overlaps and contrast for the target. A page
+  checks every version unless --platform names one; a component every variant
+  unless --variant names one. Nothing named checks the main page and lists
+  names stored twice.
 
 Output:
-  status valid with Product and Foundation revisions; dependency conflicts return
-  repair_required with exact choices.
+  status/dataStatus valid means the data and references are valid. Visual
+  issues are separate: read visualStatus, issueCount, issues and
+  coverage.skipped. Valid data is not visual approval. Issue pagination does
+  not shrink coverage. Dependency conflicts return repair_required with exact
+  choices. view --as issues gives the same issues by element name.
 
 Next:
-  smallpen inspect <package> --json
-  smallpen repair <product> --json`,
+  smallpen view <package> --as issues --json
+  smallpen project repair <product> --json`,
   inspect: `Usage:
   smallpen inspect <package.smallpen> [--json]
 
 Purpose:
-  Return package identity/revision, format capabilities, Contexts, Screens,
-  Presentations, Tokens, Component Sets, Scenarios, requirements, Flows, and
-  machine-readable Design System preflight operations.
+  Return Package identity, revision, and domain counts. --full includes all
+  domain summaries and format capabilities.
 
 Next:
-  smallpen list <package> --kind screens --json
-  smallpen read-view <package> --json`,
+  smallpen view <package> --json`,
   list: `Usage:
   smallpen list <package.smallpen> [--kind KIND] [--offset N] [--limit N] [--json]
 
 Values:
   KIND: all|screens|presentations|contexts|tokens|components|scenarios|requirements|flows
-  Defaults: kind=all, offset=0, limit=100. Lists include total/range pagination.
+  Defaults: kind=all, offset=0, limit=20. Return identities and counts, without
+  node trees or variants. page includes total/hasMore; --full includes definitions.
+  Default item fields follow the public allowlist in schema command list.
+  Descriptions and editor root IDs belong to target reads, not this directory.
+  Omit visibility=public and deprecated=false. Only report private visibility,
+  actual deprecation and a configured replacement when they affect reuse.
+  JSON is compact in all modes; --full adds data, not pretty-printing.
 
 Next:
-  Use returned stable IDs with read-view, effective-token, or compare.`,
-  read: `Usage:
-  smallpen read <package.smallpen> [--json]
-
-Purpose:
-  Return the complete validated Canonical Snapshot used by adapters. Binary blobs are
-  not embedded in JSON. Prefer inspect/list/read-view for bounded Agent reads.
-
-Next:
-  smallpen inspect <package> --json`,
-  "read-view": `Usage:
-  smallpen read-view <product.smallpen> [selectors] [--offset N] [--limit N]
-                     [--locale LOCALE] [--json]
-
-${VIEW_SELECTORS}
-
-Defaults:
-  Base Presentation + default Context values + canonical initial state + structure.
-  All formats resolve the same selection. --locale defaults to the environment
-  (zh* selects Chinese labels, anything else English).
-
-Choose a format:
-  wireframe  A scaled 2D ASCII canvas for fast spatial reasoning, followed by a
-             compact marker key with hierarchy, layer type, name, and stable ID.
-  semantic   Exact machine-readable hierarchy, bounds, text, alignment, resolved
-             typography, component references, variants, and Token bindings.
-  screenshot Rendered PNG metadata only; use render/evidence for inline pixels,
-             or add --output to explicitly write PNG files.
-             The PNG image itself is raster pixels only: it has no layer IDs,
-             hierarchy, bounds, component references, or Token bindings.
-
-Agent guidance:
-  Use wireframe or semantic to understand and edit the design. Use PNG to inspect
-  high-fidelity color, typography, spacing, effects, and rendering. Use inspect-view
-  --include-image when both structural reasoning and visual QA are required.
-
-Next:
-  Execute any Discovery Guide command without inventing arguments.`,
-  discover: `Usage:
-  smallpen discover <product.smallpen> [selectors] [--offset N] [--limit N]
-                    [--locale LOCALE] [--json]
-
-${VIEW_SELECTORS}
-
-Output:
-  Exact selector parameters, defaults, finite valid values, localized summaries,
-  machine operation/args, copyable commands, and pagination metadata.`,
+  Look at one by name: smallpen view <package> --page NAME | --component NAME.`,
   catalog: `Usage:
-  smallpen catalog <product.smallpen> [--context AXIS=VALUE]... [--json]
+  smallpen catalog <product.smallpen> [--context AXIS=VALUE]... [--theme GROUP/NAME]...
+                   [--offset N] [--limit N] [--full] [--json]
 
 Purpose:
-  Derive legal Component variants, inherited assets, Effective Tokens, Contexts,
-  Scenarios, Screens, and requirement coverage from the same validated workspace.`,
+  Return Component identities (limit=20) and domain counts. Use component for one
+  candidate's legal selections, tokens/search-tokens for values, or --full for
+  the complete Catalog. Token definitions, effective values and inventory are
+  not repeated in the default response. Default items use the same public
+  discovery fields as list; descriptions require a target read.`,
   "search-components": `Usage:
   smallpen search-components <product.smallpen> --query TEXT [--limit N] [--json]
 
 Purpose:
   Find reusable Product, public Foundation, and linked Library components before
   drawing a custom replacement. Matches stable ID, name, category, and description and returns the
-  owning Package, source layer, legal variant selections, and an executable
+  owning Package, source layer, variant count, and an executable
   owner-scoped component command (argv plus a POSIX-shell command).
+  Default candidates use the public discovery fields; read component for
+  descriptions and legal choices. Private reuse restrictions remain explicit.
 
 State:
   Every query is explicit and self-contained. It never creates a current component
   or affects a later command.`,
-  component: `Usage:
-  smallpen component <package.smallpen> --component-id CMP [--json]
-
-Purpose:
-  Return one exact Component Set, its legal variant selections, replacement metadata,
-  and component-targeted Scenarios. This is read-only and uses stable Canonical IDs.
-  The package path must identify the owning Package. For inherited components,
-  execute the owner-scoped command returned by search-components.
-  An HTTP(S) Library URL is also accepted and uses the normal Library cache.
-
-Shapes:
-  smallpen schema component-set   axes (role configuration|state) and variants
-  smallpen schema instance        place a variant on a Screen and override it
-  Edit a variant: {"type":"update-component-node","componentSetId":"cmp_button",
-    "variantId":"var_button_primary","nodeId":"node_button_label",
-    "changes":{"textStyle":{"textAlign":"center"}}}
-
-Next:
-  Use a returned selection with read-view or inspect-view to review the design.`,
-  compare: `Usage:
-  smallpen compare <product.smallpen> --selector JSON --selector JSON
-                   [--selector JSON] [--selector JSON] [--json]
-
-Values:
-  Exactly two to four selector objects. Example:
-  smallpen compare product.smallpen --selector '{"presentationId":"pres_desktop"}' \\
-    --selector '{"presentationId":"pres_mobile"}' --json`,
   tokens: `Usage:
-  smallpen tokens <product.smallpen> [--context AXIS=VALUE]... [--locale LOCALE] [--json]
+  smallpen tokens <package.smallpen> [--theme GROUP/NAME]... [--context AXIS=VALUE]...
+                  [--offset N] [--limit N] [--locale LOCALE] [--full] [--json]
+  smallpen tokens <package.smallpen> --definitions [--group GROUP]
+                  [--offset N] [--limit N] [--full] [--json]
 
 Purpose:
-  List Effective Tokens using Product first, Context specificity within a layer,
-  then Foundation fallback. labels follow --locale or the environment.`,
+  List Effective Tokens: the active token sets of the selected themes (a later
+  set overrides an earlier one by name; a Product's own sets sit on top of its
+  Foundation's), then Context specificity for legacy contextValues. themes[]
+  lists every theme with active, owner (package|foundation) and its sets.
+  --theme selects themes for this read only (one per group); unknown groups or
+  names exit unknown_token_theme with validThemes. labels follow --locale or the
+  environment. Default: 20 items with target, Token id/path/type and resolved
+  value, plus page.total/hasMore. --full includes every definition and source chain.
+  --definitions reads exact stored Tokens in every option Set, with owning
+  packageId, setId, group and option. Optional --group filters the App Set group.
+  Missing cells have no item; they do not inherit Default. This mode cannot take
+  --theme or --context. Use the ordinary tokens read to resolve a combination.`,
   "search-tokens": `Usage:
   smallpen search-tokens <product.smallpen> (--color COLOR | --value JSON | --query TEXT | --type TYPE)
-                         [--context AXIS=VALUE]... [--limit N] [--json]
+                         [--context AXIS=VALUE]... [--theme GROUP/NAME]... [--all-themes]
+                         [--limit N] [--json]
 
 Purpose:
   Find reusable Product and Foundation Design Tokens before writing a hard-coded
@@ -286,6 +269,11 @@ Purpose:
   values. Without --context, every finite Web/Desktop/theme/etc. Context is searched
   and each resolved value reports its matching Contexts. Repeating --context restricts
   the search explicitly. Name queries match Token path, description, and type.
+  Token themes: by default project defaults are searched; --theme overrides only
+  named groups, as every resolved read does. --all-themes searches every
+  selection of one theme per group (at most 64) and gives each item themes[],
+  the selections where it has that value. themeScope {mode active|explicit|all,
+  selections} says which themes were searched.
 
 Examples:
   smallpen search-tokens product.smallpen --color '#6750a4' --json
@@ -296,146 +284,38 @@ State:
   Every search is self-contained. It never reads or writes a current selection,
   previous result, session, or Web UI state.`,
   "effective-token": `Usage:
-  smallpen effective-token <product.smallpen> --token-id TOK [--package-id PKG]
-                           [--context AXIS=VALUE]... [--json]
+  smallpen token show <package.smallpen> --path TOKEN.NAME
+                      [--theme GROUP/NAME]... [--json]
 
 Defaults:
-  package-id defaults to the Product Package ID; Context axes use defaults.`,
+  Themes use project defaults, independently of the App's active selection.
+  --theme overrides only named groups.`,
   "explain-token": `Usage:
-  smallpen explain-token <product.smallpen> --token-id TOK [--package-id PKG]
-                         [--context AXIS=VALUE]... [--json]
+  smallpen token explain <package.smallpen> --path TOKEN.NAME
+                         [--theme GROUP/NAME]... [--json]
 
 Output:
   Chosen source/value plus all candidates, specificity, rejection reasons, and layer.`,
-  render: `Usage:
-  smallpen render <product.smallpen> [selectors] [--scale N] [--output FILE] [--json]
-
-${DESIGN_SELECTORS}
-
-Defaults and limits:
-  No --output: return a PNG as bare base64 in one JSON result; no image file or
-  temporary image is created. This also applies without --json.
-  Explicit --output FILE: write that PNG and return its absolute output path
-  instead of base64. Existing FILE is replaced only after a successful write.
-  scale=1, scale range (0,8], maximum dimension 8192,
-  maximum 32M pixels. Output is deterministic PNG with revision/render hash. The
-  PNG image itself is raster pixels only and contains no layer IDs, hierarchy,
-  bounds, component references, or Token bindings. Use it for high-fidelity visual
-  QA of color, typography, spacing, effects, alignment, and rendering.
-  Decode the current response in an image-capable client; base64 text alone is
-  not visual QA. Verify decoded bytes against renderHash (SHA-256), and use the
-  accompanying revision and selection. On failure, never open a previous file.
-
-Fonts:
-  The renderer bundles Source Sans Pro and draws fonts imported with import-font.
-  Any other family renders in Source Sans Pro: diagnostics then carries one
-  font_render_fallback per missing family with its nodeIds, availableFonts, and
-  the import-font command in nextOperations.
-
-Wireframe:
-  Use smallpen read-view <product.smallpen> --format wireframe --json.
-  It returns a scaled 2D ASCII canvas and compact marker key. Use semanticTree
-  from inspect-view when exact bounds, text, component, and Token data is needed.`,
-  "inspect-view": `Usage:
-  smallpen inspect-view <product.smallpen> [selectors] [--include-image]
-                         [--output FILE] [--base64] [--json]
-
-${DESIGN_SELECTORS}
-  --scale N                   Image scale; default: 1 (requires --include-image to render)
-  --locale LOCALE             Localized view labels; default: from the environment
-
-Purpose:
-  Return one AI-readable view bundle.
-
-Three complementary view parts:
-  wireframe     Scaled 2D ASCII canvas plus a compact layer marker key.
-  semanticTree  Exact hierarchy, bounds, text, alignment, typography, component,
-                variant, and Token data.
-  image         Optional high-fidelity PNG and metadata; add --include-image to render it.
-
-Supporting context:
-  Effective Tokens, component catalog, selected Context, and revision metadata.
-  Without --output, image.base64 contains bare PNG base64 in this one JSON result
-  (also without --json). No image file or temporary image is created.
-  Explicit --output FILE writes the image and returns image.output instead of
-  base64; add --base64 only when both file and inline bytes are wanted.
-  --output and --base64 require --include-image.
-
-Agent guidance:
-  Use this when the Agent needs both structure and visual QA. Start with wireframe
-  for spatial relationships, query semanticTree for exact data, and inspect image
-  only when pixel-level visual QA is needed. The PNG itself contains no layer or
-  Token metadata. Decode this response in an image-capable client; base64 text
-  alone is not visual QA. image.revision/selection identify the rendered snapshot;
-  image.renderHash is the SHA-256 of the decoded PNG. Never reuse an old image
-  after an error, or infer freshness from a filename.`,
-  "render-matrix": `Usage:
-  smallpen render-matrix <product.smallpen> --contexts CONTEXTS.json
-                         [--output DIRECTORY] [--scale N] [--json]
-
-Purpose:
-  Render a deterministic PNG for every explicit design selector in CONTEXTS.json.
-  Each selector may choose context axes, screen, presentation, and scenario.
-  Without --output, one JSON result contains ordered images with bare base64,
-  dimensions, exact selectors, per-image revisions, and PNG SHA-256 renderHash.
-  No image files or temporary images are created, including if a later selector
-  fails. This also applies without --json.
-  Explicit --output DIRECTORY writes PNG files and returns each image.output
-  instead of base64. Different render hashes retain separate files; there is no
-  automatic cleanup or all-or-nothing multi-file export. Only consume images
-  from a successful current response; never fall back to earlier matrix files.`,
-  evidence: `Usage:
-  smallpen evidence <product.smallpen> [selectors] [--scale N] [--output PREFIX] [--json]
-
-${DESIGN_SELECTORS}
-
-Output:
-  Without --output, return one JSON evidence bundle with image.base64 (bare PNG
-  base64); no PNG, evidence JSON file, or temporary image is created. This also
-  applies without --json. image includes the current revision/selection and
-  renderHash (SHA-256 of decoded PNG bytes), not a cache locator.
-  Explicit --output PREFIX writes PREFIX.png and PREFIX.json instead of base64.
-  Evidence contains revision/package hash, resolved selectors,
-  render hash, node-to-image regions, Semantic Tree, viewport, and diagnostics.
-  PREFIX.png is an unannotated high-fidelity raster image. Semantic details live in
-  PREFIX.json and are not embedded visibly in the PNG.
-  Decode the current inline response in an image-capable client for visual QA.
-  Failed exports do not authorize reading an old file; multi-file export is not
-  an all-or-nothing transaction and existing files are not automatically cleaned.
-
-Wireframe:
-  Use smallpen read-view <product.smallpen> --format wireframe --json.
-  It returns a scaled 2D ASCII canvas with one [NN] marker per layer.`,
   "import-media": `Usage:
-  smallpen import-media <package.smallpen> --file MEDIA_FILE [--media-id media_...]
+  smallpen media import <package.smallpen> --file MEDIA_FILE
                         [--media-path PATH] [--name NAME] [--json]
 
 Import is the public binary Media entry for an existing Product: PNG, JPEG, GIF,
 WebP, and SVG are detected from bytes, dimensions are validated, and the blob is
 content-addressed (identical bytes in one package share one blob). JSON apply
 still forbids blob writes; media import is a file entry, not a batch operation.
-remove-media deletes the descriptor (metadata lifecycle is reversible); the
-content-addressed blob itself is immutable and shared.
+media delete --media NAME deletes the descriptor; the content-addressed blob
+itself is immutable and shared.
 
 Errors and recovery:
   Corrupt or unsupported bytes exit 1 invalid_media_file and write nothing.
-  Reusing --media-id exits duplicate_media_id with the existing descriptor.
 
 Output:
-  descriptor and revision, plus batchId and the exact inverseBatch for undo.
-
-`,
-  "remove-media": `Usage:
-  smallpen remove-media <package.smallpen> --media-id MEDIA [--json]
-
-Removes one Media descriptor from the Asset Library atomically. The result
-carries batchId and inverseBatch; smallpen apply with that inverseBatch restores
-the descriptor (the blob is retained). Unknown ids exit missing_media.
+  descriptor and revision, plus batchId and the revision-guarded reverse edit (inverseBatch).
 
 `,
   "import-font": `Usage:
-  smallpen import-font <package.smallpen> --file FONT_FILE --family NAME
-                      [--font-id font_...] [--variant-id fvar_...]
+  smallpen font import <package.smallpen> --file FONT_FILE --family NAME
                       [--weight 400] [--style normal] [--name NAME] [--json]
 
 Public Font entry for an existing Product. TTF and OTF are validated by SFNT
@@ -443,7 +323,8 @@ signature and converted to WOFF (the renderer loads ttf/otf/woff). WOFF imports
 as-is after table validation. A valid WOFF2 reaches an explicit
 unsupported_font_conversion boundary (no WOFF2 decoder is bundled); corrupt
 fonts fail invalid_font_blob. Either way nothing is written. Success returns
-fontId, variantId, files, revision, batchId, and the exact inverseBatch.
+the family, files, revision, batchId, and the exact inverseBatch. Use the
+family by name: "fontFamily": "Inter", or a font-family Token.
 
 `,
   "library-refresh": `Usage:
@@ -488,7 +369,9 @@ Purpose:
   Import a DTCG token file (Penpot or Tokens Studio export, single-set, multi-set
   with $themes/$metadata, or legacy value/type) into the package's Penpot-shaped
   Token Library. Without --apply the command only reviews: it prints the diff of
-  tokens, sets, and themes that would be added, changed, or removed, with values.
+  tokens, sets, and themes that would be added, changed, or removed (counts and
+  up to 20 identities per action). --full includes the replacement library and
+  exact before/after values.
   --dry-run keeps the operation in no-write review mode even with --apply;
   that combination also validates the prepared Operation Batch without committing.
 
@@ -525,117 +408,13 @@ Selections:
 Output:
   A typed Operation Batch whose baseRevision is the current Canonical revision.
   This command does not apply the batch. Review it, then use smallpen apply.`,
-  flow: `Usage:
-  smallpen flow <product.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
-                [--explain] [--diff] [--warning-detail compact|full]
-                [--confirm-unmatched] [--compact] [--inverse-out FILE] [--json]
-
-Purpose:
-  Compile and atomically apply a declarative flowchart intent. The intent contains
-  screenId, optional presentationId/parentId, and nodes. Each node becomes a
-  canonical add-presentation-node operation and receives an exact inverse batch.
-
-Intent example:
-  {"screenId":"scr_home","nodes":[{"id":"node_start","type":"ELLIPSE",
-    "name":"Start","x":80,"y":80,"width":120,"height":56,"children":[]}]}
-
-Node types:
-  FRAME|ELLIPSE|GROUP|PATH|RECTANGLE|TEXT. PATH nodes may carry pathData, points,
-  strokes, and tokenBindings; arrowheads use stroke cap fields.
-  Node fields: smallpen schema node. Every intent node is added as a sibling
-  under parentId (default: the Presentation root); nest with a later intent.
-  INSTANCE nodes may carry overrides, as in smallpen page --help.
-
-Output:
-  The normal atomic apply result. Follow with read-view or render to inspect it.
-
-${WRITE_REPLY}`,
-  page: `Usage:
-  smallpen page <product.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
-                [--explain] [--diff] [--warning-detail compact|full]
-                [--confirm-unmatched] [--compact] [--inverse-out FILE] [--json]
-
-Purpose:
-  Compile and atomically apply declarative page nodes. The intent uses the same
-  screenId, optional presentationId/parentId, and nodes schema as flow. Use page
-  for general UI nodes and flow for flowchart-oriented PATH/ELLIPSE nodes.
-  Warning output follows apply; see smallpen apply --help for the compact schema.
-  Pass the Product. Each node becomes one add-presentation-node, all siblings
-  under parentId (default: the Presentation root); x/y are relative to it.
-
-Instance overrides:
-  An INSTANCE intent node may carry overrides {"<sourceNodeId>:<field>": value}
-  (fields: fills, name, opacity, text, visible). Each becomes a
-  set-instance-override after the node in the same atomic batch, so a label
-  needs no second write; a wrong path or type rejects the whole intent.
-
-Intent example (a title and a Button Instance with its label):
-  {"screenId":"scr_home","nodes":[
-    {"id":"node_title","type":"TEXT","name":"Title","x":24,"y":48,"width":312,
-     "height":32,"children":[],"text":"Tasks","textStyle":{"fontSize":24}},
-    {"id":"node_add_button","type":"INSTANCE","name":"Add button","x":16,"y":576,
-     "width":328,"height":48,"children":[],"instance":{"component":
-     {"packageId":"pkg_acme_foundation","assetId":"cmp_button"},
-     "variant":{"axis_style":"primary"}},
-     "overrides":{"node_button_label:text":"Add task"}}]}
-
-Shapes:
-  smallpen schema node       fields, textStyle, tokenBindings
-  smallpen schema instance   INSTANCE nodes; search-components prints a ready intent
-
-${WRITE_REPLY}`,
-  token: `Usage:
-  smallpen token <package.smallpen> --intent INTENT.json [--batch-id ID] [--dry-run]
-                 [--explain] [--diff] [--warning-detail compact|full]
-                 [--confirm-unmatched] [--compact] [--inverse-out FILE] [--json]
-
-Which Package:
-  Pass the Foundation (<name>-foundation.smallpen) for put-token, set-token-value,
-  remove-token, and deprecate-token: shared Tokens live there. Pass the Product
-  (<name>.smallpen) for set-token-binding, clear-token-binding, and
-  set-active-token-themes, which change Product nodes and its Token Library.
-  smallpen schema operations lists the Package of every operation.
-
-Purpose:
-  Apply declarative Token operations through the canonical atomic batch contract.
-  Intent JSON contains an operations array using put-token, set-token-value,
-  set-active-token-themes, set-token-binding, clear-token-binding, remove-token,
-  or deprecate-token. Theme selection uses themePaths such as Product/Dark.
-  The current package revision is read immediately before applying the intent.
-  Write shared Tokens to the Foundation package; bind them from the Product.
-  put-token with an existing tokenId replaces that Token whole (no merge). init
-  seeds one Token per initialTokens answer (the recommended answers give
-  tok_color_brand, tok_spacing_md, tok_radius_md; the init reply lists them in
-  seeded.tokens); put-token with one of those ids redefines it.
-  Rerunning with the same --batch-id and intent after success returns
-  alreadyApplied:true; see smallpen apply --help for replay rules.
-
-Intent example (a color with a dark value, and a typography Token):
-  {"operations":[
-    {"type":"put-token","filePath":"tokens/foundation.json","path":"color.surface",
-     "tokenId":"tok_color_surface","definition":{"$type":"color","$value":"#ffffff",
-     "$extensions":{"smallpen":{"id":"tok_color_surface","contextValues":
-     [{"when":{"axis_theme":"dark"},"value":"#1c1b1f"}]}}}},
-    {"type":"put-token","filePath":"tokens/foundation.json","path":"type.heading",
-     "tokenId":"tok_type_heading","definition":{"$type":"typography","$value":
-     {"fontFamily":"Inter","fontSize":24,"fontWeight":700},
-     "$extensions":{"smallpen":{"id":"tok_type_heading"}}}}]}
-
-Shapes:
-  smallpen schema token         definition, contextValues, bindable fields
-  smallpen schema token-types   the value each type accepts
-  smallpen schema operation set-token-value
-
-${WRITE_REPLY}`,
   impact: `Usage:
-  smallpen impact <product.smallpen> (--token-id TOK | --path TOKEN.PATH) [--package-id PKG] [--json]
+  smallpen token impact <package.smallpen> --path TOKEN.NAME [--json]
 
 Purpose:
-  Find all Canonical nodes whose tokenBindings reference the selected Token. The
-  result includes screen, presentation, component, node, and field locations so
-  an Agent can preview the exact blast radius before changing a Token. Foundation
-  Tokens are resolved through the Product dependency; use --package-id to
-  disambiguate a Token ID or path that exists in both Packages.`,
+  Find every element whose bindings use the Token, by page, component and
+  element, so an Agent can see what a change touches before making it.
+  Foundation Tokens are resolved through the Product dependency.`,
   apply: `Usage:
   smallpen apply <package.smallpen> --batch BATCH.json [--dry-run] [--explain] [--diff]
                  [--warning-detail compact|full] [--confirm-unmatched]
@@ -645,7 +424,7 @@ Batch contract:
   {"baseRevision":"...","batchId":"unique-id","operations":[...]}
   baseRevision is package.revision from smallpen inspect PACKAGE --json.
   The whole candidate validates and commits atomically. Success returns revision,
-  affected stable IDs/files, an exact inverseBatch for Undo/Redo, and changed
+  affected stable IDs/files, a revision-guarded reverse edit, and changed
   (false, with noChange, when the batch leaves the Package as it was).
   Revisions are content hashes, not increasing counters: restoring the exact
   Canonical content restores its previous revision.
@@ -654,8 +433,10 @@ Operations:
   smallpen schema operations         every type, purpose, Package, required fields
   smallpen schema operation TYPE     fields, allowed values, example, inverse
   Unknown operation types and unknown fields are rejected, with a suggestion.
-  Tokens, Context Axes, and shared Component Sets go to the Foundation; Screens,
-  nodes, Instances, and Scenarios go to the Product.
+  In the default layout everything goes to the one Package. In the
+  foundation-product layout Tokens, themes, Context Axes, and shared Component
+  Sets go to the Foundation; Screens, nodes, Instances, and Scenarios go to the
+  Product.
   Example: {"baseRevision":"<revision>","batchId":"resize-home-1","operations":[
     {"type":"update-presentation-node","screenId":"scr_home",
      "presentationId":"pres_home_mobile","nodeId":"node_home_root",
@@ -705,7 +486,8 @@ Errors and recovery:
   write. If later writes moved the Package elsewhere the retry exits
   batch_superseded with committedRevision and currentRevision. The same batchId
   with a different baseRevision or operations exits batch_id_conflict.
-  flow, page, token, and import-tokens rebuild the batch from the current
+  The name-based writes (page, component, flow, token, theme, asset, canvas)
+  and import-tokens rebuild the batch from the current
   revision; rerunning one with the same --batch-id and input after success
   returns alreadyApplied:true under the same rules.
   stale_revision returns actual/base revisions. Inspect current content first:
@@ -726,11 +508,40 @@ The initial revision is emitted immediately. --max-events bounds the run for
 scripted use; Ctrl-C exits 0. Watch never writes.
 
 `,
+  "migrate-themes": `Usage:
+  smallpen migrate-themes <package.smallpen> --output NEW_PATH [--json]
+
+Purpose:
+  Upgrade by copy (the original stays untouched): write a new Package whose
+  theme-kind Context Axes and Token contextValues are Penpot token sets and
+  themes. For a Product with a Foundation, both are copied: --output names the new
+  workspace directory, which receives the Foundation and the Product under their
+  current directory names, still linked. Otherwise --output is the new
+  <name>.smallpen path.
+
+Conversion:
+  Each theme-kind axis becomes a theme group named after the axis. The set base
+  holds every Token's default value (Token ids, names and bindings stay as they
+  are); one set per non-default value holds that value's overrides as Tokens of
+  the same name (ids tok_<base id>__<value>); one theme per value activates
+  [base, its set]; the default value's theme is active. DTCG token files become
+  the token library. A Product stores the active Foundation theme on its
+  dependency. Scenario contexts on theme axes become Scenario themes. Legacy
+  {x, y} shadows become {offsetX, offsetY}.
+
+Warnings:
+  contextValues whose when names a non-theme axis, or more than one axis, cannot
+  be a theme set: they are kept as they were and listed in warnings with their
+  Tokens. Product Token overrides (overrideOf) stay DTCG Tokens.
+
+Next:
+  smallpen view NEW_PATH --theme Theme/Dark --json`,
   repair: `Usage:
   smallpen repair <product.smallpen> [--conflict N] [--action ACTION]
                   [action arguments] [--batch-id ID] [--json]
 
 Actions:
+  select-instance-variant  [--selection JSON]; default: the closest variant
   retarget-reference       --replacement-package-id PKG --replacement-asset-id ID
   remove-dependent-usage  no additional arguments
   choose-foundation        --foundation PATH
@@ -738,18 +549,68 @@ Actions:
 
 Without --action, returns all typed conflicts and choices. Each action is checked
 against the selected conflict and committed through one atomic Operation Batch.
-After each step the workspace is resolved again; remaining conflicts stay explicit.`,
+After each step the workspace is resolved again; remaining conflicts stay explicit.
+
+Instances whose variant is gone:
+  An Instance selects variant values. When its Foundation renames those values
+  while the Product is open in the same Desktop or Web session, the Product's
+  Instances follow the variant in a batch of their own (with its own undo).
+  When the variant is deleted, or the rename happened elsewhere, the Product
+  enters Repair: the conflict is missing_variant with degraded:true, the
+  Instance still renders with the closest variant (a stale_instance_variant
+  diagnostic says so), and the choices are select-instance-variant (the closest
+  variant; --selection picks one of validSelections), retarget-reference or
+  remove-dependent-usage (delete the Instance).`,
 };
 
-export function printHelp(command) {
+export function printHelp(command, { full = false } = {}) {
+  const say = (text) => printText(publicText(text));
+  if (Object.hasOwn(COMMAND_GROUPS, command) || !command) {
+    printBriefHelp(command, undefined, { full });
+    say(
+      "\nOptions: -h, --help; --version\nUse smallpen help OBJECT ACTION for options. Common rules: smallpen help rules\n",
+    );
+    return;
+  }
+  if (!full) {
+    if (!command) {
+      printBriefHelp();
+      say(
+        "\nOptions: -h, --help; --version\nUse smallpen COMMAND --help for options. Common rules: smallpen help rules\n",
+      );
+    } else
+      say(
+        `SmallPen ${command}\n\n${commandContract(command).purpose}\n\nUsage: smallpen ${command} ${commandContract(
+          command,
+        )
+          .arguments.map((a) => (a.required ? `<${a.name}>` : `[${a.name}]`))
+          .join(
+            " ",
+          )} [options]\n\n${commandHelp(command)}\n\nInput shapes: smallpen schema command ${command} --json\n`,
+      );
+    if (command && commandOverview(command).notes)
+      say(commandOverview(command).notes.join("\n") + "\n");
+    return;
+  }
   if (command && HELP[command]) {
-    process.stdout.write(`SmallPen ${command}\n\n${HELP[command]}
+    say(`SmallPen ${command}\n\n${HELP[command]}
+
+${commandHelp(command)}
 
 Common output and error contract:
+  Default JSON is compact and bounded to 8 KiB. Large complete results are saved
+  to resultFile.path with bytes/SHA-256; stdout retains status and write receipts.
+  Search/read the JSON with jq or your file tools, and text with rg/sed.
+  Each call uses random filenames of a fixed format in one system temporary
+  folder: smallpen-TIMESTAMP-UUID-KIND.ext. Every invocation cleans CLI files
+  whose mtime is older than 30 minutes; active calls are protected.
+  --output chooses a retained file. Lists default to 20 items; --full expands data
+  but still uses files for large results. --stdout opts into large stdout.
+  --base64 explicitly requests inline image bytes; PNG paths are the default.
   --json emits stable English keys; localized labels remain additional data and
   follow --locale where offered, else LC_ALL, LC_MESSAGES, or LANG (zh* selects
   Chinese, anything else English). Success
-  exits 0. Errors exit 1 as {error:{code,message,details}} and include exact
+  exits 0. Errors exit 1 as {error:{code,message,details,writeState}} and include exact
   nextOperations when recovery requires refresh, replay, Repair, or confirmation.
   Unknown options are not part of the command contract shown above. Only options
   shown with ..., repeated, or described as repeatable may appear more than once;
@@ -761,17 +622,23 @@ Help / next:
 `);
     return;
   }
-  process.stdout.write(`SmallPen Canonical Package CLI
+  say(`SmallPen Canonical Package CLI
 
 Model:
-  One .smallpen directory is one Canonical Package. init creates a Foundation
-  (<name>-foundation.smallpen: shared Tokens, Context Axes, shared Component Sets)
-  and a Product (<name>.smallpen: Screens, Presentations, Scenarios). Write Tokens
-  and components to the Foundation; write Screens and nodes to the Product, and
-  pass the Product to read-view, render, evidence, tokens, and search-*.
-  A Presentation renders at the size of its root node: resize it with
-  update-presentation-node; update-presentation {viewport} keeps the declared
-  size in step.
+  One .smallpen directory is one Canonical Package. init creates one
+  self-contained Package (<name>.smallpen) by default: token sets and themes,
+  Context Axes, Component Sets, Screens, Presentations, Scenarios. Write
+  everything to it and pass it to view, validate, export, token list and
+  search. With init --layout foundation-product it creates a Foundation
+  (<name>-foundation.smallpen: token sets and themes, Context Axes, shared
+  Component Sets) and a Product (<name>.smallpen: Screens, Presentations,
+  Scenarios) instead: write Tokens and components to the Foundation, Screens and
+  nodes to the Product, and pass the Product to the reads.
+  Themes are Penpot token sets + themes. themes reads groups/options/defaults;
+  theme add|rename|default|delete write them by Group/Option name. Resolved reads take
+  --theme GROUP/NAME for this call only: project defaults, then an explicit
+  Scenario, then explicit overrides of named groups. App active selection is
+  independent. set-active-token-themes explicitly stores the App selection.
   A Product references exactly one same-workspace Foundation by permanent Package
   ID and relative path. Every CLI call
   receives its Package locator and complete selectors explicitly; there is no current
@@ -780,45 +647,72 @@ Model:
   and one typed Operation Batch contract. No PostgreSQL, collaboration server, MCP,
   or built-in AI Chat is required.
 
-Choose an Agent view:
-  wireframe   Fast 2D spatial reasoning from a scaled ASCII canvas plus a compact
-              [NN] key containing hierarchy, layer type, name, and stable ID.
-  semantic    Exact hierarchy, bounds, text, alignment, typography, component,
-              variant, and Token properties.
-  PNG         High-fidelity visual QA. The image is raster pixels only; it contains
-              no layer IDs, hierarchy, component references, or Token bindings.
-  both        Use inspect-view --include-image, then reason from structure and verify
-              appearance from the PNG.
+CLI entry point:
+  smallpen help
+  smallpen help OBJECT ACTION
+  smallpen schema command OBJECT ACTION --json
+  smallpen help rules
+  CLI usage is complete without a Skill. Scene Skills supply task-specific rules.
+
+Separate actions:
+  settings    theme/token/component/page/canvas/asset/flow actions save changes by
+              name; advanced apply runs an exact batch, such as an undo batch.
+  definitions theme list is a cheap settings query; search finds reusable Tokens
+              and components.
+  view        Compact layout outline, or a page/component/region text wireframe.
+  validate    Problems and coverage; data validity is separate from visual QA.
+  export      Actual text, wireframe or PNG files with size/hash/selection.
+  Read compact text/issues first, then text wireframes. Inspect PNG only when
+  useful and the caller supports image input; reuse an unchanged renderHash.
+  export defaults to a text wireframe; PNG requires --format png. The CLI does
+  not detect model image capability. Text-only models may export PNG deliverables
+  but must review text/wireframes and must not claim visual inspection of a PNG.
 
 Usage:
   smallpen <command> [arguments] [--json]
   smallpen <command> --help
-  smallpen --version
+  smallpen version --json
 
 Commands:
-${COMMANDS.map(([name, summary]) => `  ${name.padEnd(18)} ${summary}`).join("\n")}
+${PUBLIC_PATHS.map(([name, summary]) => `  ${name.padEnd(24)} ${summary}`).join("\n")}
 
-Common workflow:
-  smallpen init ./workspace --json
-  smallpen validate ./workspace/product.smallpen --json
-  smallpen search-tokens ./workspace/product.smallpen --color '#6750a4' --json
-  smallpen search-components ./workspace/product.smallpen --query button --json
-  smallpen catalog ./workspace/product.smallpen --json
-  smallpen read-view ./workspace/product.smallpen --json
-  smallpen discover ./workspace/product.smallpen --json
-  smallpen apply ./workspace/product.smallpen --batch batch.json --json
-  smallpen evidence ./workspace/product.smallpen --output review --json
-  smallpen import-draft ./workspace/import-1.smallpen --kind figma --input clipboard.html --json
-  smallpen repair ./workspace/product.smallpen --json
+Query examples:
+  smallpen init ./acme --json
+  smallpen themes ./acme/acme.smallpen --json
+  smallpen help rules --json
+  smallpen validate ./acme/acme.smallpen --json
+  smallpen search-tokens ./acme/acme.smallpen --color '#6750a4' --json
+  smallpen search-components ./acme/acme.smallpen --query button --json
+  smallpen catalog ./acme/acme.smallpen --json
+  smallpen view ./acme/acme.smallpen --json
+  smallpen apply ./acme/acme.smallpen --batch batch.json --json
+  smallpen export ./acme/acme.smallpen --format text --json
+  smallpen export ./acme/acme.smallpen --format png --json
+  smallpen export ./acme/acme.smallpen --design-system --json
+  smallpen import-draft ./acme/import-1.smallpen --kind figma --input clipboard.html --json
+  smallpen repair ./acme/acme.smallpen --json
 
-Worked example (tokens, component set, screen, instance override, render):
-${workedExampleText()}
+Output:
+  Defaults are summaries, paginated identities, and artifact paths (8 KiB budget).
+  JSON is compact. Directory fields are a public CLI contract, not a dump of
+  internal objects. Reuse restrictions appear only when they affect a decision.
+  Read one target before editing. --full requests complete data; --base64 requests
+  image bytes. Operation schemas are available individually: smallpen schema operation TYPE.
+  smallpen schema returns cliVersion/contractRevision for stable contract caching.
+  Package reads return revision; workspace views also return dependency revisions.
+  Cache a view by those revisions plus its selectors, theme, context and locale.
+
+Worked example:
+  smallpen schema batch --full
 
 Every write input has a schema and a tested example: smallpen schema
-(operations, node, token, component-set, instance, presentation, batch, init).
+(operations, node, token, theme, component-set, instance, presentation, batch, init).
 Run smallpen <command> --help for syntax, defaults, values, examples, outputs,
 errors, and relevant next commands.
 `);
 }
 
 export const COMMAND_NAMES = Object.freeze(COMMANDS.map(([name]) => name));
+export function commandGuidance(command) {
+  return HELP[command];
+}

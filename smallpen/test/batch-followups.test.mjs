@@ -37,18 +37,28 @@ async function apply(root, packagePath, operations, batchId) {
     join(root, `${batchId}.json`),
     JSON.stringify({ baseRevision: before.revision, batchId, operations }),
   );
-  const result = await runCli(["apply", packagePath, "--batch", `${batchId}.json`, "--json"], root);
+  const result = await runCli(["advanced", "apply", packagePath, "--batch", `${batchId}.json`, "--json"], root);
   assert.equal(result.code, 0, result.stdout);
 }
 
-// smallpen init, the Button Component Set in the Foundation, and one Button
-// Instance on the Product's Home screen.
+// smallpen init --layout foundation-product, the Button Component Set in
+// the Foundation, and one Button Instance on the Product's Home screen.
 async function acmeWithInstance(context) {
   const root = await mkdtemp(join(tmpdir(), "smallpen-batch-followups-"));
   context.after(() => rm(root, { force: true, recursive: true }));
   await writeFile(join(root, "answers.json"), JSON.stringify(INIT_ANSWERS_EXAMPLE));
   const init = await runCli(
-    ["init", "acme", "--answers", "answers.json", "--confirm", "--json"],
+    [
+      "project",
+      "init",
+      "acme",
+      "--answers",
+      "answers.json",
+      "--layout",
+      "foundation-product",
+      "--confirm",
+      "--json",
+    ],
     root,
   );
   assert.equal(init.code, 0, init.stdout);
@@ -56,7 +66,13 @@ async function acmeWithInstance(context) {
   const productPath = join(root, "acme", "acme.smallpen");
   await apply(root, foundationPath, [OPERATION_SCHEMAS["put-component-set"].example], "button");
   await apply(root, productPath, [{
-    node: INSTANCE_NODE_EXAMPLE,
+    node: {
+      ...INSTANCE_NODE_EXAMPLE,
+      instance: {
+        ...INSTANCE_NODE_EXAMPLE.instance,
+        component: { assetId: "cmp_button", packageId: "pkg_acme_foundation" },
+      },
+    },
     parentId: "node_home_root",
     presentationId: "pres_home_mobile",
     screenId: "scr_home",
@@ -106,17 +122,23 @@ test("font fallback diagnostics name both fonts as structured details", async ()
 });
 
 test("many writes to one token file keep one restore in the inverse batch", async (context) => {
-  const { foundation } = await acmeWithInstance(context);
+  const { foundation: initialized } = await acmeWithInstance(context);
   const putToken = (name) => ({
     definition: {
       $extensions: { smallpen: { id: `tok_color_${name}` } },
       $type: "color",
       $value: "#123456",
     },
-    filePath: "tokens/foundation.json",
+    filePath: "tokens/extra.json",
     path: `color.${name}`,
     tokenId: `tok_color_${name}`,
     type: "put-token",
+  });
+  // The init token file is a token library (sets); a DTCG file takes put-token.
+  const { snapshot: foundation } = await prepareOperationBatch(initialized, {
+    baseRevision: initialized.revision,
+    batchId: "first-token",
+    operations: [putToken("zero")],
   });
   const prepared = await prepareOperationBatch(foundation, {
     baseRevision: foundation.revision,
@@ -125,7 +147,7 @@ test("many writes to one token file keep one restore in the inverse batch", asyn
   });
   assert.deepEqual(
     prepared.result.inverseBatch.operations.map(({ entry, type }) => [type, entry]),
-    [["restore-canonical-entry", "tokens/foundation.json"]],
+    [["restore-canonical-entry", "tokens/extra.json"]],
   );
   const restored = await prepareOperationBatch(
     prepared.snapshot,

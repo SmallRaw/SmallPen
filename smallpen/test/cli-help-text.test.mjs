@@ -14,6 +14,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
 
 function runCli(args, cwd) {
+  // Schema and full-value checks opt into stdout; fixed-file transport is tested separately.
+  if (
+    (args[0] === "schema" || args.includes("--full")) &&
+    !args.includes("--stdout")
+  )
+    args = [...args, "--stdout"];
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
       cwd,
@@ -37,65 +43,137 @@ function helpJson(help, heading) {
 }
 
 test("write command help points to smallpen schema with a real example", async () => {
-  for (const command of ["apply", "token", "page", "flow", "component", "init"]) {
-    const help = (await runCli([command, "--help"])).stdout;
-    assert.match(help, /smallpen schema/, command);
+  for (const command of [
+    ["advanced"],
+    ["advanced", "apply"],
+    ["token"],
+    ["token", "set"],
+    ["page"],
+    ["page", "draw"],
+    ["flow"],
+    ["component"],
+    ["component", "define"],
+    ["project", "init"],
+  ]) {
+    const help = (await runCli([...command, "--help"])).stdout;
+    assert.match(help, /smallpen schema/, command.join(" "));
   }
-  const top = (await runCli(["--help"])).stdout;
+  // Engine names no longer run; they name their grouped path.
+  for (const [command, suggestion] of [
+    ["apply", "advanced apply"],
+    ["init", "project init"],
+  ]) {
+    const result = await runCli([command, "--help"]);
+    assert.equal(result.code, 1, command);
+    const { error } = JSON.parse(result.stdout);
+    assert.equal(error.code, "unknown_command", command);
+    assert.equal(error.details.suggestion, suggestion, command);
+  }
+  const top = (await runCli(["--help", "--full"])).stdout;
   assert.match(top, /schema\s+Print the JSON shape/);
-  assert.match(top, /Write Tokens\s+and components to the Foundation/);
-  assert.match(top, /renders at the size of its root node/);
-  assert.match(top, /Worked example/);
-  const schemaHelp = (await runCli(["schema", "--help"])).stdout;
-  assert.match(schemaHelp, /component-set\s+Component Set, Axis roles \(configuration, state\)/);
+  assert.match(top, /project\s+Create, inspect/);
+  assert.match(top, /help OBJECT ACTION/);
+  assert.doesNotMatch(top, /Worked example/);
+  const schemaHelp = (await runCli(["schema", "--help", "--full"])).stdout;
+  assert.match(
+    schemaHelp,
+    /component-set\s+Component Set, Axis roles \(configuration, state\)/,
+  );
 });
 
-test("the JSON examples in token, page, apply, and component help apply", async (context) => {
+test("help and schema write examples execute against a fresh package", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-cli-help-"));
   context.after(() => rm(root, { force: true, recursive: true }));
-  await writeFile(join(root, "answers.json"), JSON.stringify(INIT_ANSWERS_EXAMPLE));
+  await writeFile(
+    join(root, "answers.json"),
+    JSON.stringify(INIT_ANSWERS_EXAMPLE),
+  );
   assert.equal(
-    (await runCli(["init", "acme", "--answers", "answers.json", "--confirm", "--json"], root)).code,
+    (
+      await runCli(
+        ["project", "init", "acme", "--answers", "answers.json", "--confirm", "--json"],
+        root,
+      )
+    ).code,
     0,
   );
-  const foundation = "acme/acme-foundation.smallpen";
-  const product = "acme/acme.smallpen";
+  // The default layout is one self-contained Package for both roles.
+  const pkg = "acme/acme.smallpen";
   const revision = async (path) =>
-    JSON.parse((await runCli(["inspect", path, "--json"], root)).stdout).package.revision;
+    JSON.parse((await runCli(["project", "show", path, "--json"], root)).stdout).package
+      .revision;
+  const example = async (topic) =>
+    JSON.parse((await runCli(["schema", topic, "--json"], root)).stdout)
+      .example;
 
-  const tokenIntent = helpJson((await runCli(["token", "--help"])).stdout, "Intent example");
-  await writeFile(join(root, "tokens.json"), JSON.stringify(tokenIntent));
-  const tokens = await runCli(["token", foundation, "--intent", "tokens.json", "--json"], root);
-  assert.equal(tokens.code, 0, tokens.stdout);
+  // The operation example applies as an exact batch.
+  await writeFile(
+    join(root, "button.json"),
+    JSON.stringify({
+      baseRevision: await revision(pkg),
+      batchId: "help-button",
+      operations: [OPERATION_SCHEMAS["put-component-set"].example],
+    }),
+  );
+  const button = await runCli(
+    ["advanced", "apply", pkg, "--batch", "button.json", "--json"],
+    root,
+  );
+  assert.equal(button.code, 0, button.stdout);
 
-  await writeFile(join(root, "button.json"), JSON.stringify({
-    baseRevision: await revision(foundation),
-    batchId: "help-button",
-    operations: [OPERATION_SCHEMAS["put-component-set"].example],
-  }));
-  assert.equal((await runCli(["apply", foundation, "--batch", "button.json", "--json"], root)).code, 0);
+  // The component and page examples reference Tokens the blank package
+  // does not have yet; create them by name first.
+  await writeFile(
+    join(root, "prerequisites.json"),
+    JSON.stringify({
+      tokens: [
+        {
+          name: "type.label",
+          type: "typography",
+          value: { fontFamily: "Source Sans Pro", fontSize: 14, fontWeight: 600 },
+        },
+        { name: "color.bg.canvas", type: "color", value: "#f8fafc" },
+      ],
+    }),
+  );
+  const prerequisites = await runCli(
+    ["token", "set", pkg, "--intent", "prerequisites.json", "--json"],
+    root,
+  );
+  assert.equal(prerequisites.code, 0, prerequisites.stdout);
 
-  const variantEdit = helpJson((await runCli(["component", "--help"])).stdout, "Edit a variant:");
-  await writeFile(join(root, "variant.json"), JSON.stringify({
-    baseRevision: await revision(foundation),
-    batchId: "help-variant",
-    operations: [variantEdit],
-  }));
-  const edited = await runCli(["apply", foundation, "--batch", "variant.json", "--dry-run", "--json"], root);
-  assert.equal(edited.code, 0, edited.stdout);
+  // Each name-based write runs the example its own input query prints.
+  for (const [group, action, topic] of [
+    ["token", "set", "token-set"],
+    ["component", "define", "component-define"],
+    ["page", "draw", "page-draw"],
+  ]) {
+    await writeFile(
+      join(root, `${topic}.json`),
+      JSON.stringify(await example(topic)),
+    );
+    const written = await runCli(
+      [group, action, pkg, "--intent", `${topic}.json`, "--json"],
+      root,
+    );
+    assert.equal(written.code, 0, `${topic}: ${written.stdout}`);
+  }
 
-  const pageIntent = helpJson((await runCli(["page", "--help"])).stdout, "Intent example");
-  await writeFile(join(root, "page.json"), JSON.stringify(pageIntent));
-  const page = await runCli(["page", product, "--intent", "page.json", "--json"], root);
-  assert.equal(page.code, 0, page.stdout);
-
-  const applyHelp = (await runCli(["apply", "--help"])).stdout;
+  const applyHelp = (await runCli(["advanced", "apply", "--help", "--full"])).stdout;
+  // The full help carries a worked batch example.
+  assert.match(applyHelp, /Unknown operation types/);
   const batch = helpJson(applyHelp, "Unknown operation types");
-  await writeFile(join(root, "resize.json"), JSON.stringify({
-    ...batch,
-    baseRevision: await revision(product),
-  }));
-  const resized = await runCli(["apply", product, "--batch", "resize.json", "--json"], root);
+  await writeFile(
+    join(root, "resize.json"),
+    JSON.stringify({
+      ...batch,
+      baseRevision: await revision(pkg),
+    }),
+  );
+  const resized = await runCli(
+    ["advanced", "apply", pkg, "--batch", "resize.json", "--json"],
+    root,
+  );
   assert.equal(resized.code, 0, resized.stdout);
   assert.equal(JSON.parse(resized.stdout).changed, true);
 });
