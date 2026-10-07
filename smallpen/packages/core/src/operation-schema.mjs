@@ -27,6 +27,9 @@ const BASE_PRESENTATION_ID = field(
   { prefix: "pres_" },
 );
 const NODE_ID = required("string", "Node id (node_...)", { prefix: "node_" });
+const COMPONENT_ID = required("string", "Component id (cmp_...)", {
+  prefix: "cmp_",
+});
 const PARENT_ID = required(
   "string|null",
   "Parent node id, or null for a Presentation root",
@@ -34,7 +37,7 @@ const PARENT_ID = required(
 const INDEX = field("integer|null", "Position among siblings; default: last");
 const NODE_CHANGES = required(
   "object",
-  "Node fields to set; null clears an optional field. See: smallpen schema node",
+  "Mutable node fields to set; null clears an optional field. id, type and children are structural and cannot be changed here. See: smallpen schema node",
 );
 const ASSET_REFERENCE = "{packageId:pkg_..., assetId:...}";
 
@@ -182,12 +185,10 @@ export const OPERATION_SCHEMAS = Object.freeze({
     purpose: "Delete a Component Set (fails while a Product still uses it)",
     package: "foundation",
     fields: {
-      componentSetId: required("string", "Component Set id (cmp_...)", {
-        prefix: "cmp_",
-      }),
+      componentId: COMPONENT_ID,
     },
     inverse: "restore-canonical-entry",
-    example: { componentSetId: "cmp_button", type: "delete-component-set" },
+    example: { componentId: "cmp_button", type: "delete-component-set" },
   },
   "delete-context-file": {
     purpose: "Delete one Context file",
@@ -243,27 +244,25 @@ export const OPERATION_SCHEMAS = Object.freeze({
     purpose: "Delete one variant of a Component Set",
     package: "foundation",
     fields: {
-      componentSetId: required("string", "Component Set id (cmp_...)", {
-        prefix: "cmp_",
-      }),
+      componentId: COMPONENT_ID,
       variantId: required("string", "Variant id (var_...)", { prefix: "var_" }),
     },
     inverse: "restore-canonical-entry",
     example: {
-      componentSetId: "cmp_button",
+      componentId: "cmp_button",
       type: "delete-variant",
       variantId: "var_button_secondary",
     },
   },
   "deprecate-token": {
-    purpose: "Mark a Token deprecated, optionally naming its replacement",
+    purpose: "Mark a DTCG Token deprecated, optionally naming its replacement (Tokens in token sets have no flag)",
     package: "foundation",
     fields: {
       tokenId: required("string", "Token id (tok_...)", { prefix: "tok_" }),
       replacement: field("object", `Replacement Token ${ASSET_REFERENCE}`),
     },
     inverse: "restore-canonical-entry",
-    example: { tokenId: "tok_spacing_md", type: "deprecate-token" },
+    example: { tokenId: "tok_color_surface", type: "deprecate-token" },
   },
   "delete-presentation": {
     purpose: "Delete a Presentation (a Screen keeps at least one)",
@@ -359,6 +358,10 @@ export const OPERATION_SCHEMAS = Object.freeze({
         "string",
         "Components entry to create when none exists; default components/components.json",
       ),
+      index: field(
+        "integer|null",
+        "Position of a new Component Set in its entry; default: last",
+      ),
     },
     inverse: "restore-canonical-entry",
     example: {
@@ -399,11 +402,11 @@ export const OPERATION_SCHEMAS = Object.freeze({
                 tokenBindings: {
                   cornerRadius: {
                     assetId: "tok_radius_md",
-                    packageId: "pkg_acme_foundation",
+                    packageId: "pkg_acme",
                   },
                   fill: {
                     assetId: "tok_color_brand",
-                    packageId: "pkg_acme_foundation",
+                    packageId: "pkg_acme",
                   },
                 },
                 type: "COMPONENT",
@@ -467,7 +470,7 @@ export const OPERATION_SCHEMAS = Object.freeze({
     example: {
       interaction: {
         action: {
-          screen: { assetId: "scr_settings", packageId: "pkg_acme_product" },
+          screen: { assetId: "scr_settings", packageId: "pkg_acme" },
           type: "navigate",
         },
         id: "int_open_settings",
@@ -542,7 +545,7 @@ export const OPERATION_SCHEMAS = Object.freeze({
     example: {
       scenario: {
         actions: [],
-        context: { axis_platform: "mobile", axis_theme: "dark" },
+        context: { axis_platform: "mobile" },
         expectedVisibleNodeIds: ["node_home_root"],
         fixture: {},
         id: "scn_home_dark",
@@ -550,8 +553,9 @@ export const OPERATION_SCHEMAS = Object.freeze({
         target: {
           kind: "screen",
           presentationId: "pres_home_mobile",
-          screen: { assetId: "scr_home", packageId: "pkg_acme_product" },
+          screen: { assetId: "scr_home", packageId: "pkg_acme" },
         },
+        themes: ["Theme/Dark"],
         viewport: { height: 640, scale: 1, width: 360 },
       },
       type: "put-scenario",
@@ -598,14 +602,105 @@ export const OPERATION_SCHEMAS = Object.freeze({
       type: "put-screen",
     },
   },
+  "put-set-token": {
+    purpose:
+      "Create or replace one Token inside a token set (by token id); a theme's set overrides the base set by name",
+    package: "foundation",
+    fields: {
+      setId: required("string", "Token set id (tset_...)", { prefix: "tset_" }),
+      token: required(
+        "object",
+        "{id:tok_..., name:\"color.surface\", type, value, description?}; value matches type (smallpen schema token-types)",
+      ),
+    },
+    inverse: "restore-canonical-entry",
+    example: {
+      setId: "tset_theme_dark",
+      token: {
+        id: "tok_color_brand_dark",
+        name: "color.brand",
+        type: "color",
+        value: "#d0bcff",
+      },
+      type: "put-set-token",
+    },
+  },
+  "put-token-set": {
+    purpose:
+      "Create or replace one token set (sets, themes, active selection: smallpen schema theme)",
+    package: "foundation",
+    fields: {
+      set: required(
+        "object",
+        "{id:tset_..., name, description?, tokens:[{id:tok_..., name, type, value, description?}]}",
+      ),
+      index: field("integer|null", "Position among the sets of a new set; default: last. Later sets override earlier ones"),
+      entry: field("string", "Token library entry to create when the Package has none; default tokens/tokens.json"),
+    },
+    inverse: "restore-canonical-entry",
+    example: {
+      set: {
+        id: "tset_contrast_high",
+        name: "contrast/high",
+        tokens: [
+          {
+            id: "tok_color_brand_contrast",
+            name: "color.brand",
+            type: "color",
+            value: "#21005d",
+          },
+        ],
+      },
+      type: "put-token-set",
+    },
+  },
+  "put-token-theme": {
+    purpose:
+      "Create or replace one token theme: a group/name that activates a list of sets (one theme per group is active)",
+    package: "foundation",
+    fields: {
+      theme: required(
+        "object",
+        "{id:theme_..., group, name, setIds:[tset_...], description?}",
+      ),
+    },
+    inverse: "restore-canonical-entry",
+    example: {
+      theme: {
+        group: "Contrast",
+        id: "theme_contrast_high",
+        name: "High",
+        setIds: ["tset_base", "tset_theme_dark"],
+      },
+      type: "put-token-theme",
+    },
+  },
+  "delete-token-set": {
+    purpose: "Delete one token set and its tokens; themes stop listing it (fails while nodes bind its tokens)",
+    package: "foundation",
+    fields: {
+      setId: required("string", "Token set id (tset_...)", { prefix: "tset_" }),
+    },
+    inverse: "restore-canonical-entry",
+    example: { setId: "tset_theme_light", type: "delete-token-set" },
+  },
+  "delete-token-theme": {
+    purpose: "Delete one token theme (its sets stay)",
+    package: "foundation",
+    fields: {
+      themeId: required("string", "Token theme id (theme_...)", { prefix: "theme_" }),
+    },
+    inverse: "restore-canonical-entry",
+    example: { themeId: "theme_contrast_high", type: "delete-token-theme" },
+  },
   "put-token": {
     purpose:
-      "Create or replace one DTCG Token; shared Tokens belong in the Foundation",
+      "Create or replace one DTCG Token in a DTCG token file; themes use put-set-token in token sets instead",
     package: "foundation",
     fields: {
       filePath: required(
         "string",
-        "Token entry, for example tokens/foundation.json (smallpen inspect lists entries)",
+        "DTCG token file, created when missing, for example tokens/dtcg.json. Not the token library with sets and themes that init makes (tokens/foundation.json or tokens/tokens.json): add Tokens there with put-set-token. smallpen tokens PACKAGE --json shows each Token's filePath",
       ),
       path: required("string", "Dot path inside the file, for example color.surface"),
       tokenId: required("string", "Permanent id (tok_...); equals definition.$extensions.smallpen.id", {
@@ -613,22 +708,17 @@ export const OPERATION_SCHEMAS = Object.freeze({
       }),
       definition: required(
         "object",
-        "{$type, $value, $extensions:{smallpen:{id, contextValues?}}}; see: smallpen schema token",
+        "{$type, $value, $extensions:{smallpen:{id}}}; see: smallpen schema token. contextValues are deprecated: theme values go in token sets (smallpen schema theme)",
       ),
     },
     inverse: "restore-canonical-entry",
     example: {
       definition: {
-        $extensions: {
-          smallpen: {
-            contextValues: [{ value: "#1c1b1f", when: { axis_theme: "dark" } }],
-            id: "tok_color_surface",
-          },
-        },
+        $extensions: { smallpen: { id: "tok_color_surface" } },
         $type: "color",
         $value: "#ffffff",
       },
-      filePath: "tokens/foundation.json",
+      filePath: "tokens/dtcg.json",
       path: "color.surface",
       tokenId: "tok_color_surface",
       type: "put-token",
@@ -638,9 +728,7 @@ export const OPERATION_SCHEMAS = Object.freeze({
     purpose: "Create or replace one variant of an existing Component Set",
     package: "foundation",
     fields: {
-      componentSetId: required("string", "Component Set id (cmp_...)", {
-        prefix: "cmp_",
-      }),
+      componentId: COMPONENT_ID,
       variant: required(
         "object",
         "{id:var_..., selection:{axisId:value}, rootId, nodes}; see: smallpen schema component-set",
@@ -648,7 +736,7 @@ export const OPERATION_SCHEMAS = Object.freeze({
     },
     inverse: "restore-canonical-entry",
     example: {
-      componentSetId: "cmp_button",
+      componentId: "cmp_button",
       type: "put-variant",
       variant: {
         id: "var_button_secondary",
@@ -726,7 +814,7 @@ export const OPERATION_SCHEMAS = Object.freeze({
       action: "retarget-reference",
       referencePath:
         "screens/first-design.json.presentations[0].nodes.node_home_root.tokenBindings.fill",
-      replacement: { assetId: "tok_color_brand", packageId: "pkg_acme_foundation" },
+      replacement: { assetId: "tok_color_brand", packageId: "pkg_acme" },
       type: "repair-reference",
     },
   },
@@ -779,12 +867,12 @@ export const OPERATION_SCHEMAS = Object.freeze({
   },
   "replace-token-library": {
     purpose:
-      "Replace the whole Penpot-format Token Library (sets and themes) of a Package",
-    package: "product",
+      "Replace the whole Penpot-format Token Library (sets and themes) of a Package; prefer put-token-set / put-set-token / put-token-theme for one change",
+    package: "foundation",
     fields: {
       library: required(
         "object|null",
-        "{id:tlib_..., sets:[{id:tset_..., name, description, tokens:[{id, name, type, value, description}]}], themes:[...], activeThemeIds, activeSetIds} or null",
+        "{id:tlib_..., sets:[{id:tset_..., name, description, tokens:[{id, name, type, value, description}]}], themes:[{id:theme_..., group, name, setIds, description, externalId, isSource}], activeThemeIds, activeSetIds} or null",
       ),
       entry: field("string", "Entry to create; default tokens/tokens.json"),
       index: INDEX,
@@ -792,28 +880,27 @@ export const OPERATION_SCHEMAS = Object.freeze({
     inverse: "replace-token-library",
     example: {
       library: {
-        activeSetIds: [],
-        activeThemeIds: ["theme_default"],
-        id: "tlib_product",
+        activeSetIds: ["tset_base"],
+        activeThemeIds: ["theme_theme_light"],
+        id: "tlib_acme",
         sets: [
           {
             description: "",
-            id: "tset_theme_default",
-            name: "Theme/Default",
-            tokens: [],
+            id: "tset_base",
+            name: "base",
+            tokens: [
+              { description: "", id: "tok_color_brand", name: "color.brand", type: "color", value: "#6750a4" },
+              { description: "", id: "tok_spacing_md", name: "spacing.md", type: "spacing", value: 8 },
+              { description: "", id: "tok_radius_md", name: "radius.md", type: "border-radius", value: 8 },
+            ],
           },
+          { description: "", id: "tset_theme_light", name: "theme/light", tokens: [] },
           {
             description: "",
-            id: "tset_theme_contrast",
-            name: "Theme/Contrast",
+            id: "tset_theme_dark",
+            name: "theme/dark",
             tokens: [
-              {
-                description: "",
-                id: "tok_product_outline",
-                name: "color.outline",
-                type: "color",
-                value: "#000000",
-              },
+              { description: "", id: "tok_color_brand_dark", name: "color.brand", type: "color", value: "#d0bcff" },
             ],
           },
         ],
@@ -822,19 +909,19 @@ export const OPERATION_SCHEMAS = Object.freeze({
             description: "",
             externalId: "",
             group: "Theme",
-            id: "theme_default",
+            id: "theme_theme_light",
             isSource: false,
-            name: "Default",
-            setIds: ["tset_theme_default"],
+            name: "Light",
+            setIds: ["tset_base", "tset_theme_light"],
           },
           {
             description: "",
             externalId: "",
             group: "Theme",
-            id: "theme_contrast",
+            id: "theme_theme_dark",
             isSource: false,
-            name: "Contrast",
-            setIds: ["tset_theme_contrast"],
+            name: "Dark",
+            setIds: ["tset_base", "tset_theme_dark"],
           },
         ],
       },
@@ -878,6 +965,15 @@ export const OPERATION_SCHEMAS = Object.freeze({
       type: "select-instance-variant",
     },
   },
+  "put-canvases": {
+    purpose: "Store which pages sit on which canvas and in what order; null returns to canvases by business module",
+    package: "product",
+    fields: {
+      canvases: field("array", "[{id: cnv_..., name, screens: [screen ids in order]}], every canvas in order; omit to return to canvases by business module"),
+    },
+    inverse: "put-canvases",
+    example: { canvases: [{ id: "cnv_settings", name: "Settings", screens: ["scr_settings"] }], type: "put-canvases" },
+  },
   "set-default-screen": {
     purpose: "Choose the Screen that reads and renders use by default",
     package: "product",
@@ -893,23 +989,34 @@ export const OPERATION_SCHEMAS = Object.freeze({
     purpose: "Point a Product at its Foundation Package",
     package: "product",
     fields: {
-      dependency: required("object", "{packageId:pkg_..., path: relative Package path}"),
+      dependency: required(
+        "object",
+        "{packageId:pkg_..., path: relative Package path, activeThemeIds?: the Foundation theme ids this Product uses}",
+      ),
     },
     inverse: "set-foundation-dependency",
     example: {
-      dependency: { packageId: "pkg_acme_foundation", path: "acme-foundation.smallpen" },
+      dependency: {
+        activeThemeIds: ["theme_theme_light"],
+        packageId: "pkg_acme_foundation",
+        path: "acme-foundation.smallpen",
+      },
       type: "set-foundation-dependency",
     },
   },
   "set-active-token-themes": {
-    purpose: "Choose the active themes of the Penpot-format Token Library",
-    package: "product",
+    purpose:
+      "Store the active token themes (the whole selection, one theme per group); a Product may name its Foundation's themes",
+    package: "any",
     fields: {
-      themePaths: required("array", "Unique \"<group>/<name>\" theme paths"),
+      themePaths: required(
+        "array",
+        "Unique \"<group>/<name>\" theme paths; reads take --theme GROUP/NAME without writing",
+      ),
     },
-    inverse: "restore-canonical-entry",
+    inverse: "restore-canonical-entry and/or set-foundation-dependency",
     example: {
-      themePaths: ["Theme/Default", "Theme/Contrast"],
+      themePaths: ["Theme/Dark"],
       type: "set-active-token-themes",
     },
   },
@@ -951,7 +1058,7 @@ export const OPERATION_SCHEMAS = Object.freeze({
     },
     inverse: "restore-canonical-entry",
     example: {
-      binding: { assetId: "tok_color_surface", packageId: "pkg_acme_foundation" },
+      binding: { assetId: "tok_color_surface", packageId: "pkg_acme" },
       field: "fill",
       nodeId: "node_home_root",
       screenId: "scr_home",
@@ -975,18 +1082,19 @@ export const OPERATION_SCHEMAS = Object.freeze({
     purpose: "Change fields of one node inside one Component variant",
     package: "foundation",
     fields: {
-      componentSetId: required("string", "Component Set id (cmp_...)", {
-        prefix: "cmp_",
-      }),
+      componentId: COMPONENT_ID,
       variantId: required("string", "Variant id (var_...)", { prefix: "var_" }),
       nodeId: NODE_ID,
-      changes: NODE_CHANGES,
+      changes: {
+        ...NODE_CHANGES,
+        description: `${NODE_CHANGES.description}. To change children, read the complete variant and replace it with put-variant.`,
+      },
       unset: field("array", "Field names to remove"),
     },
     inverse: "restore-canonical-entry",
     example: {
       changes: { textStyle: { fontSize: 14, fontWeight: 600, textAlign: "center" } },
-      componentSetId: "cmp_button",
+      componentId: "cmp_button",
       nodeId: "node_button_label",
       type: "update-component-node",
       variantId: "var_button_secondary",
@@ -1085,10 +1193,10 @@ function editDistance(left, right) {
 }
 
 // The closest allowed name for a misspelled or misplaced field, or undefined.
-// `aliases` maps common wrong names to the right one.
-export function suggestField(name, allowed, aliases = {}) {
+// `corrections` gives a useful target for a misplaced field.
+export function suggestField(name, allowed, corrections = {}) {
   if (typeof name !== "string") return undefined;
-  if (Object.hasOwn(aliases, name)) return aliases[name];
+  if (Object.hasOwn(corrections, name)) return corrections[name];
   let best;
   let bestDistance = Infinity;
   for (const candidate of allowed) {
@@ -1102,11 +1210,7 @@ export function suggestField(name, allowed, aliases = {}) {
   return bestDistance <= limit ? best : undefined;
 }
 
-const OPERATION_FIELD_ALIASES = {
-  "update-component-node": { componentId: "componentSetId" },
-  "put-variant": { componentId: "componentSetId" },
-  "delete-variant": { componentId: "componentSetId" },
-  "delete-component-set": { componentId: "componentSetId" },
+const OPERATION_FIELD_CORRECTIONS = {
   "put-token": {
     $extensions: "definition.$extensions",
     $type: "definition.$type",
@@ -1152,7 +1256,8 @@ export function operationShape(type) {
 
 // Checks the operation's type, required fields, field types, and unknown
 // fields. Throws a typed error naming the field and the expected shape.
-export function checkOperationShape(operation, operationIndex) {
+export function checkOperationShape(operation, operationIndex = 0) {
+  if (!isRecord(operation)) fail("invalid_operation", "Canonical operation must contain an object", { operationIndex });
   const type = operation.type;
   if (typeof type !== "string" || !Object.hasOwn(OPERATION_SCHEMAS, type)) {
     const suggestion = suggestField(type, OPERATION_TYPES);
@@ -1172,7 +1277,12 @@ export function checkOperationShape(operation, operationIndex) {
   const schema = OPERATION_SCHEMAS[type];
   const details = (fieldName, extra = {}) => ({
     expected: operationShape(type),
+    received: typeof operation[fieldName] === "string"
+      ? operation[fieldName].slice(0, 256)
+      : (Array.isArray(operation[fieldName]) ? { type: "array", length: operation[fieldName].length }
+        : isRecord(operation[fieldName]) ? { type: "object" } : operation[fieldName] ?? null),
     field: fieldName,
+    path: `operations[${operationIndex}].${fieldName}`,
     operationIndex,
     operationType: type,
     schemaCommand: `smallpen schema operation ${type}`,
@@ -1183,7 +1293,7 @@ export function checkOperationShape(operation, operationIndex) {
   const allowed = ["type", ...Object.keys(schema.fields)];
   for (const name of Object.keys(operation)) {
     if (allowed.includes(name)) continue;
-    const suggestion = suggestField(name, allowed, OPERATION_FIELD_ALIASES[type]);
+    const suggestion = suggestField(name, allowed, OPERATION_FIELD_CORRECTIONS[type]);
     fail(
       "unknown_operation_field",
       `${type} does not accept field ${name}.` +
@@ -1199,7 +1309,7 @@ export function checkOperationShape(operation, operationIndex) {
           "missing_operation_field",
           `${type} requires ${name} (${spec.type}): ${spec.description}. ` +
             `Shape: {type, ${operationShape(type)}}`,
-          details(name, { expectedType: spec.type }),
+          details(name, { expectedType: spec.type, received: null }),
         );
       }
       continue;
@@ -1220,6 +1330,10 @@ export function checkOperationShape(operation, operationIndex) {
       );
     }
   }
+  if (type === "put-set-token" && operation.token.value === undefined) fail("invalid_token_value", "put-set-token requires token.value", {
+    ...details("token.value"), expected: `a ${typeof operation.token.type === "string" ? operation.token.type : "typed"} Token value`,
+    received: null, schemaCommand: "smallpen schema token-types",
+  });
   for (const group of schema.oneOf ?? []) {
     if (group.every((name) => operation[name] === undefined || operation[name] === "")) {
       fail(

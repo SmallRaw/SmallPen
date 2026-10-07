@@ -151,7 +151,7 @@ test("update-component-node clears a field set to null instead of storing null",
     operations: [
       {
         changes: { fills: null },
-        componentSetId: componentSet.id,
+        componentId: componentSet.id,
         nodeId,
         type: "update-component-node",
         variantId: variant.id,
@@ -333,26 +333,12 @@ function runCli(args) {
 
 test("high-level commands rerun with the same --batch-id replay instead of conflicting", async (context) => {
   const packagePath = await copyFixture(context);
-  const intentPath = `${packagePath}.flow.json`;
+  const intentPath = `${packagePath}.draw.json`;
   await writeFile(
     intentPath,
-    JSON.stringify({
-      nodes: [
-        {
-          children: [],
-          height: 10,
-          id: "node_flow_retry",
-          name: "Retry",
-          type: "RECTANGLE",
-          width: 10,
-          x: 1,
-          y: 1,
-        },
-      ],
-      screenId: "scr_roundtrip",
-    }),
+    JSON.stringify({ page: "Retry", children: [{ name: "Retry", width: 10, height: 10 }] }),
   );
-  const args = ["flow", packagePath, "--intent", intentPath, "--batch-id", "flow_retry", "--json"];
+  const args = ["page", "draw", packagePath, "--intent", intentPath, "--batch-id", "draw_retry", "--json"];
   const first = await runCli(args);
   assert.equal(first.code, 0, first.stdout);
   const firstResult = JSON.parse(first.stdout);
@@ -365,7 +351,7 @@ test("high-level commands rerun with the same --batch-id replay instead of confl
 
   // A different intent under the same id still conflicts, with retry guidance.
   const intent = JSON.parse(await readFile(intentPath, "utf8"));
-  intent.nodes[0].id = "node_flow_other";
+  intent.children[0].name = "Other";
   await writeFile(intentPath, JSON.stringify(intent));
   const conflict = await runCli(args);
   assert.equal(conflict.code, 1);
@@ -381,7 +367,7 @@ test("tokens --context rejects an unknown Axis on a Package without Tokens", asy
   manifest.entries.tokens = [];
   await writeFile(manifestPath, JSON.stringify(manifest));
   await rename(join(packagePath, "tokens"), join(packagePath, "..", "unused-tokens"));
-  const result = await runCli(["tokens", packagePath, "--context", "foo=bar", "--json"]);
+  const result = await runCli(["token", "list", packagePath, "--context", "foo=bar", "--json"]);
   assert.equal(result.code, 1, result.stdout);
   assert.equal(JSON.parse(result.stdout).error.code, "invalid_context_selection");
 });

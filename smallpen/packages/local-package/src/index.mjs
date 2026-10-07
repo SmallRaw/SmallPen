@@ -12,13 +12,22 @@ export {
   defaultLibraryCacheRoot,
   openRemoteLibrary,
 } from "./remote-library.mjs";
-export { createEvidence, renderProjection } from "./render.mjs";
+export {
+  createEvidence,
+  measureProjectionText,
+  renderProjection,
+} from "./render.mjs";
 export {
   decodeFigmaClipboard,
   importDraft,
   writeDraftPackage,
 } from "./draft-import.mjs";
-export { createBlankPackage, initializeWorkspace } from "./initialize.mjs";
+export {
+  createBlankPackage,
+  initializeBlankWorkspace,
+  initializeWorkspace,
+} from "./initialize.mjs";
+export { migrateThemesByCopy } from "./migrate-themes.mjs";
 export {
   applyOperationBatch,
   deleteFontFamily,
@@ -26,6 +35,7 @@ export {
   importFontVariant,
   importMedia,
   openPackage,
+  readBatchHistory,
   removeMedia,
   replayRecordedBatch,
   updateFontFamily,

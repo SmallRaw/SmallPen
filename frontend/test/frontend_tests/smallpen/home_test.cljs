@@ -4,9 +4,26 @@
 
 (ns frontend-tests.smallpen.home-test
   (:require
+   [app.main.smallpen :as smallpen]
    [app.main.smallpen.home :as home]
    [app.util.i18n :refer [tr]]
    [cljs.test :as t]))
+
+(t/deftest package-upload-keeps-directory-paths-and-omits-hidden-files
+  (let [file (fn [path content]
+               (let [value (js/File. #js [content] "manifest.json")]
+                 (js/Object.defineProperty value "webkitRelativePath" #js {:value path})
+                 value))
+        form (smallpen/directory-upload-form
+              [(file "Design.smallpen/manifest.json" "{}")
+               (file "Design.smallpen/screens/main.json" "screen")
+               (file "Design.smallpen/.DS_Store" "hidden")
+               (file "Design.smallpen/.git/config" "hidden")])]
+    (t/is (= 2 (.-length (js/Array.from (.entries form)))))
+    (t/is (some? (.get form "Design.smallpen/manifest.json")))
+    (t/is (some? (.get form "Design.smallpen/screens/main.json")))
+    (t/is (nil? (.get form "Design.smallpen/.DS_Store")))
+    (t/is (nil? (.get form "Design.smallpen/.git/config")))))
 
 (t/deftest local-home-tolerates-a-recent-package-without-a-role
   (t/is (nil? (home/package-role-label nil))))

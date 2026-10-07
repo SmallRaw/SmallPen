@@ -469,7 +469,7 @@ test("component family tree edits write the component definition", async () => {
     const labelOp = nodeOps.find((operation) => operation.nodeId === labelNodeId);
     assert.ok(rootOp, "root op missing");
     assert.ok(labelOp, "label op missing");
-    assert.equal(rootOp.componentSetId, family.componentSetId);
+    assert.equal(rootOp.componentId, family.componentSetId);
     assert.equal(rootOp.variantId, family.variantId);
     assert.ok(rootOp.changes.fills, "root fill not compiled");
     assert.equal(labelOp.changes.text, "Primary!");
@@ -1288,7 +1288,7 @@ test("the generated page never persists: every write class lands in its source, 
       (operation) => operation.type === "update-component-node",
     );
     assert.equal(componentOps.length, 1, "expected one definition node op");
-    assert.equal(componentOps[0].componentSetId, family.componentSetId);
+    assert.equal(componentOps[0].componentId, family.componentSetId);
     const afterToken = await openPackage(packagePath);
     const componentApplied = await applyOperationBatch(packagePath, {
       ...componentBatch,

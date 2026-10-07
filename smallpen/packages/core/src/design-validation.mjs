@@ -1,4 +1,8 @@
-import { findComponentVariant } from "./components-domain.mjs";
+import {
+  findComponentVariant,
+  variantMismatch,
+  variantMismatchText,
+} from "./components-domain.mjs";
 import { fail } from "./errors.mjs";
 
 function screenIndex(manifest, entries) {
@@ -58,8 +62,13 @@ function localComponentTarget(target, manifest, componentSets, path) {
   if (!match.variant) {
     fail(
       "missing_variant",
-      `No exact variant exists for ${target.component.assetId}`,
-      { path, selection: target.variant },
+      `No variant of ${target.component.assetId} matches ${path} selection ` +
+        `${JSON.stringify(target.variant)}: ${variantMismatchText(componentSet, target.variant)}`,
+      {
+        path,
+        selection: target.variant,
+        validSelections: variantMismatch(componentSet, target.variant).validSelections,
+      },
     );
   }
   return match.variant;
@@ -321,4 +330,86 @@ export function validateDesignReferences(manifest, entries, domain) {
     );
   }
   validateLocalAssetReferences(manifest, entries, domain);
+}
+
+// Instances whose variant selection matches no variant of their Component
+// Set, after the set lost a variant or changed its Axes. `options.foundation`
+// and `options.libraries` resolve Instances of other Packages; Instances of
+// Packages not given, and missing Component Sets, are left to the reference
+// checks. Local Screen Instances fail loading already; Instances inside
+function label(componentSet, selection) {
+  return (componentSet.axes ?? []).filter((axis) => selection?.[axis.id] !== undefined)
+    .map((axis) => `${axis.name}=${selection[axis.id]}`).join(", ") || "default";
+}
+
+// Component variants and Instances of other Packages only show here.
+export function staleInstanceDiagnostics(snapshot, options = {}) {
+  const sets = new Map([[snapshot.manifest.packageId, snapshot.domain.componentSets]]);
+  for (const other of [options.foundation, ...(options.libraries ?? [])]) {
+    if (other) sets.set(other.manifest.packageId, other.domain.componentSets);
+  }
+  const diagnostics = [];
+  const check = (instance, path, nodeId, fix, where, redraw) => {
+    const reference = instance?.component;
+    const componentSet = sets.get(reference?.packageId)?.get(reference?.assetId);
+    if (!componentSet || findComponentVariant(componentSet, instance.variant ?? {}).variant) {
+      return;
+    }
+    const { problems, validSelections } = variantMismatch(componentSet, instance.variant);
+    // Named for the agent: where the copy is, which component, the variants
+    // it can choose from, and the name-based command that fixes it.
+    const label = (selection) =>
+      (componentSet.axes ?? []).filter((axis) => selection?.[axis.id] !== undefined)
+        .map((axis) => `${axis.name}=${selection[axis.id]}`).join(", ") || "no selection";
+    const variants = componentSet.variants.map((variant) => label(variant.selection));
+    diagnostics.push({
+      code: "stale_instance_variant",
+      component: { ...structuredClone(reference), name: componentSet.name },
+      fix: `${redraw}, giving it one of these variants in props: ${variants.slice(0, 12).join("; ")}`,
+      operationFix: fix,
+      where,
+      variants,
+      message: `${where} uses ${componentSet.name} with ${label(instance.variant)}, which it no longer has`,
+      nodeId,
+      path,
+      problems,
+      selection: structuredClone(instance.variant ?? {}),
+      severity: "error",
+      validSelections,
+    });
+  };
+  for (const componentSet of snapshot.domain.componentSets.values()) {
+    for (const variant of componentSet.variants) {
+      for (const [nodeId, node] of Object.entries(variant.nodes)) {
+        if (!node.instance) continue;
+        check(
+          node.instance,
+          `componentSets.${componentSet.id}.variants.${variant.id}.nodes.${nodeId}.instance`,
+          nodeId,
+          `update-component-node {componentId:"${componentSet.id}", variantId:"${variant.id}", ` +
+            `nodeId:"${nodeId}", changes:{instance:{...}}} with a valid variant selection`,
+          `${componentSet.name} (${label(componentSet, variant.selection)}) / ${node.name ?? nodeId}`,
+          `Redefine ${componentSet.name} with component define`,
+        );
+      }
+    }
+  }
+  for (const entry of snapshot.manifest.entries.screens) {
+    const screen = snapshot.entries[entry];
+    for (const presentation of screen.presentations) {
+      for (const [nodeId, node] of Object.entries(presentation.nodes)) {
+        if (!node.instance) continue;
+        check(
+          node.instance,
+          `${entry}.presentations.${presentation.id}.nodes.${nodeId}.instance`,
+          nodeId,
+          `select-instance-variant {screenId:"${screen.id}", presentationId:"${presentation.id}", ` +
+            `nodeId:"${nodeId}", selection:{...}}`,
+          `${screen.name} (${presentation.platform ?? presentation.name}) / ${node.name ?? nodeId}`,
+          `Redraw ${node.name ?? "the copy"} on ${screen.name} with page draw`,
+        );
+      }
+    }
+  }
+  return diagnostics;
 }

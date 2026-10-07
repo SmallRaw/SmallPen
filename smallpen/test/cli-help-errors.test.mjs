@@ -34,12 +34,13 @@ async function acme(context) {
   context.after(() => rm(root, { force: true, recursive: true }));
   await writeFile(join(root, "answers.json"), JSON.stringify(INIT_ANSWERS_EXAMPLE));
   const init = await runCli(
-    ["init", "acme", "--answers", "answers.json", "--confirm", "--json"],
+    ["project", "init", "acme", "--answers", "answers.json", "--confirm", "--json"],
     root,
   );
   assert.equal(init.code, 0, init.stdout);
+  // The default layout is one self-contained Package for both roles.
   return {
-    foundation: join(root, "acme", "acme-foundation.smallpen"),
+    foundation: join(root, "acme", "acme.smallpen"),
     product: join(root, "acme", "acme.smallpen"),
     root,
   };
@@ -50,7 +51,7 @@ let batchCount = 0;
 // Runs one batch through apply --dry-run and returns the parsed output.
 async function dryRun(workspace, target, operations) {
   const packagePath = workspace[target];
-  const inspected = JSON.parse((await runCli(["inspect", packagePath, "--json"], workspace.root)).stdout);
+  const inspected = JSON.parse((await runCli(["project", "show", packagePath, "--json"], workspace.root)).stdout);
   batchCount += 1;
   const batchPath = join(workspace.root, `batch-${batchCount}.json`);
   await writeFile(
@@ -62,7 +63,7 @@ async function dryRun(workspace, target, operations) {
     }),
   );
   const result = await runCli(
-    ["apply", packagePath, "--batch", batchPath, "--dry-run", "--json"],
+    ["advanced", "apply", packagePath, "--batch", batchPath, "--dry-run", "--json"],
     workspace.root,
   );
   return { code: result.code, output: JSON.parse(result.stdout) };
@@ -122,17 +123,6 @@ test("operation errors list valid types, allowed fields, and near misses", async
   assert.match(wrongType.output.error.message, /smallpen schema operations/);
   assert.ok(wrongType.output.error.details.validTypes.includes("put-component-set"));
 
-  const intentPath = join(workspace.root, "token-intent.json");
-  await writeFile(intentPath, JSON.stringify({ operations: [{ type: "put-token" }] }));
-  const token = await runCli(
-    ["token", workspace.foundation, "--intent", intentPath, "--dry-run", "--json"],
-    workspace.root,
-  );
-  const tokenError = JSON.parse(token.stdout).error;
-  assert.equal(tokenError.code, "missing_operation_field");
-  assert.match(tokenError.message, /put-token requires filePath/);
-  assert.match(tokenError.details.expected, /definition: object/);
-
   const misplaced = await dryRun(workspace, "foundation", [{
     ...OPERATION_SCHEMAS["put-token"].example,
     $type: "color",
@@ -141,17 +131,17 @@ test("operation errors list valid types, allowed fields, and near misses", async
 
   const componentId = await dryRun(workspace, "foundation", [{
     changes: { name: "Button" },
-    componentId: "cmp_button",
+    componentID: "cmp_button",
     nodeId: "node_button_root",
     type: "update-component-node",
     variantId: "var_button_default",
   }]);
   assert.equal(componentId.output.error.code, "unknown_operation_field");
-  assert.equal(componentId.output.error.details.suggestion, "componentSetId");
+  assert.equal(componentId.output.error.details.suggestion, "componentId");
 
   const missingSet = await dryRun(workspace, "foundation", [{
     changes: { name: "Button" },
-    componentSetId: "cmp_buton",
+    componentId: "cmp_buton",
     nodeId: "node_button_root",
     type: "update-component-node",
     variantId: "var_button_default",
@@ -177,7 +167,7 @@ test("unknown node change fields are rejected with the field that holds them", a
     OPERATION_SCHEMAS["put-component-set"].example,
     {
       changes: { textAlign: "center" },
-      componentSetId: "cmp_button",
+      componentId: "cmp_button",
       nodeId: "node_button_label",
       type: "update-component-node",
       variantId: "var_button_primary",
@@ -191,7 +181,7 @@ test("unknown node change fields are rejected with the field that holds them", a
     OPERATION_SCHEMAS["put-component-set"].example,
     {
       changes: { textStyle: { textAlign: "center" } },
-      componentSetId: "cmp_button",
+      componentId: "cmp_button",
       nodeId: "node_button_root",
       type: "update-component-node",
       variantId: "var_button_primary",
@@ -206,7 +196,9 @@ test("unknown node change fields are rejected with the field that holds them", a
     }]);
     assert.equal(node.output.error.code, "unsupported_node_change", field);
     assert.equal(node.output.error.details.suggestion, suggestion, field);
-    assert.ok(node.output.error.details.allowedFields.includes("textStyle"));
+    assert.ok(node.output.error.details.allowedFields.includes(suggestion.split(".")[0]));
+    assert.ok(node.output.error.details.allowedFieldsTruncated);
+    assert.ok(node.output.error.details.nextOperations.length);
   }
 
   const width = await dryRun(workspace, "product", [{
@@ -235,9 +227,10 @@ test("enum refusals list allowed values and Token errors show the expected shape
   assert.equal(value.output.error.code, "invalid_token_value");
   assert.match(value.output.error.message, /fontSize: number/);
   assert.deepEqual(value.output.error.details.example, {
-    fontFamily: "Inter",
+    fontFamily: "Source Sans Pro",
     fontSize: 24,
     fontWeight: 700,
+    lineHeight: 1.3,
   });
 
   const noValue = structuredClone(OPERATION_SCHEMAS["put-token"].example);

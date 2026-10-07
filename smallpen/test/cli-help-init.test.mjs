@@ -12,7 +12,13 @@ const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
 function runCli(args, env = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
-      env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "", LC_MESSAGES: "", ...env },
+      env: {
+        ...process.env,
+        LANG: "en_US.UTF-8",
+        LC_ALL: "",
+        LC_MESSAGES: "",
+        ...env,
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -29,74 +35,33 @@ async function workspace(context) {
   return join(root, "acme");
 }
 
-test("single --answer calls with the same --state build up the answers", async (context) => {
-  const target = await workspace(context);
-  const state = `${target}.state.json`;
-  for (const [id, value] of [
-    ["projectKind", "application"],
-    ["projectName", "Acme"],
-    ["purpose", "Track daily tasks"],
-  ]) {
-    const result = await runCli([
-      "init", target, "--state", state, "--answer", `${id}=${JSON.stringify(value)}`, "--json",
-    ]);
-    assert.equal(result.code, 0);
-    assert.equal(result.json.stateNotice, undefined);
-  }
-  const last = await runCli(["init", target, "--state", state, "--json"]);
-  assert.deepEqual(last.json.answers, {
-    projectKind: "application",
-    projectName: "Acme",
-    purpose: "Track daily tasks",
-  });
-  assert.equal(last.json.nextQuestion.id, "audience");
-});
-
-test("init without --state warns that it did not read earlier answers", async (context) => {
-  const target = await workspace(context);
-  await runCli(["init", target, "--answer", 'projectKind="application"', "--json"]);
-  const second = await runCli(["init", target, "--answer", 'projectName="Acme"', "--json"]);
-  assert.equal(second.json.nextQuestion.id, "projectKind");
-  assert.match(second.json.stateNotice, /--state/);
-  assert.match(second.json.answersTemplate, /smallpen schema init/);
-  const continuation = second.json.nextQuestion.continuation.args;
-  assert.equal(continuation[continuation.indexOf("--state") + 1], second.json.statePath);
-});
-
-test("init labels and locale follow the environment unless --locale is given", async (context) => {
-  const target = await workspace(context);
-  const english = await runCli(["init", target, "--json"]);
-  assert.equal(english.json.nextQuestion.label, "Project kind");
-  assert.deepEqual(english.json.nextQuestion.continuation.args.slice(-2), ["--locale", "en"]);
-
-  const chinese = await runCli(["init", target, "--json"], { LANG: "zh_TW.UTF-8" });
-  assert.equal(chinese.json.nextQuestion.label, "專案類型");
-  assert.deepEqual(chinese.json.nextQuestion.continuation.args.slice(-2), ["--locale", "zh-TW"]);
-
-  const overridden = await runCli(["init", target, "--json"], {
-    LANG: "zh_CN.UTF-8",
-    LC_ALL: "en_GB.UTF-8",
-  });
-  assert.equal(overridden.json.nextQuestion.label, "Project kind");
-
-  const explicit = await runCli(["init", target, "--locale", "zh-TW", "--json"]);
-  assert.equal(explicit.json.nextQuestion.label, "專案類型");
-});
-
-test("an invalid contextAxes answer returns the full item schema", async (context) => {
+test("the compatibility init alias creates a blank project without questions in any locale", async (context) => {
   const target = await workspace(context);
   const result = await runCli([
-    "init", target, "--answer", 'contextAxes=["theme"]', "--json",
+    "project",
+    "init",
+    target,
+    "--locale",
+    "zh-TW",
+    "--name",
+    "画板",
+    "--json",
   ]);
-  assert.equal(result.code, 1);
-  const { schema } = result.json.error.details;
-  assert.deepEqual(schema.items.properties.kind.enum, [
-    "accessibility",
-    "custom",
-    "density",
-    "locale",
-    "theme",
-    "viewport",
-  ]);
-  assert.equal(schema.items.properties.values.items.type, "string");
+  assert.equal(result.code, 0);
+  assert.equal(result.json.status, "initialized");
+  assert.equal(result.json.nextQuestion, undefined);
+  assert.equal(result.json.statePath, undefined);
+});
+
+test("removed questionnaire parameters are rejected before creating state", async (context) => {
+  const target = await workspace(context);
+  for (const args of [
+    ["--state", `${target}.state.json`],
+    ["--answer", 'projectKind="application"'],
+  ]) {
+    const result = await runCli(["project", "init", target, ...args, "--json"]);
+    assert.equal(result.code, 1);
+    assert.equal(result.json.error.code, "unknown_option");
+    assert.equal(result.json.error.writeState, "not-applied");
+  }
 });

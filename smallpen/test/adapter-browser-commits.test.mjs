@@ -116,25 +116,15 @@ test("a stroke width edit that also sets every side to that width is accepted", 
       width: 3,
     },
   ]);
-  // A real per-side width still has no place in the format.
-  assert.throws(
-    () =>
-      compilePenpotChanges(snapshot, {
-        changes: [
-          modObj(snapshot, SWATCH, [
-            {
-              type: "set",
-              attr: "strokes",
-              val: [{ ...stroke, "stroke-width-top": 6 }],
-            },
-          ]),
-        ],
-        commitId: "per-side",
-      }),
-    (error) =>
-      error.code === "unsupported_penpot_stroke" &&
-      error.details.fields.join() === "stroke-width-top",
+  // A side with its own width is stored as that side's width.
+  const perSide = await apply(
+    snapshot,
+    [modObj(snapshot, SWATCH, [{ type: "set", attr: "strokes", val: [{ ...stroke, "stroke-width-top": 6 }] }])],
+    "per-side",
   );
+  assert.equal(perSide[SWATCH].strokes[0].width, 3);
+  assert.equal(perSide[SWATCH].strokes[0].widthTop, 6);
+  assert.equal(perSide[SWATCH].strokes[0].widthLeft, undefined, "equal sides stay the plain width");
 });
 
 test("a flex layout added in Penpot projects back where Penpot placed the children", async () => {
@@ -317,26 +307,23 @@ test("a stroke width Token applied to every side binds stroke-width", async () =
     ],
     commitId: "stroke-token",
   }).operations;
-  assert.deepEqual(
-    operations.map(({ changes }) => changes.appliedTokens),
-    [{ "stroke-width": "border-width" }],
-  );
-  // Different Tokens per side have no canonical binding.
-  assert.throws(
-    () =>
-      compilePenpotChanges(snapshot, {
-        changes: [
-          modObj(snapshot, "node_card_hardcoded", [
-            userSet("applied-tokens", {
-              "stroke-width-left": "border-width",
-              "stroke-width-top": "border-width",
-            }),
-          ]),
-        ],
-        commitId: "stroke-side-token",
-      }),
-    (error) => error.code === "unsupported_applied_token_attribute",
-  );
+  // The App's Token is the same binding the CLI writes.
+  assert.equal(operations.length, 1);
+  assert.ok(operations[0].changes.tokenBindings.strokeWidth);
+  assert.equal(operations[0].changes.appliedTokens, undefined);
+  // A Token on some sides binds those sides.
+  const sides = compilePenpotChanges(snapshot, {
+    changes: [
+      modObj(snapshot, "node_card_hardcoded", [
+        userSet("applied-tokens", {
+          "stroke-width-left": "border-width",
+          "stroke-width-top": "border-width",
+        }),
+      ]),
+    ],
+    commitId: "stroke-side-token",
+  }).operations;
+  assert.deepEqual(Object.keys(sides[0].changes.tokenBindings).filter((field) => field.startsWith("strokeWidth")).sort(), ["strokeWidthLeft", "strokeWidthTop"]);
 });
 
 test("a font-weight Token on a text keeps the variant Penpot merges into it", async () => {
@@ -401,5 +388,6 @@ test("a font-weight Token on a text keeps the variant Penpot merges into it", as
     "font-weight-token",
   );
   assert.equal(nodes.node_note.textStyle.fontWeight, 700);
-  assert.deepEqual(nodes.node_note.appliedTokens, { "font-weight": "weight" });
+  assert.ok(nodes.node_note.tokenBindings.fontWeight, "the App's Token is a binding");
+  assert.equal(nodes.node_note.appliedTokens, undefined);
 });

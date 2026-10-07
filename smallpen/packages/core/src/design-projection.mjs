@@ -1,5 +1,9 @@
 import { canonicalJSON } from "./canonical.mjs";
-import { findComponentVariant } from "./components-domain.mjs";
+import {
+  closestComponentVariant,
+  findComponentVariant,
+  variantMismatchText,
+} from "./components-domain.mjs";
 import { resolveContext } from "./contexts.mjs";
 import { fail } from "./errors.mjs";
 import {
@@ -7,7 +11,11 @@ import {
   overrideTouchedGroups,
   ownValue,
 } from "./internal.mjs";
-import { applyEffectiveTokenBindings } from "./projection-values.mjs";
+import {
+  applyEffectiveTokenBindings,
+  resolveOverrideBindings,
+  normalizedLayoutGap,
+} from "./projection-values.mjs";
 
 function screenById(snapshot, screenId) {
   const entry = snapshot.manifest.entries.screens.find(
@@ -161,6 +169,18 @@ function applyOverrideField(node, field, value) {
     if (run.fills) node.fills = structuredClone(run.fills);
     delete node.textBlocks;
   }
+  if (field === "tokenBindings") {
+    // The copy's own bindings: a reference per field, null drops the
+    // source's binding.
+    const bindings = { ...(node.tokenBindings ?? {}) };
+    for (const [binding, reference] of Object.entries(value ?? {}))
+      if (reference === null) delete bindings[binding];
+      else bindings[binding] = structuredClone(reference);
+    if (Object.keys(bindings).length) node.tokenBindings = bindings;
+    else delete node.tokenBindings;
+    return;
+  }
+  if (field === "variant") return; // applied when the nested copy is drawn
   node[field] = structuredClone(value);
 }
 
@@ -187,7 +207,7 @@ export function applyNodeOverrides(node, overrides) {
       touched.add("text-content-structure");
     }
     applyOverrideField(node, field, overrides[field]);
-    for (const group of overrideTouchedGroups(field, node.type)) {
+    for (const group of overrideTouchedGroups(field, node.type, overrides[field])) {
       touched.add(group);
     }
   }
@@ -220,7 +240,7 @@ function rootOverrideTouched(root, instance, sourceRoot) {
   if (touched.size > 0) root.touched = [...touched].sort();
 }
 
-function applyInstanceOverrides(nodes, instance) {
+function applyInstanceOverrides(nodes, instance, resolve) {
   const byNode = new Map();
   for (const [overridePath, value] of Object.entries(
     instance.instance.overrides ?? {},
@@ -264,7 +284,81 @@ function applyInstanceOverrides(nodes, instance) {
     if (!byNode.has(node)) byNode.set(node, {});
     byNode.get(node)[field] = value;
   }
-  for (const [node, overrides] of byNode) applyNodeOverrides(node, overrides);
+  for (const [node, overrides] of byNode) {
+    applyNodeOverrides(node, overrides);
+    if (overrides.tokenBindings && resolve) resolve(node, overrides.tokenBindings);
+  }
+}
+
+// Shapes Penpot draws as boards: their children pin left/top by default.
+const BOARD_TYPES = new Set(["COMPONENT", "FRAME", "INSTANCE"]);
+
+// A child's constraint on one axis ("h" or "v"). Without one, Penpot pins a
+// board's direct child to its left/top and scales any other shape with its
+// parent (geom/shapes/constraints.cljc default-constraints-h/-v).
+function constraintOf(child, parent, axis) {
+  const value = child[`constraints-${axis}`];
+  if (typeof value === "string") return value;
+  if (!BOARD_TYPES.has(parent.type)) return "scale";
+  return axis === "h" ? "left" : "top";
+}
+
+// A child's parent-relative start and size on one axis after its parent
+// grows from `before` to `after`, per Penpot's constraint modifiers.
+function constrainedAxis(constraint, start, size, before, after) {
+  const delta = after - before;
+  if (constraint === "right" || constraint === "bottom") return [start + delta, size];
+  // Penpot scales the side to its new length, which never goes negative.
+  if (constraint === "leftright" || constraint === "topbottom") {
+    return [start, Math.abs(size + delta)];
+  }
+  if (constraint === "center") return [start + delta / 2, size];
+  if (constraint === "scale") {
+    const ratio = before > 0 ? after / before : 1;
+    return [start * ratio, size * ratio];
+  }
+  return [start, size];
+}
+
+// Resizes the subtree under `parentId`, which was `before` ({width, height})
+// in its source, the way Penpot resizes a component copy: every child
+// follows its constraints, children a flex layout places are left to the
+// layout reflow, and a resized child passes the change on to its own.
+function applyResizeConstraints(nodes, parentId, before) {
+  const parent = nodes[parentId];
+  if (
+    !parent ||
+    ![parent.width, parent.height, before.width, before.height].every(Number.isFinite) ||
+    (parent.width === before.width && parent.height === before.height)
+  ) {
+    return;
+  }
+  for (const childId of parent.children ?? []) {
+    const child = nodes[childId];
+    if (!child) continue;
+    if (
+      (parent.layout === "flex" || parent.layout === "grid") &&
+      child["layout-item-absolute"] !== true
+    ) {
+      continue;
+    }
+    const childBefore = { height: child.height, width: child.width };
+    [child.x, child.width] = constrainedAxis(
+      constraintOf(child, parent, "h"),
+      child.x,
+      child.width,
+      before.width,
+      parent.width,
+    );
+    [child.y, child.height] = constrainedAxis(
+      constraintOf(child, parent, "v"),
+      child.y,
+      child.height,
+      before.height,
+      parent.height,
+    );
+    applyResizeConstraints(nodes, childId, childBefore);
+  }
 }
 
 function instantiateComponent(instanceValue, product, options, stack) {
@@ -294,16 +388,36 @@ function instantiateComponent(instanceValue, product, options, stack) {
     instance.instance.variant,
     { allowPreviewFallback: options.allowPreviewFallback },
   );
+  // An Instance whose selection no variant has any more (its Foundation
+  // renamed a value or deleted the variant) is a Repair, not an unreadable
+  // file: it draws with the closest variant and says so.
+  const stale = [];
   if (!match.variant) {
-    fail(
-      "missing_variant",
-      `No exact variant exists for ${target.componentSet.id}`,
-      {
-        componentId: target.componentSet.id,
-        instanceId: instance.id,
-        selection: instance.instance.variant,
-      },
+    match.variant = closestComponentVariant(
+      target.componentSet,
+      instance.instance.variant,
     );
+    if (!match.variant) {
+      fail(
+        "missing_variant",
+        `${target.componentSet.id} has no variant to draw ${instance.id} with`,
+        { componentId: target.componentSet.id, instanceId: instance.id },
+      );
+    }
+    const label = (selection) =>
+      (target.componentSet.axes ?? []).filter((axis) => selection?.[axis.id] !== undefined)
+        .map((axis) => `${axis.name}=${selection[axis.id]}`).join(", ") || "no selection";
+    stale.push({
+      code: "stale_instance_variant",
+      component: { ...structuredClone(instance.instance.component), name: target.componentSet.name },
+      fallbackSelection: structuredClone(match.variant.selection),
+      instanceId: instance.id,
+      message:
+        `${instance.name ?? "A copy"} uses ${target.componentSet.name} with ${label(instance.instance.variant)}, ` +
+        `which it no longer has; it is drawn as ${label(match.variant.selection)} until a variant is chosen`,
+      selection: structuredClone(instance.instance.variant ?? {}),
+      severity: "error",
+    });
   }
   stack.add(target.componentSet.id);
   const result = {};
@@ -323,14 +437,21 @@ function instantiateComponent(instanceValue, product, options, stack) {
       ? instance.id
       : prefixedNodeId(instance.id, sourceId);
     if (source.instance) {
+      // A copy may switch a nested copy's variant ("<nested>:variant").
+      const switched = instance.instance.overrides?.[`${sourceId}:variant`];
+      // A switched copy takes the size of its new variant, as Penpot's swap.
+      const nestedSource = switched
+        ? { ...source, width: undefined, height: undefined, instance: { ...source.instance, variant: { ...(source.instance.variant ?? {}), ...switched } } }
+        : source;
       const nested = instantiateComponent(
-        { ...source, id: derivedId },
+        { ...nestedSource, id: derivedId },
         product,
         options,
         stack,
       );
       Object.assign(result, nested.nodes);
       nestedFallbackUsed ||= nested.fallbackUsed;
+      stale.push(...nested.staleInstances);
       return;
     }
     const children = source.children.map((childId) =>
@@ -349,20 +470,58 @@ function instantiateComponent(instanceValue, product, options, stack) {
       variantSelection: structuredClone(match.variant.selection),
       ...(sourceId === match.variant.rootId
         ? {
-            height: instance.height,
+            height: instance.height ?? sourceNodes[match.variant.rootId].height,
             name: instance.name,
             type: "INSTANCE",
-            width: instance.width,
+            width: instance.width ?? sourceNodes[match.variant.rootId].width,
             x: instance.x,
             y: instance.y,
           }
         : {}),
     };
+    if (
+      sourceId === match.variant.rootId &&
+      Object.keys(instance.tokenBindings ?? {}).length > 0
+    ) {
+      // Resolve the copy's own bindings against its complete layout. The
+      // source supplies unbound sides; the copy's raw values and Tokens win.
+      const root = result[derivedId];
+      if (
+        ["itemSpacing", "rowGap", "columnGap"].some((field) =>
+          Object.hasOwn(instance.tokenBindings, field),
+        )
+      ) {
+        root["layout-gap"] = {
+          ...normalizedLayoutGap(source["layout-gap"]),
+          ...normalizedLayoutGap(instance["layout-gap"]),
+        };
+      }
+      if (
+        ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"].some(
+          (field) => Object.hasOwn(instance.tokenBindings, field),
+        )
+      ) {
+        root["layout-padding"] = {
+          ...source["layout-padding"],
+          ...instance["layout-padding"],
+        };
+      }
+      result[derivedId] = applyEffectiveTokenBindings(root, product, {
+        context: options.context,
+        foundation: options.foundation,
+        libraries: options.libraries,
+      });
+    }
     delete result[derivedId].instance;
     for (const childId of source.children) visit(childId);
   };
   visit(match.variant.rootId);
   const root = result[instance.id];
+  const sourceRoot = sourceNodes[match.variant.rootId];
+  applyResizeConstraints(result, instance.id, {
+    height: sourceRoot.height,
+    width: sourceRoot.width,
+  });
   rootOverrideTouched(
     root,
     instance,
@@ -375,25 +534,34 @@ function instantiateComponent(instanceValue, product, options, stack) {
   root.sourceNodeId = match.variant.rootId;
   root.componentId = target.componentSet.id;
   root.componentOwnerPackageId = target.owner.manifest.packageId;
-  applyInstanceOverrides(result, {
-    ...instance,
-    sourceNodeId: match.variant.rootId,
-  });
+  applyInstanceOverrides(
+    result,
+    { ...instance, sourceNodeId: match.variant.rootId },
+    (node, bindings) =>
+      resolveOverrideBindings(node, bindings, product, {
+        context: options.context,
+        foundation: options.foundation,
+        libraries: options.libraries,
+      }),
+  );
   stack.delete(target.componentSet.id);
   return {
     fallbackUsed: match.fallbackUsed || nestedFallbackUsed,
     nodes: result,
+    staleInstances: stale,
   };
 }
 
 function projectNodes(sourceNodes, product, options) {
   const nodes = {};
   let fallbackUsed = false;
+  const staleInstances = [];
   for (const node of Object.values(sourceNodes)) {
     if (node.instance) {
       const instance = instantiateComponent(node, product, options, new Set());
       Object.assign(nodes, instance.nodes);
       fallbackUsed ||= instance.fallbackUsed;
+      staleInstances.push(...instance.staleInstances);
     } else {
       nodes[node.id] = applyEffectiveTokenBindings(node, product, {
         context: options.context,
@@ -408,7 +576,7 @@ function projectNodes(sourceNodes, product, options) {
     );
   }
   applyLocatedCopyInheritance(nodes, product, options);
-  return { fallbackUsed, nodes };
+  return { fallbackUsed, nodes, staleInstances };
 }
 
 const COPY_TOUCHED_FIELDS = new Map([
@@ -548,7 +716,7 @@ function reflowFlexLayout(nodes, nodeId) {
       : [...(node.children ?? [])].reverse();
   const items = children
     .map((childId) => nodes[childId])
-    .filter((child) => child && child["layout-item-absolute"] !== true);
+    .filter((child) => child && child.visible !== false && child["layout-item-absolute"] !== true);
   if (items.length === 0) return;
   const column = isColumnLayout(node);
   const padding = layoutPaddingOf(node);
@@ -608,7 +776,44 @@ function reflowFlexLayout(nodes, nodeId) {
       child.y = crossOffset;
     }
     cursor += mainSize(child) + gap + spaceBetween;
+    // A fill-sized container must lay out its own children at its new size.
+    if (child.layout === "flex") reflowFlexLayout(nodes, child.id);
   }
+}
+
+// Persisting a native layout field does not mean the local projection executes
+// it. Every consumer can report these gaps rather than approving stored bounds.
+export function layoutProjectionDiagnostics(nodes) {
+  const diagnostics = [];
+  for (const node of Object.values(nodes)) {
+    if (!node.layout || node.visible === false) continue;
+    const unsupported = [];
+    if (node.layout !== "flex") unsupported.push("layout");
+    else {
+      const allowed = {
+        "layout-flex-dir": ["row", "row-reverse", "column", "column-reverse"],
+        "layout-wrap-type": ["nowrap"],
+        "layout-justify-content": ["start", "center", "end", "space-between"],
+        "layout-align-items": ["start", "center", "end"],
+        "layout-align-content": ["start"],
+      };
+      for (const [field, values] of Object.entries(allowed))
+        if (node[field] !== undefined && !values.includes(node[field])) unsupported.push(field);
+      for (const childId of node.children ?? []) {
+        const child = nodes[childId];
+        if (!child || child.visible === false || child["layout-item-absolute"] === true) continue;
+        for (const field of ["layout-item-h-sizing", "layout-item-v-sizing"])
+          if (child[field] !== undefined && !["fill", "fix"].includes(child[field])) unsupported.push(`${childId}.${field}`);
+        if (child["layout-item-align-self"] !== undefined && !["start", "center", "end"].includes(child["layout-item-align-self"])) unsupported.push(`${childId}.layout-item-align-self`);
+        if (Object.values(child["layout-item-margin"] ?? {}).some(value => Number(value) !== 0)) unsupported.push(`${childId}.layout-item-margin`);
+        for (const field of ["layout-item-min-h", "layout-item-max-h", "layout-item-min-w", "layout-item-max-w"])
+          if (child[field] !== undefined) unsupported.push(`${childId}.${field}`);
+      }
+    }
+    if (unsupported.length) diagnostics.push({ code: "layout_projection_partial", nodeId: node.id, unsupportedFields: unsupported,
+      message: "Local projection does not compute these native layout fields; stored bounds are only a partial preview. App layout can differ. Do not treat geometry checks or PNG as complete layout validation." });
+  }
+  return diagnostics;
 }
 
 function reflowProjection(nodes, rootId) {
@@ -616,7 +821,12 @@ function reflowProjection(nodes, rootId) {
 }
 
 export function projectComponentVariant(product, variant, options = {}) {
-  const projected = projectNodes(variant.nodes, product, {
+  const sourceNodes = options.owner
+    ? Object.fromEntries(Object.entries(variant.nodes).map(([id, node]) => [
+        id, qualifyComponentAssetReferences(node, options.owner, product),
+      ]))
+    : variant.nodes;
+  const projected = projectNodes(sourceNodes, product, {
     ...options,
     context: resolveContext(product, options.foundation, options.context ?? {}),
     allowPreviewFallback: false,
@@ -649,6 +859,7 @@ export function projectScreen(product, screenId, options = {}) {
   reflowProjection(projected.nodes, presentation.rootId);
   return {
     context,
+    diagnostics: [...projected.staleInstances, ...layoutProjectionDiagnostics(projected.nodes)],
     fallbackUsed: projected.fallbackUsed,
     nodes: projected.nodes,
     presentation: { ...structuredClone(presentation), nodes: projected.nodes },
@@ -682,7 +893,8 @@ function projectComponentScenario(product, scenario, options) {
   if (!match.variant) {
     fail(
       "missing_variant",
-      `No exact variant exists for ${target.componentSet.id}`,
+      `No exact variant exists for ${target.componentSet.id} ` +
+        `${JSON.stringify(selection)}: ${variantMismatchText(target.componentSet, selection)}`,
       { componentId: target.componentSet.id, selection },
     );
   }
@@ -717,6 +929,7 @@ function projectComponentScenario(product, scenario, options) {
   }
   return {
     context: options.context,
+    diagnostics: [...projected.staleInstances, ...layoutProjectionDiagnostics(projected.nodes)],
     fallbackUsed: match.fallbackUsed || projected.fallbackUsed,
     nodes,
     presentationId: null,
@@ -767,15 +980,33 @@ export function projectScenario(product, scenarioId, options = {}) {
           context,
         });
   applyScenarioActions(projection, scenario);
-  const visibleNodeIds = Object.values(projection.nodes)
-    .filter((node) => node.visible !== false)
-    .map(({ id }) => id)
-    .sort();
+  // Expectations use the same canonical IDs accepted by put-scenario. Instance
+  // internals are generated projection IDs, not independently saved nodes.
+  let sourceNodes;
+  if (scenario.target.kind === "screen") {
+    const { screen } = screenById(product, scenario.target.screen.assetId);
+    sourceNodes = screen.presentations.find(({ id }) => id === projection.presentationId).nodes;
+  } else {
+    const target = componentTarget(product, options.foundation, options.libraries ?? [], scenario.target.component);
+    const selection = { ...scenario.target.variant };
+    for (const action of scenario.actions) if (action.type === "set-state") selection[action.axisId] = action.value;
+    sourceNodes = findComponentVariant(target.componentSet, selection, { allowPreviewFallback: options.allowPreviewFallback }).variant.nodes;
+  }
+  const visibleNodeIds = [];
+  const visit = (id) => {
+    const node = projection.nodes[id];
+    if (!node || node.visible === false) return;
+    if (Object.hasOwn(sourceNodes, id)) visibleNodeIds.push(id);
+    for (const childId of node.children ?? []) visit(childId);
+  };
+  visit(projection.rootId);
+  visibleNodeIds.sort();
   const expectedVisibleNodeIds = [...scenario.expectedVisibleNodeIds].sort();
   return {
     ...projection,
-    diagnostics:
-      JSON.stringify(visibleNodeIds) === JSON.stringify(expectedVisibleNodeIds)
+    diagnostics: [
+      ...(projection.diagnostics ?? []),
+      ...(JSON.stringify(visibleNodeIds) === JSON.stringify(expectedVisibleNodeIds)
         ? []
         : [
             {
@@ -784,7 +1015,8 @@ export function projectScenario(product, scenarioId, options = {}) {
               message: "Projected visibility differs from Scenario expectation",
               visibleNodeIds,
             },
-          ],
+          ]),
+    ],
     scenario: structuredClone(scenario),
     scenarioId,
   };

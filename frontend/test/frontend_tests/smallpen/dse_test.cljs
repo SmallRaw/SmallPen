@@ -120,6 +120,29 @@
                        {:type :reg-objects :page-id page-id :shapes [frame-id]}])))
     (t/is (nil? (policy/commit-block-reason (file-with {}) [change])))))
 
+(t/deftest ordinary-edits-do-not-decode-foundation-token-permissions
+  (let [foundation-id (str (uuid/next))
+        metadata (js/JSON.stringify (clj->js {:ids [foundation-id] :sets ["Foundation"]}))
+        file (assoc-in (file-with {}) [:data :plugin-data :smallpen "foundation-tokens"] metadata)
+        decoded (atom [])
+        parse-json (.-parse js/JSON)]
+    (set! (.-parse js/JSON) (fn [value]
+                              (swap! decoded conj value)
+                              (parse-json value)))
+    (try
+      (t/is (nil? (policy/commit-block-reason
+                   file [{:type :mod-obj :page-id page-id :id frame-id
+                          :operations [{:type :set :attr :opacity :val 0.5}]}])))
+      (t/is (empty? @decoded) "Shape edits do not read the Token permission table")
+      (t/is (= :foundation (policy/commit-block-reason
+                            file [{:type :set-token :token-id foundation-id}])))
+      (t/is (= :foundation (policy/commit-block-reason
+                            file [{:type :move-token-set :from-path ["Foundation"]
+                                   :to-path ["Local"]}])))
+      (t/is (nil? (policy/commit-block-reason
+                   file [{:type :set-token :token-id (str (uuid/next))}])))
+      (finally (set! (.-parse js/JSON) parse-json)))))
+
 (defn- file-with-source-rect
   "A screen page holding one projected rect that carries its source node
   identity, the way the projection names it."

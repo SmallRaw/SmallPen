@@ -1,6 +1,6 @@
 # SmallPen 产品规格
 
-更新：2026-09-23。目标行为，不代表全部已实现或已验收。
+更新：2026-10-02。目标行为，不代表全部已实现或已验收。
 
 ## Problem Statement
 
@@ -42,6 +42,11 @@ DS 的展示与编辑边界独立规定于 [DS 规格](DESIGN-SYSTEM-SPEC.md)。
 - 公开支持的属性（含 strokeWidth）可绑定、解析、清除并逆向恢复；多描边及类型错误不得部分成功。
 - 删除被引用 Token 拒绝提交，列出带 owner 的引用及完整可执行恢复命令，不只提示“解除引用”。
 - 字面值确认、匹配 Token 建议、显式解除绑定分开处理，不静默改成 literal。
+- 主题只有一种机制：Penpot token sets + themes（与 Penpot token 管理器、Tokens Studio、DTCG `$themes` 相同）。
+  Token `contextValues` 不再用于主题，旧包照常加载与渲染；Context 只留给 viewport、平台等非 Token 维度。
+  默认一个自包含 Package；Foundation + Product 为进阶布局，Product 在依赖上保存所选 Foundation 主题。
+  读取用 `--theme GROUP/NAME`（只读）；旧包用 `migrate-themes` 复制升级。契约见 [Token 主题](TOKEN-THEMES.md)。
+- 阴影统一为 `{offsetX, offsetY, blur, spread, color}`，blur 按 CSS 半径（σ = blur/2）；写入拒绝 `{x, y}` 并给出建议，旧包读取时兼容。
 
 ### P2 · 渲染、布局与文字
 

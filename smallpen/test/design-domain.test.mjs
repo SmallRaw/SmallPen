@@ -528,9 +528,9 @@ test("Default Design View, Discovery, semantic, wireframe, and Compare share one
   const wireframeCommand = scenarioDiscovery.entries.find(
     ({ id, kind }) => id === "wireframe" && kind === "view-format",
   ).copyableCommand;
-  assert.match(wireframeCommand, /--scenario scn_home_signed_in/);
-  assert.match(wireframeCommand, /--presentation pres_home_desktop/);
-  assert.match(wireframeCommand, /--screen scr_home/);
+  assert.match(wireframeCommand, /--scenario-id scn_home_signed_in/);
+  assert.match(wireframeCommand, /--presentation-id pres_home_desktop/);
+  assert.match(wireframeCommand, /--screen-id scr_home/);
   const mobileCommand = scenarioDiscovery.entries.find(
     ({ id, kind }) => id === "pres_home_mobile" && kind === "presentation",
   ).copyableCommand;

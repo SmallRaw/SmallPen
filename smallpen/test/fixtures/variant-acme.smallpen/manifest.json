@@ -1,0 +1,28 @@
+{
+  "defaultScreenId": "scr_home",
+  "entries": {
+    "assets": [],
+    "components": [
+      "components/components.json"
+    ],
+    "contexts": [
+      "contexts/contexts.json"
+    ],
+    "requirements": [
+      "requirements/product.json"
+    ],
+    "scenarios": [
+      "scenarios/product.json"
+    ],
+    "screens": [
+      "screens/first-design.json"
+    ],
+    "tokens": [
+      "tokens/tokens.json"
+    ]
+  },
+  "formatVersion": 1,
+  "name": "Acme",
+  "packageId": "pkg_acme",
+  "role": "foundation"
+}

@@ -30,6 +30,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
 
 function runCli(args) {
+  // Schema and full-value checks opt into stdout; fixed-file transport is tested separately.
+  if (
+    (args[0] === "schema" || args.includes("--full")) &&
+    !args.includes("--stdout")
+  )
+    args = [...args, "--stdout"];
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
       stdio: ["ignore", "pipe", "pipe"],
@@ -73,9 +79,7 @@ function componentClipboardNodes() {
       type: "COMPONENT_SET",
     },
     {
-      fillPaints: [
-        { color: { b: 0.8, g: 0.2, r: 0.4 }, type: "SOLID" },
-      ],
+      fillPaints: [{ color: { b: 0.8, g: 0.2, r: 0.4 }, type: "SOLID" }],
       guid: guid(1, 2),
       name: "State=Idle",
       parentIndex: { guid: guid(1, 1) },
@@ -100,7 +104,10 @@ function componentClipboardNodes() {
   ];
 }
 
-async function structuredDraft(nodes = componentClipboardNodes(), hash = "a".repeat(64)) {
+async function structuredDraft(
+  nodes = componentClipboardNodes(),
+  hash = "a".repeat(64),
+) {
   const model = createFigmaDraftValues({
     importedAt,
     inputHash: hash,
@@ -108,13 +115,19 @@ async function structuredDraft(nodes = componentClipboardNodes(), hash = "a".rep
     nodeChanges: nodes,
     packageId: "pkg_figma_draft",
   });
-  const snapshot = await loadPackageFromValues("/tmp/fixture.smallpen", model.values);
+  const snapshot = await loadPackageFromValues(
+    "/tmp/fixture.smallpen",
+    model.values,
+  );
   return { model, snapshot };
 }
 
 test("structured Figma Draft preserves components, instances, metadata, and losses", async () => {
   const { snapshot } = await structuredDraft();
-  assert.equal(snapshot.manifest.draft.provenance.sourceKind, "figma-structured");
+  assert.equal(
+    snapshot.manifest.draft.provenance.sourceKind,
+    "figma-structured",
+  );
   assert.equal(snapshot.manifest.draft.provenance.sourceFileId, "fixture");
   assert.equal(snapshot.domain.componentSets.size, 1);
   const component = [...snapshot.domain.componentSets.values()][0];
@@ -131,7 +144,9 @@ test("structured Figma Draft preserves components, instances, metadata, and loss
     },
   ]);
   assert.equal(
-    snapshot.manifest.draft.losses.filter(({ code }) => code === "figma_fill_unsupported").length,
+    snapshot.manifest.draft.losses.filter(
+      ({ code }) => code === "figma_fill_unsupported",
+    ).length,
     1,
   );
 });
@@ -141,7 +156,10 @@ test("Draft diff is independent and compile emits only selected current-revision
   const changedNodes = componentClipboardNodes();
   changedNodes[2].transform = matrix(28, 20);
   const after = await structuredDraft(changedNodes, "b".repeat(64));
-  const diff = diffDrafts(draftFromSnapshot(before.snapshot), draftFromSnapshot(after.snapshot));
+  const diff = diffDrafts(
+    draftFromSnapshot(before.snapshot),
+    draftFromSnapshot(after.snapshot),
+  );
   assert.ok(diff.semantic.length > 0);
 
   const batch = compileDraftMerge(
@@ -178,33 +196,87 @@ function minimalClipboardHtml() {
     definitions: [
       {
         fields: [
-          { isArray: false, isDeprecated: false, name: "sessionID", type: "uint", value: 0 },
-          { isArray: false, isDeprecated: false, name: "localID", type: "uint", value: 0 },
+          {
+            isArray: false,
+            isDeprecated: false,
+            name: "sessionID",
+            type: "uint",
+            value: 0,
+          },
+          {
+            isArray: false,
+            isDeprecated: false,
+            name: "localID",
+            type: "uint",
+            value: 0,
+          },
         ],
         kind: "STRUCT",
         name: "GUID",
       },
       {
         fields: [
-          { isArray: false, isDeprecated: false, name: "x", type: "float", value: 0 },
-          { isArray: false, isDeprecated: false, name: "y", type: "float", value: 0 },
+          {
+            isArray: false,
+            isDeprecated: false,
+            name: "x",
+            type: "float",
+            value: 0,
+          },
+          {
+            isArray: false,
+            isDeprecated: false,
+            name: "y",
+            type: "float",
+            value: 0,
+          },
         ],
         kind: "STRUCT",
         name: "Vector",
       },
       {
         fields: [
-          { isArray: false, isDeprecated: false, name: "guid", type: "GUID", value: 1 },
-          { isArray: false, isDeprecated: false, name: "type", type: "string", value: 2 },
-          { isArray: false, isDeprecated: false, name: "name", type: "string", value: 3 },
-          { isArray: false, isDeprecated: false, name: "size", type: "Vector", value: 4 },
+          {
+            isArray: false,
+            isDeprecated: false,
+            name: "guid",
+            type: "GUID",
+            value: 1,
+          },
+          {
+            isArray: false,
+            isDeprecated: false,
+            name: "type",
+            type: "string",
+            value: 2,
+          },
+          {
+            isArray: false,
+            isDeprecated: false,
+            name: "name",
+            type: "string",
+            value: 3,
+          },
+          {
+            isArray: false,
+            isDeprecated: false,
+            name: "size",
+            type: "Vector",
+            value: 4,
+          },
         ],
         kind: "MESSAGE",
         name: "NodeChange",
       },
       {
         fields: [
-          { isArray: true, isDeprecated: false, name: "nodeChanges", type: "NodeChange", value: 1 },
+          {
+            isArray: true,
+            isDeprecated: false,
+            name: "nodeChanges",
+            type: "NodeChange",
+            value: 1,
+          },
         ],
         kind: "MESSAGE",
         name: "Message",
@@ -217,7 +289,12 @@ function minimalClipboardHtml() {
   const dataBytes = deflateSync(
     compiled.encodeMessage({
       nodeChanges: [
-        { guid: guid(1, 9), name: "Decoded Frame", size: { x: 320, y: 200 }, type: "FRAME" },
+        {
+          guid: guid(1, 9),
+          name: "Decoded Frame",
+          size: { x: 320, y: 200 },
+          type: "FRAME",
+        },
       ],
     }),
   );
@@ -232,10 +309,78 @@ function minimalClipboardHtml() {
   view.setUint32(dataOffset, dataBytes.byteLength, true);
   payload.set(dataBytes, dataOffset + 4);
   const meta = Buffer.from(
-    JSON.stringify({ dataType: "NODE_CHANGES", fileKey: "decoded", pasteID: 7 }),
+    JSON.stringify({
+      dataType: "NODE_CHANGES",
+      fileKey: "decoded",
+      pasteID: 7,
+    }),
   ).toString("base64");
   return `<meta>(figmeta)${meta}(/figmeta)</meta><div>(figma)${Buffer.from(payload).toString("base64")}(/figma)</div>`;
 }
+
+test("Figma line heights become multiples of the font size", async () => {
+  const text = (localID, lineHeight) => ({
+    fontName: { family: "Source Sans Pro", style: "Regular" },
+    fontSize: 20,
+    guid: guid(2, localID),
+    name: `Text ${localID}`,
+    parentIndex: { guid: guid(0, 1) },
+    size: { x: 200, y: 40 },
+    textData: { characters: "Line" },
+    transform: matrix(0, localID * 50),
+    type: "TEXT",
+    ...(lineHeight ? { lineHeight } : {}),
+  });
+  const { snapshot } = await structuredDraft(
+    [
+      text(1, { units: "PIXELS", value: 30 }),
+      text(2, { units: "PERCENT", value: 140 }),
+      text(3, { units: "RAW", value: 1.6 }),
+      text(4, { unit: "AUTO" }),
+      text(5),
+      text(6, { unit: "PIXELS", value: 16 }),
+    ],
+    "b".repeat(64),
+  );
+  const nodes =
+    snapshot.entries["screens/imported.json"].presentations[0].nodes;
+  const lineHeights = [1, 2, 3, 4, 5, 6].map(
+    (localID) => nodes[`node_figma_2_${localID}`].textStyle.lineHeight,
+  );
+  assert.deepEqual(lineHeights, [1.5, 1.4, 1.6, 1.2, 1.2, 0.8]);
+});
+
+test("Figma letter spacing becomes px of the font size", async () => {
+  const text = (localID, letterSpacing) => ({
+    fontName: { family: "Source Sans Pro", style: "Regular" },
+    fontSize: 20,
+    guid: guid(3, localID),
+    name: `Text ${localID}`,
+    parentIndex: { guid: guid(0, 1) },
+    size: { x: 200, y: 40 },
+    textData: { characters: "Line" },
+    transform: matrix(0, localID * 50),
+    type: "TEXT",
+    ...(letterSpacing ? { letterSpacing } : {}),
+  });
+  const { snapshot } = await structuredDraft(
+    [
+      text(1, { units: "PERCENT", value: 5 }),
+      text(2, { units: "PIXELS", value: 1.5 }),
+      text(3, { unit: "PERCENT", value: -2 }),
+      text(4, { value: 7 }),
+      text(5, { units: "RAW", value: 3 }),
+      text(6),
+    ],
+    "c".repeat(64),
+  );
+  const nodes =
+    snapshot.entries["screens/imported.json"].presentations[0].nodes;
+  const spacings = [1, 2, 3, 4, 5, 6].map(
+    (localID) => nodes[`node_figma_3_${localID}`].textStyle.letterSpacing,
+  );
+  assert.deepEqual(spacings, [1, 1.5, -0.4, 0, 0, 0]);
+});
 
 test("native Figma clipboard markers decode their embedded Kiwi schema", async () => {
   const decoded = await decodeFigmaClipboard(minimalClipboardHtml());
@@ -248,9 +393,7 @@ test("hostile Figma parent links fail typed instead of exhausting the stack", ()
   const frame = (localID, parent, type = "FRAME") => ({
     guid: guid(1, localID),
     name: `Node ${localID}`,
-    ...(parent === undefined
-      ? {}
-      : { parentIndex: { guid: guid(1, parent) } }),
+    ...(parent === undefined ? {} : { parentIndex: { guid: guid(1, parent) } }),
     size: { x: 10, y: 10 },
     transform: matrix(0, 0),
     type,
@@ -296,11 +439,15 @@ test("PNG fallback writes one validated independent Draft and never overwrites",
   assert.equal(result.provenance.sourceKind, "png");
   assert.equal(result.losses[0].code, "flat_media_only");
   const loaded = await openPackage(output);
-  const node = loaded.entries["screens/imported.json"].presentations[0].nodes
-    .node_flat_import;
+  const node =
+    loaded.entries["screens/imported.json"].presentations[0].nodes
+      .node_flat_import;
   assert.equal(node.type, "IMAGE");
   assert.equal(loaded.blobs.size, 1);
-  assert.equal((await readFile(join(output, [...loaded.blobs.keys()][0]))).byteLength, onePixelPng.byteLength);
+  assert.equal(
+    (await readFile(join(output, [...loaded.blobs.keys()][0]))).byteLength,
+    onePixelPng.byteLength,
+  );
   await assert.rejects(
     importDraft({
       bytes: onePixelPng,
@@ -323,6 +470,7 @@ test("public CLI imports, inspects, diffs, and compiles independent Draft files"
   await writeFile(input, onePixelPng);
   for (const output of [first, second]) {
     const imported = await runCli([
+      "advanced",
       "import-draft",
       output,
       "--kind",
@@ -336,11 +484,21 @@ test("public CLI imports, inspects, diffs, and compiles independent Draft files"
     assert.equal(imported.code, 0, `${imported.stderr}\n${imported.stdout}`);
     assert.equal(JSON.parse(imported.stdout).provenance.sourceKind, "png");
   }
-  const inspected = await runCli(["inspect", first, "--json"]);
+  const inspected = await runCli(["project", "show", first, "--full", "--json"]);
   assert.equal(inspected.code, 0, inspected.stderr);
-  assert.equal(JSON.parse(inspected.stdout).draft.losses[0].code, "flat_media_only");
+  assert.equal(
+    JSON.parse(inspected.stdout).draft.losses[0].code,
+    "flat_media_only",
+  );
 
-  const diffed = await runCli(["draft-diff", first, "--after", second, "--json"]);
+  const diffed = await runCli([
+    "advanced",
+    "draft-diff",
+    first,
+    "--after",
+    second,
+    "--json",
+  ]);
   assert.equal(diffed.code, 0, diffed.stderr);
   assert.deepEqual(JSON.parse(diffed.stdout), { losses: [], semantic: [] });
 
@@ -355,6 +513,7 @@ test("public CLI imports, inspects, diffs, and compiles independent Draft files"
     ]),
   );
   const compiled = await runCli([
+    "advanced",
     "draft-compile",
     first,
     "--draft",

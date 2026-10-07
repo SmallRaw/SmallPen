@@ -20,7 +20,9 @@
    [beicon.v2.core :as rx]
    [cljs.test :as t]
    [clojure.string :as str]
+   [frontend-tests.helpers.async :as async]
    [frontend-tests.helpers.http :as http]
+   [frontend-tests.helpers.mock :as mock]
    [frontend-tests.smallpen.projection-test :as fixture]
    [potok.v2.core :as ptk]))
 
@@ -318,6 +320,140 @@
                                     (unchecked-get % "changes"))
                              @bodies)))
               (finish)))))))
+
+;; Scenario: opening a page makes the renderer measure every text and save
+;; the result as `position-data`. The Package stores no text layout, so a
+;; save holding only measurements sends nothing; a real text edit that
+;; carries its measurement along is still sent.
+(t/deftest text-layout-measurements-are-not-sent
+  (t/async done
+    (let [restore    (enter-smallpen! {:file-id "file-1" :revision "rev-local"})
+          bodies     (atom [])
+          prev-fetch (http/install-fetch-mock!
+                      (fn [_url opts]
+                        (swap! bodies conj (js/JSON.parse (.-body opts)))
+                        (js/Promise.resolve
+                         (json-response 409 {:error {:code "stale_revision"
+                                                     :message "stale"}}))))
+          finish     (fn []
+                       (http/restore-fetch! prev-fetch)
+                       (restore)
+                       (done))
+          measured   {:type :set :attr :position-data :val [{:text "Hi"}]
+                      :ignore-geometry true :ignore-touched true}
+          layout     {:type :mod-obj :id (uuid/next) :page-id (uuid/next)
+                      :operations [measured]}]
+      (->> (#'smallpen/commit-workspace
+            {:changes [layout layout] :commit-id (uuid/next) :revn 2})
+           (rx/subs!
+            (fn [ack]
+              (t/is (= {:revision "rev-local" :revn 2} ack))
+              (t/is (empty? @bodies) "a measurement-only save sends nothing"))))
+      (->> (#'smallpen/commit-workspace
+            {:changes [layout
+                       (assoc layout :operations
+                              [{:type :set :attr :content :val {}} measured])]
+             :commit-id (uuid/next)
+             :revn 3})
+           (rx/subs!
+            (fn [_]
+              (t/is false "the mocked Background rejects every save")
+              (finish))
+            (fn [_]
+              (t/is (= [[["content" "position-data"]]]
+                       (mapv #(mapv (fn [change]
+                                      (mapv (fn [op] (unchecked-get op "attr"))
+                                            (unchecked-get change "operations")))
+                                    (unchecked-get % "changes"))
+                             @bodies)))
+              (finish)))))))
+
+;; Scenario: a theme switch on a screen page. Token bindings resolve in the
+;; Background, so the saved selection re-projects the open file wherever
+;; the user is, not only on the generated Design System page.
+(t/deftest a-saved-theme-switch-re-projects-the-open-file
+  (t/async done
+    (let [restore    (enter-smallpen! {:file-id "file-1" :revision "rev-local"})
+          emitted    (atom [])
+          prev-emit  st/async-emit!
+          prev-fetch (http/install-fetch-mock!
+                      (fn [_url _opts]
+                        (js/Promise.resolve
+                         (json-response 200 {:revision "rev-dark"
+                                             :operationTypes ["set-active-token-themes"]}))))
+          finish     (fn []
+                       (set! st/async-emit! prev-emit)
+                       (http/restore-fetch! prev-fetch)
+                       (restore)
+                       (done))]
+      (set! st/async-emit! (fn [& events] (swap! emitted into events)))
+      (->> (#'smallpen/commit-workspace
+            {:changes [{:type :set-tokens-status
+                        :theme-ids [(uuid/next)]
+                        :set-ids []}]
+             :commit-id (uuid/next)
+             :revn 1})
+           (rx/subs!
+            (fn [_]
+              (t/is (some #(= ::smallpen/reproject-generated-page (ptk/type %))
+                          @emitted))
+              (finish))
+            (fn [cause]
+              (t/is false (str "the save must succeed: " (ex-message cause)))
+              (finish)))))))
+
+(t/deftest save-refreshes-preserve-the-viewport-and-older-backgrounds
+  (doseq [[structural? generated? operations expected]
+          [[false true ["put-component-set" "replace-token-library"] {:recenter? false}]
+           [true true ["update-component-node" "set-token-value"] {:recenter? false}]
+           [true true ["update-component-node"] {}]
+           [true true [] nil]
+           [true true nil {}]
+           [true false ["update-node"] nil]
+           [false false ["set-active-token-themes"] {:recenter? false}]]]
+    (t/is (= expected (#'smallpen/reprojection-options structural? generated? operations)))))
+
+(t/deftest ^:async saved-batches-refresh-the-generated-file-only-once
+  (doseq [{:keys [label operations changes expected-count]}
+          [{:label "Component and Token edits share one projection"
+            :operations ["put-component-set" "replace-token-library"]
+            :changes [{:type :mod-obj :id (uuid/next) :operations []}]
+            :expected-count 1}
+           {:label "Object registration without canonical operations leaves the file in place"
+            :operations []
+            :changes [{:type :reg-objects :shapes []}]
+            :expected-count 0}
+           {:label "Geometry edits still resync other component occurrences"
+            :operations ["update-component-node"]
+            :changes [{:type :mod-obj :id (uuid/next) :operations []}
+                      {:type :reg-objects :shapes []}]
+            :expected-count 1}]]
+    (let [restore (enter-smallpen! {:file-id (str fixture/file-id) :revision "rev-local"})
+          emitted (atom [])
+          state {:current-file-id fixture/file-id
+                 :current-page-id fixture/page-id
+                 :files {fixture/file-id
+                         {:data {:pages-index
+                                 {fixture/page-id
+                                  {:plugin-data {:smallpen {"components-page" true}}}}}}}}]
+      (try
+        (await
+         (mock/with-mocks*
+           {st/state (atom state)
+            st/async-emit! (fn [& events] (swap! emitted into events))
+            js/fetch (fn [_url _opts]
+                       (js/Promise.resolve
+                        (json-response 200 {:revision "rev-saved"
+                                            :operationTypes operations})))}
+           (await (async/observe
+                   (#'smallpen/commit-workspace
+                    {:changes (mapv #(assoc % :page-id fixture/page-id) changes)
+                     :commit-id (uuid/next) :revn 1})))
+           (t/is (= expected-count
+                    (count (filter #(= ::smallpen/reproject-generated-page (ptk/type %))
+                                   @emitted)))
+                 label)))
+        (finally (restore))))))
 
 ;; Scenario: the Background refuses one change (422). Penpot's persistence
 ;; would park in :error and never send a later edit, so the refusal is
@@ -896,6 +1032,50 @@
     (t/is (= (rest changes) (rest result)))
     (t/is (= {"x" 500 "y" -12.5}
              (get (#'smallpen/json-value (first result)) "smallpen-layout-offset")))))
+
+;; Scenario: a layer added inside a variant main on the Components page. It
+;; has no offset of its own yet; it is drawn with its main's tree, so its
+;; add-obj carries that offset, and the main's current geometry (mains move
+;; freely there without saving their place).
+(t/deftest components-page-additions-carry-their-tree-offset
+  (let [file-id  (uuid/next)
+        page-id  (uuid/next)
+        main-id  (uuid/next)
+        layer-id (uuid/next)
+        state    {:current-file-id file-id
+                  :files {file-id
+                          {:data
+                           {:pages-index
+                            {page-id
+                             {:plugin-data {:smallpen {"components-page" true}}
+                              :objects
+                              {main-id {:id main-id
+                                        :parent-id uuid/zero
+                                        :x 40 :y 376 :width 96 :height 32
+                                        :plugin-data {:smallpen {"layout-offset" "30 366"}}}
+                               layer-id {:id layer-id :parent-id main-id}}}}}}}}
+        result   (smallpen/with-layout-offsets
+                   state
+                   [{:type :add-obj :id layer-id :page-id page-id
+                     :parent-id main-id :obj {}}])]
+    (t/is (= {:x 30 :y 366} (:smallpen-layout-offset (first result))))
+    (t/is (= {:id main-id
+              :geometry {:x 40 :y 376 :width 96 :height 32}
+              :child {}}
+             (:smallpen-parent (first result))))))
+
+;; Scenario: a variant edit the Package cannot hold is refused; the toast
+;; explains it in the user's language, other refusals keep their message.
+(t/deftest variant-refusals-get-a-translated-reason
+  (let [refusal (fn [code message]
+                  (#'smallpen/rejection-reason
+                   (ex-info message {:type :smallpen-backend :status 422 :code code})))]
+    (t/is (= (tr "smallpen.variants.duplicate-selection")
+             (refusal :variant_duplicate_selection "Two variants of Button ...")))
+    (t/is (= (tr "smallpen.variants.in-use")
+             (refusal :variant_in_use "Chip is still used by ...")))
+    (t/is (= "Penpot runtime page is not mapped"
+             (refusal :unknown_runtime_page "Penpot runtime page is not mapped")))))
 
 ;; Scenario: a copy dropped on a screen inherited its main's layout offset.
 ;; Outside a generated page the offset means nothing; sending it shifted the

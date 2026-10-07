@@ -1,16 +1,30 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { spawn } from "node:child_process";
+import { openPackage } from "@smallpen/local-package";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen-check.cjs");
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
 
 function runCli(args) {
+  // Schema and full-value checks opt into stdout; fixed-file transport is tested separately.
+  if (
+    (args[0] === "schema" || args.includes("--full")) &&
+    !args.includes("--stdout")
+  )
+    args = [...args, "--stdout"];
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
       stdio: ["ignore", "pipe", "pipe"],
@@ -55,6 +69,11 @@ async function workspaceFixture() {
   return { foundationPath, productPath, root };
 }
 
+// Stored state is read directly; the CLI no longer reads by ID.
+async function revisionOf(path) {
+  return (await openPackage(path)).revision;
+}
+
 async function clonePackage(path, name) {
   const root = await mkdtemp(join(tmpdir(), "smallpen-cli-clone-"));
   const target = join(root, name);
@@ -63,22 +82,26 @@ async function clonePackage(path, name) {
 }
 
 test("stale writes return executable public recovery commands (SP-037)", async () => {
-  const packagePath = await clonePackage(fixture, `stale-${Date.now()}.smallpen`);
-  const read = await runCli(["read", packagePath, "--json"]);
-  const { revision } = JSON.parse(read.stdout);
+  const packagePath = await clonePackage(
+    fixture,
+    `stale-${Date.now()}.smallpen`,
+  );
   const batch = {
     baseRevision: "0".repeat(64),
     batchId: "batch_stale_cli",
-    operations: [{
-      changes: { name: "Renamed by stale intent" },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    operations: [
+      {
+        changes: { name: "Renamed by stale intent" },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
+      },
+    ],
   };
   const batchPath = `${packagePath}.stale-batch.json`;
   await writeJson(batchPath, batch);
   const result = await runCli([
+    "advanced",
     "apply",
     packagePath,
     "--batch",
@@ -89,43 +112,62 @@ test("stale writes return executable public recovery commands (SP-037)", async (
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.error.code, "stale_revision");
   assert.ok(Array.isArray(payload.error.details.commands));
-  const [readStep, replayStep] = payload.error.details.commands;
-  assert.equal(readStep.argv[0], "read");
-  assert.equal(readStep.argv[1], packagePath);
-  assert.equal(replayStep.argv[0], "apply");
-  assert.equal(replayStep.argv[2], "--batch");
-  assert.ok(!replayStep.argv.includes("--batch-id"), "apply has no --batch-id option");
+  const [viewStep, replayStep] = payload.error.details.commands;
+  assert.deepEqual(viewStep.argv, ["view", packagePath, "--json"]);
+  const viewed = await runCli(viewStep.argv);
+  assert.equal(viewed.code, 0, viewed.stdout);
+  assert.equal(
+    JSON.parse(viewed.stdout).revision,
+    payload.error.details.actualRevision,
+  );
+  assert.deepEqual(replayStep.argv.slice(0, 4), [
+    "advanced",
+    "apply",
+    packagePath,
+    "--batch",
+  ]);
+  assert.ok(
+    !replayStep.argv.includes("--batch-id"),
+    "apply has no --batch-id option",
+  );
   assert.match(replayStep.explanation, /baseRevision/);
   assert.match(replayStep.explanation, /batchId/);
-  assert.ok(
-    Array.isArray(payload.error.details.remainingIntent),
-    "remaining intent is echoed for the rebuild",
+  assert.equal(payload.error.details.remainingIntent, undefined);
+  assert.equal(
+    payload.error.details.remainingIntentCount,
+    batch.operations.length,
   );
   assert.match(payload.error.details.recovery, /atomically/);
 });
 
 test("live token removal errors carry executable recovery steps (SP-002)", async () => {
-  const packagePath = await clonePackage(fixture, `token-live-${Date.now()}.smallpen`);
+  const packagePath = await clonePackage(
+    fixture,
+    `token-live-${Date.now()}.smallpen`,
+  );
   // Bind a token, then attempt to remove it while the binding is live.
   const tokenBatchPath = `${packagePath}.token.json`;
   await writeJson(tokenBatchPath, {
-    baseRevision: JSON.parse((await runCli(["read", packagePath, "--json"])).stdout).revision,
+    baseRevision: await revisionOf(packagePath),
     batchId: "batch_token_create",
-    operations: [{
-      definition: {
-        $extensions: {
-          smallpen: { id: "tok_spacing_local", visibility: "public" },
+    operations: [
+      {
+        definition: {
+          $extensions: {
+            smallpen: { id: "tok_spacing_local", visibility: "public" },
+          },
+          $type: "number",
+          $value: 16,
         },
-        $type: "number",
-        $value: 16,
+        filePath: "tokens/local.json",
+        path: "space.tight",
+        tokenId: "tok_spacing_local",
+        type: "put-token",
       },
-      filePath: "tokens/local.json",
-      path: "space.tight",
-      tokenId: "tok_spacing_local",
-      type: "put-token",
-    }],
+    ],
   });
   const created = await runCli([
+    "advanced",
     "apply",
     packagePath,
     "--batch",
@@ -135,25 +177,35 @@ test("live token removal errors carry executable recovery steps (SP-002)", async
   assert.equal(created.code, 0, created.stdout);
   const bindBatchPath = `${packagePath}.bind.json`;
   await writeJson(bindBatchPath, {
-    baseRevision: JSON.parse((await runCli(["read", packagePath, "--json"])).stdout).revision,
+    baseRevision: await revisionOf(packagePath),
     batchId: "batch_token_bind",
-    operations: [{
-      binding: { assetId: "tok_spacing_local", packageId: "pkg_roundtrip" },
-      field: "itemSpacing",
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "set-token-binding",
-    }],
+    operations: [
+      {
+        binding: { assetId: "tok_spacing_local", packageId: "pkg_roundtrip" },
+        field: "itemSpacing",
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "set-token-binding",
+      },
+    ],
   });
-  const bound = await runCli(["apply", packagePath, "--batch", bindBatchPath, "--json"]);
+  const bound = await runCli([
+    "advanced",
+    "apply",
+    packagePath,
+    "--batch",
+    bindBatchPath,
+    "--json",
+  ]);
   assert.equal(bound.code, 0, bound.stdout);
   const removeBatchPath = `${packagePath}.remove.json`;
   await writeJson(removeBatchPath, {
-    baseRevision: JSON.parse((await runCli(["read", packagePath, "--json"])).stdout).revision,
+    baseRevision: await revisionOf(packagePath),
     batchId: "batch_token_remove",
     operations: [{ tokenId: "tok_spacing_local", type: "remove-token" }],
   });
   const removed = await runCli([
+    "advanced",
     "apply",
     packagePath,
     "--batch",
@@ -164,51 +216,91 @@ test("live token removal errors carry executable recovery steps (SP-002)", async
   const payload = JSON.parse(removed.stdout);
   assert.equal(payload.error.code, "missing_local_asset");
   assert.ok(Array.isArray(payload.error.details.commands));
-  const impactStep = payload.error.details.commands[0];
-  assert.equal(impactStep.argv[0], "impact");
-  assert.equal(impactStep.argv[3], "tok_spacing_local");
-  assert.match(payload.error.details.recovery, /clear-token-binding|referenced/);
+  assert.match(
+    payload.error.details.recovery,
+    /clear-token-binding|referenced/,
+  );
   assert.ok(Array.isArray(payload.error.details.nextOperations));
+  const listStep = payload.error.details.commands[0];
+  assert.deepEqual(listStep.argv, [
+    "token",
+    "impact",
+    packagePath,
+    "--path",
+    "space.tight",
+    "--json",
+  ]);
+  assert.match(listStep.explanation, /still binds this token/);
+  // The step promises to list the elements that still use the Token; running
+  // it must name the bound element.
+  const listed = await runCli(listStep.argv);
+  assert.equal(listed.code, 0, listed.stdout);
+  assert.match(
+    listed.stdout,
+    /Editable Rectangle|node_rectangle/,
+    `the recovery listing names the live binding: ${listed.stdout}`,
+  );
 });
 
 test("unmatched raw values expose a documented confirmation flag (SP-003)", async () => {
-  const packagePath = await clonePackage(fixture, `confirm-${Date.now()}.smallpen`);
-  const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const packagePath = await clonePackage(
+    fixture,
+    `confirm-${Date.now()}.smallpen`,
+  );
+  const read = await openPackage(packagePath);
   const tokenBatchPath = `${packagePath}.tokens.json`;
   await writeJson(tokenBatchPath, {
     baseRevision: read.revision,
     batchId: "batch_seed_tokens",
-    operations: [{
-      definition: {
-        $extensions: {
-          smallpen: { id: "tok_seed_brand", visibility: "public" },
+    operations: [
+      {
+        definition: {
+          $extensions: {
+            smallpen: { id: "tok_seed_brand", visibility: "public" },
+          },
+          $type: "color",
+          $value: "#6750a4",
         },
-        $type: "color",
-        $value: "#6750a4",
+        filePath: "tokens/design.json",
+        path: "color.brand",
+        tokenId: "tok_seed_brand",
+        type: "put-token",
       },
-      filePath: "tokens/design.json",
-      path: "color.brand",
-      tokenId: "tok_seed_brand",
-      type: "put-token",
-    }],
+    ],
   });
-  const seeded = await runCli(["apply", packagePath, "--batch", tokenBatchPath, "--json"]);
+  const seeded = await runCli([
+    "advanced",
+    "apply",
+    packagePath,
+    "--batch",
+    tokenBatchPath,
+    "--json",
+  ]);
   assert.equal(seeded.code, 0, seeded.stdout);
-  const rebased = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const rebased = await openPackage(packagePath);
   const batchPath = `${packagePath}.raw.json`;
   await writeJson(batchPath, {
     baseRevision: rebased.revision,
     batchId: "batch_raw_color",
-    operations: [{
-      changes: {
-        fills: [{ color: "#0f766e", type: "solid" }],
+    operations: [
+      {
+        changes: {
+          fills: [{ color: "#0f766e", type: "solid" }],
+        },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
       },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    ],
   });
-  const plain = await runCli(["apply", packagePath, "--batch", batchPath, "--json"]);
+  const plain = await runCli([
+    "advanced",
+    "apply",
+    packagePath,
+    "--batch",
+    batchPath,
+    "--json",
+  ]);
   assert.equal(plain.code, 0, plain.stdout);
   const plainPayload = JSON.parse(plain.stdout);
   const unmatched = (plainPayload.warnings ?? []).filter(
@@ -217,7 +309,7 @@ test("unmatched raw values expose a documented confirmation flag (SP-003)", asyn
   assert.ok(unmatched.length > 0, "raw write surfaces the unmatched warning");
   assert.ok(unmatched.every((warning) => warning.confirmed === undefined));
 
-  const help = await runCli(["apply", "--help"]);
+  const help = await runCli(["advanced", "apply", "--help", "--full"]);
   assert.match(help.stdout, /--confirm-unmatched/);
   assert.match(help.stdout, /design_token_value_unmatched/);
 });
@@ -225,10 +317,13 @@ test("unmatched raw values expose a documented confirmation flag (SP-003)", asyn
 test("catalog attributes contributing revisions and workspace warnings (SP-021/SP-022)", async () => {
   const { productPath } = await workspaceFixture();
   const catalog = JSON.parse(
-    (await runCli(["catalog", productPath, "--json"])).stdout,
+    (await runCli(["component", "list", productPath, "--json"])).stdout,
   );
   assert.equal(catalog.productRevision, catalog.revision);
-  assert.ok(catalog.foundationRevision, "catalog carries the Foundation revision");
+  assert.ok(
+    catalog.foundationRevision,
+    "catalog carries the Foundation revision",
+  );
   assert.ok(Array.isArray(catalog.warnings));
 
   // A Foundation outside the workspace root is valid but warned about.
@@ -236,14 +331,18 @@ test("catalog attributes contributing revisions and workspace warnings (SP-021/S
   const outsidePath = join(outsideRoot, "outside.smallpen");
   await cp(fixture, outsidePath, { recursive: true });
   const outsideManifestPath = join(outsidePath, "manifest.json");
-  const outsideManifest = JSON.parse(await readFile(outsideManifestPath, "utf8"));
+  const outsideManifest = JSON.parse(
+    await readFile(outsideManifestPath, "utf8"),
+  );
   outsideManifest.name = "Foundation";
   outsideManifest.packageId = "pkg_foundation";
   await writeJson(outsideManifestPath, outsideManifest);
   const linkPath = join(dirname(productPath), "linked.smallpen");
   await symlink(outsidePath, linkPath);
   const productManifestPath = join(productPath, "manifest.json");
-  const productManifest = JSON.parse(await readFile(productManifestPath, "utf8"));
+  const productManifest = JSON.parse(
+    await readFile(productManifestPath, "utf8"),
+  );
   productManifest.dependencies[0].path = "linked.smallpen";
   await writeJson(productManifestPath, productManifest);
   const validated = JSON.parse(
@@ -251,7 +350,9 @@ test("catalog attributes contributing revisions and workspace warnings (SP-021/S
   );
   assert.equal(validated.status, "valid");
   assert.ok(
-    validated.warnings.some((warning) => warning.code === "external_foundation_path"),
+    validated.warnings.some(
+      (warning) => warning.code === "external_foundation_path",
+    ),
     "external Foundation path is surfaced as a warning",
   );
 });
@@ -269,18 +370,22 @@ test("repair conflict listings carry executable choice commands (SP-038)", async
     activeSetIds: ["tset_foundation"],
     activeThemeIds: [],
     id: "tlib_foundation",
-    sets: [{
-      description: "Foundation",
-      id: "tset_foundation",
-      name: "Foundation",
-      tokens: [{
-        description: "Brand",
-        id: "tok_foundation_brand",
-        name: "color.brand",
-        type: "color",
-        value: "#6750a4",
-      }],
-    }],
+    sets: [
+      {
+        description: "Foundation",
+        id: "tset_foundation",
+        name: "Foundation",
+        tokens: [
+          {
+            description: "Brand",
+            id: "tok_foundation_brand",
+            name: "color.brand",
+            type: "color",
+            value: "#6750a4",
+          },
+        ],
+      },
+    ],
     themes: [],
   };
   await writeJson(join(foundationPath, "tokens/design.json"), tokenLibrary);
@@ -294,7 +399,7 @@ test("repair conflict listings carry executable choice commands (SP-038)", async
   await writeJson(join(foundationPath, "tokens/design.json"), tokenLibrary);
 
   const listed = JSON.parse(
-    (await runCli(["repair", productPath, "--json"])).stdout,
+    (await runCli(["project", "repair", productPath, "--json"])).stdout,
   );
   assert.equal(listed.status, "repair");
   assert.ok(listed.conflicts.length > 0);
@@ -306,7 +411,10 @@ test("repair conflict listings carry executable choice commands (SP-038)", async
       assert.ok(choice.command.argv.includes("--action"));
       assert.ok(choice.command.argv.includes("--json"));
       if (choice.action === "recreate-product-asset") {
-        assert.equal(choice.command.argv[choice.command.argv.indexOf("--asset-kind") + 1], "token");
+        assert.equal(
+          choice.command.argv[choice.command.argv.indexOf("--asset-kind") + 1],
+          "token",
+        );
       }
     }
   }
@@ -322,8 +430,13 @@ test("the public launcher gates Node version before ESM instantiation (SP-050)",
   // The public launcher passes through to the CLI on the current runtime.
   const result = await runCli(["version"]);
   assert.equal(result.code, 0);
-  const metadata = JSON.parse(await readFile(join(here, "..", "apps", "cli", "package.json"), "utf8"));
-  assert.equal(result.stdout.trim(), metadata.version);
+  const metadata = JSON.parse(
+    await readFile(join(here, "..", "apps", "cli", "package.json"), "utf8"),
+  );
+  assert.deepEqual(JSON.parse(result.stdout), {
+    name: metadata.name,
+    version: metadata.version,
+  });
 });
 
 async function componentWorkspace() {
@@ -335,35 +448,41 @@ async function componentWorkspace() {
   await writeJson(join(foundationPath, "manifest.json"), foundationManifest);
   await mkdir(join(foundationPath, "components"), { recursive: true });
   await writeJson(join(foundationPath, "components/shared.json"), {
-    componentSets: [{
-      axes: [{
-        domain: ["idle"],
-        id: "axis_state",
-        name: "State",
-        role: "state",
-      }],
-      id: "cmp_shared_button",
-      name: "Shared Button",
-      variants: [{
-        id: "var_shared_idle",
-        nodes: {
-          node_shared_root: {
-            children: [],
-            fills: [{ color: "#2563eb", type: "solid" }],
-            height: 40,
-            id: "node_shared_root",
-            name: "Shared Button",
-            type: "COMPONENT",
-            width: 120,
-            x: 0,
-            y: 0,
+    componentSets: [
+      {
+        axes: [
+          {
+            domain: ["idle"],
+            id: "axis_state",
+            name: "State",
+            role: "state",
           },
-        },
-        rootId: "node_shared_root",
-        selection: { axis_state: "idle" },
-      }],
-      visibility: "public",
-    }],
+        ],
+        id: "cmp_shared_button",
+        name: "Shared Button",
+        variants: [
+          {
+            id: "var_shared_idle",
+            nodes: {
+              node_shared_root: {
+                children: [],
+                fills: [{ color: "#2563eb", type: "solid" }],
+                height: 40,
+                id: "node_shared_root",
+                name: "Shared Button",
+                type: "COMPONENT",
+                width: 120,
+                x: 0,
+                y: 0,
+              },
+            },
+            rootId: "node_shared_root",
+            selection: { axis_state: "idle" },
+          },
+        ],
+        visibility: "public",
+      },
+    ],
   });
   const screenPath = join(productPath, "screens/roundtrip.json");
   const screen = JSON.parse(await readFile(screenPath, "utf8"));
@@ -381,7 +500,9 @@ async function componentWorkspace() {
     x: 400,
     y: 300,
   };
-  screen.presentations[0].nodes.node_canvas.children.push("node_shared_instance");
+  screen.presentations[0].nodes.node_canvas.children.push(
+    "node_shared_instance",
+  );
   await writeJson(screenPath, screen);
   return { foundationPath, productPath, root };
 }
@@ -391,10 +512,12 @@ test("search-components ships executable insertion advice (SP-017)", async () =>
   const search = JSON.parse(
     (
       await runCli([
-        "search-components",
+        "component",
+        "search",
         productPath,
         "--query",
         "Shared Button",
+        "--full",
         "--json",
       ])
     ).stdout,
@@ -403,33 +526,21 @@ test("search-components ships executable insertion advice (SP-017)", async () =>
   assert.ok(match, "shared component is discoverable from the Product");
   const insertion = match.recommendedInsertion;
   assert.ok(insertion, "candidates carry recommendedInsertion");
-  assert.equal(insertion.intent.screenId, "scr_roundtrip");
-  assert.equal(insertion.intent.nodes[0].type, "INSTANCE");
-  assert.equal(
-    insertion.intent.nodes[0].instance.component.assetId,
-    "cmp_shared_button",
-  );
-  assert.equal(insertion.intent.nodes[0].width, 120);
+  assert.equal(insertion.element.use, match.name, "the advice names the component");
 
-  // The advice is executable: run the flow intent it recommends.
+  // The advice is usable: draw a page with the element it recommends.
   const intentPath = `${productPath}.insertion-intent.json`;
-  await writeJson(intentPath, insertion.intent);
-  const applied = JSON.parse(
-    (
-      await runCli(["flow", productPath, "--intent", intentPath, "--json"])
-    ).stdout,
-  );
-  assert.ok(applied.revision);
-  const verify = JSON.parse(
-    (await runCli(["read-view", productPath, "--json"])).stdout,
-  );
-  const nodes = verify.result?.nodes ?? {};
+  await writeJson(intentPath, { page: "Inserted", children: [insertion.element] });
+  const applied = await runCli(["page", "draw", productPath, "--intent", intentPath, "--json"]);
+  assert.equal(applied.code, 0, applied.stdout);
+  assert.ok(JSON.parse(applied.stdout).revision);
+  const stored = await openPackage(productPath);
+  const entry = stored.manifest.entries.screens.find((name) => stored.entries[name].name === "Inserted");
   assert.ok(
-    Object.values(nodes).some(
+    Object.values(stored.entries[entry].presentations[0].nodes).some(
       (node) =>
         node.type === "INSTANCE" &&
-        (node.instance?.component?.assetId === "cmp_shared_button" ||
-          node.componentRef?.assetId === "cmp_shared_button"),
+        node.instance?.component?.assetId === "cmp_shared_button",
     ),
     "the inserted instance exists after executing the advice",
   );
@@ -439,11 +550,14 @@ test("shared component deletion is refused while a consumer exists (SP-018)", as
   const { foundationPath } = await componentWorkspace();
   const batchPath = `${foundationPath}.delete.json`;
   await writeJson(batchPath, {
-    baseRevision: JSON.parse((await runCli(["read", foundationPath, "--json"])).stdout).revision,
+    baseRevision: await revisionOf(foundationPath),
     batchId: "batch_delete_shared",
-    operations: [{ componentSetId: "cmp_shared_button", type: "delete-component-set" }],
+    operations: [
+      { componentId: "cmp_shared_button", type: "delete-component-set" },
+    ],
   });
   const refused = await runCli([
+    "advanced",
     "apply",
     foundationPath,
     "--batch",
@@ -457,7 +571,12 @@ test("shared component deletion is refused while a consumer exists (SP-018)", as
   assert.ok(Array.isArray(payload.error.details.nextOperations));
 
   // After the consumer is removed, the deletion succeeds.
-  const screenPath = join(foundationPath, "..", "app.smallpen", "screens/roundtrip.json");
+  const screenPath = join(
+    foundationPath,
+    "..",
+    "app.smallpen",
+    "screens/roundtrip.json",
+  );
   const screen = JSON.parse(await readFile(screenPath, "utf8"));
   delete screen.presentations[0].nodes.node_shared_instance;
   screen.presentations[0].nodes.node_canvas.children =
@@ -465,13 +584,16 @@ test("shared component deletion is refused while a consumer exists (SP-018)", as
       (id) => id !== "node_shared_instance",
     );
   await writeJson(screenPath, screen);
-  const rebased = JSON.parse((await runCli(["read", foundationPath, "--json"])).stdout);
+  const rebased = await openPackage(foundationPath);
   await writeJson(batchPath, {
     baseRevision: rebased.revision,
     batchId: "batch_delete_shared_rebased",
-    operations: [{ componentSetId: "cmp_shared_button", type: "delete-component-set" }],
+    operations: [
+      { componentId: "cmp_shared_button", type: "delete-component-set" },
+    ],
   });
   const accepted = await runCli([
+    "advanced",
     "apply",
     foundationPath,
     "--batch",
@@ -482,27 +604,34 @@ test("shared component deletion is refused while a consumer exists (SP-018)", as
 });
 
 test("batch identity replays idempotently across CLI processes (SP-039)", async () => {
-  const packagePath = await clonePackage(fixture, `idempotent-${Date.now()}.smallpen`);
-  const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const packagePath = await clonePackage(
+    fixture,
+    `idempotent-${Date.now()}.smallpen`,
+  );
+  const read = await openPackage(packagePath);
   const batchPath = `${packagePath}.batch.json`;
   const batch = {
     baseRevision: read.revision,
     batchId: "batch_idempotent_cli",
-    operations: [{
-      changes: { name: "Renamed once" },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    operations: [
+      {
+        changes: { name: "Renamed once" },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
+      },
+    ],
   };
   await writeJson(batchPath, batch);
   const first = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", batchPath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", batchPath, "--json"]))
+      .stdout,
   );
   assert.equal(first.batchId, "batch_idempotent_cli");
   // Replaying the identical file returns the recorded confirmation.
   const replay = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", batchPath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", batchPath, "--json"]))
+      .stdout,
   );
   assert.equal(replay.alreadyApplied, true);
   assert.equal(replay.revision, first.revision);
@@ -510,33 +639,42 @@ test("batch identity replays idempotently across CLI processes (SP-039)", async 
 });
 
 test("reusing a batch identity for different operations is rejected (SP-040)", async () => {
-  const packagePath = await clonePackage(fixture, `conflict-${Date.now()}.smallpen`);
-  const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const packagePath = await clonePackage(
+    fixture,
+    `conflict-${Date.now()}.smallpen`,
+  );
+  const read = await openPackage(packagePath);
   const batchPath = `${packagePath}.batch.json`;
   await writeJson(batchPath, {
     baseRevision: read.revision,
     batchId: "batch_conflict_cli",
-    operations: [{
-      changes: { name: "First intent" },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    operations: [
+      {
+        changes: { name: "First intent" },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
+      },
+    ],
   });
   const first = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", batchPath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", batchPath, "--json"]))
+      .stdout,
   );
   await writeJson(batchPath, {
     baseRevision: first.revision,
     batchId: "batch_conflict_cli",
-    operations: [{
-      changes: { name: "Different intent" },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    operations: [
+      {
+        changes: { name: "Different intent" },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
+      },
+    ],
   });
   const conflict = await runCli([
+    "advanced",
     "apply",
     packagePath,
     "--batch",
@@ -549,52 +687,81 @@ test("reusing a batch identity for different operations is rejected (SP-040)", a
   assert.match(payload.error.details.correction, /new unique batchId/);
 });
 
-test("watch without --max-events survives edits and emits both revisions (SP-041-A)", async () => {
+test("watch keeps observing across an edit and emits both revisions (SP-041-A)", async () => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-watch-live-"));
   const packagePath = join(root, "p.smallpen");
   await cp(fixture, packagePath, { recursive: true });
-  const child = spawn(process.execPath, [cli, "watch", packagePath, "--json"], {
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // --max-events bounds the run: the watcher exits on its own after the
+  // initial and the edited revision.
+  const child = spawn(
+    process.execPath,
+    [cli, "project", "watch", packagePath, "--max-events", "2", "--json"],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const closed = new Promise((resolve) => child.once("close", resolve));
   let stdout = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => (stdout += chunk));
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  await wait(700);
-  assert.equal(child.exitCode, null, "watch must keep observing by default");
-  const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
-  const editPath = join(root, "edit.json");
-  await writeJson(editPath, {
-    baseRevision: read.revision,
-    batchId: "batch_watch_edit",
-    operations: [{
-      changes: { name: "Watched" },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
-  });
-  const applied = await runCli(["apply", packagePath, "--batch", editPath, "--json"]);
-  assert.equal(applied.code, 0, applied.stdout);
-  await wait(1100);
-  child.kill("SIGINT");
-  const exitCode = await new Promise((resolve) => {
-    const timer = setTimeout(() => resolve("timeout"), 3000);
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      resolve(code);
+  try {
+    for (let waited = 0; !stdout.includes("\n") && waited < 10000; ) {
+      await wait(50);
+      waited += 50;
+    }
+    assert.ok(stdout.includes("\n"), `watch emits the initial revision`);
+    assert.equal(child.exitCode, null, "watch keeps observing after one event");
+    const editPath = join(root, "edit.json");
+    await writeJson(editPath, {
+      baseRevision: await revisionOf(packagePath),
+      batchId: "batch_watch_edit",
+      operations: [
+        {
+          changes: { name: "Watched" },
+          nodeId: "node_rectangle",
+          screenId: "scr_roundtrip",
+          type: "update-node",
+        },
+      ],
     });
-  });
-  assert.equal(exitCode, 0);
-  const events = stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-  assert.ok(events.length >= 2, `expected initial + edited events: ${stdout}`);
-  assert.equal(events[0].event, "revision");
-  assert.notEqual(events.at(-1).revision, events[0].revision);
+    const applied = await runCli([
+      "advanced",
+      "apply",
+      packagePath,
+      "--batch",
+      editPath,
+      "--json",
+    ]);
+    assert.equal(applied.code, 0, applied.stdout);
+    const exitCode = await Promise.race([
+      closed,
+      wait(10000).then(() => "timeout"),
+    ]);
+    assert.equal(exitCode, 0, `watch ends after two events: ${stdout}`);
+    const events = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.equal(events.length, 2, `expected initial + edited events: ${stdout}`);
+    assert.equal(events[0].event, "revision");
+    assert.equal(events[1].event, "revision");
+    assert.equal(events[1].revision, JSON.parse(applied.stdout).revision);
+    assert.notEqual(events[1].revision, events[0].revision);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await closed;
+    }
+  }
 });
 
 test("watch emits revision events and terminates under --max-events (SP-041)", async () => {
-  const packagePath = await clonePackage(fixture, `watch-${Date.now()}.smallpen`);
+  const packagePath = await clonePackage(
+    fixture,
+    `watch-${Date.now()}.smallpen`,
+  );
   const watched = await runCli([
+    "project",
     "watch",
     packagePath,
     "--max-events",
@@ -609,30 +776,37 @@ test("watch emits revision events and terminates under --max-events (SP-041)", a
 });
 
 test("every write supports explain and diff previews without writing (SP-042/SP-043)", async () => {
-  const packagePath = await clonePackage(fixture, `explain-${Date.now()}.smallpen`);
-  const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const packagePath = await clonePackage(
+    fixture,
+    `explain-${Date.now()}.smallpen`,
+  );
+  const read = await openPackage(packagePath);
   const batchPath = `${packagePath}.batch.json`;
   await writeJson(batchPath, {
     baseRevision: read.revision,
     batchId: "batch_explain",
-    operations: [{
-      changes: {
-        fills: [{ color: "#0f766e", type: "solid" }],
-        name: "Renamed rectangle",
+    operations: [
+      {
+        changes: {
+          fills: [{ color: "#0f766e", type: "solid" }],
+          name: "Renamed rectangle",
+        },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
       },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    ],
   });
   const explained = JSON.parse(
     (
       await runCli([
+        "advanced",
         "apply",
         packagePath,
         "--batch",
         batchPath,
         "--explain",
+        "--full",
         "--json",
       ])
     ).stdout,
@@ -642,7 +816,10 @@ test("every write supports explain and diff previews without writing (SP-042/SP-
   const diffEntry = explained.diff.find(
     (entry) => entry.entry === "screens/roundtrip.json",
   );
-  assert.ok(diffEntry?.changes?.presentations, "changed canonical fields appear");
+  assert.ok(
+    diffEntry?.changes?.presentations,
+    "changed canonical fields appear",
+  );
   assert.notDeepEqual(
     diffEntry.changes.presentations.before,
     diffEntry.changes.presentations.after,
@@ -650,7 +827,8 @@ test("every write supports explain and diff previews without writing (SP-042/SP-
 
   // The explain run wrote nothing: the plain apply still applies cleanly.
   const after = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", batchPath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", batchPath, "--json"]))
+      .stdout,
   );
   assert.equal(after.batchId, "batch_explain");
 });
@@ -660,31 +838,55 @@ test("boolean flags work in any position relative to value options (RV-003-A/B)"
   const root = await mkdtemp(join(tmpdir(), "smallpen-rv003-"));
   const packagePath = join(root, "p.smallpen");
   await cp(fixture, packagePath, { recursive: true });
-  const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const read = await openPackage(packagePath);
   const batchPath = join(root, "batch.json");
   await writeJson(batchPath, {
     baseRevision: read.revision,
     batchId: "batch_rv003_order",
-    operations: [{
-      changes: { name: "Order probe" },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    operations: [
+      {
+        changes: { name: "Order probe" },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
+      },
+    ],
   });
   for (const [index, argv] of [
-    ["apply", packagePath, "--explain", "--batch", batchPath, "--json"],
-    ["apply", packagePath, "--batch", batchPath, "--explain", "--json"],
-    ["apply", packagePath, "--diff", "--batch", batchPath, "--json"],
-    ["apply", packagePath, "--batch", batchPath, "--diff", "--json"],
-    ["apply", packagePath, "--confirm-unmatched", "--batch", batchPath, "--json"],
-    ["apply", packagePath, "--batch", batchPath, "--confirm-unmatched", "--json"],
+    ["advanced", "apply", packagePath, "--explain", "--batch", batchPath, "--json"],
+    ["advanced", "apply", packagePath, "--batch", batchPath, "--explain", "--json"],
+    ["advanced", "apply", packagePath, "--diff", "--batch", batchPath, "--json"],
+    ["advanced", "apply", packagePath, "--batch", batchPath, "--diff", "--json"],
+    [
+      "advanced",
+      "apply",
+      packagePath,
+      "--confirm-unmatched",
+      "--batch",
+      batchPath,
+      "--json",
+    ],
+    [
+      "advanced",
+      "apply",
+      packagePath,
+      "--batch",
+      batchPath,
+      "--confirm-unmatched",
+      "--json",
+    ],
   ].entries()) {
     const probePath = join(root, `p-${index}.smallpen`);
     await cp(fixture, probePath, { recursive: true });
-    const argvWithProbe = argv.map((part) => (part === packagePath ? probePath : part));
+    const argvWithProbe = argv.map((part) =>
+      part === packagePath ? probePath : part,
+    );
     const result = await runCli(argvWithProbe);
-    assert.equal(result.code, 0, `permutation ${index} failed: ${result.stdout}`);
+    assert.equal(
+      result.code,
+      0,
+      `permutation ${index} failed: ${result.stdout}`,
+    );
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.batchId, "batch_rv003_order");
   }
@@ -692,161 +894,190 @@ test("boolean flags work in any position relative to value options (RV-003-A/B)"
 
 test("flow/page/token flag permutations do not change outcomes (RV-003-B)", async () => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-rv003b-"));
-  const packagePath = join(root, "p.smallpen");
-  await cp(fixture, packagePath, { recursive: true });
-  const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
-
-  const flowIntentPath = join(root, "flow-intent.json");
-  await writeJson(flowIntentPath, {
-    nodes: [{
-      children: [],
-      fills: [{ color: "#2563eb", type: "solid" }],
-      height: 60,
-      id: "node_rv003_flow",
-      name: "Flow node",
-      type: "RECTANGLE",
-      width: 80,
-      x: 20,
-      y: 20,
-    }],
-    parentId: "node_canvas",
-    presentationId: "pres_desktop",
-    screenId: "scr_roundtrip",
+  const pageIntentPath = join(root, "page-intent.json");
+  await writeJson(pageIntentPath, {
+    children: [
+      { fill: "#2563eb", height: 60, name: "Flow node", width: 80 },
+    ],
+    into: "Canvas",
+    page: "Round Trip",
   });
   const tokenIntentPath = join(root, "token-intent.json");
   await writeJson(tokenIntentPath, {
-    operations: [{
-      definition: {
-        $extensions: {
-          smallpen: { id: "tok_rv003", visibility: "public" },
-        },
-        $type: "color",
-        $value: "#123456",
-      },
-      filePath: "tokens/rv003.json",
-      path: "color.rv003",
-      tokenId: "tok_rv003",
-      type: "put-token",
-    }],
+    tokens: [{ name: "color.rv003", type: "color", value: "#123456" }],
   });
 
-  // Each entry probes two flag orders; every run gets a fresh package copy so
+  // Each entry probes flag orders; every run gets a fresh package copy so
   // no-op safety keeps results comparable.
   const cases = [
-    ["flow", flowIntentPath],
-    ["page", flowIntentPath],
-    ["token", tokenIntentPath],
+    ["page-draw", ["page", "draw"], ["--intent", pageIntentPath]],
+    ["token-set", ["token", "set"], ["--intent", tokenIntentPath]],
+    ["flow-start", ["flow", "start"], ["--page", "Round Trip"]],
   ];
-  for (const [command, intentPath] of cases) {
+  for (const [label, command, target] of cases) {
+    const previews = [];
     for (const [flagName, flagPosition] of [
       ["--explain", "before"],
       ["--explain", "after"],
       ["--confirm-unmatched", "before"],
       ["--diff", "after"],
     ]) {
-      const probePath = join(root, `${command}-${flagName}-${flagPosition}.smallpen`);
+      const probePath = join(
+        root,
+        `${label}-${flagName}-${flagPosition}.smallpen`,
+      );
       await cp(fixture, probePath, { recursive: true });
-      const intentForProbe = join(root, `${command}-${flagName}-${flagPosition}-intent.json`);
-      await cp(intentPath, intentForProbe);
+      const before = await revisionOf(probePath);
       const argv = [
-        command,
+        ...command,
         probePath,
         ...(flagPosition === "before" ? [flagName] : []),
-        "--intent",
-        intentForProbe,
+        ...target,
         ...(flagPosition === "after" ? [flagName] : []),
         "--json",
       ];
       const result = await runCli(argv);
-      assert.equal(result.code, 0, `${command} ${flagName}/${flagPosition}: ${result.stdout}`);
+      assert.equal(
+        result.code,
+        0,
+        `${label} ${flagName}/${flagPosition}: ${result.stdout}`,
+      );
       const payload = JSON.parse(result.stdout);
-      assert.ok(payload.revision, `${command} ${flagName} returns a revision`);
+      assert.ok(payload.revision, `${label} ${flagName} returns a revision`);
+      const preview = flagName !== "--confirm-unmatched";
+      assert.equal(payload.dryRun, preview, `${label} ${flagName}`);
+      assert.equal(
+        (await revisionOf(probePath)) === before,
+        preview,
+        `${label} ${flagName}/${flagPosition} writes only without a preview flag`,
+      );
+      if (flagName === "--explain") previews.push(payload.changedFiles);
     }
+    // The same flag before or after the target previews the same change.
+    assert.deepEqual(previews[0], previews[1], label);
   }
 });
 
 // RV-003-C: explain/diff are read-only previews in every combination.
 test("explain and diff previews never write, in any combination (RV-003-C)", async () => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-rv003c-"));
-  for (const flags of [["--explain"], ["--diff"], ["--explain", "--diff"], ["--diff", "--dry-run"]]) {
-    const packagePath = join(root, `${flags.join("")}.smallpen`.replaceAll("--", ""));
+  for (const flags of [
+    ["--explain"],
+    ["--diff"],
+    ["--explain", "--diff"],
+    ["--diff", "--dry-run"],
+  ]) {
+    const packagePath = join(
+      root,
+      `${flags.join("")}.smallpen`.replaceAll("--", ""),
+    );
     await cp(fixture, packagePath, { recursive: true });
-    const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
-    const batchPath = join(root, `${flags.join("")}.batch.json`.replaceAll("--", ""));
+    const read = await openPackage(packagePath);
+    const batchPath = join(
+      root,
+      `${flags.join("")}.batch.json`.replaceAll("--", ""),
+    );
     await writeJson(batchPath, {
       baseRevision: read.revision,
       batchId: "batch_rv003c",
-      operations: [{
-        changes: { name: "Should never apply" },
-        nodeId: "node_rectangle",
-        screenId: "scr_roundtrip",
-        type: "update-node",
-      }],
+      operations: [
+        {
+          changes: { name: "Should never apply" },
+          nodeId: "node_rectangle",
+          screenId: "scr_roundtrip",
+          type: "update-node",
+        },
+      ],
     });
     const result = await runCli([
+      "advanced",
       "apply",
       packagePath,
       ...flags,
       "--batch",
       batchPath,
+      "--full",
       "--json",
     ]);
     assert.equal(result.code, 0, `${flags.join(" ")}: ${result.stdout}`);
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.dryRun, true, `${flags.join(" ")} must not write`);
     assert.ok(payload.diff, `${flags.join(" ")} returns a diff`);
-    const after = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
-    assert.equal(after.revision, read.revision, `${flags.join(" ")} leaves the package unchanged`);
+    const after = await openPackage(packagePath);
     assert.equal(
-      after.entries["screens/roundtrip.json"].presentations[0].nodes.node_rectangle.name,
+      after.revision,
+      read.revision,
+      `${flags.join(" ")} leaves the package unchanged`,
+    );
+    assert.equal(
+      after.entries["screens/roundtrip.json"].presentations[0].nodes
+        .node_rectangle.name,
       "Editable Rectangle",
     );
     const diffEntry = payload.diff.find(
       (entry) => entry.entry === "screens/roundtrip.json",
     );
     assert.equal(
-      diffEntry.changes.presentations.before !== diffEntry.changes.presentations.after,
+      diffEntry.changes.presentations.before !==
+        diffEntry.changes.presentations.after,
       true,
     );
   }
 
   // --confirm-unmatched marks unmatched groups confirmed regardless of order.
-  for (const [order, index] of [["before", 0], ["after", 1]]) {
+  for (const [order, index] of [
+    ["before", 0],
+    ["after", 1],
+  ]) {
     const packagePath = join(root, `confirm-${index}.smallpen`);
     await cp(fixture, packagePath, { recursive: true });
     const seededBatchPath = join(root, `confirm-${index}-seed.json`);
-    const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+    const read = await openPackage(packagePath);
     await writeJson(seededBatchPath, {
       baseRevision: read.revision,
       batchId: "batch_rv003c_seed",
-      operations: [{
-        definition: {
-          $extensions: { smallpen: { id: "tok_rv003c", visibility: "public" } },
-          $type: "color",
-          $value: "#6750a4",
+      operations: [
+        {
+          definition: {
+            $extensions: {
+              smallpen: { id: "tok_rv003c", visibility: "public" },
+            },
+            $type: "color",
+            $value: "#6750a4",
+          },
+          filePath: "tokens/rv003c.json",
+          path: "color.rv003c",
+          tokenId: "tok_rv003c",
+          type: "put-token",
         },
-        filePath: "tokens/rv003c.json",
-        path: "color.rv003c",
-        tokenId: "tok_rv003c",
-        type: "put-token",
-      }],
+      ],
     });
     // Seed the token, then write an unmatched raw color with the flag in both positions.
-    const seeded = await runCli(["apply", packagePath, "--batch", seededBatchPath, "--json"]);
+    const seeded = await runCli([
+      "advanced",
+      "apply",
+      packagePath,
+      "--batch",
+      seededBatchPath,
+      "--json",
+    ]);
     assert.equal(seeded.code, 0, seeded.stdout);
-    const rebased = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+    const rebased = await openPackage(packagePath);
     const rawPath = join(root, `confirm-${index}-raw.json`);
     await writeJson(rawPath, {
       baseRevision: rebased.revision,
       batchId: "batch_rv003c_raw",
-      operations: [{
-        changes: { fills: [{ color: "#0f766e", type: "solid" }] },
-        nodeId: "node_rectangle",
-        screenId: "scr_roundtrip",
-        type: "update-node",
-      }],
+      operations: [
+        {
+          changes: { fills: [{ color: "#0f766e", type: "solid" }] },
+          nodeId: "node_rectangle",
+          screenId: "scr_roundtrip",
+          type: "update-node",
+        },
+      ],
     });
     const argv = [
+      "advanced",
       "apply",
       packagePath,
       ...(order === "before" ? ["--confirm-unmatched"] : []),
@@ -861,13 +1092,11 @@ test("explain and diff previews never write, in any combination (RV-003-C)", asy
     );
     assert.ok(unmatched.length > 0);
     assert.ok(
-      unmatched.length > 0 && unmatched.every((warning) => warning.confirmed === true),
+      unmatched.length > 0 &&
+        unmatched.every((warning) => warning.confirmed === true),
       `confirmed flag (${order}) marks unmatched warnings`,
     );
-    assert.equal(
-      confirmed.warningSummary.unmatchedConfirmed,
-      unmatched.length,
-    );
+    assert.equal(confirmed.warningSummary.unmatchedConfirmed, unmatched.length);
   }
 });
 
@@ -877,28 +1106,67 @@ test("unknown and value-less options are rejected around new flags (RV-003-D)", 
   const root = await mkdtemp(join(tmpdir(), "smallpen-rv003d-"));
   const packagePath = join(root, "p.smallpen");
   await cp(fixture, packagePath, { recursive: true });
-  const read = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const read = await openPackage(packagePath);
   const batchPath = join(root, "batch.json");
   await writeJson(batchPath, {
     baseRevision: read.revision,
     batchId: "batch_rv003d",
-    operations: [{
-      changes: { name: "X" },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    operations: [
+      {
+        changes: { name: "X" },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
+      },
+    ],
   });
 
   for (const argv of [
-    ["apply", packagePath, "--not-a-real-option", "--explain", "--batch", batchPath, "--json"],
-    ["apply", packagePath, "--explain", "--not-a-real-option", "--batch", batchPath, "--json"],
-    ["apply", packagePath, "--explain", "--batch", batchPath, "--not-a-real-option", "--json"],
-    ["apply", packagePath, "--confirm-unmatched", "--not-a-real-option", "--batch", batchPath, "--json"],
+    [
+      "advanced",
+      "apply",
+      packagePath,
+      "--not-a-real-option",
+      "--explain",
+      "--batch",
+      batchPath,
+      "--json",
+    ],
+    [
+      "advanced",
+      "apply",
+      packagePath,
+      "--explain",
+      "--not-a-real-option",
+      "--batch",
+      batchPath,
+      "--json",
+    ],
+    [
+      "advanced",
+      "apply",
+      packagePath,
+      "--explain",
+      "--batch",
+      batchPath,
+      "--not-a-real-option",
+      "--json",
+    ],
+    [
+      "advanced",
+      "apply",
+      packagePath,
+      "--confirm-unmatched",
+      "--not-a-real-option",
+      "--batch",
+      batchPath,
+      "--json",
+    ],
     // Value-less options must not swallow flags or JSON as their value.
-    ["apply", packagePath, "--explain", "--batch", "--json"],
-    ["apply", packagePath, "--diff", "--batch", "--explain"],
-    ["flow", packagePath, "--intent", "--json"],
+    ["advanced", "apply", packagePath, "--explain", "--batch", "--json"],
+    ["advanced", "apply", packagePath, "--diff", "--batch", "--explain"],
+    ["page", "draw", packagePath, "--intent", "--json"],
+    ["flow", "start", packagePath, "--page", "--explain", "--json"],
   ]) {
     const result = await runCli(argv);
     assert.equal(result.code, 1, `expected rejection: ${argv.join(" ")}`);
@@ -908,7 +1176,7 @@ test("unknown and value-less options are rejected around new flags (RV-003-D)", 
       `${argv.join(" ")} → ${payload.error.code}`,
     );
     // Nothing applied.
-    const after = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+    const after = await openPackage(packagePath);
     assert.equal(after.revision, read.revision);
   }
 });
@@ -919,22 +1187,25 @@ test("stale recovery commands execute and preserve concurrent edits (RV-004-C)",
   const root = await mkdtemp(join(tmpdir(), "smallpen-rv004c-"));
   const packagePath = join(root, "p.smallpen");
   await cp(fixture, packagePath, { recursive: true });
-  const base = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const base = await openPackage(packagePath);
 
   // Concurrent writer changes fills on revision A -> B.
   const concurrentPath = join(root, "concurrent.json");
   await writeJson(concurrentPath, {
     baseRevision: base.revision,
     batchId: "batch_rv004c_concurrent",
-    operations: [{
-      changes: { fills: [{ color: "#16a34a", type: "solid" }] },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    operations: [
+      {
+        changes: { fills: [{ color: "#16a34a", type: "solid" }] },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
+      },
+    ],
   });
   const concurrent = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", concurrentPath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", concurrentPath, "--json"]))
+      .stdout,
   );
 
   // The stale writer only renames, based on revision A.
@@ -942,90 +1213,104 @@ test("stale recovery commands execute and preserve concurrent edits (RV-004-C)",
   await writeJson(staleIntentPath, {
     baseRevision: base.revision,
     batchId: "batch_rv004c_stale",
-    operations: [{
-      changes: { name: "Recovered name" },
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "update-node",
-    }],
+    operations: [
+      {
+        changes: { name: "Recovered name" },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
+      },
+    ],
   });
   const stale = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", staleIntentPath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", staleIntentPath, "--json"]))
+      .stdout,
   );
   assert.equal(stale.error.code, "stale_revision");
   assert.equal(stale.error.details.baseRevision, base.revision);
   assert.equal(stale.error.details.actualRevision, concurrent.revision);
 
-  // Execute the error's read command verbatim.
-  const readArgv = stale.error.details.commands[0].argv;
-  const current = JSON.parse((await runCli(readArgv)).stdout);
-  assert.equal(current.revision, concurrent.revision);
+  // Execute the error's view command verbatim; the error itself carries the
+  // actual revision to rebuild against (SP-037 checks the view reports it).
+  const viewArgv = stale.error.details.commands[0].argv;
+  assert.equal(viewArgv[0], "view");
+  const viewed = await runCli(viewArgv);
+  assert.equal(viewed.code, 0, viewed.stdout);
+  assert.match(JSON.parse(viewed.stdout).text, /Editable Rectangle/);
+  assert.equal(await revisionOf(packagePath), concurrent.revision);
 
   // Rebuild the intent file: baseRevision=B, NEW batchId, same operations.
   const rebuiltPath = join(root, "rebuilt-intent.json");
   await writeJson(rebuiltPath, {
     baseRevision: concurrent.revision,
     batchId: "batch_rv004c_rebuilt",
-    operations: stale.error.details.remainingIntent,
+    operations: JSON.parse(await readFile(staleIntentPath, "utf8")).operations,
   });
   // Only substitute the placeholder batch path in the returned apply argv.
-  const replayArgv = stale.error.details.commands[1].argv.map(
-    (part) => (part.startsWith("<") && part.endsWith(">") ? rebuiltPath : part),
+  const replayArgv = stale.error.details.commands[1].argv.map((part) =>
+    part.startsWith("<") && part.endsWith(">") ? rebuiltPath : part,
   );
-  assert.equal(replayArgv[0], "apply");
+  assert.deepEqual(replayArgv.slice(0, 2), ["advanced", "apply"]);
   const recovered = JSON.parse((await runCli(replayArgv)).stdout);
   assert.equal(recovered.batchId, "batch_rv004c_rebuilt");
 
   // Both the concurrent fill and the recovered rename survive.
-  const final = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const final = await openPackage(packagePath);
   const node =
-    final.entries["screens/roundtrip.json"].presentations[0].nodes.node_rectangle;
+    final.entries["screens/roundtrip.json"].presentations[0].nodes
+      .node_rectangle;
   assert.equal(node.name, "Recovered name");
   assert.equal(node.fills[0].color, "#16a34a");
 });
 
-// RV-004-D: execute the token-removal recovery chain end to end using only the
-// commands the error response returns.
+// RV-004-D: execute the token-removal recovery chain end to end with the
+// commands the error response returns and the Token's name.
 test("token removal recovery chain executes returned argv (RV-004-D)", async () => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-rv004d-"));
   const packagePath = join(root, "p.smallpen");
   await cp(fixture, packagePath, { recursive: true });
-  const base = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const base = await openPackage(packagePath);
 
   const seedPath = join(root, "seed.json");
   await writeJson(seedPath, {
     baseRevision: base.revision,
     batchId: "batch_rv004d_seed",
-    operations: [{
-      definition: {
-        $extensions: { smallpen: { id: "tok_rv004d", visibility: "public" } },
-        $type: "number",
-        $value: 16,
+    operations: [
+      {
+        definition: {
+          $extensions: { smallpen: { id: "tok_rv004d", visibility: "public" } },
+          $type: "number",
+          $value: 16,
+        },
+        filePath: "tokens/rv004d.json",
+        path: "space.tight",
+        tokenId: "tok_rv004d",
+        type: "put-token",
       },
-      filePath: "tokens/rv004d.json",
-      path: "space.tight",
-      tokenId: "tok_rv004d",
-      type: "put-token",
-    }],
+    ],
   });
   const seeded = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", seedPath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", seedPath, "--json"]))
+      .stdout,
   );
 
   const bindPath = join(root, "bind.json");
   await writeJson(bindPath, {
     baseRevision: seeded.revision,
     batchId: "batch_rv004d_bind",
-    operations: [{
-      binding: { assetId: "tok_rv004d", packageId: "pkg_roundtrip" },
-      field: "itemSpacing",
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "set-token-binding",
-    }],
+    operations: [
+      {
+        binding: { assetId: "tok_rv004d", packageId: "pkg_roundtrip" },
+        field: "itemSpacing",
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "set-token-binding",
+      },
+    ],
   });
   const bound = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", bindPath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", bindPath, "--json"]))
+      .stdout,
   );
 
   // Live removal is refused atomically.
@@ -1036,18 +1321,42 @@ test("token removal recovery chain executes returned argv (RV-004-D)", async () 
     operations: [{ tokenId: "tok_rv004d", type: "remove-token" }],
   });
   const refused = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", removePath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", removePath, "--json"]))
+      .stdout,
   );
   assert.equal(refused.error.code, "missing_local_asset");
-  const refusedCheck = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
-  assert.equal(refusedCheck.revision, bound.revision, "rejection writes nothing");
+  const refusedCheck = await openPackage(packagePath);
+  assert.equal(
+    refusedCheck.revision,
+    bound.revision,
+    "rejection writes nothing",
+  );
 
-  // Execute the error's impact argv verbatim.
-  const impactArgv = refused.error.details.commands[0].argv;
-  const impact = JSON.parse((await runCli(impactArgv)).stdout);
+  // The error's listing argv runs verbatim; the Token's name then locates
+  // its bindings.
+  const listed = await runCli(refused.error.details.commands[0].argv);
+  assert.equal(listed.code, 0, listed.stdout);
+  JSON.parse(listed.stdout);
+  const impact = JSON.parse(
+    (
+      await runCli([
+        "token",
+        "impact",
+        packagePath,
+        "--path",
+        "space.tight",
+        "--json",
+      ])
+    ).stdout,
+  );
   assert.ok(
     (impact.locations ?? []).some(
-      (item) => item.nodeId === "node_rectangle" && item.field === "itemSpacing",
+      (item) =>
+        item.kind === "screen-node" &&
+        item.page === "Round Trip" &&
+        item.element === "Editable Rectangle" &&
+        item.field === "itemSpacing" &&
+        item.nodeId === undefined,
     ),
     `impact locates the live binding: ${JSON.stringify(impact.locations ?? impact)}`,
   );
@@ -1057,21 +1366,23 @@ test("token removal recovery chain executes returned argv (RV-004-D)", async () 
   await writeJson(clearPath, {
     baseRevision: bound.revision,
     batchId: "batch_rv004d_clear",
-    operations: [{
-      field: "itemSpacing",
-      nodeId: "node_rectangle",
-      screenId: "scr_roundtrip",
-      type: "clear-token-binding",
-    }],
+    operations: [
+      {
+        field: "itemSpacing",
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "clear-token-binding",
+      },
+    ],
   });
-  const clearArgv = refused.error.details.commands[1].argv.map(
-    (part) => (part.startsWith("<") && part.endsWith(">") ? clearPath : part),
+  const clearArgv = refused.error.details.commands[1].argv.map((part) =>
+    part.startsWith("<") && part.endsWith(">") ? clearPath : part,
   );
   const cleared = JSON.parse((await runCli(clearArgv)).stdout);
   assert.ok(cleared.revision);
 
   // Retry the removal with a fresh batch id and the current revision.
-  const final = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const final = await openPackage(packagePath);
   const retryPath = join(root, "retry.json");
   await writeJson(retryPath, {
     baseRevision: final.revision,
@@ -1079,16 +1390,19 @@ test("token removal recovery chain executes returned argv (RV-004-D)", async () 
     operations: [{ tokenId: "tok_rv004d", type: "remove-token" }],
   });
   const retried = JSON.parse(
-    (await runCli(["apply", packagePath, "--batch", retryPath, "--json"])).stdout,
+    (await runCli(["advanced", "apply", packagePath, "--batch", retryPath, "--json"]))
+      .stdout,
   );
   assert.ok(retried.revision);
-  const done = JSON.parse((await runCli(["read", packagePath, "--json"])).stdout);
+  const done = await openPackage(packagePath);
   const tokenEntry = done.entries["tokens/rv004d.json"];
   const tokenGone =
     tokenEntry === undefined ||
     tokenEntry.space?.tight === undefined ||
     (Array.isArray(tokenEntry.sets) &&
-      tokenEntry.sets.every((set) => !set.tokens.some(({ id }) => id === "tok_rv004d")));
+      tokenEntry.sets.every(
+        (set) => !set.tokens.some(({ id }) => id === "tok_rv004d"),
+      ));
   assert.ok(tokenGone, "token removed after the recovery chain");
   assert.equal(
     done.entries["screens/roundtrip.json"].presentations[0].nodes.node_rectangle

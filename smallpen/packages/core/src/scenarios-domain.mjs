@@ -175,11 +175,27 @@ function parseScenario(value, path) {
     "target",
     "viewport",
   ]);
+  // themes is optional: the token themes ("Group/Name") the Scenario shows.
+  const present = Object.keys(value).filter((field) => field !== "themes");
   if (
-    Object.keys(value).length !== fields.size ||
-    Object.keys(value).some((field) => !fields.has(field))
+    present.length !== fields.size ||
+    present.some((field) => !fields.has(field))
   ) {
     fail("invalid_scenario", `${path} fields are invalid`);
+  }
+  if (
+    value.themes !== undefined &&
+    (!Array.isArray(value.themes) ||
+      value.themes.some(
+        (theme) => typeof theme !== "string" || !theme.includes("/"),
+      ) ||
+      new Set(value.themes).size !== value.themes.length)
+  ) {
+    fail(
+      "invalid_scenario_themes",
+      `${path}.themes must be unique token theme paths such as "Theme/Dark"`,
+      { path: `${path}.themes` },
+    );
   }
   stableId(value.id, "scn_", "invalid_scenario_id", `${path}.id`);
   nonEmpty(value.name, "invalid_scenario_name", `${path}.name`);
@@ -237,6 +253,7 @@ function parseScenario(value, path) {
     id: value.id,
     name: value.name,
     target: parseTarget(value.target, `${path}.target`),
+    ...(value.themes ? { themes: [...value.themes] } : {}),
     viewport: structuredClone(value.viewport),
   };
 }

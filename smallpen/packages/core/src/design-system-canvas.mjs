@@ -11,6 +11,7 @@
 // the only ids the canvas UI addresses; canonical ids only ever appear
 // inside sourceRef.
 import { tokenInventoryRows } from "./catalog.mjs";
+import { combinationSetKeys, foundationTokenView } from "./token-themes.mjs";
 
 export const CANVAS_SCENE_VERSION = 1;
 
@@ -58,6 +59,14 @@ function nodeEditableFields(node) {
   if (node.width !== undefined) fields.push("width");
   if (node.height !== undefined) fields.push("height");
   return fields;
+}
+
+// The Foundation as the Product sees it: its active sets follow the
+// Product's choice of Foundation themes.
+function inventorySource(snapshot, source, options) {
+  return source === options.foundation
+    ? foundationTokenView(snapshot, source)
+    : source;
 }
 
 function componentSources(snapshot, options) {
@@ -213,24 +222,18 @@ export function buildCanvasScene(snapshot, options = {}) {
 
   // Observed set ids for the requested combination: drives the inactive
   // marking on token specimens (DSC-005 semantics on the scene).
-  const observedSetIds = new Set(
-    (combination ?? []).flatMap((selection) => {
-      for (const entry of snapshot.manifest.entries.tokens) {
-        const library = snapshot.entries[entry];
-        const theme = (library.themes ?? []).find(
-          (candidate) => candidate.id === selection.themeId,
-        );
-        if (theme) return theme.setIds ?? [];
-      }
-      return [];
-    }),
+  // A Product's combination may select its Foundation's themes.
+  const observedSetKeys = combinationSetKeys(
+    snapshot,
+    options.foundation,
+    combination,
   );
 
   // Token board: one specimen scene node per inventory row.
   const tokenBoardId = sceneNodeId("board", "tokens");
   const tokenSections = new Map();
   for (const { snapshot: source, owner } of componentSources(snapshot, options)) {
-    for (const row of tokenInventoryRows(source, options.foundation === source ? "foundation" : owner === snapshot.manifest.packageId ? "product" : "library")) {
+    for (const row of tokenInventoryRows(inventorySource(snapshot, source, options), options.foundation === source ? "foundation" : owner === snapshot.manifest.packageId ? "product" : "library")) {
       const domain = row.setName.split("/")[0];
       const sectionId = sceneNodeId("section", "tokens", domain);
       if (!tokenSections.has(sectionId)) {
@@ -261,7 +264,7 @@ export function buildCanvasScene(snapshot, options = {}) {
         id: specimenId,
         kind: "specimen",
         label: row.path,
-        observed: observedSetIds.has(row.setId),
+        observed: observedSetKeys.has(`${source.manifest.packageId}\0${row.setId}`),
         parent: sectionId,
         sourceRef: {
           kind: "token-cell",
@@ -457,21 +460,14 @@ const CANVAS_ALIAS_PATTERN = /^\{([^{}]+)\}$/;
 export function collectCanvasTokenCatalog(snapshot, options = {}) {
   const diagnostics = [];
   const rows = [];
-  const observedSetIds = new Set(
-    (options.combination ?? []).flatMap((selection) => {
-      // Resolve themeId -> setIds from the product token library.
-      for (const entry of snapshot.manifest.entries.tokens) {
-        const library = snapshot.entries[entry];
-        const theme = (library.themes ?? []).find(
-          (candidate) => candidate.id === selection.themeId,
-        );
-        if (theme) return theme.setIds ?? [];
-      }
-      return [];
-    }),
+  // themeId -> sets from the Product's and its Foundation's themes.
+  const observedSetKeys = combinationSetKeys(
+    snapshot,
+    options.foundation,
+    options.combination,
   );
   for (const { snapshot: source, kind } of componentSources(snapshot, options)) {
-    for (const row of tokenInventoryRows(source, kind)) {
+    for (const row of tokenInventoryRows(inventorySource(snapshot, source, options), kind)) {
       const alias = CANVAS_ALIAS_PATTERN.exec(
         typeof row.value === "string" ? row.value : "",
       )?.[1];
@@ -490,7 +486,7 @@ export function collectCanvasTokenCatalog(snapshot, options = {}) {
       rows.push({
         active: row.active ?? false,
         alias: alias ?? null,
-        observed: observedSetIds.has(row.setId),
+        observed: observedSetKeys.has(`${source.manifest.packageId}\0${row.setId}`),
         ownerPackageId: row.qualifiedKey?.split("/")[0] ?? null,
         path: row.path,
         qualifiedKey: row.qualifiedKey,

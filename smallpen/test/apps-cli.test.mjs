@@ -30,7 +30,7 @@ function run(args, timeout = 10000) {
 
 test("watch rejects a non-numeric --interval instead of polling nonstop", async () => {
   for (const value of ["abc", "-5", "1.5"]) {
-    const result = await run([cli, "watch", fixture, "--interval", value, "--json"]);
+    const result = await run([cli, "project", "watch", fixture, "--interval", value, "--json"]);
     assert.equal(result.signal, null, `watch --interval ${value} must exit`);
     assert.notEqual(result.code, 0);
     assert.match(result.stdout + result.stderr, /invalid_integer_option/);

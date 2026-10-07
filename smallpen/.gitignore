@@ -8,3 +8,5 @@
 
 # Historical CLI runs wrote timestamped copies beside the real fixtures.
 /test/fixtures/*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].smallpen*
+# Write-lock directories created beside Packages by tests and local runs
+.*.smallpen.write-lock/

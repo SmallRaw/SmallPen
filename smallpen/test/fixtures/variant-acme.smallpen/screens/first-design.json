@@ -1,0 +1,97 @@
+{
+  "basePresentationId": "pres_home_mobile",
+  "counterparts": [],
+  "id": "scr_home",
+  "name": "Home",
+  "presentations": [
+    {
+      "id": "pres_home_mobile",
+      "interactions": [],
+      "name": "mobile",
+      "nodes": {
+        "node_badge_one": {
+          "children": [],
+          "height": 24,
+          "id": "node_badge_one",
+          "instance": {
+            "component": {
+              "assetId": "cmp_badge",
+              "packageId": "pkg_acme"
+            },
+            "variant": {}
+          },
+          "name": "Badge one",
+          "type": "INSTANCE",
+          "width": 72,
+          "x": 24,
+          "y": 180
+        },
+        "node_button_one": {
+          "children": [],
+          "height": 40,
+          "id": "node_button_one",
+          "instance": {
+            "component": {
+              "assetId": "cmp_button",
+              "packageId": "pkg_acme"
+            },
+            "variant": {}
+          },
+          "name": "Button one",
+          "type": "INSTANCE",
+          "width": 120,
+          "x": 24,
+          "y": 220
+        },
+        "node_chip_one": {
+          "children": [],
+          "height": 32,
+          "id": "node_chip_one",
+          "instance": {
+            "component": {
+              "assetId": "cmp_chip",
+              "packageId": "pkg_acme"
+            },
+            "overrides": {
+              "node_chip_label:text": "Hello"
+            },
+            "variant": {
+              "axis_tone": "neutral"
+            }
+          },
+          "name": "Chip one",
+          "type": "INSTANCE",
+          "width": 96,
+          "x": 24,
+          "y": 120
+        },
+        "node_home_root": {
+          "children": [
+            "node_chip_one",
+            "node_badge_one",
+            "node_button_one"
+          ],
+          "fills": [
+            {
+              "color": "#ffffff",
+              "type": "solid"
+            }
+          ],
+          "height": 844,
+          "id": "node_home_root",
+          "name": "Home",
+          "type": "FRAME",
+          "width": 390,
+          "x": 0,
+          "y": 0
+        }
+      },
+      "platform": "mobile",
+      "rootId": "node_home_root",
+      "viewport": {
+        "height": 844,
+        "width": 390
+      }
+    }
+  ]
+}

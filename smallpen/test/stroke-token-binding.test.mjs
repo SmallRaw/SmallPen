@@ -32,7 +32,9 @@ const PRESENTATION = "pres_desktop";
 const SWATCH = "node_swatch_primary";
 
 async function fixtureValues(fixture) {
-  const manifest = JSON.parse(await readFile(join(fixture, "manifest.json"), "utf8"));
+  const manifest = JSON.parse(
+    await readFile(join(fixture, "manifest.json"), "utf8"),
+  );
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
@@ -70,16 +72,22 @@ async function contextualStrokeValues() {
     },
   });
   values.set("contexts/design.json", {
-    axes: [{
-      defaultValue: "light",
-      id: "axis_theme",
-      kind: "theme",
-      name: "Theme",
-      values: [{ id: "light", name: "Light" }, { id: "dark", name: "Dark" }],
-    }],
+    axes: [
+      {
+        defaultValue: "light",
+        id: "axis_theme",
+        kind: "theme",
+        name: "Theme",
+        values: [
+          { id: "light", name: "Light" },
+          { id: "dark", name: "Dark" },
+        ],
+      },
+    ],
     profiles: [],
   });
-  const rectangle = values.get("screens/roundtrip.json").presentations[0].nodes.node_rectangle;
+  const rectangle = values.get("screens/roundtrip.json").presentations[0].nodes
+    .node_rectangle;
   rectangle.strokes = [
     { alignment: "inner", color: "#000000", type: "solid", width: 10 },
     { alignment: "outer", color: "#00ff00", type: "solid", width: 2 },
@@ -91,13 +99,15 @@ function bind(snapshot, field, assetId, nodeId = "node_rectangle") {
   return prepareOperationBatch(snapshot, {
     baseRevision: snapshot.revision,
     batchId: `bind-${field}`,
-    operations: [{
-      binding: { assetId, packageId: snapshot.manifest.packageId },
-      field,
-      nodeId,
-      screenId: "scr_roundtrip",
-      type: "set-token-binding",
-    }],
+    operations: [
+      {
+        binding: { assetId, packageId: snapshot.manifest.packageId },
+        field,
+        nodeId,
+        screenId: "scr_roundtrip",
+        type: "set-token-binding",
+      },
+    ],
   });
 }
 
@@ -106,17 +116,23 @@ function pngPixel(bytes, width, x, y) {
   let offset = 8;
   while (offset < bytes.length) {
     const length = Buffer.from(bytes).readUInt32BE(offset);
-    const type = Buffer.from(bytes.slice(offset + 4, offset + 8)).toString("ascii");
-    if (type === "IDAT") chunks.push(bytes.slice(offset + 8, offset + 8 + length));
+    const type = Buffer.from(bytes.slice(offset + 4, offset + 8)).toString(
+      "ascii",
+    );
+    if (type === "IDAT")
+      chunks.push(bytes.slice(offset + 8, offset + 8 + length));
     offset += length + 12;
   }
-  const pixels = inflateSync(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))));
+  const pixels = inflateSync(
+    Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))),
+  );
   const row = y * (width * 4 + 1);
   return [...pixels.slice(row + 1 + x * 4, row + 1 + x * 4 + 4)];
 }
 
 test("stroke and strokes.N are advertised colour binding fields", () => {
-  const fields = SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenBindingFields;
+  const fields =
+    SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenBindingFields;
   assert.ok(fields.includes("stroke"));
   assert.ok(fields.includes("strokes.N"));
 });
@@ -141,14 +157,22 @@ test("a stroke binding resolves per Context and the dark render changes the stro
   assert.equal(view("dark")[0].width, 10);
 
   const render = async (axisTheme) =>
-    (await createEvidence(bound, {
-      scale: 1,
-      selector: { context: { axis_theme: axisTheme }, viewFormat: "screenshot" },
-    })).render;
+    (
+      await createEvidence(bound, {
+        scale: 1,
+        selector: {
+          context: { axis_theme: axisTheme },
+          viewFormat: "screenshot",
+        },
+      })
+    ).render;
   const light = await render("light");
   const dark = await render("dark");
   // The rectangle sits at (80, 96); its inner stroke covers the first 10px.
-  assert.deepEqual(pngPixel(light.bytes, light.width, 83, 150), [0, 0, 255, 255]);
+  assert.deepEqual(
+    pngPixel(light.bytes, light.width, 83, 150),
+    [0, 0, 255, 255],
+  );
   assert.deepEqual(pngPixel(dark.bytes, dark.width, 83, 150), [255, 0, 0, 255]);
 
   const second = (await bind(snapshot, "strokes.1", "tok_border")).snapshot;
@@ -165,15 +189,27 @@ test("stroke bindings fail on a missing stroke or a non-color Token", async () =
     "memory://stroke.smallpen",
     await contextualStrokeValues(),
   );
-  await assert.rejects(bind(snapshot, "strokes.2", "tok_border"), (error) =>
-    error.code === "missing_token_binding_target");
-  await assert.rejects(bind(snapshot, "stroke", "tok_card"), (error) =>
-    error.code === "binding_type_mismatch");
-  await assert.rejects(bind(snapshot, "strokes.x", "tok_border"), (error) =>
-    error.code === "unsupported_token_binding");
+  await assert.rejects(
+    bind(snapshot, "strokes.2", "tok_border"),
+    (error) => error.code === "missing_token_binding_target",
+  );
+  await assert.rejects(
+    bind(snapshot, "stroke", "tok_card"),
+    (error) => error.code === "binding_type_mismatch",
+  );
+  await assert.rejects(
+    bind(snapshot, "strokes.x", "tok_border"),
+    (error) => error.code === "unsupported_token_binding",
+  );
 });
 
 function runCli(args, cwd) {
+  // Schema and full-value checks opt into stdout; fixed-file transport is tested separately.
+  if (
+    (args[0] === "schema" || args.includes("--full")) &&
+    !args.includes("--stdout")
+  )
+    args = [...args, "--stdout"];
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {
       cwd,
@@ -194,7 +230,10 @@ test("smallpen schema documents stroke color bindings", async () => {
   const types = JSON.parse(node.stdout).tokenBindings.fieldTokenTypes;
   assert.deepEqual(types.stroke, ["color"]);
   assert.deepEqual(types["strokes.N"], ["color"]);
-  const operation = await runCli(["schema", "set-token-binding", "--json"], here);
+  const operation = await runCli(
+    ["schema", "operation", "set-token-binding", "--json"],
+    here,
+  );
   assert.equal(operation.code, 0, operation.stdout);
   assert.match(operation.stdout, /stroke, strokes\.N/);
 });
@@ -245,36 +284,54 @@ test("CLI stroke binding round-trips through the Web projection and Penpot", asy
   context.after(() => rm(root, { force: true, recursive: true }));
   const packagePath = join(root, "design-system.smallpen");
   await cp(DESIGN_SYSTEM, packagePath, { recursive: true });
-  await cp(join(here, "fixtures", "dsp-shared.smallpen"), join(root, "dsp-shared.smallpen"), {
-    recursive: true,
-  });
+  await cp(
+    join(here, "fixtures", "dsp-shared.smallpen"),
+    join(root, "dsp-shared.smallpen"),
+    {
+      recursive: true,
+    },
+  );
   const before = await openPackage(packagePath);
-  await writeFile(join(root, "bind.json"), JSON.stringify({
-    baseRevision: before.revision,
-    batchId: "bind-stroke",
-    operations: [
-      {
-        changes: { strokes: [{ alignment: "inner", color: "#000000", type: "solid", width: 4 }] },
-        nodeId: SWATCH,
-        presentationId: PRESENTATION,
-        screenId: SCREEN,
-        type: "update-presentation-node",
-      },
-      {
-        binding: { assetId: "tok_color_light_primary", packageId: "pkg_design_system" },
-        field: "stroke",
-        nodeId: SWATCH,
-        screenId: SCREEN,
-        type: "set-token-binding",
-      },
-    ],
-  }));
-  const applied = await runCli(["apply", packagePath, "--batch", "bind.json", "--json"], root);
+  await writeFile(
+    join(root, "bind.json"),
+    JSON.stringify({
+      baseRevision: before.revision,
+      batchId: "bind-stroke",
+      operations: [
+        {
+          changes: {
+            strokes: [
+              { alignment: "inner", color: "#000000", type: "solid", width: 4 },
+            ],
+          },
+          nodeId: SWATCH,
+          presentationId: PRESENTATION,
+          screenId: SCREEN,
+          type: "update-presentation-node",
+        },
+        {
+          binding: {
+            assetId: "tok_color_light_primary",
+            packageId: "pkg_design_system",
+          },
+          field: "stroke",
+          nodeId: SWATCH,
+          screenId: SCREEN,
+          type: "set-token-binding",
+        },
+      ],
+    }),
+  );
+  const applied = await runCli(
+    ["advanced", "apply", packagePath, "--batch", "bind.json", "--json"],
+    root,
+  );
   assert.equal(applied.code, 0, applied.stdout);
 
   // The Web projection carries the binding with the active (Light) value.
   const light = await served(await openPackage(packagePath));
-  const projected = light.web.entries["screens/screen.json"].presentations[0].nodes[SWATCH];
+  const projected =
+    light.web.entries["screens/screen.json"].presentations[0].nodes[SWATCH];
   assert.deepEqual(projected.tokenBindings.stroke, {
     assetId: "tok_color_light_primary",
     packageId: "pkg_design_system",
@@ -284,9 +341,14 @@ test("CLI stroke binding round-trips through the Web projection and Penpot", asy
   // Switching the active color theme to Dark changes the stroke.
   const darkValues = await fixtureValues(packagePath);
   darkValues.get("tokens/tokens.json").activeThemeIds = darkValues
-    .get("tokens/tokens.json").activeThemeIds
-    .map((id) => (id === "theme_color_light" ? "theme_color_dark" : id));
-  const dark = await loadPackageFromValues("memory://dark.smallpen", darkValues);
+    .get("tokens/tokens.json")
+    .activeThemeIds.map((id) =>
+      id === "theme_color_light" ? "theme_color_dark" : id,
+    );
+  const dark = await loadPackageFromValues(
+    "memory://dark.smallpen",
+    darkValues,
+  );
   assert.equal(
     projectScreen(dark, SCREEN, {}).nodes[SWATCH].strokes[0].color,
     "#d0bcff",
@@ -295,7 +357,11 @@ test("CLI stroke binding round-trips through the Web projection and Penpot", asy
   // Penpot shows it as the stroke-color applied Token; applying the same
   // Token again (with other Tokens) keeps the binding and adds no name.
   const same = compilePenpotChanges(light, {
-    changes: [modObj(light, SWATCH, [userSet("applied-tokens", { "stroke-color": "primary" })])],
+    changes: [
+      modObj(light, SWATCH, [
+        userSet("applied-tokens", { "stroke-color": "primary" }),
+      ]),
+    ],
     commitId: "same-stroke-token",
   });
   for (const { changes } of same.operations) {
@@ -309,9 +375,10 @@ test("CLI stroke binding round-trips through the Web projection and Penpot", asy
     changes: [modObj(light, SWATCH, [userSet("applied-tokens", {})])],
     commitId: "detach-stroke-token",
   });
-  assert.deepEqual(detached.operations.map(({ changes }) => changes), [
-    { tokenBindings: null },
-  ]);
+  assert.deepEqual(
+    detached.operations.map(({ changes }) => changes),
+    [{ tokenBindings: null }],
+  );
   const cleared = (await prepareOperationBatch(light, detached)).snapshot;
   assert.equal(swatch(cleared).tokenBindings, undefined);
   assert.equal(swatch(cleared).strokes[0].type, "solid");
@@ -321,31 +388,46 @@ test("CLI stroke binding round-trips through the Web projection and Penpot", asy
   const reserved = await served(cleared);
   const reapplied = compilePenpotChanges(reserved, {
     changes: [
-      modObj(reserved, SWATCH, [userSet("applied-tokens", { "stroke-color": "on-primary" })]),
-      modObj(reserved, SWATCH, [userSet("strokes", [{ ...STROKE, "stroke-color": "#ffffff" }])]),
+      modObj(reserved, SWATCH, [
+        userSet("applied-tokens", { "stroke-color": "on-primary" }),
+      ]),
+      modObj(reserved, SWATCH, [
+        userSet("strokes", [{ ...STROKE, "stroke-color": "#ffffff" }]),
+      ]),
     ],
     commitId: "apply-stroke-token",
   });
   const rebound = (await prepareOperationBatch(reserved, reapplied)).snapshot;
   assert.deepEqual(swatch(rebound).tokenBindings, {
-    stroke: { assetId: "tok_color_light_on_primary", packageId: "pkg_design_system" },
+    stroke: {
+      assetId: "tok_color_light_on_primary",
+      packageId: "pkg_design_system",
+    },
   });
   assert.equal(swatch(rebound).appliedTokens, undefined);
   assert.equal(swatch(rebound).strokes[0].color, "#ffffff");
 
   // An unknown Token name fails explicitly.
   assert.throws(
-    () => compilePenpotChanges(reserved, {
-      changes: [modObj(reserved, SWATCH, [userSet("applied-tokens", { "stroke-color": "nope" })])],
-      commitId: "unknown-stroke-token",
-    }),
+    () =>
+      compilePenpotChanges(reserved, {
+        changes: [
+          modObj(reserved, SWATCH, [
+            userSet("applied-tokens", { "stroke-color": "nope" }),
+          ]),
+        ],
+        commitId: "unknown-stroke-token",
+      }),
     (error) => error.code === "missing_applied_token",
   );
 });
 
 test("page changes on the generated Components page fail with a clear code", async () => {
   const snapshot = await served(
-    await loadPackageFromValues("memory://pages.smallpen", await fixtureValues(DESIGN_SYSTEM)),
+    await loadPackageFromValues(
+      "memory://pages.smallpen",
+      await fixtureValues(DESIGN_SYSTEM),
+    ),
   );
   assert.ok(snapshot.runtime.componentsPage);
   for (const change of [
@@ -354,8 +436,14 @@ test("page changes on the generated Components page fail with a clear code", asy
     { id: snapshot.runtime.componentsPage, type: "del-page" },
   ]) {
     assert.throws(
-      () => compilePenpotChanges(snapshot, { changes: [change], commitId: change.type }),
-      (error) => error.code === "generated_page_locked" && /Components page/.test(error.message),
+      () =>
+        compilePenpotChanges(snapshot, {
+          changes: [change],
+          commitId: change.type,
+        }),
+      (error) =>
+        error.code === "generated_page_locked" &&
+        /Components page/.test(error.message),
       change.type,
     );
   }
@@ -370,30 +458,40 @@ function cardOf(snapshot) {
 
 test("a shadow Token applied in Penpot binds the shadow and resolves to the Token", async () => {
   const snapshot = await served(
-    await loadPackageFromValues("memory://example.smallpen", await fixtureValues(EXAMPLE)),
+    await loadPackageFromValues(
+      "memory://example.smallpen",
+      await fixtureValues(EXAMPLE),
+    ),
   );
   // Recorded shape of Penpot's apply: the applied Token, then the shadow
   // Penpot resolved from it.
-  const penpotShadow = [{
-    blur: 4,
-    color: { color: "#000000", opacity: 0.24 },
-    hidden: false,
-    id: "6a1d3c5e-0000-4000-8000-000000000001",
-    "offset-x": 0,
-    "offset-y": 2,
-    spread: 0,
-    style: "drop-shadow",
-  }];
+  const penpotShadow = [
+    {
+      blur: 4,
+      color: { color: "#000000", opacity: 0.24 },
+      hidden: false,
+      id: "6a1d3c5e-0000-4000-8000-000000000001",
+      "offset-x": 0,
+      "offset-y": 2,
+      spread: 0,
+      style: "drop-shadow",
+    },
+  ];
   const applied = compilePenpotChanges(snapshot, {
     changes: [
-      modObj(snapshot, CARD, [userSet("applied-tokens", { shadow: "elevation-1" })]),
+      modObj(snapshot, CARD, [
+        userSet("applied-tokens", { shadow: "elevation-1" }),
+      ]),
       modObj(snapshot, CARD, [userSet("shadow", penpotShadow)]),
     ],
     commitId: "apply-shadow-token",
   });
   const bound = (await prepareOperationBatch(snapshot, applied)).snapshot;
   assert.deepEqual(cardOf(bound).tokenBindings, {
-    shadow: { assetId: "tok_demo_effect_elevation", packageId: bound.manifest.packageId },
+    shadow: {
+      assetId: "tok_demo_effect_elevation",
+      packageId: bound.manifest.packageId,
+    },
   });
   assert.equal(cardOf(bound).appliedTokens, undefined);
   // Every read resolves the binding to the Token's DTCG shadow.
@@ -419,41 +517,49 @@ test("a shadow Token applied in Penpot binds the shadow and resolves to the Toke
     changes: [modObj(reserved, CARD, [userSet("applied-tokens", {})])],
     commitId: "detach-shadow-token",
   });
-  assert.deepEqual(detached.operations.map(({ changes }) => changes), [
-    { tokenBindings: null },
-  ]);
+  assert.deepEqual(
+    detached.operations.map(({ changes }) => changes),
+    [{ tokenBindings: null }],
+  );
 });
 
 test("a shadow Token saved from Penpot keeps the Package's DTCG shadow form", async () => {
   const snapshot = await served(
-    await loadPackageFromValues("memory://example.smallpen", await fixtureValues(EXAMPLE)),
+    await loadPackageFromValues(
+      "memory://example.smallpen",
+      await fixtureValues(EXAMPLE),
+    ),
   );
   const batch = compilePenpotChanges(snapshot, {
-    changes: [{
-      attrs: {
-        description: "",
-        id: snapshot.runtime.tokens.tok_demo_effect_elevation,
-        name: "elevation-1",
-        type: "shadow",
-        value: [{
-          blur: "6",
-          color: "rgba(0, 0, 0, 0.24)",
-          inset: false,
-          "offset-x": "0",
-          "offset-y": "3",
-          spread: "0",
-        }],
+    changes: [
+      {
+        attrs: {
+          description: "",
+          id: snapshot.runtime.tokens.tok_demo_effect_elevation,
+          name: "elevation-1",
+          type: "shadow",
+          value: [
+            {
+              blur: "6",
+              color: "rgba(0, 0, 0, 0.24)",
+              inset: false,
+              "offset-x": "0",
+              "offset-y": "3",
+              spread: "0",
+            },
+          ],
+        },
+        "set-id": snapshot.runtime.tokenSets.tset_demo_effect,
+        "token-id": snapshot.runtime.tokens.tok_demo_effect_elevation,
+        type: "set-token",
       },
-      "set-id": snapshot.runtime.tokenSets.tset_demo_effect,
-      "token-id": snapshot.runtime.tokens.tok_demo_effect_elevation,
-      type: "set-token",
-    }],
+    ],
     commitId: "edit-shadow-token",
   });
   const saved = (await prepareOperationBatch(snapshot, batch)).snapshot;
   const token = saved.entries["tokens/tokens.json"].sets
-    .find(({ id }) => id === "tset_demo_effect").tokens
-    .find(({ id }) => id === "tok_demo_effect_elevation");
+    .find(({ id }) => id === "tset_demo_effect")
+    .tokens.find(({ id }) => id === "tok_demo_effect_elevation");
   assert.deepEqual(token.value, {
     blur: 6,
     color: "rgba(0, 0, 0, 0.24)",
@@ -465,23 +571,32 @@ test("a shadow Token saved from Penpot keeps the Package's DTCG shadow form", as
 
 test("the renderer draws shadows kept in Penpot's form", async () => {
   const values = await fixtureValues(ROUNDTRIP);
-  const rectangle = values.get("screens/roundtrip.json").presentations[0].nodes.node_rectangle;
-  rectangle.shadow = [{
-    blur: 0,
-    color: { color: "#ff0000", opacity: 1 },
-    hidden: false,
-    id: "6a1d3c5e-0000-4000-8000-000000000002",
-    "offset-x": 20,
-    "offset-y": 20,
-    spread: 0,
-    style: "drop-shadow",
-  }];
-  const snapshot = await loadPackageFromValues("memory://shadow.smallpen", values);
+  const rectangle = values.get("screens/roundtrip.json").presentations[0].nodes
+    .node_rectangle;
+  rectangle.shadow = [
+    {
+      blur: 0,
+      color: { color: "#ff0000", opacity: 1 },
+      hidden: false,
+      id: "6a1d3c5e-0000-4000-8000-000000000002",
+      "offset-x": 20,
+      "offset-y": 20,
+      spread: 0,
+      style: "drop-shadow",
+    },
+  ];
+  const snapshot = await loadPackageFromValues(
+    "memory://shadow.smallpen",
+    values,
+  );
   const { render } = await createEvidence(snapshot, {
     scale: 1,
     selector: { viewFormat: "screenshot" },
   });
   // The rectangle spans (80..320, 96..216); its shadow shows past the
   // bottom-right corner, red.
-  assert.deepEqual(pngPixel(render.bytes, render.width, 330, 226), [255, 0, 0, 255]);
+  assert.deepEqual(
+    pngPixel(render.bytes, render.width, 330, 226),
+    [255, 0, 0, 255],
+  );
 });

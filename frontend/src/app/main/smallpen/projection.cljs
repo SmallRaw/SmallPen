@@ -11,149 +11,23 @@
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
    [app.common.math :as mth]
+   [app.common.path-names :as cpn]
    [app.common.types.file :as ctf]
    [app.common.types.page :as ctp]
    [app.common.types.path :as path]
    [app.common.types.shape :as cts]
    [app.common.types.tokens-lib :as ctob]
+   [app.common.types.variant :as ctv]
    [app.common.uuid :as uuid]
    [app.main.smallpen.token-state :as spts]
    [app.util.i18n :refer [tr]]
-   [cuerdas.core :as str]))
+   [cuerdas.core :as str]
+   [shadow.resource :as rc]))
 
 (def format-capabilities
-  {:appliedTokenAttributes ["column-gap"
-                            "fill"
-                            "font-family"
-                            "font-size"
-                            "font-weight"
-                            "height"
-                            "layout-item-max-h"
-                            "layout-item-max-w"
-                            "layout-item-min-h"
-                            "layout-item-min-w"
-                            "letter-spacing"
-                            "line-height"
-                            "m1"
-                            "m2"
-                            "m3"
-                            "m4"
-                            "opacity"
-                            "p1"
-                            "p2"
-                            "p3"
-                            "p4"
-                            "r1"
-                            "r2"
-                            "r3"
-                            "r4"
-                            "rotation"
-                            "row-gap"
-                            "shadow"
-                            "stroke-color"
-                            "stroke-width"
-                            "text-case"
-                            "text-decoration"
-                            "typography"
-                            "width"]
-   :componentModel "located-main-instance"
-   :cornerRadiusForms ["uniform" "per-corner"]
-   :entryKinds ["assets" "components" "screens" "tokens"]
-   :fillTypes ["image" "linear-gradient" "radial-gradient" "solid"]
-   :localAssetTypes ["color" "font" "media" "typography"]
-   :nodeFields ["appliedTokens"
-                "backgroundBlur"
-                "blend-mode"
-                "blur"
-                "children"
-                "componentId"
-                "componentVariantId"
-                "cornerRadius"
-                "fills"
-                "flipX"
-                "flipY"
-                "growType"
-                "grids"
-                "height"
-                "hide-fill-on-export"
-                "hide-in-viewer"
-                "id"
-                "interactions"
-                "layout"
-                "layout-flex-dir"
-                "layout-gap-type"
-                "layout-gap"
-                "layout-align-items"
-                "layout-justify-content"
-                "layout-align-content"
-                "layout-wrap-type"
-                "layout-padding-type"
-                "layout-padding"
-                "layout-item-margin"
-                "layout-item-margin-type"
-                "layout-item-h-sizing"
-                "layout-item-v-sizing"
-                "layout-item-max-h"
-                "layout-item-min-h"
-                "layout-item-max-w"
-                "layout-item-min-w"
-                "layout-item-align-self"
-                "layout-item-absolute"
-                "layout-item-z-index"
-                "constraints-h"
-                "constraints-v"
-                "fixed-scroll"
-                "exports"
-                "content"
-                "pathData"
-                "points"
-                "locked"
-                "masked-group"
-                "mediaRef"
-                "name"
-                "opacity"
-                "proportionLock"
-                "rotation"
-                "sourceNodeId"
-                "strokes"
-                "shadow"
-                "show-content"
-                "text"
-                "textBlocks"
-                "textStyle"
-                "touched"
-                "type"
-                "visible"
-                "width"
-                "x"
-                "y"]
-   :nodeTypes ["COMPONENT" "ELLIPSE" "FRAME" "GROUP" "IMAGE" "INSTANCE" "PATH" "RECTANGLE" "TEXT"]
-   :presentationRootForms ["legacy-single" "forest"]
-   :textModel "blocks-runs"
-   :strokeTypes ["image" "linear-gradient" "radial-gradient" "solid"]
-   :supportedFontTypes ["font/otf" "font/ttf" "font/woff" "font/woff2"]
-   :supportedMediaTypes ["image/gif"
-                         "image/jpeg"
-                         "image/png"
-                         "image/svg+xml"
-                         "image/webp"]
-   :assetLibraryEntries "zero-or-one"
-   :tokenLibraryEntries "zero-or-one"
-   :touchedGroups ["blur-group"
-                   "constraints-group"
-                   "content-group"
-                   "fill-group"
-                   "geometry-group"
-                   "layer-effects-group"
-                   "mask-group"
-                   "modifiable-group"
-                   "name-group"
-                   "radius-group"
-                   "shadow-group"
-                   "stroke-group"
-                   "text-display-group"
-                   "text-font-group"
-                   "visibility-group"]})
+  "The Web projection capabilities the Background must report. Generated from
+  SmallPen core (npm run build:web-capabilities), never kept by hand here."
+  (js->clj (js/JSON.parse (rc/inline "./web_capabilities.json")) :keywordize-keys true))
 
 (defn- validate-capabilities!
   [snapshot]
@@ -295,7 +169,8 @@
 (defn- project-strokes
   [snapshot values]
   (mapv (fn [{:keys [alignment capEnd capStart color dash gap hidden opacity
-                     colorRef style type width] :as stroke}]
+                     colorRef style type width widthTop widthRight widthBottom
+                     widthLeft] :as stroke}]
           (when-not (contains? #{"image" "linear-gradient" "radial-gradient" "solid"}
                                type)
             (throw (ex-info "unsupported SmallPen stroke type"
@@ -306,6 +181,13 @@
                    :stroke-opacity (or opacity 1)
                    :stroke-style (keyword (or style "solid"))
                    :stroke-width (or width 1)}
+            ;; Per-side widths; a missing side uses the stroke width.
+            (some some? [widthTop widthRight widthBottom widthLeft])
+            (assoc :stroke-width-top (or widthTop width 1)
+                   :stroke-width-right (or widthRight width 1)
+                   :stroke-width-bottom (or widthBottom width 1)
+                   :stroke-width-left (or widthLeft width 1))
+
             (= type "solid")
             (assoc :stroke-color color)
 
@@ -578,12 +460,16 @@
   [snapshot node-path node-id]
   (apply runtime-id snapshot (conj (vec node-path) node-id)))
 
+(def ^:private frame-node-types
+  "Node types Penpot draws as boards: a component main and a copy too."
+  #{"FRAME" "COMPONENT" "INSTANCE"})
+
 (defn- nearest-frame-id
   [snapshot node-path nodes parents node-id]
   (loop [parent-id (get parents node-id)]
     (if parent-id
       (let [parent (lookup nodes parent-id)]
-        (if (= "FRAME" (:type parent))
+        (if (contains? frame-node-types (:type parent))
           (node-runtime-id snapshot node-path parent-id)
           (recur (get parents parent-id))))
       uuid/zero)))
@@ -636,30 +522,6 @@
               (reduce walk (assoc acc node-id node) (:children node))
               acc))]
     (walk {} root-id)))
-
-(defn- subtree-size
-  "Width/height of a node subtree relative to its root origin, so board
-  cells reserve the right space before the shapes are built."
-  [nodes root-id]
-  (let [origins (absolute-origins nodes [root-id])
-        root    (lookup nodes root-id)
-        [rx ry] (if (some? (lookup origins root-id))
-                  (root-origin origins nodes root-id)
-                  [(or (:x root) 0) (or (:y root) 0)])]
-    (reduce
-     (fn [[width height] [node-id {:keys [matrix]}]]
-       (let [node (lookup nodes node-id)
-             w    (or (:width node) 0)
-             h    (or (:height node) 0)]
-         (if (translation-only? matrix)
-           [(max width (+ (- (:e matrix) rx) w))
-            (max height (+ (- (:f matrix) ry) h))]
-           (let [corners (map #(gpt/transform % matrix)
-                              (grc/rect->points (grc/make-rect 0 0 w h)))]
-             [(apply max width (map #(- (:x %) rx) corners))
-              (apply max height (map #(- (:y %) ry) corners))]))))
-     [0 0]
-     origins)))
 
 (defn- screen-presentation
   "Resolve one screen presentation from the snapshot entries."
@@ -870,55 +732,134 @@
           (if (map? value) [value] value))
     value))
 
-(defn- project-token-library
-  [snapshot {:keys [activeSetIds activeThemeIds sets themes]}]
-  (let [set-names (into {} (map (juxt :id :name)) sets)
-        token-sets
-        (mapv (fn [{:keys [description id name tokens]}]
-                (ctob/make-token-set
-                 {:description description
-                  :id (runtime-id snapshot :tokenSets id)
-                  :name name
-                  :tokens
-                  ;; Canonical token order survives: a plain map literal
-                  ;; would reorder sets with more than eight tokens.
-                  (into (d/ordered-map)
-                        (map (fn [{:keys [description id name type value]}]
-                               [name
-                                (ctob/make-token
-                                 {:description description
-                                  :id (runtime-id snapshot :tokens id)
-                                  :name name
-                                  :type (keyword type)
-                                  :value (penpot-token-value type value)})]))
-                        tokens)}))
-              sets)
-        token-themes
-        (mapv (fn [{:keys [description externalId group id isSource name setIds]}]
-                (ctob/make-token-theme
-                 {:description description
-                  :external-id externalId
-                  :group group
-                  :id (runtime-id snapshot :tokenThemes id)
-                  :is-source isSource
-                  :name name
-                  :sets (set (map #(lookup set-names %) setIds))}))
-              themes)
-        themes-by-id (into {} (map vector (map :id themes) token-themes))
-        active-set-names (set (map #(lookup set-names %) activeSetIds))
+(defn- project-token-parts
+  "One Penpot token library from the Form A libraries of `parts`, each
+  {:owner snapshot :library library :active-theme-ids ids}: their sets and
+  themes in part order (a later set overrides an earlier one by name, as
+  Penpot resolves it). A part without an active theme contributes its
+  activeSetIds through Penpot's hidden theme."
+  [parts]
+  (let [token-sets
+        (into []
+              (mapcat
+               (fn [{:keys [owner library]}]
+                 (map (fn [{:keys [description id name tokens]}]
+                        (ctob/make-token-set
+                         {:description description
+                          :id (runtime-id owner :tokenSets id)
+                          :name name
+                          :tokens
+                          ;; Canonical token order survives: a plain map literal
+                          ;; would reorder sets with more than eight tokens.
+                          (into (d/ordered-map)
+                                (map (fn [{:keys [description id name type value]}]
+                                       [name
+                                        (ctob/make-token
+                                         {:description description
+                                          :id (runtime-id owner :tokens id)
+                                          :name name
+                                          :type (keyword type)
+                                          :value (penpot-token-value type value)})]))
+                                tokens)}))
+                      (:sets library))))
+              parts)
+        _ (when (not= (count token-sets)
+                      (count (into #{} (map ctob/get-name) token-sets)))
+            (throw (ex-info "SmallPen token set names collide between the Foundation and the Product"
+                            {:type :validation
+                             :code :smallpen-token-set-name-collision
+                             :sets (mapv ctob/get-name token-sets)})))
+        part-themes
+        (mapv (fn [{:keys [owner library]}]
+                (let [set-names (into {} (map (juxt :id :name)) (:sets library))]
+                  (mapv (fn [{:keys [description externalId group id isSource name setIds]}]
+                          [id
+                           (ctob/make-token-theme
+                            {:description description
+                             :external-id externalId
+                             :group group
+                             :id (runtime-id owner :tokenThemes id)
+                             :is-source isSource
+                             :name name
+                             :sets (set (map #(lookup set-names %) setIds))})])
+                        (:themes library))))
+              parts)
+        active-theme-paths
+        (into #{}
+              cat
+              (map (fn [{:keys [active-theme-ids]} themes]
+                     (let [by-id (into {} themes)]
+                       (keep #(some-> (lookup by-id %) ctob/get-theme-path)
+                             active-theme-ids)))
+                   parts
+                   part-themes))
+        set-names-of (fn [{:keys [library]}]
+                       (let [set-names (into {} (map (juxt :id :name)) (:sets library))]
+                         (keep #(lookup set-names %) (:activeSetIds library))))
+        unthemed-sets (into #{}
+                            (comp (remove #(seq (:active-theme-ids %)))
+                                  (mapcat set-names-of))
+                            parts)
         result (reduce ctob/add-set (ctob/make-tokens-lib) token-sets)
         result (ctob/update-theme
                 result
                 uuid/zero
                 (fn [_]
-                  (ctob/make-hidden-theme :sets active-set-names)))
-        result (reduce ctob/add-theme result token-themes)
-        active-theme-paths
-        (if (seq activeThemeIds)
-          (set (map #(ctob/get-theme-path (lookup themes-by-id %))
-                    activeThemeIds))
-          #{ctob/hidden-theme-path})]
-    (spts/set-active-themes result active-theme-paths)))
+                  (ctob/make-hidden-theme
+                   :sets (if (seq unthemed-sets)
+                           unthemed-sets
+                           (into #{} (mapcat set-names-of) parts)))))
+        result (reduce ctob/add-theme result (into [] (comp cat (map second)) part-themes))]
+    (spts/set-active-themes result
+                            (cond-> active-theme-paths
+                              (or (empty? active-theme-paths) (seq unthemed-sets))
+                              (conj ctob/hidden-theme-path)))))
+
+(defn- project-token-library
+  [snapshot library]
+  (project-token-parts [{:owner snapshot
+                         :library library
+                         :active-theme-ids (:activeThemeIds library)}]))
+
+(defn- foundation-token-data
+  "What a Product's token manager must not edit (edit_policy.cljs): the
+  runtime ids of its Foundation's sets, themes and tokens and the set
+  names, as JSON plugin-data."
+  [{:keys [owner library]}]
+  (js/JSON.stringify
+   (clj->js
+    {:ids (map str
+               (concat (map #(runtime-id owner :tokenSets (:id %)) (:sets library))
+                       (map #(runtime-id owner :tokenThemes (:id %)) (:themes library))
+                       (for [token-set (:sets library)
+                             token (:tokens token-set)]
+                         (runtime-id owner :tokens (:id token)))))
+     :sets (map :name (:sets library))})))
+
+(defn- foundation-token-part
+  "The Form A library of the Foundation a Product depends on, with the
+  Product's selection of its themes: the Background's `tokenThemes` rows
+  (core listTokenThemes), else the dependency's activeThemeIds, else the
+  Foundation's own (docs/TOKEN-THEMES.md 3.2)."
+  [snapshot]
+  (some (fn [{:keys [packageId] :as dependency}]
+          (when-let [owner (some #(when (= packageId (get-in % [:manifest :packageId])) %)
+                                 (:libraries snapshot))]
+            (when-let [library (token-library owner)]
+              (let [rows (filter #(= packageId (:packageId %)) (:tokenThemes snapshot))]
+                {:owner owner
+                 :library library
+                 :active-theme-ids
+                 (cond
+                   (seq rows)
+                   (into [] (comp (filter :active) (map :id)) rows)
+
+                   (contains? dependency :activeThemeIds)
+                   (:activeThemeIds dependency)
+
+                   :else
+                   (:activeThemeIds library))}))))
+        (get-in snapshot [:manifest :dependencies])))
 
 (defn- unused-token-set-name
   [tokens-lib]
@@ -966,36 +907,6 @@
         (ctob/add-set token-set)
         (ctob/add-theme token-theme)
         (spts/activate-theme (ctob/get-id token-theme)))))
-
-(def ^:private binding-token-attributes
-  "Canonical Token bindings Penpot shows as an applied Token. Penpot applies
-  a stroke color Token to the first stroke only."
-  {"shadow" :shadow
-   "stroke" :stroke-color
-   "strokes.0" :stroke-color})
-
-(defn- token-names-by-id
-  [snapshot]
-  (into {}
-        (map (juxt :id :name))
-        (concat (mapcat :tokens (:sets (token-library snapshot)))
-                (snapshot-dtcg-token-definitions snapshot))))
-
-(defn- binding-applied-tokens
-  "Applied Token names for the bindings whose Token is in this Package's
-  token library. Bindings to other Packages stay resolved values only: the
-  Penpot token library holds no Token to name."
-  [snapshot token-bindings]
-  (let [package-id (get-in snapshot [:manifest :packageId])
-        names      (delay (token-names-by-id snapshot))]
-    (into {}
-          (keep (fn [[field reference]]
-                  (let [attribute (get binding-token-attributes (name field))]
-                    (when (and attribute
-                               (= package-id (lookup reference "packageId")))
-                      (some->> (get @names (lookup reference "assetId"))
-                               (vector attribute))))))
-          token-bindings)))
 
 (defn- linear-part
   [matrix]
@@ -1070,20 +981,92 @@
                                                startingNodeId)}])))
         flows))
 
-(declare specimen-shadow)
+(declare css-color->attrs)
+
+(defn- invalid-shadow
+  [value]
+  (throw (ex-info "unsupported SmallPen shadow"
+                  {:type :validation
+                   :code :unsupported-smallpen-shadow
+                   :shadow value})))
+
+(defn- shadow-length
+  "A shadow length is a number or a px string (\"4\", \"4px\")."
+  [record value]
+  (cond
+    (nil? value) 0
+    (number? value) value
+
+    (and (string? value) (re-matches #"-?\d+(\.\d+)?(px)?" (str/trim value)))
+    (js/parseFloat value)
+
+    :else (invalid-shadow record)))
+
+(defn- dtcg-shadow
+  "A DTCG shadow object -> a native shadow record carrying the full common
+  Shadow schema (id, style, hidden, color attrs), so effects panel edits
+  re-validated with check-shadow succeed and rgba/hex colors keep their
+  alpha. Older Packages store the offsets as x/y."
+  [value]
+  (let [field #(some (fn [key] (lookup value key)) %)
+        color (css-color->attrs (field ["color"]))]
+    (when-not color
+      (throw (ex-info "unsupported SmallPen shadow color"
+                      {:type :validation
+                       :code :unsupported-smallpen-shadow-color
+                       :color (field ["color"])})))
+    {:id nil
+     :style (if (true? (field ["inset"])) :inner-shadow :drop-shadow)
+     :hidden false
+     :blur (shadow-length value (field ["blur"]))
+     :offset-x (shadow-length value (field ["offsetX" "offset-x" "x"]))
+     :offset-y (shadow-length value (field ["offsetY" "offset-y" "y"]))
+     :spread (shadow-length value (field ["spread"]))
+     :color color}))
+
+(defn- native-shadow
+  "A shadow edited in Penpot is stored as its native record, with the
+  style as a string, the id as a uuid string and color attrs as a map."
+  [value]
+  (let [style (keyword (or (lookup value "style") "drop-shadow"))
+        color (lookup value "color")]
+    (when-not (and (contains? #{:drop-shadow :inner-shadow} style)
+                   (map? color))
+      (invalid-shadow value))
+    {:id (some-> (lookup value "id") str uuid/parse*)
+     :style style
+     :hidden (true? (lookup value "hidden"))
+     :blur (shadow-length value (lookup value "blur"))
+     :offset-x (shadow-length value (lookup value "offset-x"))
+     :offset-y (shadow-length value (lookup value "offset-y"))
+     :spread (shadow-length value (lookup value "spread"))
+     :color (cond-> {:color (lookup color "color")
+                     :opacity (or (lookup color "opacity") 1)}
+              (some? (lookup color "ref-id"))
+              (assoc :ref-id (uuid/parse* (str (lookup color "ref-id"))))
+
+              (some? (lookup color "ref-file"))
+              (assoc :ref-file (uuid/parse* (str (lookup color "ref-file")))))}))
 
 (defn- project-shadow
-  "A bound shadow Token resolves to DTCG shadow objects; Penpot shapes hold
-  native shadow records."
+  "A Package shadow (one record or a list) -> Penpot's native shadow
+  vector. Records are DTCG objects (what a bound shadow Token resolves to)
+  or native records saved from Penpot; anything else fails explicitly
+  rather than reaching the shape unconverted."
   [value]
   (let [records (if (map? value) [value] value)]
-    (if (some #(some? (lookup % "offsetX")) records)
-      (into [] (mapcat specimen-shadow) records)
-      value)))
+    (when-not (and (sequential? records) (every? map? records))
+      (invalid-shadow value))
+    (mapv (fn [record]
+            (if (or (some? (lookup record "style"))
+                    (map? (lookup record "color")))
+              (native-shadow record)
+              (dtcg-shadow record)))
+          records)))
 
 (defn- project-node
   [snapshot components node-path plugin-data-fn origins nodes parents root-ids node]
-  (let [{:keys [appliedTokens backgroundBlur blend-mode blur children componentId
+  (let [{:keys [appliedTokens penpotAppliedTokens backgroundBlur blend-mode blur children componentId
                 componentVariantId content
                 cornerRadius exports fills fixed-scroll growType
                 grids height hide-fill-on-export hide-in-viewer id interactions
@@ -1130,11 +1113,12 @@
         turned?     (not (translation-only? matrix))
         transform   (when turned? (linear-part matrix))
         [abs-x abs-y] (geometry-origin geometry (or width 0) (or height 0))
-        applied-tokens (merge (into {}
-                                    (map (fn [[attribute token-name]]
-                                           [(keyword attribute) token-name]))
-                                    appliedTokens)
-                              (binding-applied-tokens snapshot tokenBindings))]
+        ;; The Background computes the applied Tokens from the bindings with
+        ;; core's one table (token-attributes.mjs); the App translates none.
+        applied-tokens (into {}
+                             (map (fn [[attribute token-name]]
+                                    [(keyword attribute) token-name]))
+                             (or penpotAppliedTokens appliedTokens))]
     (cts/setup-shape
      (cond->
       {:id shape-id
@@ -1156,9 +1140,11 @@
 
        ;; No fills means no paint, as the Package renderer draws it; Penpot
        ;; would otherwise give boards a white and shapes a grey default.
-       ;; Only a root board keeps Penpot's (and the renderer's) white.
-       (and (empty? fills) (not root?)
-            (contains? #{"COMPONENT" "ELLIPSE" "FRAME" "RECTANGLE"} type))
+       ;; Only a screen's root board keeps Penpot's (and the renderer's)
+       ;; white; Instances and variant or Component roots never do.
+       (and (empty? fills)
+            (not (and root? (= type "FRAME") (= :nodes (first node-path))))
+            (contains? #{"COMPONENT" "ELLIPSE" "FRAME" "INSTANCE" "RECTANGLE"} type))
        (assoc :fills [])
 
        (= type "TEXT")
@@ -1197,6 +1183,11 @@
 
        (some? hide-in-viewer)
        (assoc :hide-in-viewer hide-in-viewer)
+
+       ;; Like a board drawn inside a board in Penpot, a nested board is
+       ;; not a View mode screen unless the Package says it is.
+       (and (nil? hide-in-viewer) (not root?) (= :frame (node-type type)))
+       (assoc :hide-in-viewer true)
 
        (some? masked-group)
        (assoc :masked-group masked-group)
@@ -1283,8 +1274,8 @@
        (some? exports)
        (assoc :exports exports)
 
-        ;; A turned or mirrored node carries the composed linear transform;
-        ;; setup-shape derives its points from selrect and transform.
+       ;; A turned or mirrored node carries the composed linear transform;
+       ;; setup-shape derives its points from selrect and transform.
        turned?
        (assoc :transform transform
               :transform-inverse (gmt/inverse transform))
@@ -1298,11 +1289,11 @@
        (:flip-y geometry)
        (assoc :flip-y true)
 
-        ;; Canonical pathData is local to the node box, but Penpot path
-        ;; content is page-absolute (setup-path derives the selrect from it
-        ;; unless given). A stored `points` field is derived Penpot state
-        ;; from older packages and never projected: the box corners always
-        ;; follow the composed transform.
+       ;; Canonical pathData is local to the node box, but Penpot path
+       ;; content is page-absolute (setup-path derives the selrect from it
+       ;; unless given). A stored `points` field is derived Penpot state
+       ;; from older packages and never projected: the box corners always
+       ;; follow the composed transform.
        (and (= type "PATH") (or (some? pathData) (some? content)))
        (merge (project-path-geometry (or pathData content) matrix))
 
@@ -1330,11 +1321,11 @@
        (and (true? proportionLock) (not (zero? height)))
        (assoc :proportion (/ width height))
 
-       (or (some? appliedTokens) (seq applied-tokens))
+       (or (some? appliedTokens) (some? penpotAppliedTokens) (seq applied-tokens))
        (assoc :applied-tokens applied-tokens)
 
-        ;; A Component Set variant root is also typed COMPONENT but carries no
-        ;; componentId; its caller supplies the component wiring instead.
+       ;; A Component Set variant root is also typed COMPONENT but carries no
+       ;; componentId; its caller supplies the component wiring instead.
        (and (= type "COMPONENT") (some? component-id))
        (assoc :component-id (:component-id component-target)
               :component-file (:file-id component-target)
@@ -1361,7 +1352,29 @@
        (some? touched)
        (assoc :touched (set (map keyword touched)))))))
 
-(defn- project-page
+(defn- show-interaction-destinations
+  "A nested board an interaction navigates to stays a View mode screen, as
+  Penpot shows a hidden board once it becomes a destination, unless the
+  Package hides it explicitly."
+  [nodes shapes]
+  (reduce (fn [shapes id]
+            (let [node-id (get-in shapes [id :plugin-data :smallpen "node-id"])]
+              (if (and (true? (get-in shapes [id :hide-in-viewer]))
+                       (nil? (:hide-in-viewer (lookup nodes node-id))))
+                (update shapes id dissoc :hide-in-viewer)
+                shapes)))
+          shapes
+          (into #{} (comp (mapcat :interactions) (keep :destination)) (vals shapes))))
+
+(defn- presentation-page-name
+  [screen presentation]
+  (if (= (:name screen) (:name presentation))
+    (:name screen)
+    (str (:name screen) " · " (:name presentation))))
+
+(defn- presentation-parts
+  "The shapes, top-level shape ids and prototype flows of one page version,
+  for the canvas it is drawn on."
   [snapshot components screen presentation]
   (let [screen-id       (:id screen)
         presentation-id (:id presentation)
@@ -1386,7 +1399,8 @@
                                                   root-id-set
                                                   node)))
                              (map (juxt :id identity))
-                             (into {}))
+                             (into {})
+                             (show-interaction-destinations nodes))
         root-shape      (-> (get-in ctp/empty-page-data [:objects uuid/zero])
                             (assoc :shapes
                                    (mapv #(node-runtime-id snapshot node-path %)
@@ -1395,50 +1409,98 @@
                                                  screen-id
                                                  presentation-id
                                                  (:prototypeFlows presentation))]
-    (-> (ctp/make-empty-page
-         {:id page-id
-          :name (if (= (:name screen) (:name presentation))
-                  (:name screen)
-                  (str (:name screen) " · " (:name presentation)))})
-        (cond-> (some? (:background presentation))
-          (assoc :background (:background presentation))
+    {:shapes shapes
+     :root-shape-ids (mapv #(node-runtime-id snapshot node-path %) root-ids)
+     :flows flows
+     :page-id page-id
+     :presentation presentation
+     :screen screen}))
 
-          (some? (:pixel-grid-color presentation))
-          (assoc :pixel-grid-color (:pixel-grid-color presentation))
+(defn- page-settings
+  "A one-board canvas carries its page version's background and pixel grid."
+  [page presentation]
+  (cond-> page
+    (some? (:background presentation))
+    (assoc :background (:background presentation))
 
-          (some? (:pixel-grid-opacity presentation))
-          (assoc :pixel-grid-opacity (:pixel-grid-opacity presentation)))
-        (assoc :objects (assoc shapes uuid/zero root-shape))
+    (some? (:pixel-grid-color presentation))
+    (assoc :pixel-grid-color (:pixel-grid-color presentation))
+
+    (some? (:pixel-grid-opacity presentation))
+    (assoc :pixel-grid-opacity (:pixel-grid-opacity presentation))))
+
+(defn- project-canvas
+  "One canvas as one Penpot page: every page version on it is a board, at the
+  place the Background's canvas layout gave it (core canvases.mjs)."
+  [snapshot components screens canvas]
+  (let [parts      (mapv (fn [{:keys [screenId presentationId]}]
+                           (let [screen (get screens screenId)]
+                             (presentation-parts snapshot
+                                                 components
+                                                 screen
+                                                 (d/seek #(= presentationId (:id %))
+                                                         (:presentations screen)))))
+                         (:boards canvas))
+        page-id    (or (uuid/parse* (:pageId canvas)) (:page-id (first parts)))
+        root-shape (-> (get-in ctp/empty-page-data [:objects uuid/zero])
+                       (assoc :shapes (into [] (mapcat :root-shape-ids) parts)))
+        flows      (into {} (mapcat :flows) parts)
+        single     (when (= 1 (count parts)) (first parts))]
+    (-> (ctp/make-empty-page {:id page-id :name (:name canvas)})
+        (cond-> single (page-settings (:presentation single)))
+        (assoc :objects (into {uuid/zero root-shape} (mapcat :shapes) parts))
         (cond-> (seq flows)
           (assoc :flows flows))
         (assoc :plugin-data
                {:smallpen
-                {"presentation-id" presentation-id
-                 "screen-id" screen-id}}))))
+                (cond-> {"canvas-id" (:id canvas)}
+                  single (assoc "presentation-id" (get-in single [:presentation :id])
+                                "screen-id" (get-in single [:screen :id])))}))))
 
 (def ^:private component-grid-gap 80)
 (def ^:private component-grid-columns 6)
 
-(defn- variant-label
-  "A readable name for one variant, built from its axis selection. A Component
-  Set with no axes has a single variant that just carries the set name."
+(defn- variant-properties
+  "Penpot variant properties of one variant: one {:name :value} per axis, in
+  axis order. Penpot names properties uniquely, so a repeated axis name gets
+  Penpot's numbered suffix."
   [component-set variant]
-  (let [selection (:selection variant)
-        parts     (->> (:axes component-set)
-                       (keep (fn [axis]
-                               (when-let [value (lookup selection (:id axis))]
-                                 (str (:name axis) "=" value)))))]
-    (if (seq parts)
-      (str/join ", " parts)
-      (:name component-set))))
+  (let [names (->> (:axes component-set)
+                   (mapv (fn [axis] {:name (:name axis) :value ""}))
+                   (ctv/update-number-in-repeated-prop-names)
+                   (mapv :name))]
+    (mapv (fn [axis name]
+            {:name name
+             :value (str (or (lookup (:selection variant) (:id axis)) ""))})
+          (:axes component-set)
+          names)))
+
+(defn- component-set-path
+  "The Assets folder of a Component Set's components: its category."
+  [component-set]
+  (cpn/clean-path (str (or (:category component-set) ""))))
+
+(defn- component-set-full-name
+  "Penpot names a variant container and its mains after the components'
+  folder and name together."
+  [component-set]
+  (cpn/merge-path-item (component-set-path component-set) (:name component-set)))
+
+(defn- variant-container?
+  "A Component Set with axes is a Penpot variant container holding one main
+  per variant. One without axes has a single variant: a plain component."
+  [component-set]
+  (boolean (seq (:axes component-set))))
 
 (defn- grid-offsets
   "Start offset of every track (column or row): the sum of the widest cell
   of each earlier track plus one gap per track."
-  [sizes]
-  (vec (reductions (fn [offset size] (+ offset size component-grid-gap))
-                   0
-                   (butlast sizes))))
+  ([sizes]
+   (grid-offsets sizes component-grid-gap))
+  ([sizes gap]
+   (vec (reductions (fn [offset size] (+ offset size gap))
+                    0
+                    (butlast sizes)))))
 
 (defn- variant-placements
   "Lay every variant of every Component Set out on one grid so their main
@@ -1516,27 +1578,602 @@
          (map (juxt :id identity))
          (into {}))))
 
+(def ^:private variant-container-padding 30)
+(def ^:private variant-container-gap 20)
+;; With three or more axes the first axis groups the columns while that
+;; keeps the table at most this many columns wide.
+(def ^:private matrix-max-grouped-columns 12)
+(def ^:private matrix-label-size 12)
+(def ^:private matrix-header-height 24)
+(def ^:private matrix-label-gap 12)
+(def ^:private matrix-summary-height 28)
+(def ^:private page-content-width 1600)
+(def ^:private page-block-gap 80)
+(def ^:private page-section-gap 120)
+
+(declare board-text-metrics flow-layout)
+
+(defn- variant-value
+  [axis variant]
+  (str (or (lookup (:selection variant) (:id axis)) "")))
+
+(defn- value-text
+  [value]
+  (if (str/blank? value) "—" value))
+
+(defn- axis-values
+  "The values of one axis the variants use: in domain order, then the values
+  only variants know (one added in Penpot) in variant order."
+  [axis variants]
+  (let [used    (distinct (map (partial variant-value axis) variants))
+        ordered (filter (set used) (distinct (map str (:domain axis))))]
+    (vec (concat ordered (remove (set ordered) used)))))
+
+(defn- variant-matrix
+  "How the variants of a Component Set read as a table: the last axis gives
+  the columns and the combinations of the other axes the rows. With three
+  or more axes the first axis also groups the columns, one block per value
+  side by side, unless that makes the table wider than
+  `matrix-max-grouped-columns`; then it stays the outermost row axis. Rows
+  and columns hold only combinations some variant has, in axis value order.
+  Each key holds one value per axis of its side; cells are in variant order."
+  [{:keys [axes variants]}]
+  (let [axes       (vec axes)
+        values     (mapv #(axis-values % variants) axes)
+        last-index (dec (count axes))
+        grouped?   (and (>= (count axes) 3)
+                        (<= (* (count (first values)) (count (peek values)))
+                            matrix-max-grouped-columns))
+        column-ixs (cond
+                     (neg? last-index) []
+                     grouped?          [0 last-index]
+                     :else             [last-index])
+        row-ixs    (into [] (remove (set column-ixs)) (range (count axes)))
+        key-of     (fn [ixs variant]
+                     (mapv #(variant-value (nth axes %) variant) ixs))
+        keys-of    (fn [ixs]
+                     (->> variants
+                          (map (partial key-of ixs))
+                          (distinct)
+                          (sort-by (fn [key]
+                                     (mapv #(d/index-of (nth values %1) %2) ixs key)))
+                          (vec)))
+        columns    (keys-of column-ixs)
+        rows       (keys-of row-ixs)]
+    {:column-axes (mapv axes column-ixs)
+     :row-axes    (mapv axes row-ixs)
+     :columns     columns
+     :rows        rows
+     :cells       (mapv (fn [variant]
+                          {:variant variant
+                           :column (d/index-of columns (key-of column-ixs variant))
+                           :row (d/index-of rows (key-of row-ixs variant))})
+                        variants)}))
+
+(defn- runs
+  "[start end) index ranges of consecutive keys sharing their first `depth`
+  values: the span of one header label."
+  [keys depth]
+  (->> (range (count keys))
+       (partition-by #(subvec (nth keys %) 0 depth))
+       (mapv (fn [indexes] [(first indexes) (inc (last indexes))]))))
+
+(defn- matrix-label
+  [text x y & {:keys [size weight muted?]
+               :or {size matrix-label-size weight 400 muted? false}}]
+  {:text text :x x :y y :size size :weight weight :muted? muted?})
+
+(defn- label-width
+  [text size]
+  (:width (board-text-metrics text size)))
+
+(defn- set-summary
+  [{:keys [axes variants]}]
+  (if (seq axes)
+    (tr "smallpen.components-page.properties"
+        (str/join " × " (map :name axes))
+        (count variants))
+    (tr "smallpen.components-page.no-properties")))
+
+(defn- component-set-block
+  "Layout of one Component Set on the Components page, its top-left corner at
+  (x y). A set with axes is a variant container laid out as an axis table
+  (`variant-matrix`): inside its padding the property summary, the column
+  headers, the row headers on the left and the variant mains in their
+  cells. Every column is as wide as its widest variant and every row as
+  tall as its tallest, so mains never overlap. Labels are data: the page
+  draws them as locked decoration under the container, never inside it. A
+  set without axes is its single main. Penpot titles both with the name."
+  [component-id component-set x y]
+  (let [variants (:variants component-set)
+        root     (fn [variant] (lookup (:nodes variant) (:rootId variant)))
+        size     (fn [variant key] (or (key (root variant)) 0))
+        place    (fn [variant offset-x offset-y]
+                   {:component-id component-id
+                    :component-set component-set
+                    :variant variant
+                    :offset-x offset-x
+                    :offset-y offset-y})]
+    (if-not (variant-container? component-set)
+      (let [variant (first variants)]
+        {:component-id component-id
+         :component-set component-set
+         :labels []
+         :placements (if variant [(place variant x y)] [])
+         :width (if variant (size variant :width) 0)
+         :height (if variant (size variant :height) 0)})
+      (let [{:keys [column-axes row-axes columns rows cells]}
+            (variant-matrix component-set)
+            gap          variant-container-gap
+            padding      variant-container-padding
+            grouped?     (= 2 (count column-axes))
+            ;; Variants with the same values (an edit in progress) share a
+            ;; cell and stack in it.
+            members      (group-by (juxt :column :row) cells)
+            stack-height (fn [cells]
+                           (+ (reduce + (map #(size (:variant %) :height) cells))
+                              (* gap (dec (count cells)))))
+            slot-y       (into {}
+                               (mapcat (fn [[_ cells]]
+                                         (map (fn [cell offset]
+                                                [(:id (:variant cell)) offset])
+                                              cells
+                                              (reductions + 0 (map #(+ gap (size (:variant %) :height))
+                                                                   cells)))))
+                               members)
+            group-label  (fn [key]
+                           (str (:name (first column-axes)) ": " (value-text (first key))))
+            widths       (mapv (fn [column]
+                                 (reduce max
+                                         (label-width (value-text (peek (nth columns column)))
+                                                      matrix-label-size)
+                                         (for [[[c _] cells] members
+                                               :when (= c column)
+                                               cell cells]
+                                           (size (:variant cell) :width))))
+                               (range (count columns)))
+            ;; A group label spans its columns: widen the last one if needed.
+            widths       (if grouped?
+                           (reduce (fn [widths [start end]]
+                                     (let [span (+ (reduce + (subvec widths start end))
+                                                   (* gap (- end start 1)))
+                                           need (+ gap (label-width (group-label (nth columns start))
+                                                                    matrix-label-size))]
+                                       (cond-> widths
+                                         (< span need) (update (dec end) + (- need span)))))
+                                   widths
+                                   (runs columns 1))
+                           widths)
+            heights      (mapv (fn [row]
+                                 (reduce max
+                                         matrix-header-height
+                                         (for [[[_ r] cells] members
+                                               :when (= r row)]
+                                           (stack-height cells))))
+                               (range (count rows)))
+            col-x        (grid-offsets widths gap)
+            row-y        (grid-offsets heights gap)
+            row-label-w  (mapv (fn [index]
+                                 (+ 16 (reduce max 0 (map #(label-width (value-text (nth % index))
+                                                                        matrix-label-size)
+                                                          rows))))
+                               (range (count row-axes)))
+            corner       (when (seq row-axes)
+                           (str (str/join " · " (map :name row-axes))
+                                " / " (:name (peek column-axes))))
+            corner-w     (if corner
+                           (max (reduce + row-label-w)
+                                (+ 16 (label-width corner matrix-label-size)))
+                           0)
+            summary      (set-summary component-set)
+            header-y     (+ y padding matrix-summary-height)
+            values-y     (+ header-y (* (dec (count column-axes)) matrix-header-height))
+            cells-x      (+ x padding corner-w)
+            cells-y      (+ header-y (* (count column-axes) matrix-header-height) matrix-label-gap)
+            width        (max (+ (* 2 padding) (label-width summary matrix-label-size))
+                              (+ (- cells-x x) (peek col-x) (or (peek widths) 0) padding))
+            height       (+ (- cells-y y) (peek row-y) (or (peek heights) 0) padding)
+            column-x     (fn [column] (+ cells-x (nth col-x column)))
+            cell-y       (fn [row] (+ cells-y (nth row-y row)))]
+        {:component-id component-id
+         :component-set component-set
+         :container {:x x :y y :width width :height height}
+         :labels (vec
+                  (concat
+                   [(matrix-label summary (+ x padding) (+ y padding) :muted? true)]
+                   (when grouped?
+                     (map (fn [[start _]]
+                            (matrix-label (group-label (nth columns start))
+                                          (column-x start) header-y :weight 600))
+                          (runs columns 1)))
+                   (map-indexed (fn [column key]
+                                  (matrix-label (value-text (peek key)) (column-x column) values-y))
+                                columns)
+                   (when corner
+                     [(matrix-label corner (+ x padding) values-y :muted? true)])
+                   ;; One header column per row axis; a value shows where it
+                   ;; starts a run, like a pivot table.
+                   (for [index (range (count row-axes))
+                         [start _] (runs rows (inc index))]
+                     (matrix-label (value-text (nth (nth rows start) index))
+                                   (+ x padding (reduce + (subvec row-label-w 0 index)))
+                                   (cell-y start)
+                                   :weight (if (< index (dec (count row-axes))) 600 400)))))
+         :placements (mapv (fn [{:keys [variant column row]}]
+                             (place variant
+                                    (column-x column)
+                                    (+ (cell-y row) (get slot-y (:id variant) 0))))
+                           cells)
+         :width width
+         :height height}))))
+
+(defn- offset-component-set-block
+  "Move an already computed block from the origin to its page position."
+  [block x y]
+  (let [offset (fn [position]
+                 (-> position (update :x + x) (update :y + y)))]
+    (cond-> (-> block
+                (update :labels #(mapv offset %))
+                (update :placements
+                        #(mapv (fn [placement]
+                                 (-> placement
+                                     (update :offset-x + x)
+                                     (update :offset-y + y)))
+                               %)))
+      (:container block)
+      (update :container offset))))
+
+(defn- ordered-component-sets
+  "Component Sets in Package order: component entry order, then set order
+  inside the entry."
+  [snapshot]
+  (->> (component-entries snapshot)
+       (mapcat :componentSets)
+       (filter :id)
+       (mapv (juxt :id identity))))
+
+(defn- located-components
+  "Components defined on a screen (their main lives on that screen's page),
+  in Package order."
+  [snapshot]
+  (->> (component-entries snapshot)
+       (remove #(sequential? (:componentSets %)))
+       (filterv :id)))
+
+(defn- located-page-name
+  [snapshot {:keys [screenId presentationId]}]
+  (some (fn [screen]
+          (when (= (:id screen) screenId)
+            (some #(when (= (:id %) presentationId)
+                     (presentation-page-name screen %))
+                  (:presentations screen))))
+        (map #(lookup (:entries snapshot) %)
+             (get-in snapshot [:manifest :entries :screens]))))
+
+(defn- located-card
+  [snapshot component x y]
+  (let [name  (str (:name component))
+        page  (tr "smallpen.components-page.located-page"
+                  (or (located-page-name snapshot component) "—"))
+        width (max 220 (+ 32 (label-width name 14)) (+ 32 (label-width page matrix-label-size)))]
+    {:width width
+     :height 64
+     :box {:x x :y y :width width :height 64}
+     :labels [(matrix-label name (+ x 16) (+ y 12) :size 14 :weight 600)
+              (matrix-label page (+ x 16) (+ y 36) :muted? true)]}))
+
+(defn- flowed
+  "Items built by `build` (fn [item x y]) at the places a greedy row flow
+  gives them, and the y below the last row."
+  [items build x y width gap]
+  (let [{:keys [positions end-y]} (flow-layout items x y width gap gap)]
+    {:items (mapv (fn [item [px py]] (build item px py)) items positions)
+     :end-y (if (seq items) end-y y)}))
+
+(defn- components-page-layout
+  "The Components page from top to bottom: a header, one section per
+  component category with its Component Sets flowed in rows (both in
+  Package order; sets without a category come last), and a section of
+  cards for the components defined on screens. Positions are derived from
+  the Package on every projection and never stored."
+  [snapshot]
+  (let [sets      (ordered-component-sets snapshot)
+        located   (located-components snapshot)
+        category  #(let [value (str/trim (str (or (:category (second %)) "")))]
+                     (when-not (str/blank? value) value))
+        by-name   (->> (group-by category sets)
+                       (sort-by (fn [[name _]]
+                                  (if (some? name)
+                                    (d/index-of (distinct (map category sets)) name)
+                                    js/Number.MAX_SAFE_INTEGER))))
+        blocks    (into {}
+                        (map (fn [[component-id component-set]]
+                               [component-id (component-set-block component-id component-set 0 0)]))
+                        sets)
+        sized     (fn [[component-id _]] (get blocks component-id))
+        width     (reduce max page-content-width (map :width (vals blocks)))
+        header    [(matrix-label (tr "smallpen.components-page.title") 0 0 :size 28 :weight 700)
+                   (matrix-label (tr "smallpen.components-page.summary"
+                                     (count sets)
+                                     (reduce + (map #(count (:variants (second %))) sets))
+                                     (count located))
+                                 0 48 :size 13 :muted? true)
+                   (matrix-label (tr "smallpen.components-page.edit-note") 0 72 :size 13 :muted? true)
+                   (matrix-label (tr "smallpen.components-page.theme-note") 0 96 :size 13 :muted? true)]
+        {:keys [sections y]}
+        (reduce (fn [{:keys [y] :as acc} [name sets]]
+                  (let [title  (or name (tr "smallpen.components-page.uncategorized"))
+                        blocks (flowed (map sized sets)
+                                       offset-component-set-block
+                                       0 (+ y 88) width page-block-gap)]
+                    (-> acc
+                        (update :sections conj
+                                {:key (str "section/" name)
+                                 :name title
+                                 :labels [(matrix-label title 0 y :size 22 :weight 600)]
+                                 :rule {:x 0 :y (+ y 40) :width width :height 1}
+                                 :blocks (:items blocks)})
+                        (assoc :y (+ (:end-y blocks) page-section-gap)))))
+                {:sections [] :y 200}
+                by-name)
+        cards     (when (seq located)
+                    (flowed (map #(assoc (located-card snapshot % 0 0) :component %) located)
+                            (fn [{:keys [component]} x y]
+                              (assoc (located-card snapshot component x y) :component component))
+                            0 (+ y 100) width 16))]
+    {:header header
+     :sections sections
+     :blocks (vec (mapcat :blocks sections))
+     :located (when cards
+                {:labels [(matrix-label (tr "smallpen.components-page.located-title") 0 y
+                                        :size 22 :weight 600)
+                          (matrix-label (tr "smallpen.components-page.located-note") 0 (+ y 40)
+                                        :size 13 :muted? true)]
+                 :rule {:x 0 :y (+ y 64) :width width :height 1}
+                 :cards (:items cards)})}))
+
+(defn- variant-container-shape
+  "The board Penpot draws around the variants of one Component Set: the
+  variant container, named after the set, holding the variant mains with the
+  first variant on top (Penpot's primary variant is the last child)."
+  [snapshot {:keys [component-id component-set container placements]}]
+  (let [container-id (runtime-id snapshot :components component-id)]
+    (cts/setup-shape
+     {:id container-id
+      :type :frame
+      :name (component-set-full-name component-set)
+      :x (:x container)
+      :y (:y container)
+      :width (:width container)
+      :height (:height container)
+      :parent-id uuid/zero
+      :frame-id uuid/zero
+      :is-variant-container true
+      :fills []
+      :strokes [{:stroke-alignment :inner
+                 :stroke-style :solid
+                 :stroke-color "#bb97d8"
+                 :stroke-opacity 1
+                 :stroke-width 2}]
+      :r1 20 :r2 20 :r3 20 :r4 20
+      :shapes (->> placements
+                   (map (fn [{:keys [variant]}]
+                          (runtime-id snapshot
+                                      :componentNodes
+                                      component-id
+                                      (:id variant)
+                                      (:rootId variant))))
+                   (reverse)
+                   (vec))
+      :plugin-data {:smallpen {"component-id" component-id}}})))
+
+(defn- in-variant-container
+  "The shapes of one variant main moved under its variant container: the
+  root becomes a variant (Penpot names it after the container and derives
+  its variant name from the property values), and shapes framed by the page
+  are framed by the container instead."
+  [shapes container-id component-set variant root-id]
+  (into {}
+        (map (fn [[id shape]]
+               [id (cond-> shape
+                     (= uuid/zero (:frame-id shape))
+                     (assoc :frame-id container-id)
+
+                     (= id root-id)
+                     (assoc :parent-id container-id
+                            :name (component-set-full-name component-set)
+                            :variant-id container-id
+                            :variant-name (ctv/properties-to-name
+                                           (variant-properties component-set
+                                                               variant))))]))
+        shapes))
+
+(def ^:private components-decoration
+  {:smallpen {"components-page" "decoration"}})
+
+(defn- components-decoration-id
+  "Stable id of a Components page decoration: the page id with its low bits
+  taken from hashes of `key`, so a reprojection keeps every label's id."
+  [page-id key]
+  (let [parts (uuid/get-unsigned-parts page-id)]
+    (uuid/from-unsigned-parts (aget parts 0)
+                              (aget parts 1)
+                              (bit-or 0x80000000 (bit-and (hash key) 0x3fffffff))
+                              (hash (str key "/")))))
+
+(defn- decoration-label-shape
+  [snapshot id parent-id {:keys [text x y size weight muted?]}]
+  (let [{:keys [width height]} (board-text-metrics text size)]
+    (cts/setup-shape
+     {:id id
+      :type :text
+      :name text
+      :x x :y y
+      :width width
+      :height height
+      :grow-type :fixed
+      :parent-id parent-id
+      :frame-id uuid/zero
+      :blocked true
+      :content (project-text-content
+                snapshot
+                text
+                [{:color (if muted? "#6b7280" "#111827") :type "solid"}]
+                {:fontSize size :fontWeight weight}
+                nil)
+      :plugin-data components-decoration})))
+
+(defn- decoration-box-shape
+  [id name parent-id {:keys [x y width height]} fill stroke]
+  (cts/setup-shape
+   {:id id
+    :type :rect
+    :name name
+    :x x :y y
+    :width width
+    :height height
+    :parent-id parent-id
+    :frame-id uuid/zero
+    :blocked true
+    :fills [{:fill-color fill :fill-opacity 1}]
+    :strokes (if stroke
+               [{:stroke-alignment :inner
+                 :stroke-style :solid
+                 :stroke-color stroke
+                 :stroke-opacity 1
+                 :stroke-width 1}]
+               [])
+    :r1 8 :r2 8 :r3 8 :r4 8
+    :plugin-data components-decoration}))
+
+(defn- decoration-group
+  "A locked group of Components page decoration, flat: the group shape, then
+  every shape inside it. Each part is a fn of the group id returning its
+  child followed by the child's own descendants."
+  [page-id key name parent-id parts]
+  (let [id    (components-decoration-id page-id key)
+        trees (mapv #(% id) parts)
+        rect  (grc/join-rects (map (comp :selrect first) trees))]
+    (into [(cts/setup-shape
+            {:id id
+             :type :group
+             :name name
+             :x (:x rect) :y (:y rect)
+             :width (:width rect)
+             :height (:height rect)
+             :parent-id parent-id
+             :frame-id uuid/zero
+             :blocked true
+             :shapes (mapv (comp :id first) trees)
+             :plugin-data components-decoration})]
+          cat
+          trees)))
+
+(defn- components-page-decorations
+  "The locked label groups of the Components page, one per page part: the
+  header, each category section (its title, a rule and one group of labels
+  per Component Set) and the located components with their cards. They sit
+  beside the variant containers, never inside them, and are never written
+  back to the Package."
+  [snapshot page-id {:keys [header sections located]}]
+  (let [labels (fn [key labels]
+                 (map-indexed (fn [index label]
+                                (fn [parent]
+                                  [(decoration-label-shape
+                                    snapshot
+                                    (components-decoration-id page-id (str key "/label/" index))
+                                    parent
+                                    label)]))
+                              labels))
+        box    (fn [key name rect fill stroke]
+                 (fn [parent]
+                   [(decoration-box-shape (components-decoration-id page-id key)
+                                          name parent rect fill stroke)]))
+        rule   (fn [key rect]
+                 (box (str key "/rule") (tr "smallpen.components-page.divider") rect "#c9ccd4" nil))]
+    (cond-> [(decoration-group page-id "header" (tr "smallpen.components-page.title")
+                               uuid/zero (labels "header" header))]
+      :always
+      (into (map (fn [{:keys [key name blocks] :as section}]
+                   (decoration-group
+                    page-id key name uuid/zero
+                    (concat (labels key (:labels section))
+                            [(rule key (:rule section))]
+                            (map (fn [{:keys [component-id component-set] :as block}]
+                                   (fn [parent]
+                                     (decoration-group
+                                      page-id (str "set/" component-id)
+                                      (tr "smallpen.components-page.labels-layer"
+                                          (:name component-set))
+                                      parent
+                                      (labels (str "set/" component-id) (:labels block)))))
+                                 blocks))))
+                 sections))
+
+      (some? located)
+      (conj (decoration-group
+             page-id "located" (tr "smallpen.components-page.located-title") uuid/zero
+             (concat (labels "located" (:labels located))
+                     [(rule "located" (:rule located))]
+                     (mapcat (fn [{:keys [component] :as card}]
+                               (let [key (str "located/" (:id component))]
+                                 (cons (box key (str (:name component)) (:box card)
+                                            "#ffffff" "#d1d5db")
+                                       (labels key (:labels card)))))
+                             (:cards located))))))))
+
 (defn- project-components-page
   "One synthetic page holding the main instance of every Component Set variant.
   Penpot resolves a component through (main-instance-page, main-instance-id),
   so the shapes must live on a real page; this page exists only in the
-  projection and is never written back to the Package."
-  [snapshot components placements]
-  (let [page-id    (-> snapshot :runtime :componentsPage uuid/parse)
-        shapes     (reduce (fn [acc placement]
-                             (merge acc
-                                    (project-variant-shapes snapshot
-                                                            components
-                                                            placement)))
-                           {}
-                           placements)
-        root-ids   (mapv (fn [{:keys [component-id variant]}]
-                           (runtime-id snapshot
-                                       :componentNodes
-                                       component-id
-                                       (:id variant)
-                                       (:rootId variant)))
-                         placements)
+  projection and is never written back to the Package. A set with axes is a
+  native Penpot variant container (its axes are the variant properties).
+  Locked label groups (`components-page-decorations`) make the page read as
+  an overview of every component."
+  [snapshot components {:keys [blocks] :as layout}]
+  (let [page-id  (-> snapshot :runtime :componentsPage uuid/parse)
+        labels   (components-page-decorations snapshot page-id layout)
+        shapes   (reduce
+                  (fn [acc {:keys [component-set placements] :as block}]
+                    (let [container? (variant-container? component-set)
+                          container  (when container?
+                                       (variant-container-shape snapshot block))]
+                      (reduce
+                       (fn [acc {:keys [component-id variant] :as placement}]
+                         (let [shapes (project-variant-shapes snapshot
+                                                              components
+                                                              placement)
+                               root   (runtime-id snapshot
+                                                  :componentNodes
+                                                  component-id
+                                                  (:id variant)
+                                                  (:rootId variant))]
+                           (merge acc
+                                  (if container?
+                                    (in-variant-container shapes
+                                                          (:id container)
+                                                          component-set
+                                                          variant
+                                                          root)
+                                    shapes))))
+                       (cond-> acc
+                         container? (assoc (:id container) container))
+                       placements)))
+                  (into {} (comp cat (map (juxt :id identity))) labels)
+                  blocks)
+        root-ids (into (mapv (comp :id first) labels)
+                       (map (fn [{:keys [component-id component-set placements]}]
+                              (if (variant-container? component-set)
+                                (runtime-id snapshot :components component-id)
+                                (let [{:keys [variant]} (first placements)]
+                                  (runtime-id snapshot
+                                              :componentNodes
+                                              component-id
+                                              (:id variant)
+                                              (:rootId variant)))))
+                            (filter #(or (variant-container? (:component-set %))
+                                         (seq (:placements %)))
+                                    blocks)))
         root-shape (-> (get-in ctp/empty-page-data [:objects uuid/zero])
                        (assoc :shapes root-ids))]
     (-> (ctp/make-empty-page {:id page-id :name "Components"})
@@ -1557,49 +2194,6 @@
   [snapshot]
   ;; js->clj :keywordize-keys keeps the camelCase JSON key.
   (get-in snapshot [:runtime :designSystemRefs]))
-
-(defn- byte->hex
-  [value]
-  (let [hex (.toString (js/Math.round (js/Math.min 255 (js/Math.max 0 value))) 16)]
-    (if (< (count hex) 2) (str "0" hex) hex)))
-
-(defn- canonical-color->fill
-  [value]
-  (cond
-    (and (string? value) (re-matches #"#[0-9a-fA-F]{8}" value))
-    {:fill-color (subs value 0 7)
-     :fill-opacity (/ (js/parseInt (subs value 7 9) 16) 255)}
-
-    (and (string? value) (re-matches #"#[0-9a-fA-F]{6}" value))
-    {:fill-color value :fill-opacity 1}
-
-    (and (map? value)
-         (= "srgb" (some-> (:colorSpace value) str/lower))
-         (= 3 (count (:components value))))
-    (let [[red green blue] (:components value)]
-      {:fill-color (str "#" (byte->hex (* 255 red))
-                        (byte->hex (* 255 green))
-                        (byte->hex (* 255 blue)))
-       :fill-opacity (or (:alpha value) 1)})
-
-    :else nil))
-
-(defn- specimen-rect
-  [id name x y width height fill ref]
-  (cts/setup-shape
-   (cond-> {:id id
-            :type :rect
-            :name name
-            :x x :y y
-            :width width :height height
-            :parent-id uuid/zero
-            :plugin-data
-            {:smallpen
-             {"design-system" "source"
-              "design-system-kind" "token-cell"
-              "design-system-ref" (design-system-ref-data ref)}}}
-     (some? (canonical-color->fill fill))
-     (assoc :fills [(canonical-color->fill fill)]))))
 
 (defn- css-color->attrs
   "Parse a css color (hex or rgb()/rgba() string) into the native shadow
@@ -1627,36 +2221,6 @@
              :opacity (/ (js/parseInt (subs hex 6 8) 16) 255)}
           nil)))))
 
-(defn- specimen-shadow
-  "DTCG shadow Cell -> the native shadow VECTOR the effects panel displays
-  and edits. Each record carries the full common Shadow schema (id, style,
-  hidden, color attrs) so panel edits re-validated with check-shadow
-  succeed, and rgba/hex colors round-trip without going black or losing
-  alpha."
-  [value]
-  (let [color (css-color->attrs (:color value))]
-    (when-not color
-      (throw (ex-info "unsupported SmallPen shadow color"
-                      {:type :validation
-                       :code :unsupported-smallpen-shadow-color
-                       :color (:color value)})))
-    [{:id nil
-      :style :drop-shadow
-      :hidden false
-      :blur (or (:blur value) 0)
-      :offset-x (or (:offsetX value) (:offset-x value) 0)
-      :offset-y (or (:offsetY value) (:offset-y value) 0)
-      :spread (or (:spread value) 0)
-      :color color}]))
-
-(defn- specimen-name
-  ([ref]
-   (str "Token / " (:setName ref) "/" (:path ref)))
-  ([ref combo-label]
-   (if combo-label
-     (str "Token / " (:setName ref) "/" (:path ref) " · " combo-label)
-     (str "Token / " (:setName ref) "/" (:path ref)))))
-
 (defn- board-text-metrics
   [text size]
   (let [lines (str/split (str text) "\n")]
@@ -1664,68 +2228,6 @@
                                                 (reduce + 0 (map #(if (> (.charCodeAt % 0) 255) 1 0.62) line)))
                                               lines))))
      :height (max 18 (* 1.4 size (max 1 (count lines))))}))
-
-(defn- transparent-color?
-  [value]
-  (zero? (or (:fill-opacity (canonical-color->fill value)) 1)))
-
-(defn- white-color?
-  [value]
-  (= "#ffffff" (some-> (:fill-color (canonical-color->fill value)) str/lower)))
-
-(defn- decorate-color-specimen
-  [shape value]
-  (cond-> shape
-    (or (white-color? value) (transparent-color? value))
-    (assoc :strokes [{:stroke-color "#64748b"
-                      :stroke-opacity 1
-                      :stroke-style (if (transparent-color? value) :dashed :solid)
-                      :stroke-width 1
-                      :stroke-alignment :inner}])
-
-    (transparent-color? value)
-    (assoc :fills [(canonical-color->fill value)])))
-
-(defn- typography-specimen
-  [snapshot id name x y width value ref]
-  (let [font-size   (or (:fontSize value) 16)
-        line-height (or (:lineHeight value) 1.2)]
-    (cts/setup-shape
-     {:id id
-      :type :text
-      :name name
-      :x x :y y
-      :width width
-      :height (max 48 (* font-size line-height))
-      :grow-type :fixed
-      :parent-id uuid/zero
-      :content (project-text-content
-                snapshot
-                "Ag Typography"
-                [{:color "#111827" :type "solid"}]
-                value
-                nil)
-      :plugin-data
-      {:smallpen
-       {"design-system" "source"
-        "design-system-kind" "token-cell"
-        "design-system-ref" (design-system-ref-data ref)}}})))
-
-(defn- specimen-child-rect
-  "Gap-specimen filler built at its FINAL position (DSE-R08): the frame's
-  position is known before the child is constructed so setup-shape derives a
-  consistent selrect/points."
-  [id x y]
-  (cts/setup-shape
-   {:id id
-    :type :rect
-    :name "Specimen filler"
-    :x x :y y
-    :width 24 :height 24
-    :parent-id uuid/zero
-    :fills [{:fill-color "#c7d2fe" :fill-opacity 1}]
-    :plugin-data
-    {:smallpen {"design-system" "decoration"}}}))
 
 (declare board-text)
 
@@ -1852,15 +2354,13 @@
 
     nil))
 
-(def ^:private board-caption-height 28)
-
 (defn- board-text
   "Decoration text shape built at its final position. The LAYER name is
   prefixed so caption rows never collide with the component roots they
   introduce. grow-type stays :fixed with a conservative pre-measured width:
   auto-width texts make the renderer fire measure/resize follow-ups that
   pollute the user's undo history on generated pages (DSE-R11)."
-  [snapshot id text x y {:keys [size opacity plain-name?]
+  [snapshot id text x y {:keys [size opacity plain-name? weight]
                          :or {size 14 opacity 1 plain-name? false}}]
   (let [{:keys [width height]} (board-text-metrics text size)]
     (cts/setup-shape
@@ -1881,7 +2381,7 @@
         :fontId "gfont-inter"
         :fontSize size
         :fontVariantId "regular"
-        :fontWeight (if (= size 20) 600 400)}
+        :fontWeight (or weight (if (= size 20) 600 400))}
        nil)
       :opacity opacity
       :plugin-data
@@ -1914,608 +2414,38 @@
        :end-y (+ cursor-y row-height)
        :max-x row-max-x})))
 
-(defn- empty-state-item
-  [snapshot id text]
-  {:key (str "empty:" text)
-   :width 240
-   :height 28
-   :build (fn [x y]
-            [(board-text snapshot id text x y {:size 13 :opacity 0.55})])})
-
-;; --- DSE-R17~R26: the fully-expanded Design Token panorama -----------------
-;;
-;; Simple white type cards contain every source-backed specimen. Combination
-;; groups remain fully expanded inside each card. Shells, rulers and labels
-;; are presentation-only; no generated page is persisted.
-
-(def ^:private canonical-token-types
-  "The 20 canonical Token types, with visual foundations first."
-  ["color" "border-radius" "spacing" "sizing" "dimensions" "typography"
-   "font-family" "font-size" "font-weight" "letter-spacing" "text-case"
-   "text-decoration" "stroke-width" "shadow" "opacity" "rotation"
-   "number" "boolean" "string" "other"])
-
-(def ^:private displayed-token-types
-  ;; Font primitives remain real Tokens in the library/inspector. The sheet
-  ;; shows complete Typography styles instead of six separate font sections.
-  (vec (remove #{"font-family" "font-size" "font-weight" "letter-spacing"
-                 "text-case" "text-decoration"}
-               canonical-token-types)))
-
-(defn- token-display-value
-  "The value a specimen shows: the alias-resolved value when the reference
-  chain resolves, otherwise the raw literal (the unresolved diagnosis stays
-  visible in the caption)."
-  [ref]
-  (if (and (:alias ref) (not (:unresolvedAlias ref)) (not (:aliasCycle ref)))
-    (:resolved ref)
-    (:raw ref)))
-
-(defn- token-json
-  [value]
-  (js/JSON.stringify (clj->js value)))
-
-(defn- token-human-value
-  "Human-readable value for the canvas caption (R18: semantic name, visual
-  sample, human value — never owner/path/status/internal metadata)."
-  [type value]
-  (cond
-    (nil? value) "—"
-    (and (map? value) (= type "shadow"))
-    (str (or (get value :offsetX) (get value "offsetX") 0)
-         " " (or (get value :offsetY) (get value "offsetY") 0)
-         " · blur " (or (get value :blur) (get value "blur") 0)
-         " · spread " (or (get value :spread) (get value "spread") 0))
-    (and (map? value) (= type "typography"))
-    (let [getv (fn [k] (or (get value k) (get value (name k))))]
-      (str (or (getv :fontFamily) "?") " · "
-           (or (getv :fontSize) "?") "/" (or (getv :lineHeight) "?")
-           " · " (or (getv :fontWeight) "?")))
-    (map? value) (token-json value)
-    (= type "opacity") (str (js/Math.round (* 100 (js/Number value))) "%")
-    (= type "rotation") (str value "°")
-    :else (str value)))
-
-(defn- clean-token-caption
-  "One clean caption line: `semantic-name = human value` plus, only for
-  broken alias chains, the semantic diagnosis. Alias EXPRESSIONS and
-  owner/set/status metadata live in the selection panel, not on the canvas."
-  [ref]
-  (let [value (token-display-value ref)
-        shown (if (= (:type ref) "other")
-                (let [s (token-human-value "other" value)]
-                  (if (> (count s) 64) (str (subs s 0 64) "…") s))
-                (token-human-value (:type ref) value))]
-    (let [caption (str (:path ref) " = " shown)]
-      (cond
-        (:aliasCycle ref) (tr "smallpen.design-system.alias-cycle" caption)
-        (:unresolvedAlias ref) (tr "smallpen.design-system.alias-unresolved" caption)
-        :else caption))))
-
-(defn- clamped
-  [value low high]
-  (js/Math.max low (js/Math.min high (js/Number value))))
-
 (defn- decoration-id
-  "Fresh id for a micro-decoration (checker cells, rulers, card shells).
-  Decorations are rebuilt on every re-projection and are never canonical, so
-  unlike specimen ids these do not need cross-rebuild stability."
+  "Fresh id for a generated label (a sample that cannot be drawn). Labels
+  are rebuilt on every re-projection and are never canonical."
   []
   (uuid/next))
 
-(defn- parsed-decoration-id
-  "Runtime decoration ids arrive as JSON strings and MUST enter the store as
-  uuid objects: a string id poisons every later renderer sync for the shape
-  (schema check fails -> 'Something wrong has happened' toast at mount).
-  Missing ids (older backend refs) fall back to a fresh decoration uuid."
-  [value]
-  (or (some-> value uuid/parse) (decoration-id)))
-
-(defn- decoration-rect
-  [id x y width height fill]
-  (cts/setup-shape
-   {:id id :type :rect :name "Board decoration"
-    :x x :y y :width width :height height
-    :parent-id uuid/zero
-    :fills (if (some? fill) [{:fill-color fill :fill-opacity 1}] [])
-    :plugin-data {:smallpen {"design-system" "decoration"}}}))
-
-(defn- ruler-shapes
-  "Decoration ruler (line + end ticks) measuring `length` px from (x y) in
-  direction :horizontal or :vertical (DSE-R21: real geometry with a ruler)."
-  [x y length direction]
-  (let [tick 8
-        thin 1
-        mk   (fn [rx ry w h] (decoration-rect (decoration-id) rx ry w h "#94a3b8"))]
-    (if (= direction :vertical)
-      [(mk x y thin length)
-       (mk (- x (/ tick 2) (/ thin 2)) y tick thin)
-       (mk (- x (/ tick 2) (/ thin 2)) (+ y length (- thin)) tick thin)]
-      [(mk x y length thin)
-       (mk x (- y (/ tick 2) (/ thin 2)) thin tick)
-       (mk (+ x length (- thin)) (- y (/ tick 2) (/ thin 2)) thin tick)])))
-
-(defn- checker-frame
-  "Decoration checkerboard backdrop under white/transparent/opacity
-  specimens (DSE-R19/R23)."
-  [x y width height]
-  (let [cell 16
-        cols (js/Math.ceil (/ width cell))
-        rows (js/Math.ceil (/ height cell))
-        frame-id (decoration-id)
-        cells
-        (for [row (range rows) col (range cols)]
-          (let [id (decoration-id)]
-            {:id id
-             :shape (decoration-rect id
-                                     (+ x (* col cell)) (+ y (* row cell))
-                                     cell cell
-                                     (if (even? (mod (+ row col) 2)) "#e2e8f0" "#ffffff"))}))]
-    (into
-     [(cts/setup-shape
-       {:id frame-id :type :frame :name "Board decoration"
-        :x x :y y :width width :height height
-        :parent-id uuid/zero
-        :fills []
-        :shapes (mapv :id cells)
-        :plugin-data {:smallpen {"design-system" "decoration"}}})]
-     (mapv :shape cells))))
-
-(defn- specimen-text-shape
-  "Source-mapped TEXT shape (value cards and font specimens): the token-cell
-  target, styled by `style`. Fixed width with a conservatively pre-measured
-  height (same rationale as board-text, DSE-R11)."
-  [snapshot id text x y width style ref combo-label]
-  (let [size  (or (:fontSize style) 14)
-        lines (js/Math.max 1 (count (str/split (str text) "\n")))]
-    (cts/setup-shape
-     {:id id
-      :type :text
-      :name (specimen-name ref combo-label)
-      :x x :y y
-      :width width
-      :height (js/Math.max 24 (* 1.45 size lines))
-      :grow-type :fixed
-      :parent-id uuid/zero
-      :content
-      (project-text-content
-       snapshot
-       (str text)
-       [{:color "#111827" :type "solid"}]
-       (merge {:fontFamily "Inter"
-               :fontId "gfont-inter"
-               :fontSize 14
-               :fontVariantId "regular"
-               :fontWeight 400
-               :letterSpacing 0
-               :lineHeight 1.45
-               :textTransform "none"
-               :textDecoration "none"}
-              style)
-       nil)
-      :plugin-data
-      {:smallpen
-       {"design-system" "source"
-        "design-system-kind" "token-cell"
-        "design-system-ref" (design-system-ref-data ref)}}})))
-
-(defn- scalar-card-text
-  "The literal text shown on a scalar value card: the RAW Cell value (what a
-  text edit writes back), never the alias-resolved display value."
-  [ref]
-  (let [raw (:raw ref)]
-    (cond
-      (string? raw) raw
-      (map? raw) (token-json raw)
-      :else (str raw))))
-
-(def ^:private specimen-visual-width 200)
-
-(defn- panorama-specimen-item
-  "Layout unit for one (Cell × combination) specimen on the panorama: clean
-  caption + the type's real visual, built at final position (DSE-R08).
-  combo-label disambiguates the LAYER name (two combinations showing the
-  same Cell produce two rows in the layers tree). Returns
-  {:key :width :height :build}."
-  [snapshot ref combo-label]
-  (let [{:keys [attribute shape value type]} ref
-        shape-id   (uuid/parse shape)
-        display    (token-display-value ref)
-        caption    (clean-token-caption ref)
-        metrics    (board-text-metrics caption 12)
-        card       (fn [build-height build-fn]
-                     {:key (:shape ref) :width (max specimen-visual-width (:width metrics))
-                      :height (+ 12 build-height (:height metrics))
-                      :build (fn [x y]
-                               (conj (vec (build-fn x y))
-                                     (board-text snapshot (uuid/parse (:caption ref))
-                                                 caption x (+ y build-height 12)
-                                                 {:size 12 :opacity 0.75})))})
-        visual
-        (case (or attribute type)
-          "fill"
-          (let [fill (canonical-color->fill display)]
-            (card 48
-                  (fn [x y]
-                    (let [swatch (decorate-color-specimen
-                                  (specimen-rect shape-id (specimen-name ref combo-label) x y 96 48 display ref)
-                                  display)]
-                      (if (or (white-color? display) (transparent-color? display)
-                              (and (some? fill) (< (or (:fill-opacity fill) 1) 1)))
-                        (into (checker-frame x y 96 48) [swatch])
-                        [swatch])))))
-
-          "radius"
-          (card 48
-                (fn [x y]
-                  [(-> (specimen-rect shape-id (specimen-name ref combo-label) x y 96 48 "#eef2ff" ref)
-                       (assoc :r1 display :r2 display :r3 display :r4 display))]))
-
-          "height"
-          (let [vh (clamped display 8 160)]
-            (card (+ vh 12)
-                  (fn [x y]
-                    (into [(specimen-rect shape-id (specimen-name ref combo-label) (+ x 16) y 96 vh "#eef2ff" ref)]
-                          (ruler-shapes x y vh :vertical)))))
-
-          "gap"
-          (card 64
-                (fn [x y]
-                  (into
-                   [(cts/setup-shape
-                     {:id shape-id
-                      :type :frame
-                      :name (specimen-name ref combo-label)
-                      :x x :y y
-                      :width 120 :height 48
-                      :layout :flex
-                      :layout-flex-dir :row
-                      :layout-gap-type :fixed
-                      :layout-gap {:row-gap display :column-gap display}
-                      :layout-padding-type :multiple
-                      :layout-padding {:p1 12 :p2 8 :p3 12 :p4 8}
-                      :parent-id uuid/zero
-                      :fills [{:fill-color "#eef2ff" :fill-opacity 1}]
-                      :shapes (mapv #(uuid/parse %) (:children ref))
-                      :plugin-data
-                      {:smallpen
-                       {"design-system" "source"
-                        "design-system-kind" "token-cell"
-                        "design-system-ref" (design-system-ref-data ref)}}})
-                    (specimen-child-rect (uuid/parse (first (:children ref))) (+ x 8) (+ y 12))
-                    ;; child2 sits one gap after child1 (8 + 24 + gap), the
-                    ;; same spot the flex layout assigns at render time.
-                    (specimen-child-rect (uuid/parse (second (:children ref))) (+ x 32 (js/Number display)) (+ y 12))]
-                   (ruler-shapes (+ x 32) (+ y 52) (js/Number display) :horizontal))))
-
-          "stroke-width"
-          (card 48
-                (fn [x y]
-                  [(-> (specimen-rect shape-id (specimen-name ref combo-label) x y 96 48 "#ffffff" ref)
-                       (assoc :strokes
-                              [{:stroke-color "#111827"
-                                :stroke-opacity 1
-                                :stroke-style :solid
-                                :stroke-width (js/Number display)
-                                :stroke-alignment :inner}]))]))
-
-          "shadow"
-          (card 64
-                (fn [x y]
-                  [(assoc (specimen-rect shape-id (specimen-name ref combo-label) x (+ y 8) 96 48 "#ffffff" ref)
-                          :shadow (specimen-shadow display))]))
-
-          "opacity"
-          (card 48
-                (fn [x y]
-                  (let [fg (-> (specimen-rect shape-id (specimen-name ref combo-label) x y 96 48 nil ref)
-                               (assoc :fills [{:fill-color "#6750a4" :fill-opacity 1}]
-                                      :opacity (js/Number display)))]
-                    (into (checker-frame x y 96 48) [fg]))))
-
-          "rotation"
-          (card 88
-                (fn [x y]
-                  (let [w 88 h 36
-                        cx (+ x (/ w 2)) cy (+ y (/ h 2))
-                        angle (js/Number display)
-                        rot   (mod (+ (mod angle 360) 360) 360)]
-                    [(-> (specimen-rect shape-id (specimen-name ref combo-label) x y w h "#eef2ff" ref)
-                         (assoc :rotation rot
-                                :transform (if (zero? rot)
-                                             (gmt/matrix)
-                                             (gmt/rotate-matrix rot (gpt/point cx cy)))))
-                     (decoration-rect (decoration-id)
-                                      (+ x -7) (+ cy -4) 8 8 "#6750a4")])))
-
-          "dimensions"
-          (let [side (clamped display 8 160)]
-            (card (+ side 14)
-                  (fn [x y]
-                    (into [(specimen-rect shape-id (specimen-name ref combo-label) x y side side "#eef2ff" ref)]
-                          (ruler-shapes x (+ y side 3) side :horizontal)))))
-
-          "font-family"
-          (card 32
-                (fn [x y]
-                  [(specimen-text-shape snapshot shape-id (tr "smallpen.design-system.specimen.font-family") x y specimen-visual-width
-                                        {:fontFamily (str display) :fontSize 18} ref combo-label)]))
-
-          "font-size"
-          (let [size (clamped display 8 96)]
-            (card (* size 1.5)
-                  (fn [x y]
-                    [(specimen-text-shape snapshot shape-id "Ag" x y specimen-visual-width
-                                          {:fontSize size :lineHeight 1.4} ref combo-label)])))
-
-          "font-weight"
-          (card 32
-                (fn [x y]
-                  [(specimen-text-shape snapshot shape-id (tr "smallpen.design-system.specimen.font-weight") x y specimen-visual-width
-                                        {:fontWeight (js/Number display) :fontVariantId (str display)} ref combo-label)]))
-
-          "letter-spacing"
-          (card 32
-                (fn [x y]
-                  [(specimen-text-shape snapshot shape-id (tr "smallpen.design-system.specimen.letter-spacing") x y specimen-visual-width
-                                        {:letterSpacing (js/Number display)} ref combo-label)]))
-
-          "text-transform"
-          (card 32
-                (fn [x y]
-                  [(specimen-text-shape snapshot shape-id (tr "smallpen.design-system.specimen.text-case") x y specimen-visual-width
-                                        {:textTransform (case (str display)
-                                                          "title-case" "capitalize"
-                                                          (str display))} ref combo-label)]))
-
-          "text-decoration"
-          (card 32
-                (fn [x y]
-                  [(specimen-text-shape snapshot shape-id (tr "smallpen.design-system.specimen.text-decoration") x y specimen-visual-width
-                                        {:textDecoration (str display)} ref combo-label)]))
-
-          "typography"
-          (assoc (card (max 48 (* (or (:fontSize display) 16) (or (:lineHeight display) 1.2)))
-                       (fn [x y]
-                         [(typography-specimen snapshot shape-id (specimen-name ref combo-label)
-                                               x y 220 display ref)]))
-                 :width (max 220 (:width metrics)))
-
-          ;; Scalar and semantic types (boolean/number/string/other) render
-          ;; as value cards: a decoration card shell with the RAW value as a
-          ;; source-mapped, text-editable shape (DSE-R24).
-          (let [text  (scalar-card-text ref)
-                lines (js/Math.max 1 (js/Math.ceil (/ (count text) 26)))
-                h     (js/Math.max 30 (* 18 lines))]
-            (card (+ h 10)
-                  (fn [x y]
-                    [(decoration-rect (decoration-id)
-                                      x y specimen-visual-width (+ h 10) "#f8fafc")
-                     (specimen-text-shape snapshot shape-id text (+ x 8) (+ y 5)
-                                          (- specimen-visual-width 16)
-                                          {:fontSize 14 :lineHeight 1.3} ref combo-label)]))))]
-    visual))
-
 (defn- component-sample-shapes
   [snapshot components family x y]
-  (let [sample-snapshot (assoc-in snapshot [:runtime :componentNodes
-                                            (keyword (:componentSetId family))
-                                            (keyword (:variantId family))]
-                                  (:runtimeNodes family))]
+  (let [set-key         (keyword (:componentSetId family))
+        variant-key     (keyword (:variantId family))
+        sample-snapshot (cond-> (assoc-in snapshot [:runtime :componentNodes set-key variant-key]
+                                          (:runtimeNodes family))
+                          ;; A Foundation set shown on a Product's page has no
+                          ;; component in this file; the sample drops it anyway.
+                          (nil? (get-in snapshot [:runtime :variants set-key variant-key]))
+                          (assoc-in [:runtime :variants set-key variant-key] (str (uuid/next))))]
     (if (:error family)
       [(board-text snapshot (decoration-id) (:error family) x y {:size 14})]
-      (map (fn [shape]
-             (let [node-id (some (fn [[id runtime-id]]
-                                   (when (= (:id shape) (uuid/parse runtime-id)) (name id)))
-                                 (:runtimeNodes family))
-                   ref     (lookup (:sources family) node-id)]
-               (mark-design-system-source
-                (dissoc shape :component-id :component-file :component-root :main-instance :shape-ref)
-                (assoc ref :kind "component-definition" :sourceNodeId (:nodeId ref)))))
-           (vals (project-variant-shapes
-                  sample-snapshot components
-                  {:component-id (:componentSetId family)
-                   :variant {:id (:variantId family) :rootId (:rootId family) :nodes (:nodes family)}
-                   :offset-x x :offset-y y}))))))
-
-(defn- component-sample-item
-  [snapshot components family]
-  (let [nodes (:nodes family)
-        [w h] (subtree-size nodes (:rootId family))
-        label (str (:label family) " · " (:combinationLabel family))
-        width (max 280 (+ w 32) (:width (board-text-metrics label 13)))]
-    {:width (+ width 32)
-     :height (+ 72 (max h 48))
-     :build (fn [x y]
-              (into [(assoc (decoration-rect (decoration-id) x y (+ width 32)
-                                             (+ 72 (max h 48)) "#f1f5f9")
-                            :name (str "Component sample · " label))
-                     (board-text snapshot (uuid/parse (:caption family)) label
-                                 (+ x 16) (+ y 16) {:size 13 :plain-name? true})]
-                    (component-sample-shapes snapshot components family (+ x 16) (+ y 48))))}))
-
-(defn- dimension-label
-  "Display label for the well-known component axes and values; any other
-  value is shown as authored."
-  [value]
-  (case value
-    "Style" (tr "smallpen.design-system.axis.style")
-    "Content" (tr "smallpen.design-system.axis.content")
-    "State" (tr "smallpen.design-system.axis.state")
-    "Theme" (tr "smallpen.design-system.axis.theme")
-    "Tone" (tr "smallpen.design-system.axis.tone")
-    "Level" (tr "smallpen.design-system.axis.level")
-    "Kind" (tr "smallpen.design-system.axis.kind")
-    "primary" (tr "smallpen.design-system.axis.primary")
-    "secondary" (tr "smallpen.design-system.axis.secondary")
-    "ghost" (tr "smallpen.design-system.axis.ghost")
-    "text" (tr "smallpen.design-system.axis.text")
-    "leading" (tr "smallpen.design-system.axis.leading")
-    "trailing" (tr "smallpen.design-system.axis.trailing")
-    "icon" (tr "smallpen.design-system.axis.icon")
-    ("default" "idle") (tr "smallpen.design-system.axis.default")
-    "hover" (tr "smallpen.design-system.axis.hover")
-    "pressed" (tr "smallpen.design-system.axis.pressed")
-    "disabled" (tr "smallpen.design-system.axis.disabled")
-    "Light" (tr "smallpen.design-system.axis.light")
-    "Dark" (tr "smallpen.design-system.axis.dark")
-    "neutral" (tr "smallpen.design-system.axis.neutral")
-    "success" (tr "smallpen.design-system.axis.success")
-    "danger" (tr "smallpen.design-system.axis.danger")
-    "focus" (tr "smallpen.design-system.axis.focus")
-    "error" (tr "smallpen.design-system.axis.error")
-    "page" (tr "smallpen.design-system.axis.page")
-    "section" (tr "smallpen.design-system.axis.section")
-    "dialog" (tr "smallpen.design-system.axis.dialog")
-    "confirm" (tr "smallpen.design-system.axis.confirm")
-    "form" (tr "smallpen.design-system.axis.form")
-    (str value)))
-
-(defn- dimension-value
-  [sample dimension]
-  (if (= ::theme (:id dimension))
-    (or (:combinationId sample) (:combinationLabel sample) "Default")
-    (when dimension (lookup (:selection sample) (:id dimension)))))
-
-(defn- dimension-text
-  [dimension value]
-  (dimension-label (get (:labels dimension) value value)))
-
-(defn- balanced-flow
-  "Choose a row wrap from actual item sizes, minimizing the longest side.
-  This balances both wide matrices and tall composite previews."
-  [items y]
-  (let [w (apply max 1 (map :width items))
-        candidates (map (fn [columns]
-                          (let [width (+ (* columns w) (* 32 (dec columns)))
-                                flow  (flow-layout items 0 y width 32 32)]
-                            (assoc flow :width width)))
-                        (range 1 (inc (count items))))]
-    (apply min-key #(max (:width %) (:end-y %)) candidates)))
-
-(defn- component-matrix-panel
-  [snapshot components samples column row column-values row-values title]
-  (let [sizes       (map #(subtree-size (:nodes %) (:rootId %)) samples)
-        cell-width  (max (+ 40 (apply max 0 (map first sizes)))
-                         (apply max 120 (map #(+ 32 (:width (board-text-metrics (dimension-text column %) 16))) column-values)))
-        slots       (group-by #(vector (dimension-value % column) (dimension-value % row)) samples)
-        item-height (+ 32 (apply max 48 (map second sizes)))
-        cell-height (* item-height (apply max 1 (map count (vals slots))))
-        gutter      (apply max 112 (map #(+ 32 (:width (board-text-metrics (dimension-text row %) 16))) row-values))
-        width       (max (+ 48 (:width (board-text-metrics title 18)))
-                         (+ 48 gutter (* cell-width (count column-values))))
-        height      (+ 128 (* cell-height (count row-values)))]
-    {:width width :height height
-     :build
-     (fn [x y]
-       (into [(assoc (decoration-rect (decoration-id) x y width height "#ffffff")
-                     :name (str "Component matrix · " title))
-              (board-text snapshot (decoration-id) title (+ x 24) (+ y 20) {:size 18 :plain-name? true})
-              (board-text snapshot (decoration-id)
-                          (str (dimension-label (:name row)) " / " (dimension-label (:name column)))
-                          (+ x 24) (+ y 64) {:size 14 :opacity 0.65 :plain-name? true})]
-             (concat
-              (map-indexed (fn [i value]
-                             (board-text snapshot (decoration-id) (dimension-text column value)
-                                         (+ x 24 gutter (* i cell-width)) (+ y 64) {:size 16 :plain-name? true}))
-                           column-values)
-              (mapcat
-               (fn [[j row-value]]
-                 (let [ry (+ y 104 (* j cell-height))]
-                   (into [(decoration-rect (decoration-id) (+ x 16) ry (- width 32) cell-height
-                                           (if (even? j) "#f6f7f9" "#ffffff"))
-                          (board-text snapshot (decoration-id) (dimension-text row row-value)
-                                      (+ x 24) (+ ry 16) {:size 16 :plain-name? true})]
-                         (mapcat
-                          (fn [[i column-value]]
-                            (let [members (get slots [column-value row-value])
-                                  cx      (+ x 24 gutter (* i cell-width))]
-                              (if (seq members)
-                                (mapcat (fn [[n sample]]
-                                          (component-sample-shapes snapshot components sample cx (+ ry 16 (* n item-height))))
-                                        (map-indexed vector members))
-                                [(board-text snapshot (decoration-id) "—" cx (+ ry 16) {:size 16 :opacity 0.4})])))
-                          (map-indexed vector column-values)))))
-               (map-indexed vector row-values)))))}))
-
-(defn- component-family-matrix
-  [snapshot components samples]
-  (let [theme      {:id ::theme :name "Theme"
-                    :labels (into {} (map #(vector (or (:combinationId %) (:combinationLabel %) "Default")
-                                                   (:combinationLabel %)) samples))}
-        dimensions (mapv (fn [axis]
-                           (let [observed (vec (distinct (map #(dimension-value % axis) samples)))
-                                 ordered  (filter (set observed) (:domain axis))]
-                             (assoc axis :values (vec (concat ordered (remove (set ordered) observed))))))
-                         (conj (vec (:axes (first samples))) theme))
-        varying    (filter #(> (count (:values %)) 1) dimensions)
-        axes       (sort-by #(- (count (:values %))) (remove #(= ::theme (:id %)) varying))
-        row        (or (some #(when (= "state" (:role %)) %) axes)
-                       (some #(when (= ::theme (:id %)) %) varying)
-                       (second axes))
-        column     (or (first (remove #(= (:id row) (:id %)) axes))
-                       (first (remove #(= (:id row) (:id %)) varying)))
-        facets     (remove #(contains? #{(:id row) (:id column)} (:id %)) dimensions)
-        groups     (group-by #(mapv (partial dimension-value %) facets) samples)
-        keys       (distinct (map #(mapv (partial dimension-value %) facets) samples))
-        panels     (vec
-                    (mapcat
-                     (fn [key]
-                       (let [group (get groups key)
-                             title (str/join " · " (map #(tr "smallpen.design-system.facet" (dimension-label (:name %1)) (dimension-text %1 %2)) facets key))]
-                         (for [rows (partition-all 6 (or (:values row) [nil]))
-                               cols (partition-all 6 (or (:values column) [nil]))]
-                           (component-matrix-panel snapshot components
-                                                   (filter #(and (contains? (set rows) (dimension-value % row))
-                                                                 (contains? (set cols) (dimension-value % column))) group)
-                                                   column row (vec cols) (vec rows)
-                                                   (if (seq title) title (:familyName (first samples)))))))
-                     keys))
-        flow       (balanced-flow panels 64)
-        title      (tr "smallpen.design-system.family-samples" (str (:familyName (first samples))) (count samples))]
-    {:width (:width flow) :height (:end-y flow)
-     :build (fn [x y]
-              (into [(board-text snapshot (decoration-id) title x y {:size 20 :plain-name? true})]
-                    (mapcat (fn [panel [px py]] ((:build panel) (+ x px) (+ y py))) panels (:positions flow))))}))
-
-(defn- family-item
-  "Layout unit for one component family entry: caption label + the full
-  native tree of the variant or located component definition."
-  [snapshot components placements family]
-  (when-let [{:keys [root-id build ref]} (project-family-tree
-                                          snapshot
-                                          components
-                                          placements
-                                          family)]
-    (let [[tree-width tree-height] (if (= "located" (:kind family))
-                                     (let [nodes (:nodes (screen-presentation
-                                                          snapshot
-                                                          (:screenId family)
-                                                          (:presentationId family)))
-                                           [w h] (subtree-size (subtree-nodes nodes (:mainNodeId family))
-                                                               (:mainNodeId family))]
-                                       [w h])
-                                     (let [nodes (some (fn [{:keys [component-id variant]}]
-                                                         (when (and (= (:componentSetId family) component-id)
-                                                                    (= (:variantId family) (:id variant)))
-                                                           (:nodes variant)))
-                                                       placements)]
-                                       (subtree-size nodes (:rootId family))))]
-      {:key (str (:kind family) ":" (or (:componentSetId family)
-                                        (:componentId family))
-                 "/" (or (:variantId family) "main"))
-       :width (max tree-width
-                   200
-                   (:width (board-text-metrics (or (:label family) (tr "smallpen.design-system.component")) 13)))
-       :height (+ board-caption-height (max tree-height 48))
-       :build
-       (fn [x y]
-         (into [(board-text snapshot (uuid/parse (:caption family))
-                            (or (:label family) (tr "smallpen.design-system.component"))
-                            x y {:size 13 :opacity 0.75})]
-               (mapv (fn [shape]
-                       (mark-design-system-source shape ref))
-                     (build x (+ y board-caption-height)))))})))
+      (let [node-ids (into {}
+                           (map (fn [[id runtime-id]] [(uuid/parse runtime-id) (name id)]))
+                           (:runtimeNodes family))]
+        (map (fn [shape]
+               (let [node-id (get node-ids (:id shape))
+                     ref     (lookup (:sources family) node-id)]
+                 (mark-design-system-source
+                  (dissoc shape :component-id :component-file :component-root :main-instance :shape-ref)
+                  (assoc ref :kind "component-definition" :sourceNodeId (:nodeId ref)))))
+             (vals (project-variant-shapes
+                    sample-snapshot components
+                    {:component-id (:componentSetId family)
+                     :variant {:id (:variantId family) :rootId (:rootId family) :nodes (:nodes family)}
+                     :offset-x x :offset-y y})))))))
 
 (defn- adopt-and-build-board
   "Shared tail of the generated page projection: adopt top-level shapes by
@@ -2554,7 +2484,7 @@
                         :width (max (+ (first board-extent) 40) 480)
                         :height (max (+ (second board-extent) 40) 240)
                         :parent-id uuid/zero
-                        :fills [{:fill-color "#fafafa" :fill-opacity 1}]
+                        :fills [{:fill-color "#eef1f5" :fill-opacity 1}]
                         :shapes (into []
                                       (comp (filter #(= board (:parent-id %)))
                                             (map :id))
@@ -2571,176 +2501,121 @@
                           (assoc :shapes [board]))))
         (assoc :plugin-data {:smallpen {"design-system-page" true}}))))
 
-(defn- token-type-card
-  "A white type section with every valid combination visible in local groups.
-  Only basic source-backed specimens and presentation-only labels are drawn."
-  [snapshot refs type specimens]
-  (let [members (filter #(= type (:type %)) specimens)
-        groups  (cond-> (mapv #(select-keys % [:id :label]) (:combinations refs))
-                  (some #(nil? (:combinationId %)) members)
-                  (conj {:id nil :label (tr "smallpen.design-system.archived")}))
-        groups  (keep (fn [group]
-                        (let [items (vec (keep #(panorama-specimen-item snapshot % (:label group))
-                                               (sort-by :order
-                                                        (filter #(= (:id group) (:combinationId %))
-                                                                members))))]
-                          (when (seq items) (assoc group :items items))))
-                      groups)
-        width   (max 680 (apply max 0 (mapcat #(map :width (:items %)) groups)))
-        content (loop [remaining groups
-                       y         68
-                       plans     []]
-                  (if-let [{:keys [id label items]} (first remaining)]
-                    (let [flow (flow-layout items 24 (+ y 30) width 28 24)]
-                      (recur (rest remaining) (+ (:end-y flow) 32)
-                             (conj plans {:label (if id label (tr "smallpen.design-system.other-tokens"))
-                                          :y y :items items :positions (:positions flow)})))
-                    {:plans plans :height (max 124 y)}))
-        cells   (count (set (map (juxt :ownerPackageId :setId :tokenId) members)))
-        title   (str type " · " cells)
-        id      (parsed-decoration-id (lookup (get-in snapshot [:runtime :designSystem :types]) type))]
-    {:width (+ width 48)
-     :height (:height content)
-     :build (fn [x y]
-              ;; Build at final coordinates, including rotated specimens.
-              (into [(assoc (decoration-rect (decoration-id) x y
-                                             (+ width 48) (:height content) "#ffffff")
-                            :name (str "Token type · " type))
-                     (board-text snapshot id title (+ x 24) (+ y 24)
-                                 {:size 20 :plain-name? true})]
-                    (if (seq members)
-                      (mapcat (fn [{:keys [label items positions] group-y :y}]
-                                (into [(board-text snapshot (decoration-id) label
-                                                   (+ x 24) (+ y group-y)
-                                                   {:size 13 :opacity 0.6 :plain-name? true})]
-                                      (mapcat (fn [item [ix iy]] ((:build item) (+ x ix) (+ y iy)))
-                                              items positions)))
-                              (:plans content))
-                      [(board-text snapshot (decoration-id) (tr "smallpen.design-system.no-tokens")
-                                   (+ x 24) (+ y 68) {:size 13 :opacity 0.5})])))}))
+(defn- design-system-tree
+  "The generated Design System page as one node tree, laid out by SmallPen
+  core (design-system-page.mjs) and drawn identically by the CLI renderer.
+  Nil when the serving backend predates it."
+  [snapshot]
+  (get-in snapshot [:runtime :designSystemTree]))
 
-(defn- project-panorama-shapes
-  "Fully expanded type cards and a separate Components zone.
-  Combination groups are local to each card, never global comparison columns."
-  [snapshot placements refs]
-  (let [pad           40
-        zone-gap      140
-        tokens-top    (+ pad 92)
-        specimens     (vals (:specimens refs))
-        cards         (mapv #(token-type-card snapshot refs % specimens) displayed-token-types)
-        token-flow    (flow-layout cards pad tokens-top 1496 32 32)
-        tokens-shapes (mapcat (fn [card [x y]] ((:build card) x y))
-                              cards (:positions token-flow))
-        tokens-end-y  (:end-y token-flow)
-        tokens-right  (:max-x token-flow)
-        components    (component-index snapshot)
-        content-width 640
-        components-x  (+ tokens-right zone-gap)
-        family-items  (let [samples (:componentSamples refs)
-                            groups (partition-by :componentSetId
-                                                 (sort-by (juxt #(if (= "Primitive" (:classification %)) 0 1)
-                                                                :componentSetId :variantIndex :combinationIndex) samples))
-                            columns (mapv (fn [group]
-                                            (if (seq (:axes (first group)))
-                                              (component-family-matrix snapshot components group)
-                                              (let [items (mapv #(component-sample-item snapshot components %) group)
-                                                    width (apply max 280 (map :width items))
-                                                    flow (flow-layout items 0 44 width 24 20)
-                                                    title (str (:familyName (first group)) " · " (:classification (first group)))]
-                                                {:width width :height (:end-y flow)
-                                                 :build (fn [x y]
-                                                          (into [(board-text snapshot (decoration-id) title x y
-                                                                             {:size 18 :plain-name? true})]
-                                                                (mapcat (fn [item [ix iy]] ((:build item) (+ x ix) (+ y iy)))
-                                                                        items (:positions flow))))}))) groups)
-                            legacy (if (some? samples) (filter #(= "located" (:kind %)) (:families refs)) (:families refs))
-                            items (into columns (keep #(family-item snapshot
-                                                                    components
-                                                                    placements
-                                                                    %)
-                                                      legacy))]
-                        (if (seq items)
-                          items
-                          [(empty-state-item snapshot
-                                             (runtime-id snapshot :designSystem :componentsEmpty)
-                                             (tr "smallpen.design-system.no-components"))]))
-        family-layout (balanced-flow family-items 0)
-        families-flow (flow-layout family-items
-                                   components-x (+ tokens-top 48)
-                                   (max content-width (:width family-layout)) 32 32)
-        families-end-y (max (:end-y families-flow) (+ tokens-top 28))
-        families-right (reduce max components-x
-                               (map (fn [item [x _y]] (+ x (:width item)))
-                                    family-items (:positions families-flow)))
-        white-shell   (decoration-rect (decoration-id)
-                                       (- components-x 32)
-                                       (- tokens-top 16)
-                                       (+ (max content-width (- families-right components-x)) 64)
-                                       (+ (- families-end-y tokens-top) 40)
-                                       "#ffffff")]
-    {:shapes
-     (concat
-      tokens-shapes
-      [white-shell
-       (board-text snapshot (runtime-id snapshot :designSystem :componentsSection)
-                   (tr "smallpen.design-system.components-source")
-                   components-x tokens-top
-                   {:size 13 :opacity 0.65 :plain-name? true})]
-      (mapcat (fn [item [x y]] ((:build item) x y))
-              family-items (:positions families-flow)))
-     :end-y (max tokens-end-y families-end-y)}))
+(defn- design-system-plugin-data
+  "Write target of one page node: a token specimen maps to its Token Cell
+  through refs.specimens; every other node is a decoration."
+  [refs node]
+  (let [{:keys [role specimen]} (:designSystem node)
+        ref (when (= "token-cell" role)
+              (lookup (:specimens refs) specimen))]
+    (if ref
+      {:smallpen {"design-system" "source"
+                  "design-system-kind" "token-cell"
+                  "design-system-ref" (design-system-ref-data ref)}}
+      {:smallpen {"design-system" "decoration"}})))
+
+(defn- design-system-tree-shapes
+  "Penpot shapes for the page tree below its root. Sample and located
+  placeholders become the component's own shapes at their spot."
+  [snapshot placements refs {:keys [nodes rootId runtimeIds]}]
+  (let [snapshot   (assoc-in snapshot [:runtime :designSystemNodes] runtimeIds)
+        components (component-index snapshot)
+        parents    (parent-index nodes)
+        origins    (absolute-origins nodes [rootId])
+        position   (fn [node]
+                     (geometry-origin (lookup origins (:id node))
+                                      (or (:width node) 0)
+                                      (or (:height node) 0)))
+        plugin-data (fn [id] (design-system-plugin-data refs (lookup nodes id)))
+        ;; Layer order is the tree's: the board lists its shapes in the order
+        ;; they come, bottom to top, so card shells stay under their content.
+        ordered    (letfn [(walk [id]
+                             (when-let [node (lookup nodes id)]
+                               (cons node (mapcat walk (:children node)))))]
+                     (mapcat walk (:children (lookup nodes rootId))))]
+    (into []
+          (mapcat
+           (fn [node]
+             (let [{:keys [role sample family]} (:designSystem node)]
+               (cond
+                 (= "component-sample" role)
+                 (if-let [item (nth (:componentSamples refs) sample nil)]
+                   (let [[x y] (position node)]
+                     (component-sample-shapes snapshot components item x y))
+                   [])
+
+                 (= "located-family" role)
+                 (if-let [{:keys [build ref]} (some->> (nth (:families refs) family nil)
+                                                       (project-family-tree snapshot components placements))]
+                   (let [[x y] (position node)]
+                     (map #(mark-design-system-source % ref) (build x y)))
+                   [])
+
+                 :else
+                 [(project-node snapshot components [:designSystemNodes] plugin-data
+                                origins nodes parents #{rootId} node)]))))
+          ordered)))
 
 (defn- project-design-system-page
   "Generated Design System page inside the normal workspace projection
-  (DSE-003): the fully-expanded Token panorama (DSE-R17~R26). The page
-  exists only in the projection and is never written back to the Package;
-  decorations carry no write target."
+  (DSE-003): every Token Cell and representative component samples. The
+  page exists only in the projection and is never written back to the
+  Package; decorations carry no write target."
   [snapshot placements]
   (when (some? (get-in snapshot [:runtime :designSystemPage]))
-    (let [page-id  (uuid/parse (get-in snapshot [:runtime :designSystemPage]))
-          board    (runtime-id snapshot :designSystem :board)
-          refs     (or (design-system-refs snapshot) {})
-          panorama (project-panorama-shapes snapshot placements refs)
-          summary  (tr "smallpen.design-system.summary"
-                       (count displayed-token-types)
-                       (count (:combinations refs)))]
-      ;; All types and valid combinations, without a switching controller.
-      (adopt-and-build-board snapshot page-id board
-                             (concat
-                              [(board-text snapshot (runtime-id snapshot :designSystem :tokenLabel)
-                                           (tr "smallpen.design-system") 40 40
-                                           {:size 20 :plain-name? true})
-                               (board-text snapshot (decoration-id)
-                                           summary 40 74
-                                           {:size 12 :opacity 0.6 :plain-name? true})]
-                              (:shapes panorama))
+    (let [page-id (uuid/parse (get-in snapshot [:runtime :designSystemPage]))
+          board   (runtime-id snapshot :designSystem :board)
+          refs    (or (design-system-refs snapshot) {})
+          tree    (design-system-tree snapshot)
+          shapes  (if tree
+                    (design-system-tree-shapes snapshot placements refs tree)
+                    [])]
+      ;; Preview selection changes only the generated page, never its sources.
+      (adopt-and-build-board snapshot page-id board shapes
                              (tr "smallpen.design-system")))))
 
 (defn- project-component-sets
-
-  "One Penpot component per variant. Penpot groups components by :path, so the
-  Component Set name becomes the path and the axis selection becomes the name."
-  [snapshot placements]
+  "One Penpot component per variant, named after its Component Set. The
+  variants of a set with axes belong to its variant container (:variant-id)
+  and carry the axis values as variant properties."
+  [snapshot blocks]
   (into {}
-        (map (fn [{:keys [component-id component-set variant]}]
-               (let [cmp-id (runtime-id snapshot
-                                        :variants
-                                        component-id
-                                        (:id variant))]
-                 [cmp-id
-                  {:id cmp-id
-                   :name (variant-label component-set variant)
-                   :path (:name component-set)
-                   :main-instance-id (runtime-id snapshot
-                                                 :componentNodes
-                                                 component-id
-                                                 (:id variant)
-                                                 (:rootId variant))
-                   :main-instance-page (-> snapshot
-                                           :runtime
-                                           :componentsPage
-                                           uuid/parse)}])))
-        placements))
+        (mapcat
+         (fn [{:keys [component-id component-set placements]}]
+           (let [container-id (when (variant-container? component-set)
+                                (runtime-id snapshot :components component-id))]
+             (map (fn [{:keys [variant]}]
+                    (let [cmp-id (runtime-id snapshot
+                                             :variants
+                                             component-id
+                                             (:id variant))]
+                      [cmp-id
+                       (cond-> {:id cmp-id
+                                :name (:name component-set)
+                                :path (component-set-path component-set)
+                                :main-instance-id (runtime-id snapshot
+                                                              :componentNodes
+                                                              component-id
+                                                              (:id variant)
+                                                              (:rootId variant))
+                                :main-instance-page (-> snapshot
+                                                        :runtime
+                                                        :componentsPage
+                                                        uuid/parse)}
+                         (some? container-id)
+                         (assoc :variant-id container-id
+                                :variant-properties (variant-properties
+                                                     component-set
+                                                     variant)))]))
+                  placements))))
+        blocks))
 
 (defn- project-located-components
   [snapshot components]
@@ -2769,26 +2644,47 @@
   (let [snapshot   (assoc snapshot :libraries (or libraries []))
         manifest   (:manifest snapshot)
         components (component-index snapshot)
-        placements (variant-placements (component-set-index snapshot))
+        sets       (component-set-index snapshot)
+        placements (variant-placements sets)
+        layout     (components-page-layout snapshot)
         assets     (asset-library snapshot)
         dtcg-tokens (snapshot-dtcg-token-definitions snapshot)
-        tokens-lib (if-let [library (token-library snapshot)]
+        library    (token-library snapshot)
+        foundation (foundation-token-part snapshot)
+        ;; A Product shows its Foundation's sets and themes first, then its
+        ;; own, with its own selection of the Foundation's themes.
+        tokens-lib (cond
+                     (some? foundation)
+                     (project-token-parts
+                      (cond-> [foundation]
+                        (some? library)
+                        (conj {:owner snapshot
+                               :library library
+                               :active-theme-ids (:activeThemeIds library)})))
+
+                     (some? library)
                      (project-token-library snapshot library)
-                     (if (seq dtcg-tokens)
-                       (ctob/make-tokens-lib)
-                       (default-token-library)))
+
+                     (seq dtcg-tokens)
+                     (ctob/make-tokens-lib)
+
+                     :else
+                     (default-token-library))
         tokens-lib (add-dtcg-token-set snapshot tokens-lib dtcg-tokens)
-        screen-pages (->> (get-in manifest [:entries :screens])
-                          (map #(lookup (:entries snapshot) %))
-                          (mapcat (fn [screen]
-                                    (map #(project-page snapshot components screen %)
-                                         (:presentations screen))))
-                          (vec))
+        screens      (into {}
+                           (map (fn [entry]
+                                  (let [screen (lookup (:entries snapshot) entry)]
+                                    [(:id screen) screen])))
+                           (get-in manifest [:entries :screens]))
+        ;; Canvases come from the Background (core canvases.mjs), in order.
+        screen-pages (mapv #(project-canvas snapshot components screens %)
+                           (get-in snapshot [:runtime :canvases]))
         pages    (cond-> screen-pages
-                   (seq placements)
+                   (and (some? (-> snapshot :runtime :componentsPage))
+                        (or (seq (:blocks layout)) (some? (:located layout))))
                    (conj (project-components-page snapshot
                                                   components
-                                                  placements))
+                                                  layout))
                    (some? (-> snapshot :runtime :designSystemPage))
                    (conj (project-design-system-page snapshot placements)))
         data     (-> (ctf/make-file-data file-id nil)
@@ -2796,7 +2692,7 @@
                      (assoc :pages-index (into {} (map (juxt :id identity)) pages))
                      (assoc :components
                             (merge (project-located-components snapshot components)
-                                   (project-component-sets snapshot placements)))
+                                   (project-component-sets snapshot (:blocks layout))))
                      (cond-> (some? assets)
                        (assoc :colors
                               (project-color-library snapshot
@@ -2812,9 +2708,12 @@
                             :tokens-status (cfo/make-tokens-status-from-lib tokens-lib))
                      (assoc :plugin-data
                             {:smallpen
-                             {"locator" (:locator snapshot)
-                              "package-id" (:packageId manifest)
-                              "revision" (:revision snapshot)}}))
+                             (cond-> {"locator" (:locator snapshot)
+                                      "package-id" (:packageId manifest)
+                                      "revision" (:revision snapshot)}
+                               (some? foundation)
+                               (assoc "foundation-tokens"
+                                      (foundation-token-data foundation)))}))
         file     (-> (ctf/make-file
                       {:id file-id
                        :project-id project-id

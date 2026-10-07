@@ -1,5 +1,6 @@
 import { combineContextAxes, resolveContext } from "./contexts.mjs";
 import { listEffectiveTokens } from "./effective-tokens.mjs";
+import { listTokenThemes, selectTokenThemes } from "./token-themes.mjs";
 
 const FIELD_TYPES = new Map([
   ["backgroundBlur", ["number", "other"]],
@@ -99,32 +100,89 @@ function contextSelections(product, options) {
     axis.values.map(({ id }) => ({ ...selection, [axis.id]: id }))), [{}]);
 }
 
-function createSearchIndex(product, options) {
-  const contexts = contextSelections(product, options);
-  const grouped = new Map();
-  for (const context of contexts) {
-    for (const effective of listEffectiveTokens(product, {
-      context,
-      foundation: options.foundation,
-      libraries: options.libraries,
-    })) {
-      const key = JSON.stringify([effective.target.packageId, effective.target.assetId,
-        effective.token.type, comparable(effective.value)]);
-      const existing = grouped.get(key);
-      if (existing) {
-        existing.contexts.push(structuredClone(context));
-        continue;
-      }
-      grouped.set(key, {
-        contexts: [structuredClone(context)], deprecated: effective.token.deprecated,
-        description: effective.token.description, packageId: effective.target.packageId,
-        path: effective.token.path, reference: structuredClone(effective.target),
-        sourcePackageId: effective.sourcePackageId, sourceTokenId: effective.sourceTokenId,
-        type: effective.token.type, value: structuredClone(effective.value),
-      });
+const MAX_THEME_SELECTIONS = 64;
+
+// Every selection of one theme per group, across the Package and its
+// Foundation, capped so a large theme matrix cannot flood a search.
+function allThemeSelections(product, foundation) {
+  const groups = new Map();
+  for (const theme of listTokenThemes(product, foundation)) {
+    groups.set(theme.group, [...(groups.get(theme.group) ?? []), theme.path]);
+  }
+  let selections = [[]];
+  let capped = false;
+  for (const paths of groups.values()) {
+    selections = selections.flatMap((selection) => paths.map((path) => [...selection, path]));
+    if (selections.length > MAX_THEME_SELECTIONS) {
+      selections.length = MAX_THEME_SELECTIONS;
+      capped = true;
     }
   }
-  return { contexts, items: [...grouped.values()] };
+  return { capped, selections };
+}
+
+// Searches the active theme selection by default (as every read does);
+// allThemes searches every selection and tags each value with its themes.
+function themeScope(product, options) {
+  const active = listTokenThemes(product, options.foundation)
+    .filter(({ active: isActive }) => isActive)
+    .map(({ path }) => path);
+  if (!options.allThemes) {
+    return {
+      mode: options.themeMode ?? "active",
+      selections: [active],
+      views: [{ foundation: options.foundation, product, themes: active }],
+    };
+  }
+  const { capped, selections } = allThemeSelections(product, options.foundation);
+  return {
+    ...(capped ? { capped: true, maxSelections: MAX_THEME_SELECTIONS } : {}),
+    mode: "all",
+    selections,
+    views: selections.map((themes) => ({
+      ...selectTokenThemes({ foundation: options.foundation, product }, themes),
+      themes,
+    })),
+  };
+}
+
+function createSearchIndex(product, options) {
+  const contexts = contextSelections(product, options);
+  const themes = themeScope(product, options);
+  const grouped = new Map();
+  for (const view of themes.views) {
+    for (const context of contexts) {
+      for (const effective of listEffectiveTokens(view.product, {
+        context,
+        foundation: view.foundation,
+        libraries: options.libraries,
+      })) {
+        const key = JSON.stringify([effective.target.packageId, effective.target.assetId,
+          effective.token.type, comparable(effective.value)]);
+        const existing = grouped.get(key);
+        if (existing) {
+          if (!existing.contexts.some((candidate) => equalValue(candidate, context))) {
+            existing.contexts.push(structuredClone(context));
+          }
+          if (themes.mode === "all" &&
+              !existing.themes.some((candidate) => equalValue(candidate, view.themes))) {
+            existing.themes.push([...view.themes]);
+          }
+          continue;
+        }
+        grouped.set(key, {
+          contexts: [structuredClone(context)], deprecated: effective.token.deprecated,
+          description: effective.token.description, packageId: effective.target.packageId,
+          path: effective.token.path, reference: structuredClone(effective.target),
+          sourcePackageId: effective.sourcePackageId, sourceTokenId: effective.sourceTokenId,
+          ...(themes.mode === "all" ? { themes: [[...view.themes]] } : {}),
+          type: effective.token.type, value: structuredClone(effective.value),
+        });
+      }
+    }
+  }
+  const { views, ...scope } = themes;
+  return { contexts, items: [...grouped.values()], themeScope: scope };
 }
 
 function searchItems(product, options, suppliedIndex) {
@@ -147,7 +205,7 @@ function searchItems(product, options, suppliedIndex) {
       return compareText(left.path, right.path) || compareText(left.packageId, right.packageId) ||
         compareText(JSON.stringify(comparable(left.value)), JSON.stringify(comparable(right.value)));
     });
-  return { contexts: index.contexts, items };
+  return { contexts: index.contexts, items, themeScope: index.themeScope };
 }
 
 export function searchEffectiveTokens(product, options = {}) {
@@ -159,6 +217,7 @@ export function searchEffectiveTokens(product, options = {}) {
     items: searched.items.slice(0, limit), query: options.query ?? null,
     requestedType: options.type ?? null,
     requestedValue: Object.hasOwn(options, "value") ? structuredClone(options.value) : null,
+    themeScope: searched.themeScope,
     total: searched.items.length,
   };
 }
@@ -177,7 +236,7 @@ function presentationNode(snapshot, operation) {
 
 function componentNode(snapshot, operation) {
   for (const entry of snapshot.manifest.entries.components) {
-    const componentSet = snapshot.entries[entry]?.componentSets?.find(({ id }) => id === operation.componentSetId);
+    const componentSet = snapshot.entries[entry]?.componentSets?.find(({ id }) => id === operation.componentId);
     const variant = componentSet?.variants.find(({ id }) => id === operation.variantId);
     if (variant?.nodes[operation.nodeId]) return variant.nodes[operation.nodeId];
   }
@@ -285,8 +344,9 @@ export function designTokenAdviceForBatch(product, batch, options = {}) {
           message: exactSuggestion
             ? `A Design Token resolves to the hard-coded ${assignment.field} value in one or more Contexts`
             : `No Design Token resolves to the hard-coded ${assignment.field} value; confirm that the raw value is intentional`,
-          nodeId: node.id, operationIndex,
+          nodeId: node.id, element: node.name, operationIndex,
           ...(exactSuggestion ? { recommendedBinding: { field: assignment.bindingField,
+            token: exactSuggestion.token?.path ?? exactSuggestion.path,
             reference: structuredClone(exactSuggestion.reference) } } : {}),
           severity: "warning", suggestions, valueSource: "raw-unbound",
           value: structuredClone(assignment.value),

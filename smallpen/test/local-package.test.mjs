@@ -120,7 +120,8 @@ test("runtime UUID indexes keep Presentation-scoped node IDs distinct", async ()
   const mobile = opened.runtime.nodes.scr_roundtrip.pres_mobile.node_rectangle;
 
   assert.notEqual(desktop, mobile);
-  assert.notEqual(
+  // Both versions are boards on the one default canvas.
+  assert.equal(
     opened.runtime.pages.scr_roundtrip.pres_desktop,
     opened.runtime.pages.scr_roundtrip.pres_mobile,
   );

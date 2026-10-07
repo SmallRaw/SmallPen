@@ -1,13 +1,19 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { pipeline } from "node:stream";
 
 import {
+  buildDesignSystemPage,
   compileDraftMerge,
+  createWorkspaceRuntime,
+  designSystemPageOptions,
   diffDrafts,
   draftFromSnapshot,
   importTokens,
   projectEffectiveSnapshot,
+  withCanvasPositions,
   SmallPenError,
   SMALLPEN_FORMAT_CAPABILITIES,
   stableRuntimeUuid,
@@ -23,10 +29,32 @@ import {
 } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 import { inspectImage } from "./media.mjs";
+import { packageFiles } from "./package-files.mjs";
+import {
+  compressBuffer,
+  createCompressor,
+  MIN_COMPRESSED_BYTES,
+  negotiateEncoding,
+} from "./compression.mjs";
 import { fontVariantName, prepareFontFiles } from "./font.mjs";
-import { LocalApplicationState } from "./application-state.mjs";
-import { importLibraryUpload, MAX_LIBRARY_UPLOAD_BYTES } from "./library-upload.mjs";
-import { createWebWorkspaceSnapshot } from "./web-projection.mjs";
+import {
+  defaultApplicationStatePath,
+  LocalApplicationState,
+} from "./application-state.mjs";
+import {
+  importDirectoryUpload,
+  MAX_DIRECTORY_UPLOAD_BYTES,
+} from "./directory-upload.mjs";
+import {
+  importLibraryUpload,
+  MAX_LIBRARY_UPLOAD_BYTES,
+} from "./library-upload.mjs";
+import {
+  createWebLibrarySnapshot,
+  compactDesignSystemRefs,
+  createWebWorkspaceSnapshot,
+  webDesignSystemRefs,
+} from "./web-projection.mjs";
 import {
   createCanvasWorkspace,
   createCatalogWorkspace,
@@ -80,6 +108,68 @@ function originFor(host, port) {
   return `http://${hostname}:${port}`;
 }
 
+// A Product's generated Design System page shows its Foundation's token
+// sets and themes; the runtime is rebuilt from the current Foundation on
+// every read, so a Foundation change shows without reopening the Product.
+async function workspaceSnapshot(snapshot, foundation) {
+  let runtime;
+  try {
+    runtime = await createWorkspaceRuntime(snapshot, { foundation });
+  } catch (error) {
+    if (!(error instanceof SmallPenError)) throw error;
+    // The page then shows the Product's own Cells and says why.
+    const refs = snapshot.runtime.designSystemRefs ?? {};
+    return {
+      ...snapshot,
+      runtime: {
+        ...snapshot.runtime,
+        designSystemRefs: {
+          ...refs,
+          diagnostics: [
+            ...(refs.diagnostics ?? []),
+            {
+              code: "design_system_foundation_unavailable",
+              details: error.details,
+              message: `Foundation token sets are not shown: ${error.message}`,
+            },
+          ],
+        },
+      },
+    };
+  }
+  return runtime === snapshot.runtime ? snapshot : { ...snapshot, runtime };
+}
+
+// The generated Design System page data of one combination: its Cells and
+// samples, and those shown for every combination.
+function designSystemRefsForCombination(refs, combinationId) {
+  if (!(refs.combinations ?? []).some(({ id }) => id === combinationId)) {
+    throw new SmallPenError(
+      "unknown_design_system_combination",
+      `Design System combination does not exist: ${combinationId}`,
+      {
+        combinationId,
+        combinationIds: (refs.combinations ?? []).map(({ id }) => id),
+      },
+    );
+  }
+  const shown = (item) =>
+    item.combinationId === combinationId || item.combinationId === null;
+  const specimens = Object.fromEntries(
+    Object.entries(refs.specimens ?? {}).filter(([, ref]) => shown(ref)),
+  );
+  const specimenKeysByToken = {};
+  for (const [key, ref] of Object.entries(specimens)) {
+    (specimenKeysByToken[ref.tokenId] ??= []).push(key);
+  }
+  return {
+    ...refs,
+    componentSamples: refs.componentSamples?.filter(shown),
+    specimenKeysByToken,
+    specimens,
+  };
+}
+
 function referencesPackage(snapshot, packageId) {
   let found = false;
   const visit = (value) => {
@@ -117,18 +207,65 @@ function librarySummary(snapshot) {
 }
 
 function writeJson(response, status, value) {
-  const body = JSON.stringify(value);
+  writeJsonText(response, status, JSON.stringify(value));
+}
+
+// The Content-Encoding each response may use, from its request's
+// Accept-Encoding (set when the request arrives).
+const responseEncodings = new WeakMap();
+
+const JSON_HEADERS = {
+  "cache-control": "no-store",
+  "content-type": "application/json; charset=utf-8",
+};
+
+function writeJsonText(response, status, body) {
+  const encoding = responseEncodings.get(response);
+  const length = Buffer.byteLength(body);
+  if (!encoding || length < MIN_COMPRESSED_BYTES) {
+    response.writeHead(status, { ...JSON_HEADERS, "content-length": length });
+    response.end(body);
+    return;
+  }
   response.writeHead(status, {
-    "cache-control": "no-store",
-    "content-length": Buffer.byteLength(body),
-    "content-type": "application/json; charset=utf-8",
+    ...JSON_HEADERS,
+    "content-encoding": encoding,
+    vary: "accept-encoding, origin",
+  });
+  const compressor = createCompressor(encoding);
+  pipeline(compressor, response, (error) => {
+    if (error) response.destroy(error);
+  });
+  compressor.end(body);
+}
+
+// A body that is served many times unchanged keeps its compressed forms.
+async function writeCachedJson(response, status, cached) {
+  const encoding = responseEncodings.get(response);
+  if (!encoding || Buffer.byteLength(cached.body) < MIN_COMPRESSED_BYTES) {
+    writeJsonText(response, status, cached.body);
+    return;
+  }
+  cached.encoded ??= {};
+  cached.encoded[encoding] ??= compressBuffer(
+    Buffer.from(cached.body),
+    encoding,
+  );
+  const body = await cached.encoded[encoding];
+  response.writeHead(status, {
+    ...JSON_HEADERS,
+    "content-encoding": encoding,
+    "content-length": body.byteLength,
+    vary: "accept-encoding, origin",
   });
   response.end(body);
 }
 
 const ERROR_STATUS = {
   file_not_found: 404,
+  unknown_design_system_combination: 404,
   stale_revision: 409,
+  package_upload_too_large: 413,
   unsupported_media_type: 415,
 };
 
@@ -337,11 +474,15 @@ export async function serveLocalPackage({
   const uploadSessions = new Map();
   // DSP-014-A: bounded memo for the design-system aggregation (see route).
   const designSystemMemo = { key: null, entries: [] };
+  // The generated page data per Package revision (and Foundation revision),
+  // serialized once: /v1/workspace leaves it out, the page fetches it.
+  const designSystemRefsMemo = [];
   const sessionPath = `/${randomUUID()}`;
   let revisionNumber = 0;
-  // Per package: Penpot runtime ids of copy children that a commit turned
-  // into projected Instance children (compilePenpotChanges
-  // projectedRuntimeIds). The page keeps those ids until it reloads.
+  // Per package: Penpot runtime ids a commit gave canonical meaning
+  // (compilePenpotChanges projectedRuntimeIds): copy children of new or
+  // switched Instances until the page reloads, and Component Set items for
+  // the whole session (web-projection.mjs applySessionRuntimeIds).
   const projectedRuntimeIds = new Map();
   let selectedPort;
 
@@ -376,6 +517,16 @@ export async function serveLocalPackage({
         packageStatus: { readOnly: true, state: "ready" },
       };
     });
+  }
+
+  // The Libraries as the Web loads them as library files: their component
+  // trees expanded (web-projection.mjs createWebLibrarySnapshot).
+  async function webLibrarySnapshots(description) {
+    return Promise.all(
+      librarySnapshots(description).map((library) =>
+        createWebLibrarySnapshot(library),
+      ),
+    );
   }
 
   async function packageByFileId(fileId) {
@@ -526,6 +677,10 @@ export async function serveLocalPackage({
         response.setHeader("access-control-allow-origin", requestOrigin);
       }
       response.setHeader("vary", "origin");
+      responseEncodings.set(
+        response,
+        negotiateEncoding(request.headers["accept-encoding"]),
+      );
       if (request.method === "OPTIONS") {
         response.writeHead(204);
         response.end();
@@ -561,6 +716,64 @@ export async function serveLocalPackage({
           activeSessionId: workspace.activeLocator
             ? packageSessionId(workspace.activeLocator)
             : null,
+          packages: workspace.packages.map(packageSummary),
+        });
+        return;
+      }
+      if (request.method === "POST" && route === "/v1/packages/import") {
+        const contentType = request.headers["content-type"] ?? "";
+        if (!contentType.toLowerCase().startsWith("multipart/form-data;")) {
+          throw new SmallPenError(
+            "invalid_package_upload",
+            "Expected a Package directory upload.",
+          );
+        }
+        const bytes = await readBytes(
+          request,
+          MAX_DIRECTORY_UPLOAD_BYTES + 1024 * 1024,
+          {
+            label: "Package",
+            emptyCode: "invalid_package_upload",
+            tooLargeCode: "package_upload_too_large",
+          },
+        );
+        let form;
+        try {
+          form = await new Response(bytes, {
+            headers: { "content-type": contentType },
+          }).formData();
+        } catch {
+          throw new SmallPenError(
+            "invalid_package_upload",
+            "The Package directory upload is not valid multipart data.",
+          );
+        }
+        const imported = await importDirectoryUpload(
+          join(
+            dirname(applicationStatePath ?? defaultApplicationStatePath()),
+            "imports",
+          ),
+          form,
+        );
+        let description;
+        try {
+          description = await workspace.open(imported.path);
+          await application.recordPackage({
+            locator: description.snapshot.locator,
+            name: description.snapshot.manifest.name,
+            packageId: description.snapshot.manifest.packageId,
+            role: description.snapshot.manifest.role,
+          });
+        } catch (error) {
+          if (description) await workspace.close(description.locator);
+          await rm(imported.container, { recursive: true, force: true });
+          throw error;
+        }
+        workspace.setActive(description.locator);
+        for (const item of workspace.packages) packageSessionId(item.locator);
+        writeJson(response, 201, {
+          activeSessionId: packageSessionId(description.locator),
+          packagePath: description.locator,
           packages: workspace.packages.map(packageSummary),
         });
         return;
@@ -755,6 +968,38 @@ export async function serveLocalPackage({
 
       const description = await selectedPackage(request, url);
       const { backend, locator } = description;
+      if (request.method === "GET" && route === "/v1/package-files") {
+        const snapshot = description.snapshot;
+        const revision = url.searchParams.get("revision");
+        if (revision && revision !== snapshot.revision)
+          throw new SmallPenError(
+            "stale_revision",
+            "Package changed while reading files.",
+          );
+        const exported = packageFiles(snapshot);
+        const path = url.searchParams.get("path");
+        if (path === null) {
+          writeJson(response, 200, {
+            revision: snapshot.revision,
+            files: exported.files,
+          });
+        } else {
+          const bytes = exported.bytes.get(path);
+          if (!bytes)
+            throw new SmallPenError(
+              "invalid_entry_path",
+              "Not a canonical Package file.",
+            );
+          response.writeHead(200, {
+            "cache-control": "no-store",
+            "content-type": "application/octet-stream",
+            "content-length": bytes.length,
+            "x-content-type-options": "nosniff",
+          });
+          response.end(bytes);
+        }
+        return;
+      }
       if (request.method === "GET" && route === "/v1/libraries") {
         writeJson(response, 200, {
           libraries: librarySnapshots(description).map((snapshot) => ({
@@ -783,12 +1028,23 @@ export async function serveLocalPackage({
       if (request.method === "POST" && route === "/v1/libraries/import-local") {
         const contentType = request.headers["content-type"] ?? "";
         if (!contentType.startsWith("multipart/form-data;")) {
-          throw new SmallPenError("invalid_content_type", "Expected a directory upload.");
+          throw new SmallPenError(
+            "invalid_content_type",
+            "Expected a directory upload.",
+          );
         }
-        const bytes = await readBytes(request, MAX_LIBRARY_UPLOAD_BYTES + 1024 * 1024, {
-          label: "library", emptyCode: "empty_library_upload", tooLargeCode: "library_too_large",
-        });
-        const form = await new Response(bytes, { headers: { "content-type": contentType } }).formData();
+        const bytes = await readBytes(
+          request,
+          MAX_LIBRARY_UPLOAD_BYTES + 1024 * 1024,
+          {
+            label: "library",
+            emptyCode: "empty_library_upload",
+            tooLargeCode: "library_too_large",
+          },
+        );
+        const form = await new Response(bytes, {
+          headers: { "content-type": contentType },
+        }).formData();
         writeJson(response, 200, await importLibraryUpload(locator, form));
         return;
       }
@@ -839,7 +1095,7 @@ export async function serveLocalPackage({
         const updated = workspace.describe(locator);
         writeJson(response, 200, {
           ...result,
-          libraries: librarySnapshots(updated),
+          libraries: await webLibrarySnapshots(updated),
           librarySources: updated.workspace?.librarySources ?? [],
           warnings: updated.status?.warnings ?? [],
         });
@@ -862,7 +1118,7 @@ export async function serveLocalPackage({
         const updated = workspace.describe(locator);
         writeJson(response, 200, {
           ...result,
-          libraries: librarySnapshots(updated),
+          libraries: await webLibrarySnapshots(updated),
           librarySources: updated.workspace?.librarySources ?? [],
           warnings: updated.status?.warnings ?? [],
         });
@@ -898,7 +1154,7 @@ export async function serveLocalPackage({
         }
         const updated = await workspace.refresh(locator);
         writeJson(response, 200, {
-          libraries: librarySnapshots(updated),
+          libraries: await webLibrarySnapshots(updated),
           librarySources: updated.workspace?.librarySources ?? [],
           warnings: updated.status?.warnings ?? [],
         });
@@ -944,7 +1200,10 @@ export async function serveLocalPackage({
           const entries = designSystemMemo.entries.filter(
             (entry) => entry.key !== memoKey,
           );
-          entries.push({ key: memoKey, value: createDesignSystemWorkspace(description) });
+          entries.push({
+            key: memoKey,
+            value: createDesignSystemWorkspace(description),
+          });
           designSystemMemo.entries = entries.slice(-2);
           designSystemMemo.key = memoKey;
         }
@@ -992,16 +1251,87 @@ export async function serveLocalPackage({
         });
         return;
       }
+      if (request.method === "GET" && route === "/v1/design-system-refs") {
+        const requested = url.searchParams.get("revision");
+        if (requested !== null && requested !== backend.snapshot.revision) {
+          throw new SmallPenError(
+            "stale_revision",
+            "Design System page data was requested for an older revision; reload the workspace",
+            {
+              actualRevision: backend.snapshot.revision,
+              baseRevision: requested,
+            },
+          );
+        }
+        const foundation = description.workspace?.foundation;
+        const combinationId = url.searchParams.get("combination");
+        // The page labels follow the Web's UI language.
+        const locale = url.searchParams.get("locale") ?? "en";
+        const memoKey = [
+          locator,
+          backend.snapshot.revision,
+          foundation?.revision ?? "",
+          combinationId ?? "",
+          locale,
+        ].join("\0");
+        let cached = designSystemRefsMemo.find((item) => item.key === memoKey);
+        if (!cached) {
+          const current = await workspaceSnapshot(backend.snapshot, foundation);
+          const full = webDesignSystemRefs(
+            current.runtime.designSystemRefs ?? {},
+            current,
+          );
+          // The page indexes samples of the refs it is sent with.
+          const selected =
+            combinationId === null
+              ? full
+              : designSystemRefsForCombination(full, combinationId);
+          cached = {
+            body: JSON.stringify({
+              combinationId,
+              designSystemPage: buildDesignSystemPage(
+                selected,
+                current.runtime.designSystem ?? {},
+                designSystemPageOptions(current, { foundation, locale }),
+              ),
+              designSystemRefs: compactDesignSystemRefs(selected),
+              foundationRevision: foundation?.revision ?? null,
+              revision: backend.snapshot.revision,
+            }),
+            key: memoKey,
+          };
+          designSystemRefsMemo.push(cached);
+          designSystemRefsMemo.splice(0, designSystemRefsMemo.length - 4);
+        }
+        await writeCachedJson(response, 200, cached);
+        return;
+      }
       if (request.method === "GET" && route === "/v1/workspace") {
-        const effective = projectEffectiveSnapshot(backend.snapshot, {
-          foundation: description.workspace?.foundation,
-          libraries: description.workspace?.libraries ?? [],
-        });
+        // Boards sit where the canvas layout puts them (core canvases.mjs).
+        const effective = withCanvasPositions(projectEffectiveSnapshot(
+          await workspaceSnapshot(
+            backend.snapshot,
+            description.workspace?.foundation,
+          ),
+          {
+            foundation: description.workspace?.foundation,
+            libraries: description.workspace?.libraries ?? [],
+          },
+        ));
         const projected = await createWebWorkspaceSnapshot(effective, {
           foundation: description.workspace?.foundation,
           libraries: description.workspace?.libraries ?? [],
+          sessionRuntimeIds: projectedRuntimeIds.get(locator),
         });
-        const { blobs: _blobs, ...snapshot } = projected;
+        const {
+          blobs: _blobs,
+          runtime: {
+            designSystemRefs: _refs,
+            reverseDesignSystem: _reverse,
+            ...runtime
+          },
+          ...snapshot
+        } = projected;
         const projectionWarnings = projected.projectionErrors.map((error) => ({
           code: error.code,
           message: error.message,
@@ -1011,14 +1341,18 @@ export async function serveLocalPackage({
         }));
         writeJson(response, 200, {
           ...snapshot,
+          // The generated Design System page data is served on its own,
+          // when the page opens: GET /v1/design-system-refs.
+          runtime: { ...runtime, designSystemRefsDeferred: true },
           capabilities: backend.capabilities(),
           formatCapabilities: SMALLPEN_FORMAT_CAPABILITIES,
-          libraries: librarySnapshots(description),
+          libraries: await webLibrarySnapshots(description),
           librarySources: description.workspace?.librarySources ?? [],
           packageSessionId: packageSessionId(locator),
           packageStatus: {
             ...description.status,
-            readOnly: description.status.readOnly || projectionWarnings.length > 0,
+            readOnly:
+              description.status.readOnly || projectionWarnings.length > 0,
             warnings: [
               ...(description.status.warnings ?? []),
               ...projectionWarnings,
@@ -1523,18 +1857,17 @@ export async function serveLocalPackage({
         }
         const foundation = description.workspace?.foundation;
         const libraries = description.workspace?.libraries ?? [];
-        const effective = projectEffectiveSnapshot(backend.snapshot, {
-          foundation,
-          libraries,
-        });
+        // Edits read against the same canvas layout the App drew.
+        const effective = withCanvasPositions(projectEffectiveSnapshot(
+          await workspaceSnapshot(backend.snapshot, foundation),
+          { foundation, libraries },
+        ));
+        const sessionIds = projectedRuntimeIds.get(locator) ?? new Map();
         const projected = await createWebWorkspaceSnapshot(effective, {
           foundation,
           libraries,
+          sessionRuntimeIds: sessionIds,
         });
-        const sessionIds = projectedRuntimeIds.get(locator) ?? new Map();
-        for (const [runtimeId, descriptor] of sessionIds) {
-          projected.runtime.reverseNodes[runtimeId] ??= descriptor;
-        }
         const added = new Map();
         const batch = compilePenpotChanges(
           { ...effective, runtime: projected.runtime },
@@ -1544,8 +1877,12 @@ export async function serveLocalPackage({
             projectedRuntimeIds: added,
           },
         );
-        const result = await workspace.commit(locator, batch);
+        // A copy or rename in the App that repeats a name is numbered
+        // ("Card 2"), as a file manager names a copied folder.
+        const result = await workspace.commit(locator, { ...batch, repeatedNames: "number" });
         for (const [runtimeId, descriptor] of added) {
+          // The latest meaning of an id wins when the projection applies them.
+          sessionIds.delete(runtimeId);
           sessionIds.set(runtimeId, descriptor);
         }
         projectedRuntimeIds.set(locator, sessionIds);

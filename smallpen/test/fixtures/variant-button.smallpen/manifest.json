@@ -1,0 +1,21 @@
+{
+  "entries": {
+    "assets": [],
+    "components": [
+      "components/foundation.json"
+    ],
+    "contexts": [
+      "contexts/foundation.json"
+    ],
+    "requirements": [],
+    "scenarios": [],
+    "screens": [],
+    "tokens": [
+      "tokens/tokens.json"
+    ]
+  },
+  "formatVersion": 1,
+  "name": "Flowboard Foundation",
+  "packageId": "pkg_flowboard_foundation",
+  "role": "foundation"
+}

@@ -1,0 +1,23 @@
+{
+  "annotations": [],
+  "flows": [
+    {
+      "id": "flow_add_a_task",
+      "interactionIds": [],
+      "name": "Add a task"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "req_add_a_task",
+      "links": [
+        {
+          "flowId": "flow_add_a_task",
+          "kind": "flow"
+        }
+      ],
+      "markdown": "Track daily tasks\n\nFirst output: Task list screen",
+      "title": "Add a task"
+    }
+  ]
+}

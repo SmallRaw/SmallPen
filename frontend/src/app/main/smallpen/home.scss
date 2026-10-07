@@ -9,7 +9,8 @@
 .home {
   background-color: var(--color-background-primary);
   color: var(--color-foreground-primary);
-  min-block-size: 100vh;
+  box-sizing: border-box;
+  block-size: 100vh;
   overflow-y: auto;
   padding: var(--sp-xxl);
 }
@@ -114,6 +115,12 @@
   display: block;
   color: var(--color-foreground-error);
   margin-block-start: var(--sp-l);
+}
+
+.upload-options {
+  display: grid;
+  gap: var(--sp-m);
+  margin-block-end: var(--sp-l);
 }
 
 @media (width <= 720px) {

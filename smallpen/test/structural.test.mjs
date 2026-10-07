@@ -367,124 +367,56 @@ test("Penpot page-root edits use a Canonical forest and reverse exactly", async 
   assert.equal(removeReversed.snapshot.revision, snapshot.revision);
 });
 
-test("Penpot empty-page lifecycle preserves page identity and reverses exactly", async () => {
+test("a Penpot page is a canvas: add, rename, move and delete reverse exactly", async () => {
   const snapshot = await loadPackageFromValues(
     "memory://page-lifecycle.smallpen",
     await fixtureValues(),
   );
+  const newCanvasId = newPresentationId.replace(/^pres_/, "cnv_");
   const add = compilePenpotChanges(snapshot, {
-    changes: [
-      {
-        id: newPageRuntimeId,
-        name: "Second Page",
-        type: "add-page",
-      },
-    ],
+    changes: [{ id: newPageRuntimeId, name: "Second Page", type: "add-page" }],
     commitId: "add-page",
   });
   assert.deepEqual(add.operations, [
     {
-      presentation: {
-        id: newPresentationId,
-        interactions: [],
-        name: "Second Page",
-        nodes: {},
-        platform: "desktop",
-        rootId: null,
-        rootIds: [],
-        viewport: { height: 600, width: 800 },
-      },
-      screenId: "scr_roundtrip",
-      type: "add-presentation",
+      canvases: [
+        { id: "cnv_pages", name: "Pages", screens: ["scr_roundtrip"] },
+        { id: newCanvasId, name: "Second Page", screens: [] },
+      ],
+      type: "put-canvases",
     },
   ]);
   const added = await prepareOperationBatch(snapshot, add);
-  const addedScreen = added.snapshot.entries["screens/roundtrip.json"];
-  assert.deepEqual(
-    addedScreen.presentations.map(({ id }) => id),
-    ["pres_desktop", newPresentationId],
-  );
   assert.equal(
-    added.snapshot.runtime.pages.scr_roundtrip[newPresentationId],
+    added.snapshot.runtime.canvases.find(({ id }) => id === newCanvasId).pageId,
     newPageRuntimeId,
+    "the canvas keeps the Penpot page id",
   );
-  const addReversed = await prepareOperationBatch(
-    added.snapshot,
-    added.result.inverseBatch,
-  );
-  assert.equal(addReversed.snapshot.revision, snapshot.revision);
+  const reversed = await prepareOperationBatch(added.snapshot, added.result.inverseBatch);
+  assert.equal(reversed.snapshot.revision, snapshot.revision);
 
-  const rename = compilePenpotChanges(added.snapshot, {
-    changes: [
-      {
-        id: newPageRuntimeId,
-        name: "Renamed Page",
-        type: "mod-page",
-      },
-    ],
+  const renamed = await prepareOperationBatch(added.snapshot, compilePenpotChanges(added.snapshot, {
+    changes: [{ id: newPageRuntimeId, name: "Renamed Page", type: "mod-page" }],
     commitId: "rename-page",
-  });
-  const renamed = await prepareOperationBatch(added.snapshot, rename);
-  assert.equal(
-    renamed.snapshot.entries["screens/roundtrip.json"].presentations[1].name,
-    "Renamed Page",
-  );
-  const renameReversed = await prepareOperationBatch(
-    renamed.snapshot,
-    renamed.result.inverseBatch,
-  );
-  assert.equal(renameReversed.snapshot.revision, added.snapshot.revision);
+  }));
+  assert.equal(renamed.snapshot.manifest.canvases[1].name, "Renamed Page");
 
-  const move = compilePenpotChanges(added.snapshot, {
+  const moved = await prepareOperationBatch(added.snapshot, compilePenpotChanges(added.snapshot, {
     changes: [{ id: newPageRuntimeId, index: 0, type: "mov-page" }],
     commitId: "move-page",
-  });
-  const moved = await prepareOperationBatch(added.snapshot, move);
-  assert.deepEqual(
-    moved.snapshot.entries["screens/roundtrip.json"].presentations.map(
-      ({ id }) => id,
-    ),
-    [newPresentationId, "pres_desktop"],
-  );
-  const moveReversed = await prepareOperationBatch(
-    moved.snapshot,
-    moved.result.inverseBatch,
-  );
-  assert.equal(moveReversed.snapshot.revision, added.snapshot.revision);
+  }));
+  assert.deepEqual(moved.snapshot.manifest.canvases.map(({ id }) => id), [newCanvasId, "cnv_pages"]);
 
-  const remove = compilePenpotChanges(added.snapshot, {
+  const removed = await prepareOperationBatch(added.snapshot, compilePenpotChanges(added.snapshot, {
     changes: [{ id: newPageRuntimeId, type: "del-page" }],
     commitId: "delete-page",
-  });
-  const removed = await prepareOperationBatch(added.snapshot, remove);
-  assert.deepEqual(
-    removed.snapshot.entries["screens/roundtrip.json"].presentations.map(
-      ({ id }) => id,
-    ),
-    ["pres_desktop"],
-  );
-  const removeReversed = await prepareOperationBatch(
-    removed.snapshot,
-    removed.result.inverseBatch,
-  );
-  assert.equal(removeReversed.snapshot.revision, added.snapshot.revision);
-
-  const removeLast = compilePenpotChanges(snapshot, {
-    changes: [
-      {
-        id: snapshot.runtime.pages.scr_roundtrip.pres_desktop,
-        type: "del-page",
-      },
-    ],
-    commitId: "delete-last-page",
-  });
-  await assert.rejects(
-    prepareOperationBatch(snapshot, removeLast),
-    (error) => error?.code === "cannot_delete_last_presentation",
-  );
+  }));
+  assert.deepEqual(removed.snapshot.manifest.canvases.map(({ id }) => id), ["cnv_pages"]);
+  const restored = await prepareOperationBatch(removed.snapshot, removed.result.inverseBatch);
+  assert.equal(restored.snapshot.revision, added.snapshot.revision);
 });
 
-test("a duplicated Penpot page becomes one stable Canonical Presentation", async () => {
+test("copying a whole canvas in the App says to copy its pages with the CLI", async () => {
   const snapshot = await loadPackageFromValues(
     "memory://duplicate-page.smallpen",
     await fixtureValues(),
@@ -502,7 +434,9 @@ test("a duplicated Penpot page becomes one stable Canonical Presentation", async
     type: "frame",
   };
   const child = penpotRectangle(childRuntimeId, frameRuntimeId);
-  const add = compilePenpotChanges(snapshot, {
+  assert.throws(
+    () =>
+    compilePenpotChanges(snapshot, {
     changes: [
       {
         id: newPageRuntimeId,
@@ -519,35 +453,9 @@ test("a duplicated Penpot page becomes one stable Canonical Presentation", async
       },
     ],
     commitId: "duplicate-page",
-  });
-  const duplicated = await prepareOperationBatch(snapshot, add);
-  const presentation =
-    duplicated.snapshot.entries["screens/roundtrip.json"].presentations[1];
-  assert.equal(presentation.id, newPresentationId);
-  assert.equal(presentation.rootId, frameNodeId);
-  assert.equal(presentation.rootIds, undefined);
-  assert.deepEqual(presentation.nodes[frameNodeId].children, [childNodeId]);
-  assert.equal(
-    duplicated.snapshot.runtime.pages.scr_roundtrip[newPresentationId],
-    newPageRuntimeId,
+    }),
+    (error) => error?.code === "duplicate_canvas_unsupported",
   );
-  assert.equal(
-    duplicated.snapshot.runtime.nodes.scr_roundtrip[newPresentationId][
-      frameNodeId
-    ],
-    frameRuntimeId,
-  );
-  assert.equal(
-    duplicated.snapshot.runtime.nodes.scr_roundtrip[newPresentationId][
-      childNodeId
-    ],
-    childRuntimeId,
-  );
-  const reversed = await prepareOperationBatch(
-    duplicated.snapshot,
-    duplicated.result.inverseBatch,
-  );
-  assert.equal(reversed.snapshot.revision, snapshot.revision);
 });
 
 test("a duplicated Penpot subtree keeps every new runtime identity", async () => {
@@ -742,7 +650,7 @@ test("invalid structural operations are rejected without a partial snapshot", as
 
 // RV-002-A: adapter saves real page names verbatim; only an exact no-op
 // rename is dropped, and the inverse restores the previous name.
-test("mod-page names are preserved literally across shapes (RV-002-A)", async () => {
+test("mod-page names the canvas literally and the inverse restores it (RV-002-A)", async () => {
   const { openPackage } = await import("@smallpen/local-package");
   const { cp } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
@@ -757,17 +665,11 @@ test("mod-page names are preserved literally across shapes (RV-002-A)", async ()
       commitId: `11111111-1111-1111-8111-${String(index).padStart(12, "0")}`,
     });
     assert.equal(batch.operations.length, 1, `real name keeps the op: ${name}`);
-    assert.equal(batch.operations[0].changes.name, name);
+    assert.equal(batch.operations[0].canvases[0].name, name);
     const prepared = await prepareOperationBatch(snapshot, batch);
-    const saved =
-      prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].name;
-    assert.equal(saved, name, `name saved exactly: ${name}`);
+    assert.equal(prepared.snapshot.runtime.canvases[0].name, name, `name saved exactly: ${name}`);
     const restored = await prepareOperationBatch(prepared.snapshot, prepared.result.inverseBatch);
-    assert.equal(
-      restored.snapshot.entries["screens/roundtrip.json"].presentations[0].name,
-      "Desktop",
-      `inverse restores the original name for ${name}`,
-    );
+    assert.equal(restored.snapshot.manifest.canvases, undefined, `inverse restores the canvases by module for ${name}`);
   }
 });
 

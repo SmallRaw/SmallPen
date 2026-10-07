@@ -4,16 +4,19 @@
 
 (ns frontend-tests.smallpen.projection-test
   (:require
+   [app.common.files.validate :as cfv]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.types.path :as path]
+   [app.common.types.shape-tree :as ctst]
    [app.common.types.shape.shadow :as ctss]
    [app.common.types.tokens-lib :as ctob]
    [app.common.uuid :as uuid]
    [app.main.smallpen.projection :as projection]
    [app.main.smallpen.session :as session]
    [app.main.smallpen.token-state :as spts]
-   [cljs.test :as t]))
+   [cljs.test :as t]
+   [frontend-tests.smallpen.ds-tree :as ds]))
 
 (def cos30 (/ (js/Math.sqrt 3) 2))
 
@@ -218,6 +221,11 @@
               :node_rectangle (str rectangle-id)}}}
     :pages {:scr_roundtrip
             {:pres_desktop (str page-id)}}
+    ;; Canvases as core's runtime lists them (canvases.mjs).
+    :canvases [{:id "cnv_pages"
+                :name "Round Trip · Desktop"
+                :pageId (str page-id)
+                :boards [{:screenId "scr_roundtrip" :presentationId "pres_desktop"}]}]
     :project (str project-id)
     :team (str team-id)}})
 
@@ -535,7 +543,20 @@
     (t/is (= component-main-id (:shape-ref copy)))
     (t/is (true? (:component-root copy)))
     (t/is (= component-child-id (:shape-ref copy-child)))
-    (t/is (= #{:fill-group} (:touched copy-child)))))
+    (t/is (= #{:fill-group} (:touched copy-child)))
+    ;; A main and a copy are boards: their children are framed by them, so
+    ;; Penpot pins unconstrained children left/top when a copy is resized
+    ;; instead of scaling them as a group's.
+    (t/is (= component-main-id (:frame-id main-child)))
+    (t/is (= instance-id (:frame-id copy-child)))
+    ;; Neither the main nor its copy paints Penpot's white board default.
+    (t/is (= [] (:fills main)))
+    (t/is (= [] (:fills copy)))
+    ;; Nested boards are not View mode screens; the screen root is.
+    (t/is (true? (:hide-in-viewer main)))
+    (t/is (true? (:hide-in-viewer copy)))
+    (t/is (nil? (get-in file [:data :pages-index page-id
+                              :objects canvas-id :hide-in-viewer])))))
 
 (t/deftest shapes-without-fills-project-without-penpot-default-fills
   (let [nodes     [:entries "screens/roundtrip.json" :presentations 0 :nodes]
@@ -675,7 +696,9 @@
     (t/is (= external-file-id (:component-file copy)))
     (t/is (= component-main-id (:shape-ref copy)))
     (t/is (= component-child-id (:shape-ref copy-child)))
-    (t/is (= #{:fill-group} (:touched copy-child)))))
+    (t/is (= #{:fill-group} (:touched copy-child)))
+    ;; A copy of a Library component is a board too.
+    (t/is (= instance-id (:frame-id copy-child)))))
 
 (t/deftest project-snapshot-materializes-token-library-and-applied-token-names
   (let [set-stable-id "tset_core"
@@ -743,69 +766,220 @@
     (t/is (= {:fill "color.primary" :width "size.card"}
              (:applied-tokens rectangle)))))
 
-;; A stroke color binding to a Token of this Package shows as Penpot's
-;; stroke-color applied Token; a binding to another Package stays a value.
-(t/deftest project-snapshot-shows-stroke-color-bindings-as-applied-tokens
-  (let [token-entry
-        {:activeSetIds ["tset_core"]
-         :activeThemeIds []
-         :id "tlib_design"
-         :sets [{:description ""
-                 :id "tset_core"
-                 :name "core"
-                 :tokens [{:description ""
-                           :id "tok_color_border"
-                           :name "color.border"
-                           :type "color"
-                           :value "#64748b"}]}]
-         :themes []}
-        with-bindings
-        (fn [bindings]
-          (-> snapshot
-              (assoc-in [:manifest :entries :tokens] ["tokens/design.json"])
-              (assoc-in [:entries "tokens/design.json"] token-entry)
-              (assoc-in [:runtime :tokenSets "tset_core"] (str token-set-id))
-              (assoc-in [:runtime :tokens "tok_color_border"]
-                        (str color-token-id))
-              (assoc-in [:entries "screens/roundtrip.json"
-                         :presentations 0 :nodes :node_rectangle]
-                        {:appliedTokens {:fill "color.border"}
-                         :children []
-                         :fills [{:color "#7c3aed" :type "solid"}]
-                         :height 120
-                         :id "node_rectangle"
-                         :name "Editable Rectangle"
-                         :strokes [{:color "#64748b" :type "solid" :width 2}]
-                         :tokenBindings bindings
-                         :type "RECTANGLE"
-                         :width 240
-                         :x 80
-                         :y 96})))
-        rectangle
-        (fn [bindings]
-          (-> (projection/project-snapshot (with-bindings bindings)
-                                           {:file-id file-id
-                                            :project-id project-id})
-              (get-in [:file :data :pages-index page-id
-                       :objects rectangle-id])))]
-    (t/is (= {:fill "color.border" :stroke-color "color.border"}
-             (:applied-tokens
-              (rectangle {:stroke {:assetId "tok_color_border"
-                                   :packageId "pkg_roundtrip"}}))))
-    (t/is (= {:fill "color.border" :stroke-color "color.border"}
-             (:applied-tokens
-              (rectangle {(keyword "strokes.0")
-                          {:assetId "tok_color_border"
-                           :packageId "pkg_roundtrip"}}))))
-    (t/is (= {:fill "color.border"}
-             (:applied-tokens
-              (rectangle {:stroke {:assetId "tok_color_border"
-                                   :packageId "pkg_foundation"}}))))
-    (t/is (= {:fill "color.border"}
-             (:applied-tokens
-              (rectangle {(keyword "strokes.1")
-                          {:assetId "tok_color_border"
-                           :packageId "pkg_roundtrip"}}))))))
+(t/deftest project-snapshot-shows-the-applied-tokens-the-background-computed
+  ;; The Background computes applied Tokens from the bindings with core's one
+  ;; table (token-attributes.mjs); the App shows them as they come.
+  (let [objects (-> snapshot
+                    (assoc-in [:entries "screens/roundtrip.json" :presentations 0
+                               :nodes :node_rectangle :penpotAppliedTokens]
+                              {:fill "color.brand" :r1 "radius.lg" :m4 "space.4"})
+                    (projection/project-snapshot {:file-id file-id :project-id project-id})
+                    (get-in [:file :data :pages-index page-id :objects]))]
+    (t/is (= {:fill "color.brand" :r1 "radius.lg" :m4 "space.4"}
+             (get-in objects [rectangle-id :applied-tokens])))))
+
+;; View mode pages through the boards Penpot does not hide. A board drawn
+;; inside a board is hidden there, so a one-board screen is one viewer
+;; page; an explicit Package value wins, and a nested board an interaction
+;; navigates to stays a screen.
+(t/deftest nested-boards-are-hidden-in-view-mode
+  (let [nodes     [:entries "screens/roundtrip.json" :presentations 0 :nodes]
+        runtime   [:runtime :nodes :scr_roundtrip :pres_desktop]
+        board     (fn [id x]
+                    {:children [] :height 40 :id id :name id
+                     :type "FRAME" :width 40 :x x :y 0})
+        shown-id  #uuid "a1a1a1a1-0000-4000-8000-000000000001"
+        target-id #uuid "a1a1a1a1-0000-4000-8000-000000000002"
+        candidate (-> snapshot
+                      (update-in (conj nodes :node_canvas :children)
+                                 into ["node_shown" "node_target"])
+                      (assoc-in (conj nodes :node_shown)
+                                (assoc (board "node_shown" 0)
+                                       :hide-in-viewer false))
+                      (assoc-in (conj nodes :node_target)
+                                (board "node_target" 60))
+                      (assoc-in (conj nodes :node_rectangle :interactions)
+                                [{:action-type "navigate"
+                                  :destination (str target-id)
+                                  :event-type "click"}])
+                      (assoc-in (conj runtime :node_shown) (str shown-id))
+                      (assoc-in (conj runtime :node_target) (str target-id)))
+        objects   (get-in (projection/project-snapshot
+                           candidate
+                           {:file-id file-id :project-id project-id})
+                          [:file :data :pages-index page-id :objects])
+        plain     (get-in (projection/project-snapshot
+                           (update-in candidate (conj nodes :node_rectangle)
+                                      dissoc :interactions)
+                           {:file-id file-id :project-id project-id})
+                          [:file :data :pages-index page-id :objects])]
+    (t/is (nil? (:hide-in-viewer (get objects canvas-id))))
+    (t/is (false? (:hide-in-viewer (get objects shown-id))))
+    (t/is (nil? (:hide-in-viewer (get objects target-id))))
+    (t/is (true? (:hide-in-viewer (get plain target-id))))
+    ;; Only boards: a rectangle has no viewer page to hide.
+    (t/is (nil? (:hide-in-viewer (get objects rectangle-id))))
+    (t/is (= #{canvas-id shown-id target-id}
+             (set (map :id (ctst/get-viewer-frames objects)))))
+    (t/is (= #{canvas-id shown-id}
+             (set (map :id (ctst/get-viewer-frames plain)))))))
+
+;; Package shadows come as DTCG objects (offsetX/offsetY, or x/y in older
+;; Packages) or as the native records Penpot edits saved; every one reaches
+;; the shape as a valid native shadow, and anything else fails.
+(t/deftest project-snapshot-converts-every-stored-shadow-form
+  (let [shadow-of (fn [shadow]
+                    (-> (assoc-in snapshot
+                                  [:entries "screens/roundtrip.json"
+                                   :presentations 0 :nodes :node_rectangle
+                                   :shadow]
+                                  shadow)
+                        (projection/project-snapshot
+                         {:file-id file-id :project-id project-id})
+                        (get-in [:file :data :pages-index page-id
+                                 :objects rectangle-id :shadow])))
+        legacy    (shadow-of [{:blur 12 :color "#10182826" :spread 0
+                               :x 0 :y 4}])
+        inset     (shadow-of {:blur "2px" :color "#000000" :inset true
+                              :offsetX "1" :offsetY 0 :spread 0})
+        native    (shadow-of [{:blur 4
+                               :color {:color "#000000" :opacity 0.2}
+                               :hidden false
+                               :id "shadow"
+                               :offset-x 4
+                               :offset-y 4
+                               :spread 0
+                               :style "drop-shadow"}])]
+    (t/is (every? ctss/valid-shadow? (concat legacy inset native)))
+    (t/is (= [{:id nil :style :drop-shadow :hidden false :blur 12
+               :offset-x 0 :offset-y 4 :spread 0
+               :color {:color "#101828" :opacity (/ 0x26 255)}}]
+             legacy))
+    (t/is (= [:inner-shadow 1 2] ((juxt :style :offset-x :blur) (first inset))))
+    (t/is (= [{:id nil :style :drop-shadow :hidden false :blur 4
+               :offset-x 4 :offset-y 4 :spread 0
+               :color {:color "#000000" :opacity 0.2}}]
+             native))
+    (t/is (thrown-with-msg? js/Error #"unsupported SmallPen shadow"
+                            (shadow-of [{:depth 3}])))
+    (t/is (thrown-with-msg? js/Error #"unsupported SmallPen shadow"
+                            (shadow-of [{:blur "wide" :color "#000000"}])))))
+
+;; A Product's token manager holds its Foundation's sets and themes first,
+;; then its own, with the Product's selection of the Foundation's themes
+;; (docs/TOKEN-THEMES.md 5); a name in a later active set wins.
+(defn- foundation-themes-fixture
+  [dependency]
+  (let [foundation
+        {:manifest {:packageId "pkg_fnd"
+                    :entries {:tokens ["tokens/fnd.json"]}}
+         :entries {"tokens/fnd.json"
+                   {:activeSetIds ["tset_base"]
+                    :activeThemeIds ["theme_light"]
+                    :sets [{:id "tset_base" :name "base"
+                            :tokens [{:id "tok_brand" :name "color.brand"
+                                      :type "color" :value "#6750a4"}]}
+                           {:id "tset_light" :name "theme/light" :tokens []}
+                           {:id "tset_dark" :name "theme/dark"
+                            :tokens [{:id "tok_brand_dark" :name "color.brand"
+                                      :type "color" :value "#d0bcff"}]}]
+                    :themes [{:group "Theme" :id "theme_light" :name "Light"
+                              :setIds ["tset_base" "tset_light"]}
+                             {:group "Theme" :id "theme_dark" :name "Dark"
+                              :setIds ["tset_base" "tset_dark"]}]}}
+         :runtime {:file (str (uuid/next))
+                   :tokenSets {"tset_base" (str (uuid/next))
+                               "tset_light" (str (uuid/next))
+                               "tset_dark" (str (uuid/next))}
+                   :tokenThemes {"theme_light" (str (uuid/next))
+                                 "theme_dark" (str (uuid/next))}
+                   :tokens {"tok_brand" (str (uuid/next))
+                            "tok_brand_dark" (str (uuid/next))}}}
+        product
+        (-> snapshot
+            (assoc-in [:manifest :dependencies] [dependency])
+            (assoc-in [:manifest :entries :tokens] ["tokens/product.json"])
+            (assoc-in [:entries "tokens/product.json"]
+                      {:activeSetIds ["tset_product"]
+                       :activeThemeIds []
+                       :sets [{:id "tset_product" :name "product"
+                               :tokens [{:id "tok_gap" :name "spacing.gap"
+                                         :type "spacing" :value 8}]}]
+                       :themes []})
+            (assoc-in [:runtime :tokenSets "tset_product"] (str token-set-id))
+            (assoc-in [:runtime :tokens "tok_gap"] (str (uuid/next))))]
+    [product foundation]))
+
+(defn- projected-token-library
+  [product foundation]
+  (get-in (projection/project-snapshot
+           product
+           {:file-id file-id :libraries [foundation] :project-id project-id})
+          [:file :data :tokens-lib]))
+
+(defn- active-token-values
+  [lib]
+  (into {}
+        (map (fn [[token-name token]] [token-name (:value token)]))
+        (spts/get-tokens-in-active-sets lib)))
+
+(t/deftest product-token-library-holds-the-foundation-sets-and-themes
+  (let [[product foundation] (foundation-themes-fixture
+                              {:packageId "pkg_fnd"
+                               :path "fnd.smallpen"
+                               :activeThemeIds ["theme_dark"]})
+        lib (projected-token-library product foundation)]
+    (t/is (= ["base" "theme/light" "theme/dark" "product"]
+             (mapv ctob/get-name (ctob/get-sets lib))))
+    (t/is (= #{"Theme/Light" "Theme/Dark"}
+             (into #{} (comp (remove ctob/hidden-theme?) (map ctob/get-theme-path))
+                   (ctob/get-themes lib))))
+    ;; The Product's stored selection decides, and its own active set stays
+    ;; on through the hidden theme.
+    (t/is (= #{"Theme/Dark" ctob/hidden-theme-path}
+             (spts/get-active-theme-paths lib)))
+    (t/is (= {"color.brand" "#d0bcff" "spacing.gap" 8}
+             (active-token-values lib)))
+    (t/is (= (uuid/parse (get-in foundation [:runtime :tokenThemes "theme_dark"]))
+             (ctob/get-id (ctob/get-theme-by-path lib "Theme/Dark"))))
+    ;; edit_policy refuses edits of these in the Product.
+    (t/is (= {:ids (into #{}
+                         (map str)
+                         (concat (vals (get-in foundation [:runtime :tokenSets]))
+                                 (vals (get-in foundation [:runtime :tokenThemes]))
+                                 (vals (get-in foundation [:runtime :tokens]))))
+              :sets ["base" "theme/light" "theme/dark"]}
+             (-> (projection/project-snapshot
+                  product
+                  {:file-id file-id :libraries [foundation] :project-id project-id})
+                 (get-in [:file :data :plugin-data :smallpen "foundation-tokens"])
+                 (js/JSON.parse)
+                 (js->clj :keywordize-keys true)
+                 (update :ids set))))))
+
+(t/deftest product-token-selection-falls-back-to-the-foundation
+  (let [[product foundation] (foundation-themes-fixture
+                              {:packageId "pkg_fnd" :path "fnd.smallpen"})]
+    ;; No stored selection: the Foundation's own active themes apply.
+    (t/is (= "#6750a4"
+             (get (active-token-values (projected-token-library product foundation))
+                  "color.brand")))
+    ;; The Background's rows (core listTokenThemes) win when present.
+    (t/is (= "#d0bcff"
+             (get (active-token-values
+                   (projected-token-library
+                    (assoc product :tokenThemes
+                           [{:active false :id "theme_light" :owner "foundation"
+                             :packageId "pkg_fnd" :path "Theme/Light"}
+                            {:active true :id "theme_dark" :owner "foundation"
+                             :packageId "pkg_fnd" :path "Theme/Dark"}])
+                    foundation))
+                  "color.brand")))
+    (t/is (thrown-with-msg?
+           js/Error #"collide"
+           (projected-token-library
+            (assoc-in product [:entries "tokens/product.json" :sets 0 :name] "base")
+            foundation)))))
 
 ;; Penpot resolves a shadow Token only in its own form (a vector of shadows
 ;; with string lengths); a bound shadow resolves to the DTCG object, which a
@@ -861,7 +1035,6 @@
     (t/is (= [{:offset-x "0" :offset-y "2" :blur "4" :spread "0"
                :color "rgba(0, 0, 0, 0.24)" :inset false}]
              (:value token)))
-    (t/is (= {:shadow "elevation-1"} (:applied-tokens rectangle)))
     (t/is (= 1 (count (:shadow rectangle))))
     (t/is (ctss/valid-shadow? record))
     (t/is (= 2 (:offset-y record)))))
@@ -1818,10 +1991,43 @@
                    :variantId "var_default"}]
                  :specimens specimens})))
 
+(defn- card-sample
+  "The Card variant as a core component sample, read from the entries so a
+  test's edits to the variant reach it."
+  [candidate]
+  (let [variant (get-in candidate [:entries "components/card.json" :componentSets 0 :variants 0])]
+    {:axes []
+     :caption (str ds-sample-id)
+     :classification "Composite"
+     :componentSetId "cmp_set_card"
+     :familyName "Card"
+     :kind "variant"
+     :nodes (:nodes variant)
+     :rootId (:rootId variant)
+     :runtimeNodes {:node_card_root (str sample-root-id)
+                    :node_card_body (str sample-body-id)
+                    :node_card_text (str sample-text-id)}
+     :selection {}
+     :sources {}
+     :variantId (:id variant)
+     :variantIndex 0}))
+
+(defn- with-ds-tree
+  "The candidate with the page tree the Background serves beside its refs
+  (one Card sample unless the refs bring their own)."
+  [candidate]
+  (let [refs    (get-in candidate [:runtime :designSystemRefs])
+        samples (or (:componentSamples refs) [(card-sample candidate)])
+        refs    (assoc refs :componentSamples samples)]
+    (-> candidate
+        (assoc-in [:runtime :designSystemRefs] refs)
+        (assoc-in [:runtime :designSystemTree]
+                  (ds/ds-tree (str ds-board-id) (:specimens refs) (count samples) (:families refs))))))
+
 (defn- design-system-page
   [candidate]
   (-> (projection/project-snapshot
-       candidate
+       (with-ds-tree candidate)
        {:file-id file-id :project-id project-id})
       (get-in [:file :data :pages-index ds-page-id])))
 
@@ -1845,6 +2051,18 @@
               (str "missing parent object " parent-id " for " id))
         (t/is (= 1 (count (filter #{id} (:shapes (get objects parent-id)))))
               (str "shape " id " is not listed exactly once by its parent"))))))
+
+;; A variant root without fills paints nothing in the Package renderer; on
+;; the Components page it is a main, not a screen board, so it must not get
+;; Penpot's white board default either (its copies would differ from it).
+(t/deftest variant-roots-without-fills-project-without-a-white-board
+  (let [objects (-> (projection/project-snapshot
+                     (design-system-snapshot [])
+                     {:file-id file-id :project-id project-id})
+                    (get-in [:file :data :pages-index components-page-id
+                             :objects]))]
+    (t/is (= [] (:fills (get objects sample-root-id))))
+    (t/is (nil? (:hide-in-viewer (get objects sample-root-id))))))
 
 (t/deftest design-system-page-keeps-one-consistent-parent-child-tree
   (let [specimen-id (specimen-shape-id 1)
@@ -1879,8 +2097,10 @@
         board   (get objects ds-board-id)
         frame   (get objects (specimen-shape-id 1))]
     (t/is (= :frame (:type frame)))
+    (t/is (= {:row-gap 16 :column-gap 16} (:layout-gap frame)))
     ;; The gap frame lists its two fillers exactly once.
-    (t/is (= [specimen-child-a-id specimen-child-b-id] (:shapes frame)))
+    (t/is (= #{specimen-child-a-id specimen-child-b-id} (set (:shapes frame))))
+    (t/is (= 2 (count (:shapes frame))))
     (t/is (= (specimen-shape-id 1)
              (:parent-id (get objects specimen-child-a-id))))
     (t/is (= (specimen-shape-id 1)
@@ -1889,110 +2109,58 @@
     (t/is (not-any? #{specimen-child-a-id specimen-child-b-id} (:shapes board)))
     (assert-consistent-shape-tree objects)))
 
-(t/deftest design-system-token-cells-show-group-metadata-and-real-visuals
-  (let [white-ref       (assoc (fill-specimen-ref 1)
-                               :caption (str token-caption-a-id)
-                               :raw "#ffffff"
-                               :status "active"
-                               :value "#ffffff")
-        transparent-ref (assoc (fill-specimen-ref 2)
-                               :caption (str token-caption-b-id)
-                               :path "color.transparent"
-                               :raw "#00000000"
-                               :status "active"
-                               :value "#00000000")
-        typography-ref  (assoc (fill-specimen-ref 3)
-                               :attribute nil
-                               :caption (str token-caption-c-id)
-                               :path "heading"
-                               :raw {:fontFamily "Inter"
-                                     :fontId "gfont-inter"
-                                     :fontSize 28
-                                     :fontWeight 600
-                                     :lineHeight 1.2}
-                               :status "active"
-                               :type "typography"
-                               :value {:fontFamily "Inter"
-                                       :fontId "gfont-inter"
-                                       :fontSize 28
-                                       :fontWeight 600
-                                       :lineHeight 1.2}
-                               :writable false)
-        alias-ref       (assoc (fill-specimen-ref 4)
-                               :alias true
-                               :attribute "radius"
-                               :caption (str token-caption-d-id)
-                               :path "radius.alias"
-                               :raw "{base}"
-                               :status "archived"
-                               :type "border-radius"
-                               :value "{base}"
-                               :writable false)
-        alpha-ref       (assoc (fill-specimen-ref 5)
-                               :caption (str token-caption-e-id)
-                               :path "color.alpha"
-                               :raw "#33669980"
-                               :status "active"
-                               :value "#33669980")
-        structured-ref  (assoc (fill-specimen-ref 6)
-                               :caption (str token-caption-f-id)
-                               :path "color.structured"
-                               :raw {:alpha 0.25
-                                     :colorSpace "srgb"
-                                     :components [1 0 0.5]}
-                               :status "active"
-                               :value {:alpha 0.25
-                                       :colorSpace "srgb"
-                                       :components [1 0 0.5]})
-        candidate       (-> (design-system-snapshot
-                             {"white" white-ref
-                              "transparent" transparent-ref
-                              "typography" typography-ref
-                              "alias" alias-ref
-                              "alpha" alpha-ref
-                              "structured" structured-ref})
-                            (assoc-in [:runtime :designSystemRefs :tokenGroups]
-                                      [{:header (str token-group-a-id)
-                                        :ownerPackageId "pkg_roundtrip"
-                                        :setId "tset_core"
-                                        :setName "core"
-                                        :type "color"}
-                                       {:header (str token-group-b-id)
-                                        :ownerPackageId "pkg_roundtrip"
-                                        :setId "tset_core"
-                                        :setName "core"
-                                        :type "typography"}
-                                       {:header (str token-group-c-id)
-                                        :ownerPackageId "pkg_roundtrip"
-                                        :setId "tset_core"
-                                        :setName "core"
-                                        :type "border-radius"}]))
-        page            (design-system-page candidate)
-        objects         (:objects page)
-        white           (get objects (specimen-shape-id 1))
-        transparent     (get objects (specimen-shape-id 2))
-        typography      (get objects (specimen-shape-id 3))
-        alpha            (get objects (specimen-shape-id 5))
-        structured       (get objects (specimen-shape-id 6))
-        white-caption    (get objects token-caption-a-id)
-        transparent-caption (get objects token-caption-b-id)
-        caption-names   (into #{} (map :name) (vals objects))]
-    (t/is (contains? caption-names "Label · color.swatch1 = #ffffff"))
-    (t/is (contains? caption-names "Label · heading = Inter · 28/1.2 · 600"))
-    (t/is (= :solid (get-in white [:strokes 0 :stroke-style])))
-    (t/is (= :dashed (get-in transparent [:strokes 0 :stroke-style])))
-    (t/is (= 0 (get-in transparent [:fills 0 :fill-opacity])))
-    (t/is (= "#336699" (get-in alpha [:fills 0 :fill-color])))
-    (t/is (< (js/Math.abs (- (/ 128 255) (get-in alpha [:fills 0 :fill-opacity]))) 0.0001))
-    (t/is (= {:fill-color "#ff0080" :fill-opacity 0.25}
-             (get-in structured [:fills 0])))
-    (t/is (or (not= (:y white-caption) (:y transparent-caption))
-              (<= (+ (:x white-caption) (:width white-caption))
-                  (:x transparent-caption)))
-          "measured multiline captions do not overlap on a narrow board")
+;; A page node whose Cell or sample is missing from the refs (a stale tree)
+;; draws as a plain decoration or not at all, never failing the file load.
+(t/deftest design-system-page-survives-a-stale-tree
+  (let [good      (fill-specimen-ref 2)
+        candidate (with-ds-tree (design-system-snapshot {"tok_color_swatch2" good}))
+        tree      (get-in candidate [:runtime :designSystemTree])
+        root      (get-in tree [:nodes (keyword (:rootId tree))])
+        stale     (assoc candidate :runtime
+                         (-> (:runtime candidate)
+                             (assoc-in [:designSystemTree :nodes :node_stale]
+                                       {:id "node_stale" :type "RECTANGLE" :name "Stale" :x 0 :y 0
+                                        :width 10 :height 10 :children []
+                                        :designSystem {:role "token-cell" :specimen "gone"}})
+                             (assoc-in [:designSystemTree :nodes :node_lost]
+                                       {:id "node_lost" :type "FRAME" :name "Lost" :x 0 :y 0
+                                        :width 10 :height 10 :children []
+                                        :designSystem {:role "component-sample" :sample 99}})
+                             (assoc-in [:designSystemTree :runtimeIds :node_stale] (str (specimen-shape-id 1)))
+                             (assoc-in [:designSystemTree :runtimeIds :node_lost] (str (specimen-shape-id 3)))
+                             (assoc-in [:designSystemTree :nodes (keyword (:rootId tree)) :children]
+                                       (into (:children root) ["node_stale" "node_lost"]))))
+        objects   (:objects (get-in (projection/project-snapshot stale {:file-id file-id :project-id project-id})
+                                    [:file :data :pages-index ds-page-id]))]
+    (t/is (= "decoration" (get-in objects [(specimen-shape-id 1) :plugin-data :smallpen "design-system"])))
+    (t/is (nil? (get objects (specimen-shape-id 3))))
+    (t/is (= "source" (get-in objects [(specimen-shape-id 2) :plugin-data :smallpen "design-system"])))
+    (assert-consistent-shape-tree objects)))
+
+;; The tree carries canonical paints and text; the projection turns them
+;; into native ones and marks each specimen with its Cell.
+(t/deftest design-system-token-cells-project-canonical-visuals-natively
+  (let [alpha-ref      (assoc (fill-specimen-ref 5)
+                              :node {:fills [{:color "#336699" :opacity 0.5 :type "solid"}]
+                                     :strokes [{:alignment "inner" :color "#64748b" :style "dashed"
+                                                :type "solid" :width 1}]})
+        typography-ref (assoc (fill-specimen-ref 3)
+                              :attribute "typography"
+                              :path "heading"
+                              :type "typography"
+                              :value {:fontFamily "Inter" :fontId "gfont-inter" :fontSize 28
+                                      :fontWeight 600 :lineHeight 1.2})
+        objects        (:objects (design-system-page
+                                  (design-system-snapshot {"alpha" alpha-ref
+                                                           "typography" typography-ref})))
+        alpha          (get objects (specimen-shape-id 5))
+        typography     (get objects (specimen-shape-id 3))
+        ref            (js/JSON.parse (get-in alpha [:plugin-data :smallpen "design-system-ref"]))]
+    (t/is (= {:fill-color "#336699" :fill-opacity 0.5} (get-in alpha [:fills 0])))
+    (t/is (= :dashed (get-in alpha [:strokes 0 :stroke-style])))
+    (t/is (= "tok_color_swatch5" (.-tokenId ref)))
     (t/is (= :text (:type typography)))
-    (t/is (= "28" (get-in typography [:content :children 0 :children 0
-                                      :children 0 :font-size])))
+    (t/is (= "28" (get-in typography [:content :children 0 :children 0 :children 0 :font-size])))
     (assert-consistent-shape-tree objects)))
 
 (t/deftest design-system-keeps-located-components-but-excludes-page-previews
@@ -2030,6 +2198,11 @@
             (assoc-in [:runtime :components :cmp_located] (str located-component-id))
             (assoc-in [:runtime :pages :scr_roundtrip :pres_mobile] (str second-page-id))
             (assoc-in [:runtime :pages :scr_roundtrip :pres_empty] (str third-page-id))
+            (update-in [:runtime :canvases] into
+                       [{:id "cnv_mobile" :name "Round Trip · Mobile" :pageId (str second-page-id)
+                         :boards [{:screenId "scr_roundtrip" :presentationId "pres_mobile"}]}
+                        {:id "cnv_empty" :name "Round Trip · Empty" :pageId (str third-page-id)
+                         :boards [{:screenId "scr_roundtrip" :presentationId "pres_empty"}]}])
             (assoc-in [:runtime :nodes :scr_roundtrip :pres_mobile]
                       {:node_canvas (str second-canvas-id)
                        :node_rectangle (str second-rectangle-id)
@@ -2060,7 +2233,7 @@
                                 :nodeCount 0 :presentationId "pres_empty"
                                 :rootIds [] :screenId "scr_roundtrip"}]
                        :specimens {}}))
-        result (projection/project-snapshot candidate {:file-id file-id :project-id project-id})
+        result (projection/project-snapshot (with-ds-tree candidate) {:file-id file-id :project-id project-id})
         pages (get-in result [:file :data :pages-index])
         objects (get-in pages [ds-page-id :objects])]
     (t/is (some? (get objects rectangle-id)) "located component remains in DS")
@@ -2112,7 +2285,7 @@
                            (assoc-in [:runtime :components :cmp_located] (str located-component-id))
                            (update-in [:runtime :designSystemRefs :families] conj located-family))
         pages          (get-in (projection/project-snapshot
-                                candidate
+                                (with-ds-tree candidate)
                                 {:file-id file-id :project-id project-id})
                                [:file :data :pages-index])
         source         (get-in pages [page-id :objects rectangle-id])
@@ -2155,7 +2328,7 @@
                                                     :presentationId "pres_desktop"
                                                     :rootId "node_canvas"}]}
                                     panorama? (assoc :combinations []))))
-          result (projection/project-snapshot candidate {:file-id file-id :project-id project-id})
+          result (projection/project-snapshot (with-ds-tree candidate) {:file-id file-id :project-id project-id})
           pages (get-in result [:file :data :pages-index])
           objects (get-in pages [ds-page-id :objects])
           source-root (get-in pages [page-id :objects canvas-id])
@@ -2224,3 +2397,301 @@
                    (first))]
     (t/is (ctss/valid-shadow? record))
     (t/is (= {:color "#ff8800" :opacity 1} (:color record)))))
+
+;; A shadow Cell may hold a list of shadows (Tokens Studio and Penpot both
+;; write one); the specimen shows every one of them.
+(t/deftest design-system-shadow-specimen-takes-a-list-of-shadows
+  (let [shadows [{:blur 2 :color "#1018281a" :offsetX 0 :offsetY 1 :spread 0}
+                 {:blur 8 :color "#ff0000" :offsetX 4 :offsetY 0 :spread 0}]
+        ref     (assoc (shadow-specimen-ref "#000000")
+                       :raw shadows :value shadows :resolved shadows)
+        page    (design-system-page
+                 (design-system-snapshot {"tok_canvas_effect_elevation" ref}))
+        records (:shadow (get (:objects page) (specimen-shape-id 8)))]
+    (t/is (= 2 (count records)))
+    (t/is (every? ctss/valid-shadow? records))
+    (t/is (= [1 0] (mapv :offset-y records)))))
+
+(def chip-container-id #uuid "d5e00000-0000-4000-8000-000000000042")
+(def chip-neutral-cmp-id #uuid "d5e00000-0000-4000-8000-000000000043")
+(def chip-brand-cmp-id #uuid "d5e00000-0000-4000-8000-000000000044")
+(def chip-neutral-root-id #uuid "d5e00000-0000-4000-8000-000000000045")
+(def chip-brand-root-id #uuid "d5e00000-0000-4000-8000-000000000046")
+
+(defn- chip-variant
+  [variant-id tone width]
+  {:id variant-id
+   :rootId "node_chip_root"
+   :selection {:axis_tone tone}
+   :nodes {:node_chip_root {:children []
+                            :fills [{:color "#e5e7eb" :type "solid"}]
+                            :height 32
+                            :id "node_chip_root"
+                            :name "Chip root"
+                            :type "COMPONENT"
+                            :width width
+                            :x 0
+                            :y 0}}})
+
+(defn- chip-snapshot
+  "Base snapshot plus a Component Set with one axis (two variants) next to
+  the plain Card set of the design-system fixture."
+  []
+  (-> (design-system-snapshot [])
+      (update-in [:manifest :entries :components] conj "components/chip.json")
+      (assoc-in [:entries "components/chip.json"]
+                {:componentSets
+                 [{:axes [{:domain ["neutral" "brand"]
+                           :id "axis_tone"
+                           :name "Tone"
+                           :role "configuration"}]
+                   :id "cmp_chip"
+                   :name "Chip"
+                   :variants [(chip-variant "var_neutral" "neutral" 96)
+                              (chip-variant "var_brand" "brand" 120)]}]})
+      (assoc-in [:runtime :components :cmp_chip] (str chip-container-id))
+      (assoc-in [:runtime :variants :cmp_chip]
+                {:var_neutral (str chip-neutral-cmp-id)
+                 :var_brand (str chip-brand-cmp-id)})
+      (assoc-in [:runtime :componentNodes :cmp_chip]
+                {:var_neutral {:node_chip_root (str chip-neutral-root-id)}
+                 :var_brand {:node_chip_root (str chip-brand-root-id)}})))
+
+(t/deftest component-sets-with-axes-project-as-native-variants
+  (let [file      (:file (projection/project-snapshot
+                          (chip-snapshot)
+                          {:file-id file-id :project-id project-id}))
+        data      (:data file)
+        page      (get-in data [:pages-index components-page-id])
+        objects   (:objects page)
+        container (get objects chip-container-id)
+        neutral   (get objects chip-neutral-root-id)
+        brand     (get objects chip-brand-root-id)]
+    (t/is (true? (:is-variant-container container)))
+    (t/is (= "Chip" (:name container)))
+    ;; Penpot's first (primary) variant is the container's last child.
+    (t/is (= [chip-brand-root-id chip-neutral-root-id] (:shapes container)))
+    (t/is (contains? (set (:shapes (get objects uuid/zero))) chip-container-id))
+    (doseq [[main tone] [[neutral "neutral"] [brand "brand"]]]
+      (t/is (= chip-container-id (:parent-id main)))
+      (t/is (= chip-container-id (:frame-id main)))
+      (t/is (= chip-container-id (:variant-id main)))
+      (t/is (= tone (:variant-name main)))
+      (t/is (= "Chip" (:name main)))
+      (t/is (true? (:main-instance main))))
+    ;; Mains sit inside the container padding, one grid cell each.
+    (t/is (= (+ (:x container) 30) (:x neutral)))
+    (t/is (< (+ (:x neutral) (:width neutral)) (:x brand)))
+    (t/is (= {:id chip-neutral-cmp-id
+              :name "Chip"
+              :path ""
+              :main-instance-id chip-neutral-root-id
+              :main-instance-page components-page-id
+              :variant-id chip-container-id
+              :variant-properties [{:name "Tone" :value "neutral"}]}
+             (get-in data [:components chip-neutral-cmp-id])))
+    ;; A set without axes stays a plain component outside any container.
+    (t/is (nil? (get-in data [:components variant-cmp-id :variant-id])))
+    (t/is (= uuid/zero (:parent-id (get objects sample-root-id))))
+    ;; Penpot's own referential checks accept the variant structure.
+    (t/is (empty? (cfv/validate-shape chip-container-id file page {})))))
+
+(t/deftest variant-properties-follow-penpot-naming-for-repeated-axes
+  (t/is (= [{:name "Size" :value "sm"} {:name "Size (1)" :value "lg"}]
+           (#'projection/variant-properties
+            {:axes [{:id "axis_a" :name "Size"} {:id "axis_b" :name "Size"}]}
+            {:selection {:axis_a "sm" :axis_b "lg"}}))))
+
+(defn- cartesian-set
+  "A Component Set with one variant per combination of `axes` values
+  ([id name values] each, first axis outermost), sized by `size`."
+  [name axes & {:keys [size] :or {size (constantly [40 20])}}]
+  (let [selections (reduce (fn [selections [id _ values]]
+                             (for [selection selections value values]
+                               (assoc selection (keyword id) value)))
+                           [{}]
+                           axes)]
+    {:id (str "cmp_" name)
+     :name name
+     :axes (mapv (fn [[id name values]] {:id id :name name :domain values}) axes)
+     :variants (vec (map-indexed
+                     (fn [index selection]
+                       (let [[width height] (size selection)]
+                         {:id (str "v" index)
+                          :rootId "root"
+                          :selection selection
+                          :nodes {:root {:children [] :height height :id "root"
+                                         :type "FRAME" :width width :x 0 :y 0}}}))
+                     selections))}))
+
+(def ^:private task-card-axes
+  [["axis_width" "Width" ["compact" "wide"]]
+   ["axis_state" "State" ["default" "selected" "blocked"]]
+   ["axis_status" "Status" ["backlog" "todo" "progress" "review" "done" "blocked"]]
+   ["axis_priority" "Priority" ["low" "medium" "high"]]])
+
+(t/deftest variant-matrix-puts-the-last-axis-in-columns
+  (let [matrix #'projection/variant-matrix
+        one    (matrix (cartesian-set "Tag" [["axis_tone" "Tone" ["neutral" "brand"]]]))
+        two    (matrix (cartesian-set "Header" [["axis_width" "Width" ["compact" "wide"]]
+                                                ["axis_status" "Status" ["todo" "done" "blocked"]]]))
+        four   (matrix (cartesian-set "Task card" task-card-axes))
+        wide   (matrix (cartesian-set "Wide" [["axis_a" "A" ["1" "2" "3" "4" "5"]]
+                                              ["axis_b" "B" ["x" "y"]]
+                                              ["axis_c" "C" ["p" "q" "r"]]]))]
+    (t/is (= ["Tone"] (mapv :name (:column-axes one))))
+    (t/is (= [] (:row-axes one)))
+    (t/is (= [["neutral"] ["brand"]] (:columns one)))
+    (t/is (= [[]] (:rows one)))
+    (t/is (= ["Status"] (mapv :name (:column-axes two))))
+    (t/is (= ["Width"] (mapv :name (:row-axes two))))
+    (t/is (= [["compact"] ["wide"]] (:rows two)))
+    ;; Every column holds one value of the last axis, every row one
+    ;; combination of the others.
+    (doseq [{:keys [variant column row]} (:cells two)]
+      (t/is (= [(get-in variant [:selection :axis_status])] (nth (:columns two) column)))
+      (t/is (= [(get-in variant [:selection :axis_width])] (nth (:rows two) row))))
+    ;; Four axes: the first one groups the columns, 2 x 3 = 6 of them.
+    (t/is (= ["Width" "Priority"] (mapv :name (:column-axes four))))
+    (t/is (= ["State" "Status"] (mapv :name (:row-axes four))))
+    (t/is (= [["compact" "low"] ["compact" "medium"] ["compact" "high"]
+              ["wide" "low"] ["wide" "medium"] ["wide" "high"]]
+             (:columns four)))
+    (t/is (= 18 (count (:rows four))))
+    (t/is (= ["default" "backlog"] (first (:rows four))))
+    (t/is (= 108 (count (distinct (map (juxt :column :row) (:cells four))))))
+    ;; Grouping by the first axis would make 5 x 3 = 15 columns: it stays
+    ;; the outermost row axis instead.
+    (t/is (= ["C"] (mapv :name (:column-axes wide))))
+    (t/is (= ["A" "B"] (mapv :name (:row-axes wide))))))
+
+(t/deftest variant-matrix-orders-values-by-domain-then-new-values
+  (let [base    (cartesian-set "Badge" [["axis_tone" "Tone" ["info" "success" "danger"]]])
+        added   (assoc-in (first (:variants base)) [:selection :axis_tone] "Value 5")
+        matrix  (#'projection/variant-matrix
+                 (assoc base :variants (vec (reverse (conj (:variants base)
+                                                           (assoc added :id "v_new"))))))]
+    (t/is (= [["info"] ["success"] ["danger"] ["Value 5"]] (:columns matrix)))))
+
+(defn- overlap?
+  [[ax ay aw ah] [bx by bw bh]]
+  (and (< ax (+ bx bw)) (< bx (+ ax aw)) (< ay (+ by bh)) (< by (+ ay ah))))
+
+(t/deftest component-set-block-draws-an-axis-table-with-headers
+  (let [button     (cartesian-set "Button"
+                                  [["axis_style" "Style" ["primary" "secondary" "ghost"]]
+                                   ["axis_size" "Size" ["sm" "md" "lg"]]
+                                   ["axis_state" "State" ["default" "hover" "disabled"]]]
+                                  :size (fn [{:keys [axis_size]}]
+                                          (case axis_size "sm" [80 28] "md" [96 36] [120 44])))
+        block      (#'projection/component-set-block "cmp_button" button 100 200)
+        texts      (frequencies (map :text (:labels block)))
+        {:keys [container placements]} block
+        at         (into {} (map (juxt (comp :selection :variant)
+                                       (juxt :offset-x :offset-y)))
+                         placements)
+        boxes      (mapv (fn [{:keys [variant offset-x offset-y]}]
+                           (let [root (get-in variant [:nodes :root])]
+                             [offset-x offset-y (:width root) (:height root)]))
+                         placements)
+        labels     (mapv (fn [{:keys [text x y size]}]
+                           (let [{:keys [width height]} (#'projection/board-text-metrics text size)]
+                             [x y width height]))
+                         (:labels block))]
+    (t/is (= block (#'projection/component-set-block "cmp_button" button 100 200))
+          "the layout is a function of the set alone")
+    (doseq [style ["primary" "secondary" "ghost"]]
+      (t/is (= 1 (texts (str "Style: " style))) "one header per column group"))
+    (doseq [state ["default" "hover" "disabled"]]
+      (t/is (= 3 (texts state)) "one column header per State value in each group"))
+    (doseq [size ["sm" "md" "lg"]]
+      (t/is (= 1 (texts size)) "one row header per Size value"))
+    (t/is (= 1 (texts "Size / State")))
+    ;; A column is one (Style, State) pair, a row one Size.
+    (t/is (= 9 (count (distinct (map first (vals at))))))
+    (t/is (= 3 (count (distinct (map second (vals at))))))
+    (t/is (= (first (at {:axis_style "primary" :axis_size "sm" :axis_state "hover"}))
+             (first (at {:axis_style "primary" :axis_size "lg" :axis_state "hover"}))))
+    (t/is (= (second (at {:axis_style "primary" :axis_size "md" :axis_state "default"}))
+             (second (at {:axis_style "ghost" :axis_size "md" :axis_state "disabled"}))))
+    ;; Mains and labels keep inside the container padding, and nothing
+    ;; overlaps a main.
+    (doseq [[x y w h] (concat boxes labels)]
+      (t/is (<= (+ (:x container) 30) x))
+      (t/is (<= (+ x w) (- (+ (:x container) (:width container)) 30)))
+      (t/is (<= (+ (:y container) 30) y))
+      (t/is (<= (+ y h) (- (+ (:y container) (:height container)) 30))))
+    (t/is (not-any? true? (for [i (range (count boxes))
+                                j (range (count (concat boxes labels)))
+                                :when (not= i j)]
+                            (overlap? (nth boxes i) (nth (vec (concat boxes labels)) j)))))))
+
+(t/deftest component-set-block-keeps-variant-order-and-stacks-duplicates
+  (let [base   (cartesian-set "Tag" [["axis_tone" "Tone" ["neutral" "brand"]]])
+        twin   (assoc (first (:variants base)) :id "v_twin")
+        block  (#'projection/component-set-block "cmp_tag" (update base :variants conj twin) 0 0)
+        [a _ c] (:placements block)]
+    (t/is (= ["v0" "v1" "v_twin"] (mapv (comp :id :variant) (:placements block)))
+          "Penpot's primary variant stays first")
+    (t/is (= (:offset-x a) (:offset-x c)))
+    (t/is (= (+ (:offset-y a) 20 20) (:offset-y c)) "a duplicate stacks below in its cell")))
+
+(t/deftest components-page-labels-are-locked-decoration-outside-containers
+  (let [candidate (-> (chip-snapshot)
+                      (assoc-in [:entries "components/chip.json" :componentSets 0 :category]
+                                "Status")
+                      (update-in [:manifest :entries :components] conj "components/located.json")
+                      (assoc-in [:entries "components/located.json"]
+                                {:id "cmp_located"
+                                 :mainNodeId "node_rectangle"
+                                 :name "Located rectangle"
+                                 :path ""
+                                 :presentationId "pres_desktop"
+                                 :screenId "scr_roundtrip"})
+                      (assoc-in [:runtime :components :cmp_located] (str located-component-id)))
+        project   #(:file (projection/project-snapshot
+                           candidate
+                           {:file-id file-id :project-id project-id}))
+        file      (project)
+        data      (:data file)
+        page      (get-in data [:pages-index components-page-id])
+        objects   (:objects page)
+        labels    (filter #(= "decoration" (get-in % [:plugin-data :smallpen "components-page"]))
+                          (vals objects))
+        texts     (set (keep #(when (= :text (:type %)) (:name %)) labels))]
+    (t/is (= objects (get-in (project) [:data :pages-index components-page-id :objects]))
+          "every label keeps its id and place across projections")
+    (t/is (seq labels))
+    (t/is (every? :blocked labels))
+    (t/is (not-any? #(= chip-container-id (:parent-id %)) labels))
+    (t/is (= [chip-brand-root-id chip-neutral-root-id] (:shapes (get objects chip-container-id)))
+          "the container holds only its variant mains")
+    (doseq [text ["Status" "neutral" "brand" "Located rectangle"]]
+      (t/is (contains? texts text) text))
+    (t/is (= "Status" (get-in data [:components chip-neutral-cmp-id :path]))
+          "the category is the Assets folder")
+    (t/is (= "" (get-in data [:components variant-cmp-id :path])))
+    (assert-consistent-shape-tree objects)
+    (t/is (empty? (cfv/validate-shape chip-container-id file page {})))))
+
+(t/deftest flowed-component-blocks-match-layout-at-their-final-coordinates
+  (let [large      (assoc (cartesian-set "Large" task-card-axes
+                                         :size (constantly [200 80]))
+                          :category "Composite")
+        compact    (assoc (cartesian-set "Compact" [["tone" "Tone" ["neutral" "brand"]]])
+                          :category "Composite")
+        duplicate  (update compact :variants conj (assoc (first (:variants compact)) :id "twin"))
+        plain      (cartesian-set "Plain" [])
+        candidate  (-> snapshot
+                       (assoc-in [:manifest :entries :components] ["components/sets.json"])
+                       (assoc-in [:entries "components/sets.json"]
+                                 {:componentSets [large duplicate plain]}))
+        blocks     (:blocks (#'projection/components-page-layout candidate))]
+    (t/is (= ["cmp_Large" "cmp_Compact" "cmp_Plain"] (mapv :component-id blocks)))
+    (t/is (< (get-in (first blocks) [:container :y])
+             (get-in (second blocks) [:container :y])) "the next block wraps below the wide matrix")
+    (doseq [{:keys [component-id component-set placements container] :as block} blocks]
+      (let [x (if container (:x container) (:offset-x (first placements)))
+            y (if container (:y container) (:offset-y (first placements)))]
+        (t/is (= (#'projection/component-set-block component-id component-set x y)
+                 block))))))

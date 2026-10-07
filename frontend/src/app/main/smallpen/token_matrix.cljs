@@ -18,6 +18,7 @@
    [app.main.data.workspace.tokens.library-edit :as dwtl]
    [app.main.data.workspace.tokens.propagation :as dwtp]
    [app.main.data.workspace.tokens.remapping :as remap]
+   [app.main.smallpen.token-authoring :as spta]
    [app.main.smallpen.token-state :as spts]
    [app.util.i18n :refer [tr]]
    [beicon.v2.core :as rx]
@@ -424,25 +425,41 @@
     (watch [it state _]
       (let [data (dsh/lookup-file-data state)
             tokens-lib (spts/file-library data)
-            set-ids (->> set-ids
-                         distinct
-                         (filter #(some? (ctob/get-set tokens-lib %))))
+            edits (spta/create-row tokens-lib set-ids token)
             changes
             (reduce
-             (fn [changes set-id]
-               (let [token' (-> (into {} token)
-                                (dissoc :id :modified-at)
-                                (ctob/make-token))]
-                 (pcb/set-token changes set-id (:id token') token')))
+             (fn [changes {:keys [set-id token]}]
+               (pcb/set-token changes set-id (:id token) token))
              (-> (pcb/empty-changes it)
                  (pcb/with-library-data data)
                  (pcb/set-undo-group undo-group))
-             set-ids)]
-        (when (seq set-ids)
+             edits)]
+        (when (seq edits)
           (rx/of (dch/commit-changes changes)
                  (ev/event (-> {::ev/name "create-token"
                                 :type (:type token)}
                                (merge (meta it))))))))))
+
+(defn set-token-matrix-value
+  "Writes one cell with the shared App/CLI rules; an empty cell uses its row template."
+  [set-id template value & {:keys [undo-group]}]
+  (assert (uuid? set-id) "expected uuid for `set-id`")
+  (ptk/reify ::set-token-matrix-value
+    ptk/WatchEvent
+    (watch [it state _]
+      (let [data (dsh/lookup-file-data state)
+            tokens-lib (spts/file-library data)
+            {:keys [token created?]} (spta/write-cell tokens-lib set-id template value)
+            changes (-> (pcb/empty-changes it)
+                        (pcb/with-library-data data)
+                        (pcb/set-token set-id (:id token) token)
+                        (pcb/set-undo-group undo-group))]
+        (when-not created?
+          (dwtl/toggle-token-path (str (name (:type token)) "." (:name token))))
+        (rx/of (dch/commit-changes changes)
+               (ev/event (-> {::ev/name (if created? "create-token" "edit-token")
+                              :type (:type token)}
+                             (merge (meta it)))))))))
 
 (defn update-token-matrix-row
   "Updates every definition of a matrix row, including renamed references, in one commit."

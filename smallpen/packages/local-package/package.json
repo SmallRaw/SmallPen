@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/local-package",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "publishConfig": {
     "access": "public"
   },
@@ -12,7 +12,7 @@
   ],
   "dependencies": {
     "@jsquash/webp": "1.5.0",
-    "@smallpen/core": "0.1.0-alpha.5",
+    "@smallpen/core": "0.1.0-alpha.6",
     "opentype.js": "2.0.0"
   },
   "repository": {

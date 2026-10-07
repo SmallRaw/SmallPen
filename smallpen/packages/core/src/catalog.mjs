@@ -1,4 +1,5 @@
 import { listEffectiveTokens } from "./effective-tokens.mjs";
+import { foundationTokenView } from "./token-themes.mjs";
 
 function compareText(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -261,7 +262,11 @@ export function createCatalog(product, options = {}) {
       ? [
           {
             revision: foundation.revision,
-            rows: tokenInventoryRows(foundation, "foundation"),
+            // Active rows follow the Product's choice of Foundation themes.
+            rows: tokenInventoryRows(
+              foundationTokenView(product, foundation),
+              "foundation",
+            ),
             source: "foundation",
           },
         ]

@@ -6,6 +6,7 @@ import {
   createWorkbenchPreview,
   enumerateWorkbenchCombinations,
   layoutCanvasScene,
+  listTokenThemes,
   projectScreen,
   readDesignView,
   resolveContext,
@@ -187,33 +188,42 @@ export function createDesignSystemWorkspace(description) {
   // DSP-005-A: Paired Themes grouped by Token Domain, so the workbench can
   // offer an observation-combination toolbar without reading source files.
   const themeDomains = new Map();
-  const themeSources = [
-    ...(foundation ? [{ snapshot: foundation, readOnly: true }] : []),
-    { snapshot: product, readOnly: false },
-    ...libraries.map((library) => ({ snapshot: library, readOnly: true })),
-  ];
-  for (const { snapshot, readOnly } of themeSources) {
-    const packageId = snapshot.manifest.packageId;
-    for (const entry of snapshot.manifest.entries.tokens) {
-      const libraryData = snapshot.entries[entry];
+  const addTheme = (theme, active, readOnly) => {
+    const domain = theme.group;
+    if (!themeDomains.has(domain)) {
+      themeDomains.set(domain, { domain, readOnly, themes: [] });
+    }
+    const record = themeDomains.get(domain);
+    record.readOnly = record.readOnly && readOnly;
+    if (!record.themes.some((candidate) => candidate.themeId === theme.id)) {
+      record.themes.push({
+        active,
+        name: theme.name,
+        readOnly,
+        setId: theme.setIds?.[0] ?? null,
+        themeId: theme.id,
+      });
+    }
+  };
+  // A Product's Foundation themes are active as the Product selects them
+  // (core listTokenThemes); Foundation rows first, as the token library
+  // lists them.
+  const ownThemes = listTokenThemes(product, foundation);
+  for (const theme of [
+    ...ownThemes.filter(({ owner }) => owner === "foundation"),
+    ...ownThemes.filter(({ owner }) => owner !== "foundation"),
+  ]) {
+    addTheme(theme, theme.active, theme.owner === "foundation");
+  }
+  for (const library of libraries) {
+    for (const entry of library.manifest.entries.tokens) {
+      const libraryData = library.entries[entry];
       for (const theme of libraryData.themes ?? []) {
-        const domain = theme.group;
-        if (!themeDomains.has(domain)) {
-          themeDomains.set(domain, { domain, readOnly, themes: [] });
-        }
-        const record = themeDomains.get(domain);
-        record.readOnly = record.readOnly && readOnly;
-        if (
-          !record.themes.some((candidate) => candidate.themeId === theme.id)
-        ) {
-          record.themes.push({
-            active: (libraryData.activeThemeIds ?? []).includes(theme.id),
-            name: theme.name,
-            readOnly,
-            setId: theme.setIds?.[0] ?? null,
-            themeId: theme.id,
-          });
-        }
+        addTheme(
+          theme,
+          (libraryData.activeThemeIds ?? []).includes(theme.id),
+          true,
+        );
       }
     }
   }
@@ -303,7 +313,7 @@ export function createRepairWorkspace(description) {
 export async function createCanvasWorkspace(description, { themes } = {}) {
   const { foundation, libraries, product } = composite(description);
 
-  const enumeration = enumerateWorkbenchCombinations(product);
+  const enumeration = enumerateWorkbenchCombinations(product, { foundation });
   const domainByTheme = new Map();
   for (const domain of enumeration.domains) {
     for (const variant of domain.variants) {
@@ -333,7 +343,9 @@ export async function createCanvasWorkspace(description, { themes } = {}) {
     libraries,
   });
   const layout = layoutCanvasScene(scene);
-  const preview = await createWorkbenchPreview(product, combination);
+  const preview = await createWorkbenchPreview(product, combination, {
+    foundation,
+  });
   const resolvedByTokenId = new Map(
     preview.tokens.map((row) => [row.sourceTokenId, row.resolved]),
   );

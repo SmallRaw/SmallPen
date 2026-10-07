@@ -54,29 +54,65 @@ export function isTokenName(value) {
   );
 }
 
-// Fields an Instance or Scenario override may write on a projected node.
+// Fields an Instance or Scenario override may write on a projected node:
+// what Penpot lets a copy change (its touched groups). tokenBindings holds
+// the copy's own Token bindings, only where they differ from its source
+// ({field: reference}, or null to drop a source binding); variant switches
+// a nested instance. A copy's children keep their source positions: moving
+// one would need its position in the copy's frame, which projection does
+// not compare yet.
 export const OVERRIDE_FIELDS = new Set([
+  "cornerRadius",
   "fills",
+  "height",
   "name",
   "opacity",
+  "shadow",
+  "strokes",
   "text",
+  "textStyle",
+  "tokenBindings",
+  "variant",
   "visible",
+  "width",
 ]);
 
+// The node field each Token binding writes, for touched groups and for
+// dropping a binding when its value is edited by hand.
+export function bindingTargetField(field) {
+  if (field === "fill" || field.startsWith("fills.")) return "fills";
+  if (field === "stroke" || field.startsWith("strokes.") || field.startsWith("strokeWidth")) return "strokes";
+  if (field === "cornerRadius" || field.startsWith("radius")) return "cornerRadius";
+  if (["typography", "fontFamily", "fontSize", "fontWeight", "letterSpacing", "lineHeight", "textTransform", "textDecoration"].includes(field))
+    return "textStyle";
+  if (["width", "minWidth", "maxWidth"].includes(field)) return "width";
+  if (["height", "minHeight", "maxHeight"].includes(field)) return "height";
+  return field;
+}
+
 // The Penpot touched groups an Instance override of `field` stands for. A
-// TEXT node keeps text and fills in its content: Penpot touches the content
-// group plus the sub-group naming which part changed, and its main-component
-// sync keeps only the parts so named.
-export function overrideTouchedGroups(field, nodeType) {
+// TEXT node keeps text, fills and its text style in its content: Penpot
+// touches the content group plus the sub-group naming which part changed,
+// and its main-component sync keeps only the parts so named. Token bindings
+// touch the groups of the fields they write.
+export function overrideTouchedGroups(field, nodeType, value) {
   if (field === "text") return ["content-group", "text-content-text"];
-  if (field === "fills") {
+  if (field === "fills" || field === "textStyle") {
     return nodeType === "TEXT"
       ? ["content-group", "text-content-attribute"]
-      : ["fill-group"];
+      : field === "fills" ? ["fill-group"] : [];
   }
   if (field === "name") return ["name-group"];
   if (field === "opacity") return ["layer-effects-group"];
   if (field === "visible") return ["visibility-group"];
+  if (field === "strokes") return ["stroke-group"];
+  if (field === "width" || field === "height") return ["geometry-group"];
+  if (field === "cornerRadius") return ["radius-group"];
+  if (field === "shadow") return ["shadow-group"];
+  if (field === "tokenBindings" && value && typeof value === "object") {
+    return [...new Set(Object.keys(value).flatMap((binding) =>
+      overrideTouchedGroups(bindingTargetField(binding), nodeType)))];
+  }
   return [];
 }
 

@@ -226,24 +226,29 @@ export async function smokeRender(cli, temp) {
   await cp(join(root, "test/fixtures/roundtrip.smallpen"), packagePath, {
     recursive: true,
   });
-  run(
-    process.execPath,
-    [
-      cli,
-      "import-media",
-      packagePath,
-      "--file",
-      join(root, "test/fixtures/quadrant-lossy.webp"),
-      "--media-id",
-      "media_smoke",
-      "--json",
-    ],
-    temp,
+  const imported = JSON.parse(
+    run(
+      process.execPath,
+      [
+        cli,
+        "media",
+        "import",
+        packagePath,
+        "--file",
+        join(root, "test/fixtures/quadrant-lossy.webp"),
+        "--name",
+        "Smoke",
+        // The smoke edits stored JSON directly, so it needs the media id.
+        "--full",
+        "--json",
+      ],
+      temp,
+    ),
   );
   const screenPath = join(packagePath, "screens/roundtrip.json");
   const screen = await json(screenPath);
   const nodes = screen.presentations[0].nodes;
-  nodes.node_rectangle.fills = [{ mediaRef: "media_smoke", type: "image" }];
+  nodes.node_rectangle.fills = [{ mediaRef: imported.descriptor.id, type: "image" }];
   nodes.node_canvas.children.push("node_smoke_text");
   nodes.node_smoke_text = {
     children: [],
@@ -274,8 +279,11 @@ export async function smokeRender(cli, temp) {
       process.execPath,
       [
         cli,
-        "evidence",
+        "export",
         packagePath,
+        "--format",
+        "png",
+        "--evidence",
         "--output",
         join(temp, "render-smoke"),
         "--json",

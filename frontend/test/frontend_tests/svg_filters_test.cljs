@@ -6,8 +6,15 @@
 
 (ns frontend-tests.svg-filters-test
   (:require
+   ["react-dom/server" :as react-dom]
+   [app.common.geom.rect :as grc]
    [app.common.render-wasm.svg-derived :as svg-derived]
-   [cljs.test :refer [deftest is testing]]))
+   [app.common.types.shape :as cts]
+   [app.common.uuid :as uuid]
+   [app.main.ui.shapes.filters :as filters]
+   [cljs.test :refer [deftest is testing]]
+   [cuerdas.core :as str]
+   [rumext.v2 :as mf]))
 
 (def sample-filter-shape
   {:svg-attrs {:filter "url(#simple-filter)"}
@@ -114,3 +121,24 @@
         result (svg-derived/apply-svg-filters shape)]
     (is (= shape result))))
 
+
+(defn- shadow
+  [offset-y opacity]
+  {:id (uuid/next) :style :drop-shadow :hidden false :blur 4 :spread 0
+   :offset-x 0 :offset-y offset-y :color {:color "#000000" :opacity opacity}})
+
+(deftest shadow-filter-chains-each-shadow-through-result-and-in2
+  ;; Each effect names its output (`result`) and blends over the previous
+  ;; one (`in2`). Without them a shadow blends over itself (twice as dark)
+  ;; and only the last effect of the chain survives.
+  (let [shape  (-> (cts/setup-shape {:type :rect
+                                     :selrect (grc/make-rect 0 0 100 50)
+                                     :x 0 :y 0 :width 100 :height 50})
+                   (assoc :shadow [(shadow 2 0.1) (shadow 12 0.2)]))
+        markup (react-dom/renderToStaticMarkup
+                (mf/html [:svg [:defs [:> filters/filters* {:filter-id "f" :shape shape}]]]))
+        blends (re-seq #"<feBlend[^>]*>" markup)]
+    ;; One blend per shadow, then the shape over them.
+    (is (= 3 (count blends)))
+    (is (every? #(str/includes? % "result=") blends))
+    (is (= (count blends) (count (filter #(str/includes? % "in2=") blends))))))
