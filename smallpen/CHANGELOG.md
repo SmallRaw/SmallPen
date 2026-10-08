@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.8 (2026-10-08)
+
+- Prepare the Alpha release of the CLI and Skill changes listed in
+  `0.1.0-alpha.7`. Synchronize package versions, dependency pins and the
+  generated Skill version. Design behavior is unchanged from that version.
+
 ## 0.1.0-alpha.7 (2026-10-08)
 
 ### Token settings and file assets
