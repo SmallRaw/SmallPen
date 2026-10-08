@@ -33,7 +33,9 @@ test("package arguments resolve against the reporting instance directory", () =>
 
 test("workspace file identity is read only from workspace routes", () => {
   assert.equal(
-    workspaceFileId("http://127.0.0.1:1/?screen=workspace&file-id=abc&page-id=p"),
+    workspaceFileId(
+      "http://127.0.0.1:1/?screen=workspace&file-id=abc&page-id=p",
+    ),
     "abc",
   );
   assert.equal(
@@ -44,15 +46,21 @@ test("workspace file identity is read only from workspace routes", () => {
     workspaceFileId("http://127.0.0.1:1/#/workspace?file-id=abc&page-id=p"),
     "abc",
   );
-  assert.equal(workspaceFileId("http://127.0.0.1:1/#/viewer?file-id=abc"), undefined);
-  assert.equal(workspaceFileId("http://127.0.0.1:1/#/workspace?page-id=p"), undefined);
+  assert.equal(
+    workspaceFileId("http://127.0.0.1:1/#/viewer?file-id=abc"),
+    undefined,
+  );
+  assert.equal(
+    workspaceFileId("http://127.0.0.1:1/#/workspace?page-id=p"),
+    undefined,
+  );
   assert.equal(workspaceFileId("not a url"), undefined);
 });
 
 // Runs the real Electron entry against a stub `electron` module. The scenario
 // body receives `app`, `windows` (every BrowserWindow created), `requests`
-// (every fetch body) and `settle()`.
-function runEntry(scenario, argv = []) {
+// (every fetch body) and `waitFor()`.
+function runEntry(scenario, argv = [], filesystemDelayMs = 0) {
   const result = spawnSync(
     process.execPath,
     [
@@ -98,9 +106,21 @@ function runEntry(scenario, argv = []) {
         return service;
       }};
     \`);
+    const delayedFilesystem = 'data:text/javascript,' + encodeURIComponent(\`
+      export * from "node:fs/promises";
+      import { stat as realStat } from "node:fs/promises";
+      export async function stat(...args) {
+        await new Promise(resolve => setTimeout(resolve, ${filesystemDelayMs}));
+        return realStat(...args);
+      }
+    \`);
     registerHooks({ resolve(specifier, context, next) {
-      return specifier === "electron"
-        ? { url: stub, shortCircuit: true } : next(specifier, context);
+      if (specifier === "electron")
+        return { url: stub, shortCircuit: true };
+      if (${filesystemDelayMs} && specifier === "node:fs/promises" &&
+          context.parentURL === process.argv[1])
+        return { url: delayedFilesystem, shortCircuit: true };
+      return next(specifier, context);
     }});
     const requests = [];
     globalThis.fetch = async (url, options) => {
@@ -111,15 +131,20 @@ function runEntry(scenario, argv = []) {
           (globalThis.nextFileId ?? "opened"),
       }) };
     };
-    const settle = async () => {
-      for (let i = 0; i < 50; i++)
-        await new Promise(resolve => setImmediate(resolve));
+    const waitFor = async (predicate, description) => {
+      const deadline = performance.now() + 5000;
+      while (!predicate()) {
+        assert.ok(performance.now() < deadline,
+          "Timed out waiting for " + description);
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
     };
     const fixture = process.env.SMALLPEN_TEST_FIXTURE;
     const fixtures = process.env.SMALLPEN_TEST_FIXTURES;
     await import(process.argv[1]);
     const { app } = await import("electron");
-    await settle();
+    await waitFor(() => globalThis.windows.some(window => window.url),
+      "the startup window");
     const windows = globalThis.windows;
     ${scenario}
   `,
@@ -171,7 +196,8 @@ test("a second instance resolves relative package paths in its own directory", (
   runEntry(`
     app.emit("second-instance", {}, ["SmallPen", "roundtrip.smallpen"],
       fixtures);
-    await settle();
+    await waitFor(() => windows.length === 2 && windows[1].url,
+      "the second-instance package window");
     assert.equal(globalThis.failures, undefined);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].path, "/desktop/open-package");
@@ -180,22 +206,26 @@ test("a second instance resolves relative package paths in its own directory", (
 });
 
 test("opening a package already shown from Recent focuses that window", () => {
-  runEntry(`
+  runEntry(
+    `
     assert.equal(windows.length, 1);
     const home = windows[0];
     home.webContents.emit("did-navigate-in-page", {},
       "http://127.0.0.1:12345/#/workspace?file-id=recent-file", true);
     globalThis.nextFileId = "recent-file";
     app.emit("open-file", { preventDefault() {} }, fixture);
-    await settle();
+    await waitFor(() => home.focused >= 1, "the Recent window to focus");
     assert.equal(globalThis.failures, undefined);
     assert.equal(windows.length, 1, "no second window for the same package");
     assert.equal(home.focused, 1);
     app.emit("open-file", { preventDefault() {} }, fixture);
-    await settle();
+    await waitFor(() => home.focused >= 2, "the Recent window to focus again");
     assert.equal(windows.length, 1);
     assert.equal(home.focused, 2);
     assert.equal(requests.length, 1,
       "the stored locator short-circuits the second open");
-  `);
+  `,
+    [],
+    20,
+  );
 });
