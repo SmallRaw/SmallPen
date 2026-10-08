@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.9 (2026-10-08)
+
+- Keep Design System spacing labels on the left, next to aligned preview
+  bars. Wrap long labels and leave enough height between rows.
+- Reserve enough space for large spacing previews so they do not overlap
+  the Dimensions section or extend past the board. Preserve Token values
+  and editable gaps.
+
 ## 0.1.0-alpha.8 (2026-10-08)
 
 - Prepare the Alpha release of the CLI and Skill changes listed in
