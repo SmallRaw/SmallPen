@@ -206,9 +206,9 @@ test("list order and pages do not depend on the host locale", async (context) =>
 
 test("missing, unreadable, and non-object inputs fail typed", async (context) => {
   const { packagePath, root } = await packageCopy(context);
-  await failure(["media", "import", packagePath, "--json"], "missing_media_file");
+  await failure(["asset", "media", "import", packagePath, "--json"], "missing_media_file");
   await failure(
-    ["font", "import", packagePath, "--family", "Work", "--json"],
+    ["asset", "font", "import", packagePath, "--family", "Work", "--json"],
     "missing_font_file",
   );
   for (const [command, option] of [
@@ -217,7 +217,7 @@ test("missing, unreadable, and non-object inputs fail typed", async (context) =>
     [["token", "set"], "--intent"],
     [["component", "define"], "--intent"],
     [["token", "import"], "--input"],
-    [["media", "import"], "--file"],
+    [["asset", "media", "import"], "--file"],
   ]) {
     const error = await failure(
       [...command, packagePath, option, join(root, "absent.json"), "--json"],
@@ -241,8 +241,7 @@ test("missing, unreadable, and non-object inputs fail typed", async (context) =>
 test("media writes return an inverse batch that apply can execute", async (context) => {
   const { packagePath, root } = await packageCopy(context);
   const imported = await json([
-    "media",
-    "import",
+    "asset", "media", "import",
     packagePath,
     "--file",
     jpegPath,
@@ -256,8 +255,7 @@ test("media writes return an inverse batch that apply can execute", async (conte
   assert.equal(importedInverse.baseRevision, imported.revision);
 
   const removed = await json([
-    "media",
-    "delete",
+    "asset", "media", "delete",
     packagePath,
     "--media",
     "Logos/Quadrant",
@@ -305,8 +303,7 @@ test("a single-value option given twice is rejected, repeatable ones are not", a
   );
   assert.equal(error.details.option, "--kind");
   const result = await runCli([
-    "theme",
-    "list",
+    "token", "theme", "list",
     packagePath,
     "--theme",
     "Theme/Default",
@@ -395,13 +392,13 @@ test("every option in a command's usage is accepted and help matches replay", as
   const apply = (await runCli(["advanced", "apply", "--help", "--full"])).stdout;
   assert.doesNotMatch(apply, /do not provide cross-process deduplication/);
   assert.match(apply, /alreadyApplied/);
-  for (const [group, action, optionName] of [
-    ["font", "import", "--media-path"],
-    ["advanced", "library-refresh", "--interval"],
-    ["advanced", "library-refresh", "--max-events"],
+  for (const [command, optionName] of [
+    [["asset", "font", "import"], "--media-path"],
+    [["advanced", "library-refresh"], "--interval"],
+    [["advanced", "library-refresh"], "--max-events"],
   ]) {
     await failure(
-      [group, action, "/nonexistent/x.smallpen", optionName, "v"],
+      [...command, "/nonexistent/x.smallpen", optionName, "v"],
       "unknown_option",
     );
   }

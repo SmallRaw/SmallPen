@@ -1130,7 +1130,7 @@
                           (reproject-generated-page {:recenter? false})
                           (ntf/show
                            {:content (tr "smallpen.save.renamed"
-                                         (str/join ", " (map (fn [{:keys [from to]}] (str from " → " to)) renamed)))
+                                         (str/join ", " (map (fn [{:keys [requested to]}] (str requested " → " to)) renamed)))
                             :level :info
                             :timeout 6000
                             :type :toast}))))))

@@ -66,23 +66,27 @@ async function fixture(count = 2, nameLength = 0) {
 }
 
 test("full view reads honor explicit pagination", async () => {
-  const { packagePath } = await fixture(25);
+  const { packagePath } = await fixture(90);
   const argv = ["view", packagePath, "--page", "Round Trip", "--json"];
   const brief = await run(argv);
   const full = await run([...argv, "--full"]);
   assert.equal(full.stdout, `${JSON.stringify(full.value)}\n`);
-  assert.equal(brief.value.text.split("\n").length, 20);
+  // 80 lines, then one line that says what is left and how to read it.
+  const briefLines = brief.value.text.split("\n");
+  assert.equal(briefLines.length, 81);
+  assert.equal(briefLines.at(-1), "… 10 more lines: add --offset 80");
   assert.equal(brief.value.page.hasMore, true);
-  assert.equal(brief.value.page.total, 25);
+  assert.equal(brief.value.page.total, 90);
   const lines = full.value.text.split("\n");
-  assert.equal(lines.length, 25);
-  assert.equal(full.value.page.limit, 25);
+  assert.equal(lines.length, 90);
+  assert.equal(full.value.page.limit, 90);
   assert.equal(full.value.page.hasMore, false);
   assert.match(lines[0], /^Canvas · FRAME/);
   assert.ok(lines.slice(1).every((line) => line.startsWith("  Item ")));
   const page = await run([...argv, "--full", "--limit", "3", "--offset", "2"]);
   const paged = page.value.text.split("\n");
-  assert.equal(paged.length, 3);
+  assert.equal(paged.length, 4);
+  assert.match(paged[3], /^… 85 more lines: add --offset 5$/);
   assert.match(paged[0], /Item 2 /);
   assert.equal(page.value.page.offset, 2);
   assert.equal(page.value.page.hasMore, true);

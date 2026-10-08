@@ -142,7 +142,7 @@ function webpBytes() {
 }
 
 const mediaNames = async (packagePath) =>
-  JSON.parse((await runCli(["media", "list", packagePath, "--json"])).stdout).items.map(
+  JSON.parse((await runCli(["asset", "media", "list", packagePath, "--json"])).stdout).items.map(
     ({ asset }) => asset.name,
   );
 
@@ -155,8 +155,7 @@ test("import-media is the public binary entry with content addressing and lifecy
   const first = JSON.parse(
     (
       await runCli([
-        "media",
-        "import",
+        "asset", "media", "import",
         packagePath,
         "--file",
         pngPath,
@@ -176,8 +175,7 @@ test("import-media is the public binary entry with content addressing and lifecy
   const second = JSON.parse(
     (
       await runCli([
-        "media",
-        "import",
+        "asset", "media", "import",
         packagePath,
         "--file",
         pngPath,
@@ -199,8 +197,7 @@ test("import-media is the public binary entry with content addressing and lifecy
 
   // Removal by name is typed; the shared blob stays for the other media.
   const removed = await runCli([
-    "media",
-    "delete",
+    "asset", "media", "delete",
     packagePath,
     "--media",
     "Dots/Copy",
@@ -214,8 +211,7 @@ test("import-media is the public binary entry with content addressing and lifecy
     "the remaining media keeps its shared blob",
   );
   const missing = await runCli([
-    "media",
-    "delete",
+    "asset", "media", "delete",
     packagePath,
     "--media",
     "Dots/Copy",
@@ -229,13 +225,13 @@ test("import-media under a name already taken leaves one media of that name", as
   const { packagePath } = await cloneFixture("media-dup.smallpen");
   const pngPath = join(dirname(packagePath), "dot.png");
   await writeFile(pngPath, await buildPng());
-  const args = ["media", "import", packagePath, "--file", pngPath, "--name", "Dots/Dot", "--json"];
+  const args = ["asset", "media", "import", packagePath, "--file", pngPath, "--name", "Dots/Dot", "--json"];
   assert.equal((await runCli(args)).code, 0);
   await runCli(args);
   // Names are the only handle left, so two media of one name could no
   // longer be told apart or deleted.
   assert.deepEqual(await mediaNames(packagePath), ["Dots/Dot"]);
-  const removed = await runCli(["media", "delete", packagePath, "--media", "Dots/Dot", "--json"]);
+  const removed = await runCli(["asset", "media", "delete", packagePath, "--media", "Dots/Dot", "--json"]);
   assert.equal(removed.code, 0, removed.stdout);
 });
 
@@ -243,7 +239,7 @@ test("import-media sniffs JPEG, GIF, and WebP dimensions from bytes (SP-029/030/
   const { packagePath, root } = await cloneFixture("sniff.smallpen");
   const jpegPath = join(here, "fixtures", "quadrant.jpg");
   const jpeg = JSON.parse(
-    (await runCli(["media", "import", packagePath, "--file", jpegPath, "--json"])).stdout,
+    (await runCli(["asset", "media", "import", packagePath, "--file", jpegPath, "--json"])).stdout,
   );
   assert.equal(jpeg.descriptor.mimeType, "image/jpeg");
   assert.equal(jpeg.descriptor.width, 8);
@@ -252,7 +248,7 @@ test("import-media sniffs JPEG, GIF, and WebP dimensions from bytes (SP-029/030/
   const gifPath = join(root, "frame.gif");
   await writeFile(gifPath, gifBytes());
   const gif = JSON.parse(
-    (await runCli(["media", "import", packagePath, "--file", gifPath, "--json"])).stdout,
+    (await runCli(["asset", "media", "import", packagePath, "--file", gifPath, "--json"])).stdout,
   );
   assert.equal(gif.descriptor.mimeType, "image/gif");
   assert.equal(gif.descriptor.width, 2);
@@ -261,7 +257,7 @@ test("import-media sniffs JPEG, GIF, and WebP dimensions from bytes (SP-029/030/
   const webpPath = join(root, "tiny.webp");
   await writeFile(webpPath, webpBytes());
   const webp = JSON.parse(
-    (await runCli(["media", "import", packagePath, "--file", webpPath, "--json"])).stdout,
+    (await runCli(["asset", "media", "import", packagePath, "--file", webpPath, "--json"])).stdout,
   );
   assert.equal(webp.descriptor.mimeType, "image/webp");
   assert.equal(webp.descriptor.width, 3);
@@ -269,7 +265,7 @@ test("import-media sniffs JPEG, GIF, and WebP dimensions from bytes (SP-029/030/
 
   const corrupt = join(root, "broken.png");
   await writeFile(corrupt, Buffer.from([1, 2, 3, 4]));
-  const rejected = await runCli(["media", "import", packagePath, "--file", corrupt, "--json"]);
+  const rejected = await runCli(["asset", "media", "import", packagePath, "--file", corrupt, "--json"]);
   assert.equal(rejected.code, 1);
   assert.equal(JSON.parse(rejected.stdout).error.code, "invalid_media_file");
 });
@@ -279,8 +275,7 @@ test("import-font converts SFNT to WOFF and bounds WOFF2 support (SP-033/034/035
 
   const ttfImport = JSON.parse(
     (await runCli([
-      "font",
-      "import",
+      "asset", "font", "import",
       packagePath,
       "--file",
       ttf,
@@ -309,8 +304,7 @@ test("import-font converts SFNT to WOFF and bounds WOFF2 support (SP-033/034/035
   await writeFile(woffPath, sfntToWoff(ttfBytes, "font/ttf"));
   const woffImport = JSON.parse(
     (await runCli([
-      "font",
-      "import",
+      "asset", "font", "import",
       packagePath,
       "--file",
       woffPath,
@@ -328,8 +322,7 @@ test("import-font converts SFNT to WOFF and bounds WOFF2 support (SP-033/034/035
   const woff2Path = join(root, "modern.woff2");
   await writeFile(woff2Path, Buffer.from([0x77, 0x4f, 0x46, 0x32, 0, 0, 0, 0]));
   const woff2 = await runCli([
-    "font",
-    "import",
+    "asset", "font", "import",
     packagePath,
     "--file",
     woff2Path,
@@ -344,8 +337,7 @@ test("import-font converts SFNT to WOFF and bounds WOFF2 support (SP-033/034/035
   const corruptPath = join(root, "broken.ttf");
   await writeFile(corruptPath, Buffer.from([1, 2, 3, 4, 5]));
   const corrupt = await runCli([
-    "font",
-    "import",
+    "asset", "font", "import",
     packagePath,
     "--file",
     corruptPath,
@@ -360,21 +352,21 @@ test("import-font converts SFNT to WOFF and bounds WOFF2 support (SP-033/034/035
 test("import-font adds a variant to the family of that name, and font delete removes it by name", async () => {
   const { packagePath } = await cloneFixture("font-family.smallpen");
   const add = (...extra) =>
-    runCli(["font", "import", packagePath, "--file", ttf, "--family", "Source Sans Pro", ...extra, "--json"]);
+    runCli(["asset", "font", "import", packagePath, "--file", ttf, "--family", "Source Sans Pro", ...extra, "--json"]);
   assert.equal((await add("--weight", "400")).code, 0);
   assert.equal((await add("--weight", "700", "--style", "italic")).code, 0);
   // Variants carry Penpot's display name, not their weight-style key.
   const families = async () =>
-    JSON.parse((await runCli(["font", "list", packagePath, "--json"])).stdout).items.map(
+    JSON.parse((await runCli(["asset", "font", "list", packagePath, "--json"])).stdout).items.map(
       ({ asset }) => [asset.family, asset.variants.map(({ name }) => name)],
     );
   assert.deepEqual(await families(), [["Source Sans Pro", ["Regular", "Bold Italic"]]]);
   const variant = await runCli([
-    "font", "delete", packagePath, "--font", "Source Sans Pro", "--variant", "Bold Italic", "--json",
+    "asset", "font", "delete", packagePath, "--font", "Source Sans Pro", "--variant", "Bold Italic", "--json",
   ]);
   assert.equal(variant.code, 0, variant.stdout);
   assert.deepEqual(await families(), [["Source Sans Pro", ["Regular"]]]);
-  const family = await runCli(["font", "delete", packagePath, "--font", "Source Sans Pro", "--json"]);
+  const family = await runCli(["asset", "font", "delete", packagePath, "--font", "Source Sans Pro", "--json"]);
   assert.equal(family.code, 0, family.stdout);
   assert.deepEqual(await families(), []);
 });

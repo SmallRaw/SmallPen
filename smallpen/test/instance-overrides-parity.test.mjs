@@ -24,7 +24,7 @@ test("a placed copy overrides what Penpot lets a copy change, Tokens and nested 
   const root = await mkdtemp(join(tmpdir(), "smallpen-copies-"));
   const path = (await run(["project", "init", join(root, "demo"), "--json"])).packagePath;
   const file = async (name, value) => { const at = join(root, name); await writeFile(at, JSON.stringify(value)); return at; };
-  await run(["theme", "add", path, "--theme", "Mode/Light", "--theme", "Mode/Dark", "--json"]);
+  await run(["token", "theme", "add", path, "--theme", "Mode/Light", "--theme", "Mode/Dark", "--json"]);
   await run(["token", "set", path, "--intent", await file("tokens.json", { tokens: [
     { name: "color.accent", type: "color", group: "Mode", value: "#e11d48", values: { "Mode/Dark": "#fb7185" } },
     { name: "radius.pill", type: "border-radius", value: 999 },

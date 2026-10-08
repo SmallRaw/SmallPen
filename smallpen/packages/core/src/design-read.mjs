@@ -527,12 +527,25 @@ function wireframeBounds(bounds) {
   return { height, width, x, y };
 }
 
+// Siblings that do not overlap are numbered in reading order (top to
+// bottom, then left to right); overlapping ones keep their paint order.
+function readingOrder(children) {
+  const box = (node) => node.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
+  const overlap = (a, b) => {
+    const left = box(a), right = box(b);
+    return Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x) > 1 &&
+      Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y) > 1;
+  };
+  if (children.some((child, index) => children.slice(index + 1).some((other) => overlap(child, other)))) return children;
+  return [...children].sort((a, b) => box(a).y - box(b).y || box(a).x - box(b).x);
+}
+
 function wireframeLayers(root) {
   const result = [];
   const visit = (node, depth, parentIndex) => {
     const index = result.length + 1;
     result.push({ depth, index, node, parentIndex });
-    for (const child of node.children ?? []) visit(child, depth + 1, index);
+    for (const child of readingOrder(node.children ?? [])) visit(child, depth + 1, index);
   };
   visit(root, 0, undefined);
   const digits = Math.max(2, String(result.length).length);
@@ -687,7 +700,7 @@ function placeWireframeMarker(grid, occupied, layer, bounds) {
 function wireframeLayerLine(layer) {
   const node = layer.node;
   const hidden = node.visible === false ? "HIDDEN " : "";
-  return `${"  ".repeat(layer.depth)}${layer.marker} ${hidden}${node.type} ${JSON.stringify(node.name)} #${node.id}`;
+  return `${"  ".repeat(layer.depth)}${layer.marker} ${hidden}${node.type} ${JSON.stringify(node.name)}`;
 }
 
 export function asciiWireframe(tree) {
@@ -721,10 +734,10 @@ export function asciiWireframe(tree) {
   return [
     "ASCII WIREFRAME",
     `viewport: ${wireframeNumber(viewport.width)}x${wireframeNumber(viewport.height)} @ ${wireframeNumber(viewport.x)},${wireframeNumber(viewport.y)} | canvas: ${grid[0].length}x${grid.length} chars`,
-    "markers: [NN]=visible (NN)=hidden; geometry is approximate; exact data is in semanticTree",
+    "markers: [NN]=visible (NN)=hidden; geometry is approximate; view --as text lists exact sizes",
     "CANVAS",
     canvas,
-    "LAYER KEY (back-to-front; indentation shows containment)",
+    "LAYER KEY (reading order; indentation shows containment)",
     layerIndex,
     "",
   ].join("\n");

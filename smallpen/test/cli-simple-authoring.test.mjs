@@ -46,36 +46,36 @@ const rows = async (path, ...args) =>
 
 test("theme commands name options as Group/Option, like Token values", async () => {
   const { path } = await blank();
-  await run(["theme", "add", path, "--theme", "Viewport/Desktop", "--theme", "Viewport/Mobile", "--json"]);
-  await run(["theme", "add", path, "--theme", "Viewport/Tablet", "--json"]);
-  const viewport = () => run(["theme", "list", path, "--json"]).then(({ groups }) => groups.find(({ name }) => name === "Viewport"));
+  await run(["token", "theme", "add", path, "--theme", "Viewport/Desktop", "--theme", "Viewport/Mobile", "--json"]);
+  await run(["token", "theme", "add", path, "--theme", "Viewport/Tablet", "--json"]);
+  const viewport = () => run(["token", "theme", "list", path, "--json"]).then(({ groups }) => groups.find(({ name }) => name === "Viewport"));
   assert.deepEqual(await viewport(), {
     name: "Viewport",
     default: "Viewport/Desktop",
     selected: "Viewport/Desktop",
     options: ["Viewport/Desktop", "Viewport/Mobile", "Viewport/Tablet"],
   });
-  const again = await run(["theme", "add", path, "--theme", "Viewport/Mobile", "--json"], 1);
+  const again = await run(["token", "theme", "add", path, "--theme", "Viewport/Mobile", "--json"], 1);
   assert.equal(again.error.code, "theme_options_exist");
-  const bare = await run(["theme", "add", path, "--theme", "Tablet", "--json"], 1);
+  const bare = await run(["token", "theme", "add", path, "--theme", "Tablet", "--json"], 1);
   assert.equal(bare.error.code, "invalid_theme_name");
 
-  await run(["theme", "rename", path, "--theme", "Viewport/Desktop", "--to", "Web", "--json"]);
-  await run(["theme", "default", path, "--theme", "Viewport/Mobile", "--json"]);
-  await run(["theme", "delete", path, "--theme", "Viewport/Tablet", "--json"]);
-  await run(["theme", "rename", path, "--group", "Viewport", "--to", "Platform", "--json"]);
-  const groups = (await run(["theme", "list", path, "--json"])).groups;
+  await run(["token", "theme", "rename", path, "--theme", "Viewport/Desktop", "--to", "Web", "--json"]);
+  await run(["token", "theme", "default", path, "--theme", "Viewport/Mobile", "--json"]);
+  await run(["token", "theme", "delete", path, "--theme", "Viewport/Tablet", "--json"]);
+  await run(["token", "theme", "rename", path, "--group", "Viewport", "--to", "Platform", "--json"]);
+  const groups = (await run(["token", "theme", "list", path, "--json"])).groups;
   const platform = groups.find(({ name }) => name === "Platform");
   assert.deepEqual(platform.options, ["Platform/Web", "Platform/Mobile"]);
   assert.equal(platform.default, "Platform/Mobile");
-  await run(["theme", "delete", path, "--group", "Platform", "--json"]);
-  assert.equal((await run(["theme", "list", path, "--json"])).groups.some(({ name }) => name === "Platform"), false);
+  await run(["token", "theme", "delete", path, "--group", "Platform", "--json"]);
+  assert.equal((await run(["token", "theme", "list", path, "--json"])).groups.some(({ name }) => name === "Platform"), false);
 });
 
 test("token set writes Tokens by name with default and per-option values in one call", async () => {
   const { root, path } = await blank();
-  await run(["theme", "add", path, "--theme", "Theme/Light", "--theme", "Theme/Dark", "--json"]);
-  await run(["theme", "add", path, "--theme", "Viewport/Desktop", "--theme", "Viewport/Mobile", "--json"]);
+  await run(["token", "theme", "add", path, "--theme", "Theme/Light", "--theme", "Theme/Dark", "--json"]);
+  await run(["token", "theme", "add", path, "--theme", "Viewport/Desktop", "--theme", "Viewport/Mobile", "--json"]);
   const created = await run(["token", "set", path, "--intent", await file(root, "tokens.json", {
     tokens: [
       { name: "color.brand", type: "color", value: "#4f46e5", values: { "Theme/Dark": "#818cf8" } },
@@ -104,8 +104,8 @@ test("token set writes Tokens by name with default and per-option values in one 
 
 test("token set hides storage: value follows every option without its own value", async () => {
   const { root, path } = await blank();
-  await run(["theme", "add", path, "--theme", "Viewport/Desktop", "--theme", "Viewport/Mobile", "--theme", "Viewport/Tablet", "--json"]);
-  await run(["theme", "add", path, "--theme", "Theme/Light", "--theme", "Theme/Dark", "--json"]);
+  await run(["token", "theme", "add", path, "--theme", "Viewport/Desktop", "--theme", "Viewport/Mobile", "--theme", "Viewport/Tablet", "--json"]);
+  await run(["token", "theme", "add", path, "--theme", "Theme/Light", "--theme", "Theme/Dark", "--json"]);
   await run(["token", "set", path, "--intent", await file(root, "a.json", {
     tokens: [
       { name: "space.page", type: "spacing", group: "Viewport", value: 32, values: { "Viewport/Mobile": 16 } },
@@ -120,11 +120,11 @@ test("token set hides storage: value follows every option without its own value"
     "Tablet had no value of its own, so it follows the new default");
   assert.deepEqual(tokens["color.text"].values, { "Theme/Dark": "#eeeeee", "Viewport/Mobile": "#222222" });
 
-  const themes = await run(["theme", "list", path, "--json"]);
+  const themes = await run(["token", "theme", "list", path, "--json"]);
   assert.ok(!JSON.stringify(themes).includes('"sets"') && !JSON.stringify(themes).includes("setIds"));
   const list = await run(["token", "list", path, "--json"]);
   assert.ok(!JSON.stringify(list).includes('"sets"'));
-  assert.ok(JSON.stringify(await run(["theme", "list", path, "--full", "--json"])).includes("setIds"));
+  assert.ok(JSON.stringify(await run(["token", "theme", "list", path, "--full", "--json"])).includes("setIds"));
 
   const shown = await run(["token", "show", path, "--path", "space.page", "--theme", "Viewport/Mobile", "--json"]);
   assert.equal(JSON.stringify(shown).includes("16"), true);
@@ -210,7 +210,7 @@ test("page draw lays out named elements in order, widens instances for longer te
   await run(["page", "draw", path, "--intent", await file(root, "detail.json", {
     page: "Task detail", module: "Tasks", children: [{ name: "Heading", text: "Task" }],
   }), "--json"]);
-  const pages = (await run(["page", "list", path, "--json"])).items.map(({ name }) => name);
+  const pages = (await run(["page", "list", path, "--json"])).pages.map(({ name }) => name);
   assert.ok(pages.includes("Tasks / Board") && pages.includes("Tasks / Task detail"));
   const view = await run(["view", path, "--page", "Board", "--as", "text", "--json"]);
   assert.equal(view.target.page, "Tasks / Board");
@@ -222,14 +222,14 @@ test("page draw lays out named elements in order, widens instances for longer te
 
   await run(["flow", "link", path, "--from", "Board / New task", "--to", "Task detail", "--json"]);
   await run(["flow", "start", path, "--page", "Board", "--json"]);
-  const before = await run(["flow", "list", path, "--json"]);
+  const before = await run(["flow", "list", path, "--full", "--json"]);
   assert.deepEqual(
     before.links.map(({ page, element, to }) => [page, element, to]),
     [["Tasks / Board", "New task", "Tasks / Task detail"]],
   );
   assert.deepEqual(before.starts.map(({ page }) => page), ["Tasks / Board"]);
   await run(["page", "draw", path, "--intent", board, "--json"]);
-  const after = await run(["flow", "list", path, "--json"]);
+  const after = await run(["flow", "list", path, "--full", "--json"]);
   assert.deepEqual(after.links, before.links, "redrawing keeps the link of an element drawn under the same name");
   assert.deepEqual(after.starts, before.starts);
   const missing = await run(["flow", "link", path, "--from", "Board / Nope", "--to", "Task detail", "--json"], 1);
@@ -243,7 +243,7 @@ test("Chinese page and element names get distinct ids and read back by name", as
     ["设置", [{ name: "标题", text: "设置" }]],
   ])
     await run(["page", "draw", path, "--intent", await file(root, `${page}.json`, { page, children }), "--json"]);
-  const listed = (await run(["page", "list", path, "--json"])).items.map(({ name }) => name);
+  const listed = (await run(["page", "list", path, "--json"])).pages.map(({ name }) => name);
   assert.ok(["看板", "设置"].every((name) => listed.includes(name)), "page list names both pages");
   // Replies leave out ids; the stored package keeps them.
   const snapshot = await openPackage(path);

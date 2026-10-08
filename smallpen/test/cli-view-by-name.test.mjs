@@ -104,14 +104,14 @@ test("view by name draws sheets and pages as wireframes and PNGs", async () => {
   const wire = await run(["view", path, "--page", "Board", "--as", "wireframe", "--json"]);
   assert.match(wire.wireframe, /ASCII WIREFRAME/);
   const pages = await run(["view", path, "--pages", "--as", "png", "--json"]);
-  assert.equal(pages.items.length, 2);
+  assert.equal(pages.items.length, 1);
   assert.ok(pages.items.every(({ output }) => output.endsWith(".png")));
 });
 
 test("view by name lists issues by name and names what it cannot find", async () => {
   const { path } = await designed();
   const issues = await run(["view", path, "--as", "issues", "--json"]);
-  assert.equal(issues.checked, 3);
+  assert.equal(issues.checked, 2);
   assert.equal(issues.issueCount, 0, "variants are measured one by one, so no label overflows");
   assert.ok(!JSON.stringify(issues).includes("nodeId"));
   const page = await run(["view", path, "--page", "Nope", "--json"], 1);

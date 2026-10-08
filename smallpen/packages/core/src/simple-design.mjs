@@ -3,9 +3,10 @@
 // planners build the canonical node tables, IDs, child order, flex layout
 // fields and Token bindings, and return one whole put-component-set or
 // put-screen operation, or an interaction intent.
-import { findElement, findPage, findPageElement, findPresentation } from "./named-targets.mjs";
+import { findComponent, findElement, findPage, findPageElement, findPresentation, findVariant } from "./named-targets.mjs";
 import { fail } from "./errors.mjs";
 import { listEffectiveTokens } from "./effective-tokens.mjs";
+import { defaultTokenWorkspace, listTokenThemes, selectTokenThemes } from "./token-themes.mjs";
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const TOKEN_REF = /^\{([^{}]+)\}$/;
@@ -61,12 +62,33 @@ function nameSiblings(children, where) {
   });
 }
 
-// Tokens by path across the Package and its Foundation.
+// Tokens by path across the Package and its Foundation. A string Token
+// also carries its value under every theme option (its translations), so
+// a text bound to it is sized for the longest one.
 function tokenIndex(snapshot, options) {
   const index = new Map();
   for (const item of listEffectiveTokens(snapshot, { foundation: options.foundation, libraries: options.libraries }))
     if (!index.has(item.token.path)) index.set(item.token.path, item);
+  const strings = [...index.values()].filter((item) => item.token.type === "string");
+  if (strings.length) {
+    const workspace = defaultTokenWorkspace({ product: snapshot, foundation: options.foundation });
+    for (const theme of listTokenThemes(snapshot, options.foundation)) {
+      const selected = selectTokenThemes(workspace, [theme.path]);
+      for (const item of listEffectiveTokens(selected.product, { foundation: selected.foundation, libraries: options.libraries })) {
+        const entry = index.get(item.token.path);
+        if (entry?.token.type !== "string") continue;
+        (entry.translations ??= new Set([String(entry.value)])).add(String(item.value));
+      }
+    }
+  }
   return index;
+}
+
+// The widest of a string Token's values, by a rough width: CJK and other
+// wide characters count twice.
+function widestText(texts) {
+  const width = (text) => [...text].reduce((sum, char) => sum + (char.codePointAt(0) > 0x2e7f ? 2 : 1), 0);
+  return [...texts].reduce((best, text) => (width(text) > width(best) ? text : best), "");
 }
 
 // Component Sets by name (or id) across the Package and its Foundation.
@@ -137,8 +159,8 @@ const INSTANCE_SETTINGS = {
     },
   },
   radius: { binding: "cornerRadius", field: "cornerRadius", value: Number },
-  width: { binding: "width", field: "width", value: Number },
-  height: { binding: "height", field: "height", value: Number },
+  width: { binding: "width", field: "width", value: sizeNumber("width") },
+  height: { binding: "height", field: "height", value: sizeNumber("height") },
   shadow: { binding: "shadow", field: "shadow", value: (value) => structuredClone(value) },
   fontSize: textStyleSetting("fontSize", "fontSize"),
   fontWeight: textStyleSetting("fontWeight", "fontWeight"),
@@ -220,6 +242,8 @@ class TreeBuilder {
     this.probes = {};
     this.widen = [];
     this.used = new Set();
+    // Texts bound to string Tokens, measured with their longest translation.
+    this.measureTexts = {};
   }
 
   id(path) {
@@ -231,7 +255,7 @@ class TreeBuilder {
   }
 
   // spec -> node id; parentFlex says whether a flex parent will place it.
-  build(spec, path, parentFlex, root = false) {
+  build(spec, path, parentFlex, root = false, parentJustify = undefined, textFills = false) {
     if (!isRecord(spec)) fail("invalid_element", `Element at ${path.join(" › ") || "root"} must be an object`);
     for (const key of Object.keys(spec))
       if (!LAYOUT_KEYS.has(key))
@@ -253,10 +277,11 @@ class TreeBuilder {
       }
       apply(value);
     };
-    // A text in a row grows with its row unless it says otherwise, so a
-    // longer label in a widened instance still fits.
+    // The one text of a row grows with its row unless it says otherwise, so
+    // a longer label in a widened instance still fits. Several texts in a
+    // row hug, so one never squeezes the other into extra lines.
     const isText = !spec.use && (typeof spec.text === "string" || spec.type === "text");
-    const width = sizeSpec(spec.width ?? (parentFlex === "row" && isText ? "fill" : undefined));
+    const width = sizeSpec(spec.width ?? (parentFlex === "row" && isText && textFills ? "fill" : undefined));
     const height = sizeSpec(spec.height);
     node._size = { width, height };
     // Where the element goes in a container without auto layout: its own
@@ -272,8 +297,13 @@ class TreeBuilder {
       this.instance(spec, node, where);
     } else if (spec.text !== undefined || spec.type === "text") {
       node.type = "TEXT";
-      // "{text.path}" binds a string Token: the text follows its language.
+      // "{text.path}" binds a string Token: the text follows its language,
+      // and its box is sized for the longest translation.
       bind("text", spec.text ?? "", (value) => { node.text = String(value); });
+      if (bindings.text) {
+        const translations = [...this.tokens.values()].find((item) => item.token.id === bindings.text.assetId)?.translations;
+        if (translations?.size > 1) node._measureText = this.measureTexts[id] = widestText(translations);
+      }
       node.growType = width.mode === "auto" ? "auto-width" : "auto-height";
       const textStyle = {};
       if (spec.font !== undefined)
@@ -288,6 +318,9 @@ class TreeBuilder {
       if (spec.textTransform !== undefined) bind("textTransform", spec.textTransform, (value) => { textStyle.textTransform = String(value); });
       if (spec.textDecoration !== undefined) bind("textDecoration", spec.textDecoration, (value) => { textStyle.textDecoration = String(value); });
       if (spec.textAlign !== undefined) textStyle.textAlign = spec.textAlign;
+      // A text that fills a centred row by default is centred in it, as a
+      // button label is.
+      else if (spec.width === undefined && textFills && parentJustify === "center") textStyle.textAlign = "center";
       if (Object.keys(textStyle).length) node.textStyle = textStyle;
       const color = spec.color ?? spec.fill;
       if (color !== undefined) bind("fill", color, (value) => { node.fills = [paintOf(value)]; });
@@ -317,7 +350,13 @@ class TreeBuilder {
       }
       const flex = node.layout === "flex" ? node["layout-flex-dir"] : false;
       if (!flex && spec.gap !== undefined) node._gap = Number(spec.gap);
-      const ids = nameSiblings(children, where).map((child) => this.build(child, here, flex));
+      const named = nameSiblings(children, where);
+      const isTextSpec = (child) => isRecord(child) && !child.use && (typeof child.text === "string" || child.type === "text");
+      const sized = (child) => isRecord(child) && child.width !== undefined;
+      const fills = (child) => isRecord(child) && ["fill", "100%"].includes(String(child.width).trim().toLowerCase());
+      const loneText = flex === "row" && !named.some(fills) && named.filter((child) => isTextSpec(child) && !sized(child)).length === 1
+        && named.filter(isTextSpec).length === 1;
+      const ids = named.map((child) => this.build(child, here, flex, false, spec.justify, loneText && isTextSpec(child) && !sized(child)));
       // Penpot lays a flex line out from the last child: store the reverse
       // so the elements read in the order they were written.
       node.children = flex ? [...ids].reverse() : ids;
@@ -400,19 +439,33 @@ class TreeBuilder {
     if (node.height === undefined) node.height = source.height;
     // text: {"Label": "Save"}; set: {"Icon.visible": false} -> overrides by
     // the component's own node names.
+    // An element of the component: by its whole name (a name may hold a
+    // "."), by a dotted path from the root ("Info.Title"), or by a name only
+    // one element below has ("Title").
+    const named = (name) => Object.values(variant.nodes).filter((candidate) => candidate.id !== variant.rootId && sameName(candidate.name, name));
+    const pathOf = (target) => {
+      const parentOf = (id) => Object.values(variant.nodes).find((candidate) => candidate.children?.includes(id));
+      const names = [];
+      for (let at = target; at && at.id !== variant.rootId; at = parentOf(at.id)) names.unshift(at.name);
+      return names.join(".");
+    };
     const byName = (path) => {
+      if (!path) return source;
+      const whole = named(path);
+      if (whole.length === 1) return whole[0];
       let current = source;
-      // No element name: the copy itself.
-      for (const name of path ? path.split(".") : []) {
-        const child = (current.children ?? []).map((childId) => variant.nodes[childId])
+      for (const name of path.split(".")) {
+        current = current && (current.children ?? []).map((childId) => variant.nodes[childId])
           .find((candidate) => candidate && sameName(candidate.name, name));
-        if (!child)
-          fail("unknown_element", `${set.name} has no element ${path} (at ${where})`, {
-            elements: Object.values(variant.nodes).map((candidate) => candidate.name),
-          });
-        current = child;
       }
-      return current;
+      if (current) return current;
+      const last = named(path.split(".").at(-1));
+      if (last.length === 1) return last[0];
+      fail(last.length > 1 ? "ambiguous_element" : "unknown_element",
+        last.length > 1
+          ? `${set.name} has several elements named ${path.split(".").at(-1)}; name its parent too, for example "${pathOf(last[0])}" (at ${where})`
+          : `${set.name} has no element ${path} (at ${where})`,
+        { elements: Object.values(variant.nodes).filter((candidate) => candidate.id !== variant.rootId).map(pathOf) });
     };
     const settings = { ...Object.fromEntries(Object.entries(spec.text ?? {}).map(([path, value]) => [`${path}.text`, value])), ...(spec.set ?? {}) };
     if (typeof spec.text === "string") fail("invalid_instance_text", `text on an instance maps element names to text, for example {"Label": "Save"} (at ${where})`);
@@ -453,17 +506,52 @@ class TreeBuilder {
       }
       const path = `${target.id}:${setting.field}`;
       node.instance.overrides[path] = setting.value(value, target, node.instance.overrides[path]);
+      // A value written over a field the component binds to a Token stops
+      // following it (null drops the source's binding).
+      if (!reference && target.tokenBindings?.[setting.binding]) {
+        if (!own.has(target.id)) own.set(target.id, {});
+        own.get(target.id)[setting.binding] = null;
+      }
       // A longer text in a growing slot widens the instance by the extra
       // width the new text measures.
-      if (setting.field === "text" && target["layout-item-h-sizing"] === "fill" && node._size.width.mode !== "fix") {
+      // A text that fills or hugs its slot grows with a longer text (one
+      // that wraps at a fixed width does not): the copy widens by the extra,
+      // and a hugging text takes its new width.
+      // A one-line text in a fixed box (a component drawn without auto
+      // layout) widens with its box and the elements around it.
+      const lineHeight = (target.textStyle?.fontSize ?? 14) * (target.textStyle?.lineHeight ?? 1.2);
+      const oneLineFixed = (target.growType === undefined || target.growType === "fixed") && target.height <= lineHeight * 1.6;
+      const grows = ["fill", "auto"].includes(target["layout-item-h-sizing"]) || target.growType === "auto-width" || oneLineFixed;
+      // A copy that fills or has a fixed width cannot grow: a longer text
+      // there shows as content_overflow instead.
+      if (setting.field === "text" && grows && node._size.width.mode === "auto") {
         const probe = `${node.id}::${target.id}`;
-        this.probes[probe] = { children: [], growType: "auto-width", height: target.height, id: probe, name: "probe", text: String(value), textStyle: target.textStyle, type: "TEXT", width: target.width, x: 0, y: 0 };
-        this.widen.push({ id: node.id, probe, slot: target.width });
+        const translations = reference ? [...this.tokens.values()].find((item) => item.token.id === reference.assetId)?.translations : undefined;
+        const longest = translations?.size > 1 ? widestText(translations) : String(value);
+        this.probes[probe] = { children: [], growType: "auto-width", height: target.height, id: probe, name: "probe", text: longest, textStyle: target.textStyle, type: "TEXT", width: target.width, x: 0, y: 0 };
+        // Elements between the copy and the text that hug their content
+        // grow with it too; one that fills takes the copy's new width.
+        const parentOf = (id) => Object.values(variant.nodes).find((candidate) => candidate.children?.includes(id));
+        const grow = target["layout-item-h-sizing"] === "fill" ? [] : [{ id: target.id, width: target.width }];
+        for (let at = parentOf(target.id); at && at.id !== variant.rootId; at = parentOf(at.id))
+          if (at["layout-item-h-sizing"] !== "fill" && (oneLineFixed || at["layout-item-h-sizing"] !== "fix")) grow.push({ id: at.id, width: at.width });
+        this.widen.push({ id: node.id, probe, slot: target.width, grow });
       }
     }
     for (const [id, bindings] of own) node.instance.overrides[`${id}:tokenBindings`] = bindings;
     if (!Object.keys(node.instance.overrides).length) delete node.instance.overrides;
   }
+}
+
+// A copy's element takes a size in pixels (or a Token): fill and hug are for
+// elements you draw, where the layout can decide.
+function sizeNumber(field) {
+  return (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number))
+      fail("invalid_instance_size", `A copy's element ${field} takes a number or a Token, not ${JSON.stringify(value)}; fill and hug work on elements you draw`, { field, value });
+    return number;
+  };
 }
 
 // Bottom-up sizes for elements that hug their content; text sizes come from
@@ -475,7 +563,11 @@ export function sizeDesignTree(nodes, rootId, measure = () => undefined) {
     if (node.type === "TEXT") {
       const fontSize = node.textStyle?.fontSize ?? 14;
       const measured = measure(id);
-      const estimate = { width: Math.ceil(String(node.text).length * fontSize * 0.55) + 2, height: Math.ceil(fontSize * (node.textStyle?.lineHeight ?? 1.2)) };
+      // Without a measure (or a font with the glyphs), estimate: wide (CJK)
+      // characters take about a full em, others about half.
+      const sample = String(node._measureText ?? node.text);
+      const ems = [...sample].reduce((sum, char) => sum + (char.codePointAt(0) > 0x2e7f ? 1 : 0.55), 0);
+      const estimate = { width: Math.ceil(ems * fontSize) + 2, height: Math.ceil(fontSize * (node.textStyle?.lineHeight ?? 1.2)) };
       if (node.width === undefined) node.width = measured?.width ?? estimate.width;
       if (node.height === undefined || h.mode !== "fix") node.height = measured?.height ?? estimate.height;
       return;
@@ -500,12 +592,66 @@ export function sizeDesignTree(nodes, rootId, measure = () => undefined) {
     }
   };
   visit(rootId);
+  wrapFillTexts(nodes, rootId, measure);
   for (const node of Object.values(nodes)) {
     delete node._size;
     delete node._place;
     delete node._gap;
+    delete node._measureText;
   }
   return nodes;
+}
+
+// A text that fills its slot wraps at the width the App gives it, and the
+// containers that hug it grow taller. Find each slot's width top-down, take
+// the text's height at that width (measure.wrapped, else lines estimated
+// from its one-line width), then size hugging containers again.
+function wrapFillTexts(nodes, rootId, measure) {
+  let wrapped = false;
+  const visit = (id, width) => {
+    const node = nodes[id];
+    if (node.type === "TEXT") {
+      if (width === undefined || node.growType !== "auto-height" || width >= node.width - 0.5 || width <= 0) return;
+      const at = measure.wrapped?.(id, width);
+      const lines = Math.ceil(node.width / width);
+      node.width = width;
+      node.height = at?.height ?? node.height * lines;
+      wrapped = true;
+      return;
+    }
+    const own = width ?? node.width;
+    const kids = node.children.map((child) => nodes[child]).filter((child) => child.visible !== false);
+    if (node.layout !== "flex") {
+      for (const child of kids) visit(child.id, undefined);
+      return;
+    }
+    const pad = node["layout-padding"] ?? { p1: 0, p2: 0, p3: 0, p4: 0 };
+    const inner = own - (pad.p2 ?? 0) - (pad.p4 ?? 0);
+    const fills = (child) => child["layout-item-h-sizing"] === "fill" && child["layout-item-absolute"] !== true;
+    if (node["layout-flex-dir"] === "row") {
+      const gap = node["layout-gap"]?.["column-gap"] ?? 0;
+      const fixed = kids.filter((child) => !fills(child)).reduce((sum, child) => sum + child.width, 0);
+      const count = kids.filter(fills).length;
+      const each = count ? (inner - fixed - gap * Math.max(0, kids.length - 1)) / count : 0;
+      for (const child of kids) visit(child.id, fills(child) ? Math.floor(each) : undefined);
+    } else for (const child of kids) visit(child.id, fills(child) ? inner : undefined);
+  };
+  visit(rootId, undefined);
+  if (!wrapped) return;
+  const rehug = (id) => {
+    const node = nodes[id];
+    if (node.type === "TEXT" || node.layout !== "flex") return;
+    for (const child of node.children) rehug(child);
+    if (node._size?.height?.mode !== "auto") return;
+    const row = node["layout-flex-dir"] === "row";
+    const gap = (row ? node["layout-gap"]?.["column-gap"] : node["layout-gap"]?.["row-gap"]) ?? node["layout-gap"]?.["column-gap"] ?? 0;
+    const pad = node["layout-padding"] ?? { p1: 0, p2: 0, p3: 0, p4: 0 };
+    const kids = node.children.map((child) => nodes[child]).filter((child) => child.visible !== false);
+    const heights = kids.map((child) => child.height);
+    const content = row ? Math.max(0, ...heights) : heights.reduce((sum, height) => sum + height, 0) + gap * Math.max(0, kids.length - 1);
+    node.height = content + (pad.p1 ?? 0) + (pad.p3 ?? 0);
+  };
+  rehug(rootId);
 }
 
 // place: "below Header" | {below|above|leftOf|rightOf: "Sibling", gap?}.
@@ -570,15 +716,28 @@ function componentTree(snapshot, spec, options, prefix, base) {
   const builder = new TreeBuilder(prefix, tokenIndex(snapshot, options), componentIndex(snapshot, options));
   const rootId = builder.build({ ...base, name: base.name ?? spec.name, type: "component" }, [], false, true);
   builder.nodes[rootId].type = "COMPONENT";
-  return { builder, nodes: builder.nodes, probes: builder.probes, rootId };
+  return { builder, nodes: builder.nodes, probes: builder.probes, rootId, measureTexts: builder.measureTexts };
 }
 
-// Instances whose new text is longer than their slot grow by the difference.
+// New copies grow for longer text. Edits replace the previous text's growth,
+// so retrying the same value leaves the dimensions unchanged.
 function widenInstances(builder, measure) {
-  for (const { id, probe, slot } of builder.widen) {
+  for (const { id, probe, previousProbe, slot, grow = [] } of builder.widen) {
     const measured = measure?.(probe);
     const node = builder.nodes[id];
-    if (measured && measured.width > slot) node.width += Math.ceil(measured.width - slot);
+    if (!measured) continue;
+    const extra = Math.max(0, Math.ceil(measured.width - slot));
+    const previous = previousProbe && measure?.(previousProbe);
+    const previousExtra = previous ? Math.max(0, Math.ceil(previous.width - slot)) : 0;
+    const delta = extra - previousExtra;
+    if (delta === 0) continue;
+    node.width += delta;
+    for (const element of grow) {
+      node.instance.overrides ??= {};
+      const key = `${element.id}:width`;
+      const width = node.instance.overrides[key] ?? element.width;
+      node.instance.overrides[key] = Math.max(previousProbe ? width + delta : width, element.width + extra);
+    }
   }
 }
 
@@ -640,7 +799,7 @@ export function componentDefineOperation(snapshot, spec, options = {}) {
     sizeDesignTree(tree.nodes, tree.rootId, measure);
     return {
       id: `var_${idBase}_${variantSlug}`,
-      nodes: tree.nodes,
+      nodes: existing ? keepNodeIds(tree.nodes, tree.rootId, existing.variants) : tree.nodes,
       rootId: tree.rootId,
       selection: Object.fromEntries(Object.entries(combination).map(([name, value]) => [`axis_${slug(name)}`, value])),
     };
@@ -661,6 +820,45 @@ export function componentDefineOperation(snapshot, spec, options = {}) {
 
 const PLATFORM_SIZES = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 }, tablet: { width: 834, height: 1194 } };
 export const PAGE_DRAW_FIELDS = Object.freeze(["page", "module?", "canvas?", "platform?", "width?", "height?", "into?", "fill?", "layout?", "gap?", "padding?", "align?", "justify?", "children"]);
+
+// Element paths below the root: "Info / Title". The root's own name (a
+// component or page name) is left out, so renaming it changes no path.
+function elementPaths(nodes, rootId) {
+  const paths = new Map();
+  const walk = (id, trail) => {
+    for (const child of nodes[id]?.children ?? []) {
+      const path = [...trail, String(nodes[child]?.name ?? "").trim().toLowerCase()];
+      paths.set(child, path.join(" / "));
+      walk(child, path);
+    }
+  };
+  walk(rootId, []);
+  return paths;
+}
+
+// A redrawn page or redefined component keeps the ids its elements already
+// had (matched by element path), so copies' overrides, links and the App's
+// shapes still find them after a rename of the page or component.
+function keepNodeIds(nodes, rootId, previous) {
+  const known = new Map();
+  for (const { nodes: oldNodes, rootId: oldRoot } of previous)
+    for (const [id, path] of elementPaths(oldNodes, oldRoot)) if (!known.has(path)) known.set(path, id);
+  const rename = new Map();
+  const taken = new Set(Object.keys(nodes));
+  for (const [id, path] of elementPaths(nodes, rootId)) {
+    const old = known.get(path);
+    if (old && old !== id && !taken.has(old)) {
+      rename.set(id, old);
+      taken.add(old);
+    }
+  }
+  if (!rename.size) return nodes;
+  const to = (id) => rename.get(id) ?? id;
+  return Object.fromEntries(Object.entries(nodes).map(([id, node]) => [
+    to(id),
+    { ...node, id: to(id), ...(node.children ? { children: node.children.map(to) } : {}) },
+  ]));
+}
 
 // The page a draw redraws: with a module, the page of that full name; else
 // the page of that name, or the one page whose last name part it is.
@@ -734,14 +932,30 @@ export function pageDrawOperation(snapshot, spec, options = {}) {
     }, [], false, true);
     nodes = builder.nodes;
   }
-  const measure = options.measure?.({ nodes, probes: builder.probes, rootId });
+  const measure = options.measure?.({ nodes, probes: builder.probes, rootId, measureTexts: builder.measureTexts });
   widenInstances(builder, measure);
   sizeDesignTree(nodes, rootId, measure);
-  // Element interactions live on their nodes; an element drawn again under
-  // the same name keeps them.
-  for (const [id, node] of Object.entries(nodes))
+  if (presentation.rootId && Object.keys(presentation.nodes ?? {}).length)
+    nodes = keepNodeIds(nodes, rootId, [{ nodes: presentation.nodes, rootId: presentation.rootId }]);
+  // Elements drawn again keep their interactions, including surviving
+  // source elements whose links are stored as overrides on a copy.
+  for (const [id, node] of Object.entries(nodes)) {
     if (presentation.nodes[id]?.interactions?.length && !node.interactions)
       node.interactions = structuredClone(presentation.nodes[id].interactions);
+    const previous = presentation.nodes[id]?.instance;
+    if (!previous || !node.instance ||
+      previous.component.assetId !== node.instance.component.assetId ||
+      previous.component.packageId !== node.instance.component.packageId) continue;
+    const { set } = components(node.instance.component.assetId);
+    const variant = set.variants.find((candidate) =>
+      Object.entries(node.instance.variant ?? {}).every(([axis, value]) => candidate.selection?.[axis] === value)) ?? set.variants[0];
+    for (const [key, links] of Object.entries(previous.overrides ?? {})) {
+      if (!key.endsWith(":interactions") || !variant.nodes[key.slice(0, -":interactions".length)]) continue;
+      node.instance.overrides ??= {};
+      if (!Object.hasOwn(node.instance.overrides, key))
+        node.instance.overrides[key] = structuredClone(links);
+    }
+  }
   presentation.nodes = nodes;
   presentation.rootId = rootId;
   if (!spec.into) presentation.viewport = { width: nodes[rootId].width, height: nodes[rootId].height };
@@ -750,24 +964,362 @@ export function pageDrawOperation(snapshot, spec, options = {}) {
   return { type: "put-screen", screen, ...(found ? { entry: found.entry } : {}) };
 }
 
-// link: {from: "Page / Element", to: "Page", on?: "click", action?:
-// "navigate" | "overlay" | "back"} -> a set-interaction intent.
-export function flowLinkIntent(snapshot, link) {
-  if (!isRecord(link) || typeof link.from !== "string")
-    fail("invalid_flow_link", "Expected --from \"Page / Element\" and --to \"Page\" (or --action back)");
-  const { screen, presentation, nodeId } = findPageElement(snapshot, link.from);
-  const action = link.action ?? "navigate";
-  const interaction = { "event-type": link.on ?? "click", "action-type": action === "overlay" ? "open-overlay" : action === "back" ? "prev-screen" : "navigate" };
-  if (action !== "back") interaction.destination = { screenId: findPage(snapshot, link.to ?? "").id };
-  return { action: "set-interaction", interaction, nodeId, presentationId: presentation.id, screenId: screen.id };
+// --- partial edits ----------------------------------------------------------
+//
+// page set / component set change a few fields of one element, or of the
+// page or variant itself, without drawing it again. Each field means what it
+// means in page draw: the element is built from those fields by the same
+// builder, the fields it controls are copied onto the stored element, and
+// the tree is sized again (texts measured, hugging containers regrown), as a
+// redraw would.
+
+const SET_FIELDS = Object.freeze([
+  "width", "height", "fill", "color", "stroke", "radius", "opacity", "shadow", "visible", "rotation",
+  "margin", "minWidth", "maxWidth", "minHeight", "maxHeight",
+  "text", "font", "fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "textTransform", "textDecoration", "textAlign",
+  "layout", "gap", "padding", "align", "justify",
+  "props", "set",
+]);
+const COPY_FIELDS = new Set(["props", "text", "set", "width", "height", "visible", "opacity"]);
+
+// Spec field -> the stored fields and Token bindings it controls.
+const CONTROLS = {
+  fill: { fields: ["fills"], bindings: ["fill"] },
+  color: { fields: ["fills"], bindings: ["fill"] },
+  stroke: { fields: ["strokes"], bindings: ["stroke", "strokeWidth", "strokeWidthTop", "strokeWidthRight", "strokeWidthBottom", "strokeWidthLeft"] },
+  radius: { fields: ["cornerRadius"], bindings: ["cornerRadius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft"] },
+  opacity: { fields: ["opacity"], bindings: ["opacity"] },
+  shadow: { fields: ["shadow"], bindings: ["shadow"] },
+  rotation: { fields: ["rotation"], bindings: ["rotation"] },
+  margin: { fields: ["layout-item-margin", "layout-item-margin-type"], bindings: ["marginTop", "marginRight", "marginBottom", "marginLeft"] },
+  minWidth: { fields: ["layout-item-min-w"], bindings: ["minWidth"] },
+  maxWidth: { fields: ["layout-item-max-w"], bindings: ["maxWidth"] },
+  minHeight: { fields: ["layout-item-min-h"], bindings: ["minHeight"] },
+  maxHeight: { fields: ["layout-item-max-h"], bindings: ["maxHeight"] },
+  gap: { fields: ["layout-gap"], bindings: ["itemSpacing"] },
+  padding: { fields: ["layout-padding", "layout-padding-type"], bindings: ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"] },
+  align: { fields: ["layout-align-items"], bindings: [] },
+  justify: { fields: ["layout-justify-content"], bindings: [] },
+};
+const TEXT_STYLE_CONTROLS = {
+  font: { bindings: ["typography"] },
+  fontFamily: { keys: ["fontFamily"], bindings: ["fontFamily"] },
+  fontSize: { keys: ["fontSize"], bindings: ["fontSize"] },
+  fontWeight: { keys: ["fontWeight"], bindings: ["fontWeight"] },
+  lineHeight: { keys: ["lineHeight"], bindings: ["lineHeight"] },
+  letterSpacing: { keys: ["letterSpacing"], bindings: ["letterSpacing"] },
+  textTransform: { keys: ["textTransform"], bindings: ["textTransform"] },
+  textDecoration: { keys: ["textDecoration"], bindings: ["textDecoration"] },
+  textAlign: { keys: ["textAlign"], bindings: [] },
+};
+
+function parentOf(nodes, id) {
+  return Object.values(nodes).find((node) => node.children?.includes(id));
 }
 
-export function flowStartIntent(snapshot, page, newId) {
+// Applies set to nodes[id] in place. builder holds the stored nodes, so a
+// longer text in a copy widens it as page draw does.
+function setElementFields(builder, nodes, id, set, where, root) {
+  const node = nodes[id];
+  if (!isRecord(set) || !Object.keys(set).length) fail("invalid_set", "Give at least one field to set, for example --set width=320", { allowedFields: SET_FIELDS });
+  for (const key of Object.keys(set))
+    if (!SET_FIELDS.includes(key)) fail("unknown_set_field", `Unknown field ${key} (at ${where})`, { allowedFields: SET_FIELDS });
+  const parent = parentOf(nodes, id);
+  const parentFlex = parent?.layout === "flex" ? parent["layout-flex-dir"] ?? "row" : false;
+  const scratch = new TreeBuilder(`${builder.prefix}_set`, builder.tokens, builder.components);
+  if (node.instance) {
+    const unsupported = Object.keys(set).filter((key) => !COPY_FIELDS.has(key));
+    if (unsupported.length)
+      fail("unknown_set_field", `A copy of a component takes ${[...COPY_FIELDS].join(", ")}; change ${unsupported.join(", ")} in the component (at ${where})`, { allowedFields: [...COPY_FIELDS] });
+    const { set: component } = builder.components(node.instance.component.assetId);
+    const props = Object.fromEntries((component.axes ?? []).map((axis) => [axis.name, node.instance.variant?.[axis.id]]).filter(([, value]) => value !== undefined));
+    const sizing = node["layout-item-h-sizing"];
+    const spec = {
+      name: node.name, use: component.id, props: { ...props, ...(set.props ?? {}) },
+      ...(set.width !== undefined ? { width: set.width } : sizing === "fill" ? { width: "fill" } : sizing === "fix" || parentFlex && sizing !== "auto" ? { width: node.width } : {}),
+    };
+    if (set.text !== undefined) {
+      if (!isRecord(set.text)) fail("invalid_set", `A copy's text takes {"Element": "text"} (at ${where})`);
+      spec.text = set.text;
+    }
+    if (set.set !== undefined) spec.set = set.set;
+    const scratchId = scratch.build(spec, [where.split(" › ")[0]], parentFlex);
+    const built = scratch.nodes[scratchId];
+    if (set.props !== undefined) node.instance.variant = built.instance.variant;
+    // A value written now replaces the Token its field followed: the
+    // copy's own binding for it goes, and the builder drops the
+    // component's (null).
+    const previousOverrides = node.instance.overrides ?? {};
+    const overrides = { ...previousOverrides };
+    const fresh = built.instance.overrides ?? {};
+    for (const [key, value] of Object.entries(fresh)) {
+      const at = key.lastIndexOf(":");
+      const target = key.slice(0, at), field = key.slice(at + 1);
+      if (field === "tokenBindings") continue;
+      overrides[key] = value;
+      const binding = field === "textStyle" ? undefined : Object.values(INSTANCE_SETTINGS).find((setting) => setting.field === field)?.binding;
+      const bound = overrides[`${target}:tokenBindings`];
+      if (binding && bound && binding in bound) {
+        const { [binding]: _dropped, ...rest } = bound;
+        if (Object.keys(rest).length) overrides[`${target}:tokenBindings`] = rest;
+        else delete overrides[`${target}:tokenBindings`];
+      }
+    }
+    for (const [key, value] of Object.entries(fresh))
+      if (key.endsWith(":tokenBindings")) overrides[key] = { ...(overrides[key] ?? {}), ...value };
+    node.instance.overrides = overrides;
+    if (!Object.keys(node.instance.overrides).length) delete node.instance.overrides;
+    Object.assign(builder.probes, scratch.probes);
+    for (const entry of scratch.widen) {
+      const targetId = entry.probe.slice(scratchId.length + 2);
+      const previousText = previousOverrides[`${targetId}:text`];
+      let previousProbe;
+      if (previousText !== undefined) {
+        previousProbe = `${entry.probe}::previous`;
+        const reference = previousOverrides[`${targetId}:tokenBindings`]?.text;
+        const translations = reference && [...builder.tokens.values()].find((item) => item.token.id === reference.assetId)?.translations;
+        builder.probes[previousProbe] = {
+          ...scratch.probes[entry.probe], id: previousProbe,
+          text: translations?.size > 1 ? widestText(translations) : String(previousText),
+        };
+      }
+      builder.widen.push({ ...entry, id, previousProbe });
+    }
+    for (const field of ["width", "height"])
+      if (set[field] !== undefined) {
+        const value = Number(set[field]);
+        if (!Number.isFinite(value)) fail("invalid_instance_size", `A copy's ${field} takes a number (at ${where})`);
+        node[field] = value;
+        node[field === "width" ? "layout-item-h-sizing" : "layout-item-v-sizing"] = "fix";
+      }
+    if (set.visible !== undefined) {
+      if (set.visible === false || set.visible === "false") node.visible = false;
+      else delete node.visible;
+    }
+    if (set.opacity !== undefined) node.opacity = Number(set.opacity);
+    return;
+  }
+  if (set.props !== undefined || set.set !== undefined)
+    fail("unknown_set_field", `props and set are for copies of a component; ${node.name} is not one (at ${where})`);
+  const isText = node.type === "TEXT";
+  if (!isText && (set.text !== undefined || Object.keys(TEXT_STYLE_CONTROLS).some((key) => set[key] !== undefined)))
+    fail("unknown_set_field", `${node.name} is not a text (at ${where})`);
+  if (root && ["fill", "100%", "hug"].includes(String(set.width ?? set.height ?? "").toLowerCase()))
+    fail("invalid_size", `The page or variant itself takes a number for its size (at ${where})`);
+  const flexDir = node.layout === "flex" ? node["layout-flex-dir"] : undefined;
+  const layout = set.layout ?? (flexDir ? (flexDir.startsWith("column") ? "column" : "row") : undefined);
+  const spec = {
+    ...Object.fromEntries(Object.entries(set).filter(([key]) => !["layout"].includes(key))),
+    name: node.name,
+    ...(isText ? { text: set.text ?? node.text ?? "" } : { type: "frame", ...(layout ? { layout } : {}) }),
+  };
+  const scratchId = scratch.build(spec, [where.split(" › ")[0]], parentFlex);
+  const built = scratch.nodes[scratchId];
+  const bindings = { ...(node.tokenBindings ?? {}) };
+  const takeBindings = (names) => {
+    for (const name of names) {
+      delete bindings[name];
+      if (built.tokenBindings?.[name]) bindings[name] = built.tokenBindings[name];
+    }
+  };
+  for (const [key, control] of Object.entries(CONTROLS)) {
+    if (set[key] === undefined) continue;
+    for (const field of control.fields) {
+      if (built[field] === undefined) delete node[field];
+      else node[field] = structuredClone(built[field]);
+    }
+    takeBindings(control.bindings);
+  }
+  if (set.visible !== undefined) {
+    if (built.visible === false) node.visible = false;
+    else delete node.visible;
+    takeBindings(["visible"]);
+  }
+  if (isText) {
+    if (set.text !== undefined) {
+      node.text = built.text;
+      delete node.textBlocks;
+      takeBindings(["text"]);
+      if (scratch.measureTexts[scratchId]) builder.measureTexts[id] = scratch.measureTexts[scratchId];
+    }
+    const style = { ...(node.textStyle ?? {}) };
+    for (const [key, control] of Object.entries(TEXT_STYLE_CONTROLS)) {
+      if (set[key] === undefined) continue;
+      if (key === "font") Object.assign(style, built.textStyle ?? {});
+      else for (const name of control.keys) {
+        if (built.textStyle?.[name] === undefined) delete style[name];
+        else style[name] = built.textStyle[name];
+      }
+      takeBindings(control.bindings);
+    }
+    if (Object.keys(style).length) node.textStyle = style;
+  }
+  if (set.layout !== undefined) {
+    const was = node.layout === "flex";
+    if (set.layout === "none") {
+      for (const field of ["layout", "layout-flex-dir", "layout-gap", "layout-padding", "layout-padding-type", "layout-align-items", "layout-justify-content"]) delete node[field];
+      if (was) node.children = [...node.children].reverse();
+    } else if (["row", "column"].includes(set.layout)) {
+      node.layout = "flex";
+      node["layout-flex-dir"] = set.layout;
+      // A flex line stores its children last-first (see build).
+      if (!was) node.children = [...node.children].reverse();
+      for (const childId of node.children) {
+        const child = nodes[childId];
+        child["layout-item-h-sizing"] ??= "fix";
+        child["layout-item-v-sizing"] ??= "fix";
+      }
+    } else fail("invalid_layout", `layout is row, column or none (at ${where})`, { values: ["row", "column", "none"] });
+  }
+  for (const [field, sizing] of [["width", "layout-item-h-sizing"], ["height", "layout-item-v-sizing"]]) {
+    if (set[field] === undefined) continue;
+    const size = sizeSpec(set[field]);
+    if (size.mode === "fill" && !parentFlex) fail("invalid_size", `fill needs a parent with a row or column layout (at ${where})`);
+    if (parentFlex) node[sizing] = size.mode;
+    if (size.mode === "fix") node[field] = size.value;
+    if (isText && field === "width") node.growType = size.mode === "auto" ? "auto-width" : "auto-height";
+    if (!parentFlex && size.mode === "auto" && !isText && node.layout !== "flex") fail("invalid_size", `hug needs a row or column layout inside ${node.name} (at ${where})`);
+    if (!parentFlex && size.mode === "auto") node[`_${field}Hug`] = true;
+  }
+  if (Object.keys(bindings).length) node.tokenBindings = bindings;
+  else delete node.tokenBindings;
+}
+
+// Stored sizes as sizing modes again, so sizeDesignTree measures texts and
+// regrows hugging containers after an edit.
+function storedSizing(nodes, rootId) {
+  for (const [id, node] of Object.entries(nodes)) {
+    const fixed = { width: { mode: "fix" }, height: { mode: "fix" } };
+    if (id === rootId || node.instance) {
+      node._size = fixed;
+      continue;
+    }
+    const h = node["layout-item-h-sizing"], v = node["layout-item-v-sizing"];
+    const isText = node.type === "TEXT";
+    const width = { mode: h === "fill" ? "fill" : h === "auto" || node._widthHug || (isText && node.growType === "auto-width") ? "auto" : "fix" };
+    const height = { mode: v === "fill" ? "fill" : v === "auto" || node._heightHug || (isText && ["auto-width", "auto-height"].includes(node.growType)) ? "auto" : "fix" };
+    delete node._widthHug;
+    delete node._heightHug;
+    node._size = { width, height };
+    if (isText) {
+      if (width.mode !== "fix") delete node.width;
+      if (height.mode !== "fix") delete node.height;
+    } else if (node.layout === "flex") {
+      if (width.mode === "auto") delete node.width;
+      if (height.mode === "auto") delete node.height;
+    }
+  }
+}
+
+// One element's path (or the root), or every version / variant that has it.
+// Versions and variants often differ on purpose (a narrower mobile card, a
+// hover fill), so an element in several of them changes in all only with
+// all; otherwise the edit names one.
+function editTargets(list, element, label, { all = false, one, kind }) {
+  const found = [];
+  let firstError;
+  for (const item of list) {
+    try {
+      found.push({ item, id: element === undefined ? item.rootId : findElement(item.nodes, item.rootId, element, label(item)) });
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  if (!found.length) throw firstError;
+  if (found.length > 1 && !all) {
+    const names = found.map(({ item }) => kind.name(item));
+    fail("ambiguous_target", `${element === undefined ? "This" : element} is in ${found.length} ${kind.plural}: ${names.slice(0, 8).join("; ")}${names.length > 8 ? `; and ${names.length - 8} more` : ""}. ` +
+      `They may differ on purpose: name one with ${one}, or pass --all to change every one`, {
+      [kind.plural]: names.slice(0, 20),
+      ...(names.length > 20 ? { more: names.length - 20 } : {}),
+    });
+  }
+  return found;
+}
+
+function sizeAgain(builder, nodes, rootId, options) {
+  storedSizing(nodes, rootId);
+  const measure = options.measure?.({ nodes, probes: builder.probes, rootId, measureTexts: builder.measureTexts });
+  widenInstances(builder, measure);
+  sizeDesignTree(nodes, rootId, measure);
+}
+
+// page set: {page, platform?, element?, all?, set}. The one version that
+// has the element (or the page), the named one, or every one with all.
+export function pageSetOperation(snapshot, { page, platform, element, all, set }, options = {}) {
+  const found = findPage(snapshot, page);
+  const entry = snapshot.manifest.entries.screens.find((name) => snapshot.entries[name].id === found.id);
+  const screen = structuredClone(found);
+  const versions = platform !== undefined ? [findPresentation(screen, platform)] : screen.presentations;
+  const label = (presentation) => `${screen.name} (${presentation.platform ?? presentation.name})`;
+  const tokens = tokenIndex(snapshot, options);
+  const components = componentIndex(snapshot, options);
+  const kind = { plural: "platforms", name: (presentation) => presentation.platform ?? presentation.name };
+  for (const { item: presentation, id } of editTargets(versions, element, label, { all, one: "--platform", kind })) {
+    const builder = new TreeBuilder(slug(`${screen.id}_${presentation.platform ?? presentation.name}`), tokens, components);
+    builder.nodes = presentation.nodes;
+    setElementFields(builder, presentation.nodes, id, set, label(presentation) + (element ? ` › ${element}` : ""), id === presentation.rootId);
+    sizeAgain(builder, presentation.nodes, presentation.rootId, options);
+    const rootNode = presentation.nodes[presentation.rootId];
+    presentation.viewport = { width: rootNode.width, height: rootNode.height };
+  }
+  return { type: "put-screen", screen, entry };
+}
+
+// component set: {component, variant?, element?, all?, set}. The one
+// variant that has the element (or the component), the named one, or every
+// one with all.
+export function componentSetOperation(snapshot, { component, variant, element, all, set }, options = {}) {
+  const { owner, set: found } = findComponent(snapshot, component, options);
+  if (owner !== snapshot)
+    fail("component_not_here", `${found.name} belongs to ${owner.manifest.name ?? "another package"}; edit it there`, { package: owner.manifest.name, path: owner.locator });
+  const componentSet = structuredClone(found);
+  const variants = variant !== undefined ? [componentSet.variants.find(({ id }) => id === findVariant(found, variant).id)] : componentSet.variants;
+  const labelOf = (item) => {
+    const text = (componentSet.axes ?? []).map((axis) => `${axis.name}=${item.selection?.[axis.id]}`).join(", ");
+    return text ? `${componentSet.name} (${text})` : componentSet.name;
+  };
+  const tokens = tokenIndex(snapshot, options);
+  const components = componentIndex(snapshot, options);
+  const kind = { plural: "variants", name: (item) => (componentSet.axes ?? []).map((axis) => `${axis.name}=${item.selection?.[axis.id]}`).join(", ") || "default" };
+  for (const { item: target, id } of editTargets(variants, element, labelOf, { all, one: "--variant", kind })) {
+    const builder = new TreeBuilder(slug(`${componentSet.id}_${target.id}`), tokens, components);
+    builder.nodes = target.nodes;
+    setElementFields(builder, target.nodes, id, set, labelOf(target) + (element ? ` › ${element}` : ""), id === target.rootId);
+    sizeAgain(builder, target.nodes, target.rootId, options);
+  }
+  return { type: "put-component-set", componentSet };
+}
+
+// link: {from: "Page / Element", to: "Page", on?: "click", action?:
+// "navigate" | "overlay" | "back"} -> a set-interaction intent.
+export function flowLinkIntent(snapshot, link, lookups = {}) {
+  if (!isRecord(link) || typeof link.from !== "string")
+    fail("invalid_flow_link", "Expected --from \"Page / Element\" and --to \"Page\" (or --action back)");
+  // An element inside a copy ("Page / Card / Open") links from the copy.
+  const { screen, presentation, nodeId, inside } = findPageElement(snapshot, link.from, link.platform, lookups);
+  const action = link.action ?? "navigate";
+  const interaction = { "event-type": link.on ?? "click", "action-type": action === "overlay" ? "open-overlay" : action === "back" ? "prev-screen" : "navigate" };
+  if (action !== "back") {
+    // A link from one version lands on the same version of the target page
+    // when it has one ("desktop" to "desktop").
+    const target = findPage(snapshot, link.to ?? "");
+    const platform = presentation.platform ?? presentation.name;
+    const same = target.presentations.find((candidate) => (candidate.platform ?? candidate.name) === platform);
+    interaction.destination = { screenId: target.id, ...(same ? { presentationId: same.id } : {}) };
+  }
+  return { action: "set-interaction", interaction, nodeId, ...(inside ? { sourcePath: inside.sourcePath } : {}), presentationId: presentation.id, screenId: screen.id };
+}
+
+export function flowStartIntent(snapshot, page, newId, platform) {
   const screen = findPage(snapshot, page);
-  const presentation = findPresentation(screen);
+  const presentation = findPresentation(screen, platform);
+  // Starts share one Penpot page per canvas: a page with several versions
+  // names the version, so two starts never read alike.
+  const name = screen.presentations.length > 1 ? `${screen.name} (${presentation.platform ?? presentation.name})` : screen.name;
   return {
     action: "set-start",
-    flow: { id: newId(), name: screen.name, startingNodeId: presentation.rootId },
+    flow: { id: newId(), name, startingNodeId: presentation.rootId },
     presentationId: presentation.id,
     screenId: screen.id,
   };

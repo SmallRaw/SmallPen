@@ -2,25 +2,28 @@ import { combineContextAxes, resolveContext } from "./contexts.mjs";
 import { listEffectiveTokens } from "./effective-tokens.mjs";
 import { listTokenThemes, selectTokenThemes } from "./token-themes.mjs";
 
+// Token types advised for a field. A plain number Token (a count, a ratio)
+// is not advised for sizes and spacing, which have their own types; it can
+// still be bound by name.
 const FIELD_TYPES = new Map([
   ["backgroundBlur", ["number", "other"]],
   ["blur", ["number", "other"]],
-  ["cornerRadius", ["border-radius", "dimensions", "number"]],
+  ["cornerRadius", ["border-radius", "dimensions"]],
   ["fill", ["color"]],
   ["fontFamily", ["font-family", "string"]],
-  ["fontSize", ["dimensions", "font-size", "number"]],
+  ["fontSize", ["dimensions", "font-size"]],
   ["fontWeight", ["font-weight", "number"]],
-  ["height", ["dimensions", "number", "sizing"]],
-  ["itemSpacing", ["dimensions", "number", "spacing"]],
+  ["height", ["dimensions", "sizing"]],
+  ["itemSpacing", ["dimensions", "spacing"]],
   ["opacity", ["number", "opacity"]],
-  ["paddingBottom", ["dimensions", "number", "spacing"]],
-  ["paddingLeft", ["dimensions", "number", "spacing"]],
-  ["paddingRight", ["dimensions", "number", "spacing"]],
-  ["paddingTop", ["dimensions", "number", "spacing"]],
+  ["paddingBottom", ["dimensions", "spacing"]],
+  ["paddingLeft", ["dimensions", "spacing"]],
+  ["paddingRight", ["dimensions", "spacing"]],
+  ["paddingTop", ["dimensions", "spacing"]],
   ["shadow", ["shadow"]],
   ["stroke", ["color"]],
   ["typography", ["typography"]],
-  ["width", ["dimensions", "number", "sizing"]],
+  ["width", ["dimensions", "sizing"]],
 ]);
 
 const NAMED_COLORS = new Map([
@@ -247,7 +250,7 @@ function nodesInPresentation(presentation) {
   return Object.values(presentation?.nodes ?? {}).map((node) => ({ changes: node, node }));
 }
 
-function nodesForOperation(snapshot, operation) {
+function nodesForOperation(snapshot, operation, before) {
   if (["add-presentation-node", "update-node", "update-presentation-node"].includes(operation.type)) {
     const node = presentationNode(snapshot, operation);
     return node ? [{ changes: operation.node ?? operation.changes ?? {}, node }] : [];
@@ -257,10 +260,24 @@ function nodesForOperation(snapshot, operation) {
     return node ? [{ changes: operation.changes ?? {}, node }] : [];
   }
   if (operation.type === "add-presentation") return nodesInPresentation(operation.presentation);
-  if (operation.type === "put-screen") return (operation.screen?.presentations ?? []).flatMap(nodesInPresentation);
+  // A whole screen or component written again: only the nodes it changed
+  // get advice, so a rename or a move does not repeat old advice.
+  if (operation.type === "put-screen") {
+    const oldEntry = before?.manifest.entries.screens.find((entry) => before.entries[entry]?.id === operation.screen?.id);
+    const old = oldEntry ? before.entries[oldEntry] : undefined;
+    return (operation.screen?.presentations ?? []).flatMap((presentation) => {
+      const oldNodes = old?.presentations.find(({ id }) => id === presentation.id)?.nodes ?? {};
+      return nodesInPresentation(presentation).filter(({ node }) => JSON.stringify(oldNodes[node.id]) !== JSON.stringify(node));
+    });
+  }
   if (operation.type === "put-component-set") {
-    return (operation.componentSet?.variants ?? []).flatMap((variant) =>
-      Object.values(variant.nodes ?? {}).map((node) => ({ changes: node, node })));
+    const old = before?.domain.componentSets.get(operation.componentSet?.id);
+    return (operation.componentSet?.variants ?? []).flatMap((variant) => {
+      const oldNodes = old?.variants.find(({ id }) => id === variant.id)?.nodes ?? {};
+      return Object.values(variant.nodes ?? {})
+        .filter((node) => JSON.stringify(oldNodes[node.id]) !== JSON.stringify(node))
+        .map((node) => ({ changes: node, node }));
+    });
   }
   if (operation.type === "put-variant") {
     return Object.values(operation.variant?.nodes ?? {}).map((node) => ({ changes: node, node }));
@@ -301,6 +318,9 @@ function hasBinding(node, bindingField) {
   if (bindingField.startsWith("fills.") && Object.hasOwn(bindings, "fill")) return true;
   // stroke binds the first stroke's color only.
   if (bindingField === "strokes.0" && Object.hasOwn(bindings, "stroke")) return true;
+  // A text style bound field by field needs no typography Token.
+  if (bindingField === "typography")
+    return ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing"].some((field) => Object.hasOwn(bindings, field));
   return ["fontFamily", "fontSize", "fontWeight"].includes(bindingField) && Object.hasOwn(bindings, "typography");
 }
 
@@ -323,7 +343,7 @@ export function designTokenAdviceForBatch(product, batch, options = {}) {
   // Context 展开和 Effective Token 解析每批只做一次；字段只做类型和值过滤。
   const searchIndex = createSearchIndex(product, options);
   for (const [operationIndex, operation] of (batch.operations ?? []).entries()) {
-    for (const { changes, node } of nodesForOperation(product, operation)) {
+    for (const { changes, node } of nodesForOperation(product, operation, options.before)) {
       for (const assignment of assignments(changes)) {
         if (hasBinding(node, assignment.bindingField)) continue;
         const searched = searchItems(product,

@@ -25,7 +25,9 @@ function pickOne(find, text) {
   const wanted = numbered(text);
   if (!wanted) return { matches };
   const again = find(wanted.name);
-  return { matches: again, one: again.length > 1 ? again[wanted.index - 1] : undefined };
+  // "Name [2]" when fewer than two remain names nothing; "[1]" of one is it.
+  if (wanted.index > again.length) return { matches: [] };
+  return { matches: again, one: again[wanted.index - 1] };
 }
 
 const numberedNames = (names) => names.map((name, index) => `${name} [${index + 1}]`);
@@ -165,7 +167,10 @@ export function findElement(nodes, rootId, text, where) {
 
 // "Tasks / List / Open" or "List / Card / Open": the longest leading part
 // that names a page, and the element path after it.
-export function findPageElement(snapshot, text, platform) {
+// "Page / Element", or "Page / Copy / Element" for an element inside a copy
+// of a component: then nodeId is the copy and inside names the component's
+// element (sourcePath, its name and type). lookups find the component.
+export function findPageElement(snapshot, text, platform, lookups) {
   const path = parts(text);
   for (let cut = path.length - 1; cut >= 1; cut -= 1) {
     const name = path.slice(0, cut).join(" / ");
@@ -175,12 +180,44 @@ export function findPageElement(snapshot, text, platform) {
     if (matches.length !== 1) continue;
     const screen = matches[0];
     const presentation = findPresentation(screen, platform);
-    const nodeId = findElement(presentation.nodes, presentation.rootId, path.slice(cut).join(" / "), screen.name);
-    return { screen, presentation, nodeId };
+    const rest = path.slice(cut);
+    try {
+      const nodeId = findElement(presentation.nodes, presentation.rootId, rest.join(" / "), screen.name);
+      return { screen, presentation, nodeId };
+    } catch (error) {
+      if (error?.code !== "unknown_element" || !lookups) throw error;
+      const inside = findInsideCopy(snapshot, presentation, rest, screen.name, lookups);
+      if (!inside) throw error;
+      return { screen, presentation, nodeId: inside.copyId, inside };
+    }
   }
   fail("unknown_page", `${text} does not start with a page name: "Page / Element"`, {
     pages: screens(snapshot).map((screen) => screen.name),
   });
+}
+
+// "Copy / Element": the longest leading part that names a stored copy, then
+// the element in the variant that copy shows.
+function findInsideCopy(snapshot, presentation, rest, where, { foundation, libraries = [] }) {
+  for (let split = rest.length - 1; split >= 1; split -= 1) {
+    let copyId;
+    try {
+      copyId = findElement(presentation.nodes, presentation.rootId, rest.slice(0, split).join(" / "), where);
+    } catch {
+      continue;
+    }
+    const copy = presentation.nodes[copyId];
+    if (!copy.instance) continue;
+    const set = [snapshot, foundation, ...libraries].filter(Boolean)
+      .map((owner) => owner.domain.componentSets.get(copy.instance.component.assetId)).find(Boolean);
+    if (!set) continue;
+    const variant = set.variants.find((candidate) =>
+      Object.entries(copy.instance.variant ?? {}).every(([axis, value]) => candidate.selection?.[axis] === value)) ?? set.variants[0];
+    const sourcePath = findElement(variant.nodes, variant.rootId, rest.slice(split).join(" / "), `${copy.name} (${set.name})`);
+    const element = variant.nodes[sourcePath];
+    return { copyId, sourcePath, name: element.name, type: element.type, component: set.name, path: [copy.name, element.name].join(" / ") };
+  }
+  return undefined;
 }
 
 // The shortest path that names an element on its page: "Open", or

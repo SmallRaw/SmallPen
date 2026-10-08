@@ -277,7 +277,7 @@ test("page views paginate one outline instead of repeating the projection", asyn
     "1",
     "--json",
   ]);
-  assert.equal(view.value.text, "Canvas · FRAME 800×600 · 1 item · literal fill");
+  assert.equal(view.value.text, "Canvas · FRAME 800×600 · 1 item · literal fill\n… 1 more line: add --offset 1");
   assert.equal(view.value.page.total, 2);
   assert.equal(view.value.page.hasMore, true);
   for (const key of ["nodes", "presentation", "screen", "components", "tokens"])
@@ -682,7 +682,8 @@ test("component views page their outline and select one variant by name", async 
     "1",
     "--json",
   ]);
-  assert.equal(page.value.text.split("\n").length, 1);
+  assert.equal(page.value.text.split("\n").length, 2);
+  assert.match(page.value.text, /\n… 5 more lines: add --offset 1$/);
   assert.equal(page.value.page.total, 6);
   assert.equal(page.value.page.hasMore, true);
   assert.equal(page.value.component.variantCount, 8);

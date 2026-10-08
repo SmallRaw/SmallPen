@@ -57,7 +57,7 @@ async function dryRun(workspace, target, operations) {
   await writeFile(
     batchPath,
     JSON.stringify({
-      baseRevision: inspected.package.revision,
+      baseRevision: inspected.revision,
       batchId: `errors-${batchCount}`,
       operations,
     }),

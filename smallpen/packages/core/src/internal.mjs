@@ -65,6 +65,9 @@ export const OVERRIDE_FIELDS = new Set([
   "cornerRadius",
   "fills",
   "height",
+  // Links from an element inside a copy (Penpot keeps them on the copy's
+  // child).
+  "interactions",
   "name",
   "opacity",
   "shadow",

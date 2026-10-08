@@ -70,6 +70,7 @@ test("one command schema describes only canonical selectors, values and defaults
     "wireframe",
     "png",
     "issues",
+    "spec",
   ]);
   const operation = (
     await run(["schema", "operation", "update-component-node", "--json"])
@@ -445,25 +446,19 @@ test("Token value errors identify the write input rather than an internal file p
 
 test("all commands have a small parameter contract and inherited names fail typed", async () => {
   const index = (await run(["schema", "commands", "--full", "--json"])).value;
-  for (const { name } of index.commands) {
-    const { value, bytes } = await run(["schema", "command", name, "--json"]);
-    assert.equal(value.command, name);
-    assert.ok(bytes < 16_384, `${name}: ${bytes} bytes`);
+  async function verify(path) {
+    const { value, bytes } = await run(["schema", "command", ...path, "--json"]);
+    assert.equal(value.command, path.join(" "));
+    assert.ok(bytes < 16_384, `${path.join(" ")}: ${bytes} bytes`);
     if (value.actions) {
-      for (const { action } of value.actions) {
-        const detail = (
-          await run(["schema", "command", name, action, "--json"])
-        ).value;
-        assert.ok(Object.keys(detail.parameters).length);
-      }
-      continue;
+      for (const { action } of value.actions) await verify([...path, action]);
+      return;
     }
     assert.ok(Object.keys(value.parameters).length);
-    assert.ok(
-      Object.values(value.parameters).every(
-        (parameter) => !Object.hasOwn(parameter, "aliases"),
-      ),
-    );
+    assert.ok(Object.values(value.parameters).every((parameter) => !Object.hasOwn(parameter, "aliases")));
+  }
+  for (const { name } of index.commands) {
+    await verify([name]);
   }
   const bad = (await run(["schema", "command", "__proto__", "--json"], 1)).value
     .error;
@@ -638,7 +633,7 @@ test("command-specific constraints fail with recovery facts before opening a pac
     ],
     [["token", "search"], ["--type", "invalid"], "invalid_token_type", "type"],
     [["advanced", "apply"], ["--batch", ""], "missing_batch", "batch"],
-    [["media", "import"], ["--file", ""], "missing_media_file", "file"],
+    [["asset", "media", "import"], ["--file", ""], "missing_media_file", "file"],
     [["token", "show"], [], "missing_token_path", "path"],
     [["token", "explain"], [], "missing_token_path", "path"],
     [["token", "impact"], [], "missing_token_path", "path"],

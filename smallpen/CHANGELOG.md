@@ -2,11 +2,24 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.7 (2026-10-08)
+
+### Token settings and file assets
+
+- Token values and theme settings share one entry point: `token theme
+  list|add|rename|default|delete`. Top-level `theme`, `media` and `font`
+  groups are removed. Media and font files use `asset media` and
+  `asset font`; font choice and typography remain Token values.
+- The App's separate color and typography styles remain available through
+  `advanced style list|set|delete`. Ordinary help and the application Skill
+  use Tokens for design values. Help and schema expand one command level
+  at a time, including nested groups.
+
 ### Work by name
 - Theme options are named `Group/Option` everywhere, as in Token values:
-  `theme add --theme Viewport/Desktop --theme Viewport/Mobile` adds options
-  (a new group's first option is its default), and `theme rename`,
-  `theme default` and `theme delete` take the same names. `theme list`
+  `token theme add --theme Viewport/Desktop --theme Viewport/Mobile` adds options
+  (a new group's first option is its default), and `token theme rename`,
+  `token theme default` and `token theme delete` take the same names. `token theme list`
   shows option names; IDs and token Sets need `--full`. The JSON-intent
   `theme create/update/delete` and `token create/update` actions are gone.
 - `token delete --path NAME` and `token show|explain --path NAME` work by
@@ -15,7 +28,7 @@
   applies wherever no option has its own value, `values` set named
   `Group/Option`s. The CLI picks the token Set; agents never name one.
   `token list` rows list the values that differ under other options;
-  `--type` filters. `theme list` and `token list` show token Sets only
+  `--type` filters. `token theme list` and `token list` show token Sets only
   with `--full`.
 - `component define` builds a whole component from a base element tree,
   properties and per-variant changes. `page draw` draws a page, or one
@@ -30,8 +43,8 @@
   `--element` for one element, `--platform` for one version),
   `component rename|delete` (`--element` renames an element in every
   variant, `--variant` deletes one), `flow list`, `flow unlink`,
-  `flow start --remove`, `asset set|delete --color|--typography`,
-  `media delete --media` and `font delete --font`.
+  `flow start --remove`, `advanced style set|delete --color|--typography`,
+  `asset media delete --media` and `asset font delete --font`.
 - The CLI no longer takes IDs. Removed: `read`, `project show`,
   `component show`, `component-edit`, `page show|create|add|update`, the
   `config` group, `flow show|update|delete|test`, `asset create|update`,
@@ -67,6 +80,86 @@
   it still uses (`used_elsewhere` lists where).
 - A page that other pages link to cannot be deleted until its links are
   removed.
+
+### Change one element, read its design values
+- `page set` and `component set` change some fields of one element, or of
+  a page version or component itself, without drawing it again:
+  `--set width=320 --set fill={color.surface} --set text="Save"`, a copy's
+  `props`, `text` and `set`, layout, gap, padding and text styles, with the
+  meaning they have in `page draw`. Texts are measured again and containers
+  that hug grow or shrink; links, IDs and other fields stay. Versions and
+  variants often differ on purpose, so an element in several of them is
+  refused with the list of where it is: name one with `--platform`
+  (`--variant`), or pass `--all` to change every one. A value written over
+  a Token binding replaces the binding, in `page draw` too.
+- `view --as spec` lists each element's place (x/y from
+  the top-left of the page or component), size and sizing (fill, hug),
+  layout, gap and padding, and every visual value with the Token it follows
+  (`{color.surface}`) or as a literal; copies name their component,
+  variant, texts and changes.
+- `token export --format json|flat` writes resolved Token data; without
+  `--by` the file is `tokens.json` and the reply names the theme options
+  it used.
+- An element inside a copy of a component can be a link source:
+  `flow link --from "List / Run card / Open" --to Detail`. The link is the
+  copy's override, the App shows it on the copy's element, and `flow list`,
+  `flow unlink` and `changes` name it the same way.
+- Starts of a page with several versions are named "List (mobile)", so two
+  starts never read alike; renaming the page renames them.
+- `project init` makes a package without pages (`page draw` makes the
+  first) and names its file after `--name` ("Team App" → `team-app.smallpen`).
+- The design system page names a component's first sample by its values
+  ("todo", "Primary") instead of "Default", and draws each string Token in
+  the font its theme option uses, so Chinese values show.
+- `validate` reports a text that hugs and grows past its container (a copy's
+  longer label cut by the card it sits in).
+- `changes` reads text styles key by key ("font size 13 → 16") and names the
+  page version or variant itself, not its root board, when its own size
+  changes.
+
+### Checks you can trust (second blind test)
+- `validate` counts every page version and every component variant
+  (`Button (48 variants)`), its skipped checks add up to `skippedCount` and
+  are grouped by kind with where they happened, and `complete` is true only
+  when every check ran. A named page or component (`--page`, `--component`)
+  gets the same short report; `--full` keeps every stored check.
+- New issue `content_overflow`: children wider or taller than their
+  container, with the room the content needs ("needs 272px wide but it is
+  200px").
+- A text that fills its slot is measured again at the slot's width, so it
+  wraps there and the containers that hug it grow: outline, PNG and App
+  agree. Several texts in one row hug instead of all filling, so one never
+  squeezes another into extra lines; the only text in a row still fills.
+- A copy of a component drawn without auto layout (a fixed one-line text in
+  a fixed box) widens for a longer text, with its box.
+- `component rename --element` without `--variant` renames the element in
+  every variant that has it at that path, even where variants were drawn
+  separately; with `--variant` it renames only there. `"Name [2]"` when
+  fewer than two remain is `unknown_element`.
+- Outlines show 80 lines by default and end with "… N more lines: add
+  --offset N" when cut; a long text says how many characters it left out
+  (`"…" (+54 chars)`), so a cut is not read as clipped text. Wireframes
+  number elements in reading order.
+- `changes` uses the commands' words (width, height, text size, direction,
+  gap, padding, radius), reports a renamed page or component once, says
+  what an added page holds (`desktop 840×501, 20 elements, uses Title,
+  Badge`), writes many variants as `Content=leading|trailing|icon; 36
+  variants`, sorts Tokens by name, lists colors, typographies, fonts and
+  media added, renamed or removed, and reports a page order only when a
+  page was moved (not when links or a start reorder the row).
+- Write replies by name say what they did (`done`, from the same
+  comparison as `changes`), group advice by element names, give `undo.argv`
+  and leave out hashes and counts. Plain number Tokens are no longer
+  advised for sizes and spacing. PNG exports leave out Token values;
+  repeated font fallbacks name three elements and count the rest.
+- `project show` counts pages, page versions, components, variants, Tokens,
+  theme options, links, starts and elements. `page list` lists each page
+  with its platforms. `component delete` lists each place that still uses
+  the component once, naming the page version or variant.
+- `token list --token color` lists one Token or every Token under a name.
+  `--context Density=Compact` takes names. `flow list` is one text
+  (`--full` adds fields). `canvas list` and `view --canvas` speak of rows
+  (one per module) with pages left to right, not of flows.
 
 ### Look at anything by name, learn what changed
 - `view` takes names: nothing for the whole package, `--tokens` or
@@ -174,7 +267,7 @@
 - Editing bound text or visibility in the App keeps the person's value and
   drops that one binding, as Penpot does for other Token attributes.
 - `token export [--type string] [--by Language] [--format json|flat]`
-  writes one file per option for application code.
+  writes one JSON file per option.
 - Text the fonts cannot draw (a language without glyphs) is now an issue
   (`text_missing_glyphs`) that says to import a covering font.
 - A language the bundled Latin font cannot draw, such as Chinese, is the

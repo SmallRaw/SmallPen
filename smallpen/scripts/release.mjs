@@ -231,6 +231,7 @@ export async function smokeRender(cli, temp) {
       process.execPath,
       [
         cli,
+        "asset",
         "media",
         "import",
         packagePath,

@@ -202,17 +202,17 @@ test("default exports remain text wireframes even with full output; PNG is expli
 test("colors can be created, read, edited and removed by name without replacing unrelated entries", async () => {
   const { path } = await workspace();
   const colors = async () =>
-    (await run(["asset", "list", path, "--kind", "colors"])).items.map(
+    (await run(["advanced", "style", "list", path, "--kind", "colors"])).items.map(
       (item) => item.asset,
     );
-  await run(["asset", "set", path, "--color", "Brand/Kept", "--value", "#abcdef"]);
+  await run(["advanced", "style", "set", path, "--color", "Brand/Kept", "--value", "#abcdef"]);
   const kept = (await colors()).find((asset) => asset.name === "Kept");
-  await run(["asset", "set", path, "--color", "Extra", "--value", "#123456"]);
+  await run(["advanced", "style", "set", path, "--color", "Extra", "--value", "#123456"]);
   assert.equal(
     (await colors()).find((asset) => asset.name === "Extra").paint.color,
     "#123456",
   );
-  await run(["asset", "set", path, "--color", "Extra", "--value", "#654321"]);
+  await run(["advanced", "style", "set", path, "--color", "Extra", "--value", "#654321"]);
   const edited = await colors();
   assert.equal(edited.filter((asset) => asset.name === "Extra").length, 1);
   assert.equal(
@@ -223,7 +223,7 @@ test("colors can be created, read, edited and removed by name without replacing 
     edited.find((asset) => asset.name === "Kept"),
     kept,
   );
-  await run(["asset", "delete", path, "--color", "Extra"]);
+  await run(["advanced", "style", "delete", path, "--color", "Extra"]);
   assert.deepEqual(await colors(), [kept]);
 });
 
@@ -233,10 +233,10 @@ test("font variants and individual typography fields can be maintained without r
     "../packages/local-package/assets/fonts/SourceSansPro-Regular.ttf",
     import.meta.url,
   ).pathname;
-  await run(["font", "import", path, "--file", fontFile, "--family", "Work Sans"]);
+  await run(["asset", "font", "import", path, "--file", fontFile, "--family", "Work Sans"]);
   // IDs appear only with --full; the typography must point at this font.
   const fonts = async () =>
-    (await run(["asset", "list", path, "--kind", "fonts", "--full"])).items;
+    (await run(["asset", "font", "list", path, "--full"])).items;
   const font = (await fonts())[0].asset;
   const style = {
     fontFamily: "Work Sans",
@@ -248,8 +248,7 @@ test("font variants and individual typography fields can be maintained without r
     textTransform: "none",
   };
   await run([
-    "asset",
-    "set",
+    "advanced", "style", "set",
     path,
     "--typography",
     "Text/Body",
@@ -258,14 +257,13 @@ test("font variants and individual typography fields can be maintained without r
   ]);
   const typography = async () =>
     (
-      await run(["asset", "list", path, "--kind", "typographies", "--full"])
+      await run(["advanced", "style", "list", path, "--kind", "typographies", "--full"])
     ).items[0].asset;
   const created = await typography();
   assert.equal(created.style.fontId, font.id);
   assert.deepEqual(created.style, { ...created.style, ...style });
   await run([
-    "asset",
-    "set",
+    "advanced", "style", "set",
     path,
     "--typography",
     "Text/Body",
@@ -281,26 +279,25 @@ test("font variants and individual typography fields can be maintained without r
   assert.equal(
     (
       await run(
-        ["font", "delete", path, "--font", "Work Sans", "--variant", "Missing"],
+        ["asset", "font", "delete", path, "--font", "Work Sans", "--variant", "Missing"],
         1,
       )
     ).error.code,
     "missing_font_variant",
   );
   assert.deepEqual(await stored(path), before);
-  await run(["asset", "delete", path, "--typography", "Text/Body"]);
+  await run(["advanced", "style", "delete", path, "--typography", "Text/Body"]);
   await run([
-    "font",
-    "delete",
+    "asset", "font", "delete",
     path,
     "--font",
     "Work Sans",
     "--variant",
     font.variants[0].name,
   ]);
-  assert.equal((await run(["asset", "list", path, "--kind", "fonts"])).page.total, 0);
+  assert.equal((await run(["asset", "font", "list", path])).page.total, 0);
   assert.equal(
-    (await run(["asset", "list", path, "--kind", "typographies"])).page.total,
+    (await run(["advanced", "style", "list", path, "--kind", "typographies"])).page.total,
     0,
   );
 });
@@ -383,7 +380,7 @@ test("AI configures prototype starts and links by name and reads connections wit
     "back",
   ]);
   const before = await stored(path);
-  const flows = await run(["flow", "list", path]);
+  const flows = await run(["flow", "list", path, "--full"]);
   assert.deepEqual(flows.starts.map((s) => s.page), ["Home"]);
   assert.deepEqual(flows.links, [
     {
@@ -505,7 +502,7 @@ test("native overlay, press release, hover, delay and external URL semantics sur
     [],
   );
   assert.ok(
-    !(await run(["flow", "list", path])).links.some(
+    !(await run(["flow", "list", path, "--full"])).links.some(
       (link) => link.element === "Hover",
     ),
   );
@@ -538,11 +535,8 @@ test("a page checks every version and layout gaps are never silently approved", 
   const before = await stored(path);
   const brief = await run(["validate", path, "--page", "Home"]);
   assert.equal(brief.coverage.targetCount, 2, "both versions are checked");
-  assert.ok(
-    brief.coverage.skipped.some(
-      (item) => item.code === "layout_projection_partial",
-    ),
-  );
+  // Sizes the preview cannot compute read as one note.
+  assert.match(brief.previewNote, /cannot compute some automatic sizes/);
   const report = await run(["validate", path, "--page", "Home", "--full"]);
   assert.deepEqual(
     report.coverage.targets.map((t) => t.presentationId),
@@ -618,8 +612,8 @@ test("reverse edits are new guarded writes and never overwrite later changes", a
     "--inverse-out",
     join(root, "retained-undo.json"),
   ]);
-  assert.equal(write.reverseEdit.newWrite, true);
-  assert.equal(write.reverseEdit.baseRevision, write.revision);
+  assert.deepEqual(write.undo.argv.slice(0, 4), ["advanced", "apply", path, "--batch"]);
+  assert.equal(write.baseRevision, undefined);
   const report = JSON.parse(await readFile(write.changeReportPath, "utf8"));
   assert.ok(report.entries.length);
   await run([

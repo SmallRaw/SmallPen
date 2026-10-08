@@ -240,7 +240,7 @@ test("a family card captions its axes once and each sample by what differs", () 
   const page = buildDesignSystemPage(refs, {}, { locale: "en" });
   const texts = Object.values(page.nodes).filter((node) => node.type === "TEXT").map((node) => node.text);
   assert.ok(texts.includes("Style: Primary / Secondary"));
-  assert.ok(texts.includes("Default") && texts.includes("Secondary"));
+  assert.ok(texts.includes("Primary") && texts.includes("Secondary"), "the first sample names its own values");
   assert.ok(texts.includes("Composite · 1"));
   const placeholders = roleNodes(page, "component-sample");
   assert.deepEqual(placeholders.map((node) => node.designSystem.sample).sort(), [0, 1]);

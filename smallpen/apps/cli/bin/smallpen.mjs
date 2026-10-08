@@ -24,6 +24,8 @@ import {
   flowLinkIntent,
   flowStartIntent,
   pageDrawOperation,
+  componentSetOperation,
+  pageSetOperation,
   themeAddIntents,
   themeDefaultIntent,
   themeDeleteIntent,
@@ -137,6 +139,8 @@ import {
   publicGuidance,
   publicArgv,
   groupRoute,
+  groupDefinition,
+  commandMatch,
 } from "./command-tree.mjs";
 import {
   artifactDirectory,
@@ -151,6 +155,7 @@ import {
   componentSummaryText,
   platformHints,
   localWireframe,
+  specTree,
   outlineTree,
   selectedDesign,
   themeSettings,
@@ -265,7 +270,7 @@ function contextSelection(args) {
       if (separator <= 0 || separator === value.length - 1) {
         throw new SmallPenError(
           "invalid_context_argument",
-          "--context requires AXIS_ID=VALUE_ID",
+          "--context requires CONTEXT=VALUE",
           { value },
         );
       }
@@ -337,7 +342,9 @@ function withoutIds(value) {
   return Object.fromEntries(
     Object.entries(value)
       .filter(([key]) => key === "batchId" || !ID_KEY.test(key))
-      .map(([key, child]) => [key, key === "argv" ? child : withoutIds(child)]),
+      .map(([key, child]) => [key, child, key === "argv" ? child : withoutIds(child)])
+      .filter(([, before, after]) => !emptied(before, after))
+      .map(([key, , after]) => [key, after]),
   );
 }
 function keepsIds(args) {
@@ -349,11 +356,53 @@ function keepsIds(args) {
   );
 }
 
+// A write by name answers what changed, what to look at and how to undo;
+// hashes, counts and each advised value stay in --full.
+function compactWriteReceipt(value, packagePath) {
+  if (!value || typeof value !== "object" || typeof value.batchId !== "string" || value.error) return value;
+  const out = { ...value };
+  // Undo is a new write of the saved inverse batch against this revision.
+  if (out.inverseBatchPath && !out.dryRun) {
+    out.undo = {
+      argv: ["advanced", "apply", packagePath, "--batch", out.inverseBatchPath],
+      note: "A new write against this revision; it refuses if the package changed since. The file expires after 30 minutes.",
+    };
+  }
+  delete out.reverseEdit;
+  if (out.revision !== undefined) delete out.baseRevision;
+  for (const key of ["inverseBatchHash", "changeReportHash", "affectedIdsCount", "changedFilesCount", "deletedFilesCount",
+    "warningsCount", "warningCount", "inverseOperationCount", "diffCount"])
+    delete out[key];
+  if (Array.isArray(out.deletedFiles) && !out.deletedFiles.length) delete out.deletedFiles;
+  // "textStyle" next to "textStyle.fontSize" on the same elements says it twice.
+  if (Array.isArray(out.warnings))
+    out.warnings = out.warnings.filter((warning, _index, all) => !all.some((other) => other !== warning && other.code === warning.code &&
+      typeof other.field === "string" && typeof warning.field === "string" && other.field.startsWith(`${warning.field}.`) &&
+      JSON.stringify((other.locations ?? []).map((location) => location.element)) === JSON.stringify((warning.locations ?? []).map((location) => location.element))));
+  if (Array.isArray(out.warnings))
+    out.warnings = out.warnings.map(({ locations, count, contextScope: _scope, valueSource: _source, match: _match, severity: _severity, ...warning }) => {
+      const elements = [...new Set((locations ?? []).map((location) => location.element).filter(Boolean))];
+      return {
+        ...warning,
+        ...(Array.isArray(warning.suggestions) && !warning.suggestions.length ? { suggestions: undefined } : {}),
+        ...(count !== undefined ? { count } : {}),
+        ...(elements.length ? { elements } : {}),
+      };
+    });
+  if (out.warningSummary)
+    out.warningSummary = {
+      total: out.warningSummary.total,
+      ...(out.warningSummary.suppressed ? { suppressed: out.warningSummary.suppressed } : {}),
+      ...(out.warningSummary.note ? { note: out.warningSummary.note } : {}),
+    };
+  return out;
+}
+
 function printJson(value) {
   // Every command that runs is public now: guidance names grouped paths.
   value = publicGuidance(value);
   const args = process.argv.slice(2);
-  if (!keepsIds(args)) value = withoutIds(value);
+  if (!keepsIds(args)) value = compactWriteReceipt(withoutIds(value), args[commandMatch(args)?.route ? commandMatch(args).length : 1]);
   const measuredOutput = [
     "help",
     "themes",
@@ -1200,6 +1249,9 @@ async function writeReply(result, args) {
     : result.alreadyApplied
       ? "Already applied"
       : "Applied";
+  // Empty advice says nothing: leave it out of the short reply.
+  if (!rest.reuseReminders?.length) delete rest.reuseReminders;
+  if (!rest.reuseSummary?.total) delete rest.reuseSummary;
   return {
     ...rest,
     ...fileHashes,
@@ -1237,8 +1289,16 @@ async function writeReply(result, args) {
   };
 }
 
+// A write by name says what it did in the words changes uses, from the
+// same comparison.
 async function applyBatch(packagePath, batch, args) {
-  return writeReply(await prepareAndApplyBatch(packagePath, batch, args), args);
+  const before = publicSurface ? await openPackage(packagePath).catch(() => undefined) : undefined;
+  const reply = await writeReply(await prepareAndApplyBatch(packagePath, batch, args), args);
+  if (before && reply.changed && !reply.dryRun && !reply.alreadyApplied) {
+    const text = designChangesText(designChanges(before, await openPackage(packagePath)));
+    if (text !== "No design changes.") reply.done = text;
+  }
+  return reply;
 }
 
 async function prepareAndApplyBatch(packagePath, batch, args) {
@@ -1298,6 +1358,7 @@ async function prepareAndApplyBatch(packagePath, batch, args) {
     batch,
     {
       foundation,
+      before: product,
     },
   );
   // A reminder names the Token to bind: an exact match alone, with just
@@ -1441,17 +1502,24 @@ async function initializeCommand(workspacePath, args) {
     );
     return { ...initialized, ...(await initializedSummary(initialized)) };
   }
+  // A blank package has no pages yet: page draw makes the first.
   const initialized = await trackedWrite(() =>
     initializeBlankWorkspace(workspacePath, {
       layout,
       name: option(args, "--name"),
+      page: false,
     }),
   );
-  const summary = await initializedSummary(initialized);
-  delete summary.seeded;
-  delete summary.start.contextAxes;
-  delete summary.start.scenarioIds;
-  return { ...initialized, ...summary };
+  const paths = [initialized.packagePath, initialized.foundationPath, initialized.productPath].filter(Boolean);
+  const opened = await Promise.all(paths.map((path) => openPackage(path)));
+  const summary = (snapshot) => ({ name: snapshot.manifest.name, path: snapshot.locator, revision: snapshot.revision });
+  return {
+    ...initialized,
+    packages: initialized.packagePath
+      ? { package: summary(opened[0]) }
+      : { foundation: summary(opened[0]), product: summary(opened[1]) },
+    next: "token set, component define, then page draw for the first page",
+  };
 }
 
 // The init reply names every id the first writes need (Packages, Screen,
@@ -1563,16 +1631,47 @@ async function initializedSummary({
 }
 
 // Diagnostics say where by element name, so they read without node IDs.
+// Sizes the preview cannot compute become one note, and a font fallback
+// one entry per missing family.
 function nameDiagnostics(diagnostics = [], projection) {
   const nodes = projection?.nodes ?? {};
   const name = (id) => (Object.hasOwn(nodes, id) ? elementPath(nodes, projection.rootId, id) || nodes[id].name : undefined);
-  return diagnostics.map((diagnostic) => {
+  const limits = diagnostics.filter((diagnostic) => diagnostic.code === "layout_projection_partial");
+  const fallbacks = new Map();
+  const rest = [];
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.code === "layout_projection_partial") continue;
+    if (diagnostic.code === "font_render_fallback" && !diagnostic.availableFonts) {
+      const family = diagnostic.details?.requestedFont ?? diagnostic.message;
+      const entry = fallbacks.get(family);
+      if (entry) {
+        entry.count += 1;
+        if (diagnostic.nodeId !== undefined) entry.nodeIds.push(diagnostic.nodeId);
+        continue;
+      }
+      const first = { ...diagnostic, count: 1, nodeIds: diagnostic.nodeId !== undefined ? [diagnostic.nodeId] : [] };
+      delete first.nodeId;
+      fallbacks.set(family, first);
+      rest.push(first);
+      continue;
+    }
+    rest.push(diagnostic);
+  }
+  if (limits.length)
+    rest.push({
+      code: "layout_projection_partial",
+      count: limits.length,
+      message: `The local preview cannot compute some automatic sizes in ${limits.length} place${limits.length === 1 ? "" : "s"}; geometry there may differ in the App.`,
+    });
+  return rest.map((diagnostic) => {
     const at = diagnostic.nodeId ?? diagnostic.instanceId;
     const element = at !== undefined ? name(at) : undefined;
     const elements = Array.isArray(diagnostic.nodeIds) ? diagnostic.nodeIds.map(name).filter(Boolean) : undefined;
     // The stored path spells node IDs; the element name replaces it.
     const { path: _path, ...rest } = element ? diagnostic : { path: undefined, ...diagnostic };
-    return { ...rest, ...(element ? { element } : {}), ...(elements?.length ? { elements } : {}) };
+    // A font missing from every text is one fact, not a list of texts.
+    const listed = elements?.length > 3 ? { elements: elements.slice(0, 3), moreElements: elements.length - 3 } : elements?.length ? { elements } : {};
+    return { ...rest, ...(element ? { element } : {}), ...listed };
   });
 }
 
@@ -1635,7 +1734,7 @@ async function renderEvidence(product, options) {
       message:
         `${entry.diagnostic.message} on ${entry.nodeIds.length} text node(s): ` +
         `${requestedFont} is neither bundled nor imported. Available fonts: ` +
-        `${availableFonts.join(", ")}. Import ${requestedFont} with smallpen font import ` +
+        `${availableFonts.join(", ")}. Import ${requestedFont} with smallpen asset font import ` +
         "(once per weight/style; see nextOperations), or use an available family.",
       nextOperations: [
         {
@@ -1785,10 +1884,12 @@ async function designCommand(packagePath, args, override) {
     ),
     selection: design.selection,
     // Path and resolved value say what the selection resolves to; --full
-    // adds each binding's reference and source.
-    tokenSources: flag(args, "--full")
-      ? design.tokenSources
-      : design.tokenSources?.map(({ path, value }) => ({ path, value })),
+    // adds each binding's reference and source. A PNG says it in pixels.
+    ...(format === "png" && !flag(args, "--full") ? {} : {
+      tokenSources: flag(args, "--full")
+        ? design.tokenSources
+        : design.tokenSources?.map(({ path, value }) => ({ path, value })),
+    }),
     diagnostics: nameDiagnostics(design.projection.diagnostics ?? [], design.projection),
   };
   const hints = platformHints(workspace, design);
@@ -1849,13 +1950,22 @@ async function designCommand(packagePath, args, override) {
     const text =
       format === "wireframe"
         ? localWireframe(design, { full: flag(args, "--full") })
-        : outline;
+        : format === "spec"
+          ? specTree(design.tree, design.projection, {
+              components,
+              tokenName: tokenNamer(workspace),
+              stored: storedNodesOf(workspace, design.selection),
+              heading: `Spec · px, x/y from the top-left of ${design.tree.root.name} · themes ${themeSettings(workspace).selection.themes.join(", ") || "defaults"} · {path} = Token`,
+            })
+          : outline;
     const lines = text.split("\n");
+    // A page outline reads whole; long ones page at 80 lines.
     const offset = integerOption(args, "--offset"),
       limit =
         flag(args, "--full") && !args.includes("--limit")
           ? lines.length
-          : integerOption(args, "--limit");
+          : args.includes("--limit") ? integerOption(args, "--limit") : 80;
+    const rest = lines.length - offset - limit;
     return {
       ...receipt,
       format,
@@ -1863,8 +1973,9 @@ async function designCommand(packagePath, args, override) {
       [format === "wireframe" ? "wireframe" : "outline"]:
         format === "wireframe"
           ? text
-          : lines.slice(offset, offset + limit).join("\n"),
-      ...(format === "outline"
+          : [...lines.slice(offset, offset + limit),
+              ...(rest > 0 ? [`… ${rest} more line${rest === 1 ? "" : "s"}: add --offset ${offset + limit}`] : [])].join("\n"),
+      ...(format === "outline" || format === "spec"
         ? {
             page: {
               unit: "lines",
@@ -2528,19 +2639,24 @@ function discoveryArguments(command, args) {
       options.push(args[++index]);
   }
   validateCommandArguments(command, [command, "", ...options]);
-  const maximum = command === "schema" && positional[0] === "command" ? 3 : 2;
-  if (positional.length > maximum)
+  const commandOffset = command === "schema" && positional[0] === "command" ? 1 : 0;
+  const matched = command === "help" || commandOffset ? commandMatch(positional.slice(commandOffset)) : undefined;
+  const maximum = matched?.length ?? (commandOffset ? 3 : 2);
+  const allowed = matched ? maximum + commandOffset : maximum;
+  if (positional.length > allowed)
     throw new SmallPenError(
       "unexpected_argument",
-      `Unexpected positional argument: ${positional[maximum]}`,
+      `Unexpected positional argument: ${positional[allowed]}`,
       {
-        argument: positional[maximum],
+        argument: positional[allowed],
         nextOperations: [
           { operation: `smallpen.${command}`, argv: [command, "--json"] },
         ],
       },
     );
-  return positional;
+  return matched
+    ? [...positional.slice(0, commandOffset + 1), ...(positional.length > commandOffset + 1 ? [positional.slice(commandOffset + 1).join(" ")] : [])]
+    : positional;
 }
 
 // Each Token's value under the other theme options, where it differs.
@@ -2631,7 +2747,6 @@ async function lookAt(packagePath, args, ids, target) {
             issueCount: listed.issues.length,
             ...listed,
             ...(report.hints ? { hints: report.hints } : {}),
-            ...(report.page ? { page: report.page } : {}),
             revision: report.revision,
           },
       args,
@@ -2641,7 +2756,7 @@ async function lookAt(packagePath, args, ids, target) {
   const argv =
     as === "png"
       ? ["export", packagePath, ...ids, "--format", "png", ...pass]
-      : ["view", packagePath, ...ids, "--format", as === "wireframe" ? "wireframe" : "outline", ...pass];
+      : ["view", packagePath, ...ids, "--format", as === "wireframe" || as === "spec" ? as : "outline", ...pass];
   return lookResult(target, await designCommand(packagePath, argv), args, as);
 }
 
@@ -2855,10 +2970,11 @@ async function lookCanvas(packagePath, args, workspace, name) {
       if (!flow.rows.has(board.platform)) flow.rows.set(board.platform, []);
       flow.rows.get(board.platform).push(`${screens.get(board.screenId).name} ${Math.round(board.width)}×${Math.round(board.height)}`);
     }
+    // Left to right; links between pages are flow list's.
     const lines = [`${canvas.name}`];
     for (const flow of flows) {
-      lines.push(`  ${flow.name || "(no module)"}`);
-      for (const [platform, pages] of flow.rows) lines.push(`    ${platform}: ${pages.join(" → ")}`);
+      lines.push(`  ${flow.name ? `${flow.name} row` : "Other pages"}`);
+      for (const [platform, pages] of flow.rows) lines.push(`    ${platform}: ${pages.join(", ")}`);
     }
     return { target, as, text: lines.join("\n"), nextOperations: lookAgain(args, "png") };
   }
@@ -3155,7 +3271,7 @@ async function lookCommand(packagePath, args) {
       })
       .join(", ")}`);
   const canvasLines = canvasLayout(product.manifest, product.entries, product.runtime).map((canvas) =>
-    `${canvas.name} (${[...new Set(canvas.boards.map((board) => board.screenId))].length} pages, ${[...new Set(canvas.boards.map((board) => board.flow))].length} flows)`);
+    `${canvas.name} (${[...new Set(canvas.boards.map((board) => board.screenId))].length} pages, ${[...new Set(canvas.boards.map((board) => board.flow))].length} row${new Set(canvas.boards.map((board) => board.flow)).size === 1 ? "" : "s"})`);
   const lines = [
     `Themes: ${themes.join(" · ") || "none"}`,
     `Canvases: ${canvasLines.join(" · ") || "none"}`,
@@ -3347,10 +3463,8 @@ async function changesCommand(packagePath, args) {
   };
 }
 
-// token export: Token values as files for application code, one file per
-// option of a theme group (--by Language -> en.json, zh-CN.json), or one
-// file of default values. Code owns runtime switching; this keeps the files
-// in step with the design.
+// token export: resolved values as JSON, one file per option of a theme
+// group, or one file under the call's selected options and project defaults.
 function nestTokens(items) {
   const root = {};
   for (const { token, value } of items) {
@@ -3368,7 +3482,8 @@ async function tokenExportCommand(packagePath, args) {
   const by = option(args, "--by");
   const format = option(args, "--format") ?? "json";
   const base = await tokenWorkspace(packagePath, args);
-  let versions = [{ name: "default", themes: [] }];
+  // Without --by, one file of the values under the call's theme options.
+  let versions = [{ name: "tokens", themes: [] }];
   if (by !== undefined) {
     const groups = themeSettings(base).groups;
     const group = groups.find(({ name }) => name.toLowerCase() === by.toLowerCase());
@@ -3407,41 +3522,42 @@ async function tokenExportCommand(packagePath, args) {
       .filter((item) => !type || item.token.type === type)
       .filter((item) => !prefix || tokenUnder(item.token.path, prefix))
       .sort((left, right) => left.token.path.localeCompare(right.token.path, "en", { numeric: true }));
-    const data =
-      format === "flat"
-        ? Object.fromEntries(items.map((item) => [item.token.path, item.value]))
-        : nestTokens(items);
+    const text = `${JSON.stringify(format === "flat" ? Object.fromEntries(items.map((item) => [item.token.path, item.value])) : nestTokens(items), null, 2)}\n`;
     const file = join(directory, `${version.name.replace(/[^\w.-]+/g, "-")}.json`);
-    await writeFile(file, `${JSON.stringify(data, null, 2)}\n`);
+    await writeFile(file, text);
     files.push({ ...(version.themes[0] ? { option: version.themes[0] } : {}), file, tokens: items.length });
   }
   return {
     format,
     ...(by !== undefined ? { by } : {}),
+    // The theme options every file was resolved under.
+    themes: themeSettings(base).selection.themes,
     directory,
     files,
     revision: base.product.revision,
   };
 }
 
-// canvas list: every canvas with its business flows (one row block each, in
-// layout order) and their pages, as the App shows them.
+// canvas list: every canvas with its rows (one per module, "Tasks / ..."
+// pages, in layout order) and their pages left to right, as the App shows
+// them. Links between pages are flow list's.
 async function canvasListCommand(packagePath) {
   const snapshot = await openPackage(packagePath);
   const screens = new Map(snapshot.manifest.entries.screens.map((entry) => [snapshot.entries[entry].id, snapshot.entries[entry]]));
   const canvases = canvasLayout(snapshot.manifest, snapshot.entries, snapshot.runtime).map((canvas) => {
-    const flows = [];
+    const rows = [];
     for (const board of canvas.boards) {
-      let flow = flows.find((item) => item.name === (board.flow || "(no module)"));
-      if (!flow) flows.push((flow = { name: board.flow || "(no module)", pages: [], platforms: [] }));
+      const rowName = board.flow ? `${board.flow} row` : "Other pages";
+      let row = rows.find((item) => item.name === rowName);
+      if (!row) rows.push((row = { name: rowName, pages: [], platforms: [] }));
       const name = screens.get(board.screenId).name;
-      if (!flow.pages.includes(name)) flow.pages.push(name);
-      if (!flow.platforms.includes(board.platform)) flow.platforms.push(board.platform);
+      if (!row.pages.includes(name)) row.pages.push(name);
+      if (!row.platforms.includes(board.platform)) row.platforms.push(board.platform);
     }
-    return { name: canvas.name, flows };
+    return { name: canvas.name, rows };
   });
   const text = canvases
-    .map((canvas) => [`${canvas.name}`, ...canvas.flows.map((flow) => `  ${flow.name} [${flow.platforms.join(", ")}]: ${flow.pages.join(" → ")}`)].join("\n"))
+    .map((canvas) => [`${canvas.name}`, ...canvas.rows.map((row) => `  ${row.name} [${row.platforms.join(", ")}]: ${row.pages.join(", ")}`)].join("\n"))
     .join("\n");
   return { canvases, text, revision: snapshot.revision };
 }
@@ -3474,14 +3590,29 @@ async function dependentPackages(packagePath, snapshot) {
   return found;
 }
 
-async function flowListCommand(packagePath) {
-  const snapshot = await openPackage(packagePath);
-  const { starts, links } = flowLinks(snapshot);
+// The Foundation and Libraries a package's copies may come from.
+function workspaceLookups(workspace) {
+  return {
+    foundation: workspace.foundation !== workspace.product ? workspace.foundation : undefined,
+    libraries: workspace.libraries ?? [],
+  };
+}
+
+// The text says every start and link once; --full adds them as fields.
+async function flowListCommand(packagePath, args = []) {
+  const workspace = await readableWorkspace(packagePath);
+  const snapshot = workspace.product;
+  const { starts, links } = flowLinks(snapshot, workspaceLookups(workspace));
   const named = {
     starts: starts.map(({ page, platform, name }) => ({ page, platform, name })),
     links: links.map(({ page, platform, element, on, action, to }) => ({ page, platform, element, on, action, ...(to ? { to } : {}) })),
   };
-  return { ...named, text: flowLinksText(named), revision: snapshot.revision };
+  return {
+    text: flowLinksText(named),
+    counts: { starts: starts.length, links: links.length },
+    ...(flag(args, "--full") ? named : {}),
+    revision: snapshot.revision,
+  };
 }
 
 // Name-based edits: each names its target the way outlines show it and
@@ -3512,7 +3643,7 @@ function namedEditIntent(command, args) {
   }
   if (command === "media-delete") return { kind: "media", name: option(args, "--media") };
   if (command === "font-delete") return { kind: "fonts", name: option(args, "--font"), ...pick([["variant", "--variant"]]) };
-  if (command === "flow-unlink") return pick([["from", "--from"], ["on", "--on"], ["to", "--to"]]);
+  if (command === "flow-unlink") return pick([["from", "--from"], ["on", "--on"], ["to", "--to"], ["platform", "--platform"]]);
   if (command.startsWith("component-")) return pick([["component", "--component"], ["element", "--element"], ["to", "--to"], ["variant", "--variant"]]);
   return pick([["page", "--page"], ["to", "--to"], ["platform", "--platform"], ["element", "--element"]]);
 }
@@ -3520,7 +3651,7 @@ function namedEditIntent(command, args) {
 async function namedEditOperations(command, snapshot, intent, packagePath) {
   if (command === "page-rename") return pageRenameOperations(snapshot, intent);
   if (command === "page-delete") return pageDeleteOperations(snapshot, intent);
-  if (command === "flow-unlink") return [flowUnlinkOperation(snapshot, intent)];
+  if (command === "flow-unlink") return [flowUnlinkOperation(snapshot, intent, workspaceLookups(await readableWorkspace(packagePath)))];
   if (command === "asset-set") return assetSetOperations(snapshot, intent);
   if (command.endsWith("-delete") && !command.startsWith("component")) return assetDeleteOperations(snapshot, intent);
   const workspace = await readableWorkspace(packagePath);
@@ -3533,6 +3664,14 @@ async function namedEditOperations(command, snapshot, intent, packagePath) {
       ? componentRenameOperation(snapshot, intent, lookups)
       : componentDeleteOperation(snapshot, intent, lookups),
   ];
+}
+
+// A page version by name: {page, platform}.
+function versionName(snapshot, screenId, presentationId) {
+  const entry = snapshot.manifest.entries.screens.find((item) => snapshot.entries[item]?.id === screenId);
+  const screen = entry && snapshot.entries[entry];
+  const presentation = screen?.presentations.find(({ id }) => id === presentationId);
+  return screen ? { page: screen.name, ...(presentation ? { platform: presentation.platform ?? presentation.name } : {}) } : undefined;
 }
 
 // What a design selection is, by name: page and platform, or component and
@@ -3561,7 +3700,330 @@ function packageNameIssues({ product, foundation }) {
   return duplicateNameIssues(product, { foundation: foundation !== product ? foundation : undefined });
 }
 
-async function validateCommand(packagePath, args) {
+// Nothing named: every page in every version and every component in every
+// variant, as view --as issues checks them. A target that cannot be drawn
+// (a broken reference) makes the package invalid and says where.
+// The whole package, or one named page or component (`only`), in one short
+// report by name.
+async function validateWholePackage(packagePath, args, workspace, resolution, only) {
+  const { product } = workspace;
+  const pass = lookPass(args).filter((item) => item !== "--full");
+  const targets = only ?? [
+    ...product.manifest.entries.screens.map((entry) => product.entries[entry])
+      .map((screen) => ({ ids: ["--screen-id", screen.id, "--all"], where: screen.name })),
+    ...[...product.domain.componentSets.values()]
+      .map((set) => ({ ids: ["--component-id", set.id, "--all"], where: set.name })),
+  ];
+  const targetLabel = (selection = {}) => {
+    const named = selectionNames(workspace, selection);
+    const label = [named.page ?? named.component, named.platform ?? named.variant].filter(Boolean);
+    return label.length > 1 ? `${label[0]} (${label[1]})` : label[0] ?? "design";
+  };
+  const issues = [], checked = [], skipped = [], hints = [];
+  let unreadable = 0;
+  for (const target of targets) {
+    try {
+      const report = await validateTargets(workspace, ["validate", packagePath, ...target.ids, ...pass]);
+      for (const issue of report.issues ?? []) {
+        const named = selectionNames(workspace, issue.target ?? {});
+        const at = [named.page ?? named.component ?? target.where, named.platform ?? named.variant].filter(Boolean);
+        const { target: _target, ...rest } = issue;
+        issues.push({ target: at.length > 1 ? `${at[0]} (${at[1]})` : at[0], ...rest });
+      }
+      checked.push(...(report.coverage?.targets ?? []));
+      skipped.push(...(report.coverage?.skipped ?? []).map((skip) => ({ ...skip, label: targetLabel(skip.target) })));
+      for (const hint of report.hints ?? [])
+        if (!hints.some((other) => JSON.stringify(other) === JSON.stringify(hint))) hints.push(hint);
+    } catch (error) {
+      unreadable += 1;
+      issues.push({
+        target: target.where,
+        code: error?.code ?? "unreadable_target",
+        severity: "error",
+        check: "read",
+        message: `${target.where} cannot be drawn: ${error?.message ?? error}`,
+      });
+    }
+  }
+  // Sizes the local preview cannot compute are the tool's limit, not the
+  // design's: one note instead of one issue each.
+  const limits = issues.filter((issue) => issue.code === "layout_projection_partial");
+  // The visual-intent reminder repeats per target and the preview limit has
+  // its own note; neither is a check the tool skipped.
+  const notChecked = skipped.filter((skip) => skip.check !== "visual-intent" && skip.code !== "layout_projection_partial");
+  const design = [...(only ? [] : packageNameIssues(workspace)), ...issues.filter((issue) => issue.code !== "layout_projection_partial")];
+  const full = flag(args, "--full");
+  const page = pageItems(design, pagination(args));
+  return {
+    packageId: product.manifest.packageId,
+    ...workspaceRevisions(product, workspace.foundation, workspace.libraries),
+    status: unreadable ? "invalid" : "valid",
+    dataStatus: unreadable ? "invalid" : "valid",
+    visualStatus: design.length ? "issues" : "no-issues-found",
+    issueCount: design.length,
+    issues: full ? design : page.items,
+    ...(full ? {} : { page: page.page }),
+    ...(limits.length
+      ? { previewNote: `The local preview cannot compute some automatic sizes in ${limits.length} place${limits.length === 1 ? "" : "s"}; geometry there may differ in the App.` }
+      : {}),
+    // The theme options every target was checked under.
+    selection: { themes: themeSettings(workspace).selection.themes },
+    coverage: {
+      // Every target drawn and every check run on it.
+      complete: unreadable === 0 && notChecked.length === 0,
+      targetCount: checked.length,
+      // By name, short: "Home (desktop)", "Button (Style=primary)".
+      // Pages by version; components as one line each unless --full.
+      targets: full ? checked.map(targetLabel) : Object.entries(checked.reduce((groups, selection) => {
+        const named = selectionNames(workspace, selection);
+        const key = named.component ? `component:${named.component}` : targetLabel(selection);
+        (groups[key] ??= []).push(selection);
+        return groups;
+      }, {})).map(([key, list]) => key.startsWith("component:") && list.length > 1
+        ? `${key.slice(10)} (${list.length} variants)` : targetLabel(list[0])),
+      skippedCount: notChecked.length,
+      // One line per kind of check the tool could not run, with where.
+      skipped: Object.values(notChecked.reduce((groups, skip) => {
+        const code = skip.code ?? skip.check ?? "skipped";
+        const group = (groups[code] ??= { code, count: 0, reason: skip.reason ?? skip.message, where: [] });
+        group.count += 1;
+        const where = skip.element ? `${skip.label} / ${skip.element}` : skip.label;
+        if (!group.where.includes(where)) group.where.push(where);
+        return groups;
+      }, {})).map((group) => ({
+        ...group,
+        where: full ? group.where : group.where.slice(0, 3),
+        ...(!full && group.where.length > 3 ? { moreWhere: group.where.length - 3 } : {}),
+      })),
+    },
+    ...(hints.length ? { hints } : {}),
+    // Checks prove geometry, text fit and contrast, not taste.
+    note: "Automated checks cannot prove a design looks right; look at the PNG of the combinations that matter.",
+    warnings: [
+      ...(resolution.warnings ?? []),
+      ...[resolution.workspace?.foundation, resolution.workspace?.product].filter(Boolean).flatMap(packageFormatWarnings),
+    ],
+  };
+}
+
+async function namedContextArgs(packagePath, args) {
+  const workspace = await readableWorkspace(packagePath);
+  const axes = [workspace.foundation, workspace.product].filter(Boolean).flatMap((snapshot) => [...snapshot.domain.contextAxes.values()]);
+  const same = (left, right) => String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
+  const out = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== "--context" || index + 1 >= args.length) {
+      out.push(args[index]);
+      continue;
+    }
+    const value = args[(index += 1)];
+    const separator = value.indexOf("=");
+    const axisName = separator > 0 ? value.slice(0, separator) : value;
+    const axis = axes.find((candidate) => candidate.id === axisName || same(candidate.name ?? candidate.id, axisName));
+    if (!axis)
+      throw new SmallPenError("invalid_context_selection", `No context ${axisName}`, { contexts: axes.map((candidate) => candidate.name ?? candidate.id) });
+    const wanted = value.slice(separator + 1);
+    const choice = axis.values.find((candidate) => candidate.id === wanted || same(candidate.name ?? candidate.id, wanted));
+    if (!choice)
+      throw new SmallPenError("invalid_context_selection", `${axis.name ?? axis.id} has no value ${wanted}`, { values: axis.values.map((candidate) => candidate.name ?? candidate.id) });
+    out.push("--context", `${axis.id}=${choice.id}`);
+  }
+  return out;
+}
+
+// page set / component set: the target by name, the fields from --set
+// FIELD=VALUE (a JSON value, else text) on top of an --intent {"set": {...}}.
+async function setIntent(command, args) {
+  const file = option(args, "--intent");
+  const base = file ? parseJson(await readInputFile(file, "--intent", "utf8"), `invalid_${command.replace("-", "_")}_json`) : {};
+  if (!isRecord(base)) throw new SmallPenError("invalid_set", "--intent holds {\"set\": {...}}");
+  const set = { ...(isRecord(base.set) ? base.set : {}) };
+  for (const assignment of options(args, "--set")) {
+    const at = assignment.indexOf("=");
+    if (at <= 0) throw new SmallPenError("invalid_set", `--set takes FIELD=VALUE, not ${assignment}`);
+    const raw = assignment.slice(at + 1);
+    let value = raw;
+    // {color.surface} is a Token; other JSON is a value; the rest is text.
+    if (!/^\{[^"{}]+\}$/.test(raw.trim()))
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        value = raw;
+      }
+    set[assignment.slice(0, at).trim()] = value;
+  }
+  const target = command === "page-set"
+    ? { page: option(args, "--page") ?? base.page, platform: option(args, "--platform") ?? base.platform }
+    : { component: option(args, "--component") ?? base.component, variant: option(args, "--variant") ?? base.variant };
+  const element = option(args, "--element") ?? base.element;
+  const all = flag(args, "--all") || base.all === true ? true : undefined;
+  return Object.fromEntries(Object.entries({ ...target, element, all, set }).filter(([, value]) => value !== undefined));
+}
+
+// The stored nodes behind a selection (a page version or a variant): the
+// projection draws copies but keeps their overrides only here.
+function storedNodesOf(workspace, selection = {}) {
+  const snapshots = [workspace.product, workspace.foundation, ...(workspace.libraries ?? [])].filter(Boolean);
+  for (const snapshot of snapshots) {
+    if (selection.screenId) {
+      const entry = snapshot.manifest.entries.screens.find((name) => snapshot.entries[name].id === selection.screenId);
+      const screen = entry && snapshot.entries[entry];
+      const presentation = screen?.presentations.find(({ id }) => id === (selection.presentationId ?? screen.basePresentationId));
+      if (presentation) return presentation.nodes;
+    }
+    const set = selection.componentId && snapshot.domain.componentSets.get(selection.componentId);
+    if (set) return (set.variants.find(({ id }) => id === selection.variantId) ?? set.variants[0]).nodes;
+  }
+  return {};
+}
+
+// Token id -> name across the workspace, for specs.
+function tokenNamer(workspace) {
+  const names = new Map();
+  for (const snapshot of [workspace.product, workspace.foundation, ...(workspace.libraries ?? [])].filter(Boolean))
+    for (const token of snapshot.domain.tokens.values()) if (!names.has(token.id)) names.set(token.id, token.path);
+  return (reference) => names.get(reference?.assetId ?? reference);
+}
+
+// --token: one Token by name, or every Token under a name ("color").
+function tokenNamed(path, wanted) {
+  if (wanted === undefined) return true;
+  const name = String(wanted).trim().replace(/^\{|\}$/g, "");
+  return path === name || String(path).startsWith(`${name}.`);
+}
+
+// project show: counts in the words the commands use.
+function projectSummary(snapshot) {
+  const summary = packageSummary(snapshot);
+  const pages = snapshot.manifest.entries.screens.map((entry) => snapshot.entries[entry]);
+  const sets = [...snapshot.domain.componentSets.values()];
+  const { starts, links } = flowLinks(snapshot);
+  return {
+    name: summary.name,
+    role: summary.role,
+    revision: summary.revision,
+    counts: {
+      pages: pages.length,
+      pageVersions: pages.reduce((total, page) => total + page.presentations.length, 0),
+      components: sets.length + snapshot.domain.locatedComponents.size,
+      variants: sets.reduce((total, set) => total + set.variants.length, 0),
+      tokens: summary.counts.tokens,
+      tokenValues: summary.counts.tokenValues,
+      themeOptions: listTokenThemes(snapshot).length,
+      links: links.length,
+      starts: starts.length,
+      elements: summary.counts.nodes,
+    },
+    dependencies: (snapshot.manifest.dependencies ?? []).map((dependency) => dependency.path ?? dependency.name ?? dependency.packageId),
+    next: "view PACKAGE for pages, components and Tokens by name; --full for the stored data",
+  };
+}
+
+// Every check of the selected targets, untruncated.
+async function validateTargets(workspace, args) {
+  const designs = await validationDesigns(workspace, args);
+  const reports = [];
+  for (const design of designs) {
+    const report = {
+      ...(await validateDesign(workspace, design)),
+      selection: design.selection,
+    };
+    // A skipped check names its element; its path is a projected node id.
+    const nodes = design.projection?.nodes ?? {};
+    report.coverage.skipped = (report.coverage.skipped ?? []).map((skip) => {
+      const at = typeof skip.path === "string" && Object.hasOwn(nodes, skip.path) ? skip.path
+        : typeof skip.nodeId === "string" && Object.hasOwn(nodes, skip.nodeId) ? skip.nodeId : undefined;
+      if (at === undefined) return skip;
+      const { path: _path, ...rest } = skip;
+      return { ...rest, element: elementPath(nodes, design.projection.rootId, at) || nodes[at].name };
+    });
+    if (design.selection.screenId) {
+      const flow = prototypeConnections(
+        workspace.product,
+        design.selection,
+        {
+          ...workspace,
+          context: design.projection.context,
+          initialProjection: design.projection,
+        },
+      );
+      report.issues.push(
+        ...flow.issues.map((issue) => ({
+          ...issue,
+          check: "prototype-connections",
+        })),
+      );
+      report.coverage.checks.push("prototype-connections");
+      report.coverage.connectionCount = flow.connections.length;
+    }
+    reports.push(report);
+  }
+  const all = flag(args, "--all");
+  const visual = {
+    ...reports[0],
+    ...(reports.some((report) => report.hints?.length) ? { hints: reports.flatMap((report) => report.hints ?? []) } : {}),
+    issues: reports.flatMap((report) =>
+      report.issues.map((issue) =>
+        all ? { ...issue, target: report.selection } : issue,
+      ),
+    ),
+    coverage: {
+      ...reports[0].coverage,
+      targets: reports.map((report) => ({ ...selectionNames(workspace, report.selection), ...report.selection })),
+      targetCount: reports.length,
+      nodeCount: reports.reduce(
+        (count, report) => count + report.coverage.nodeCount,
+        0,
+      ),
+      visibleNodeCount: reports.reduce(
+        (count, report) => count + report.coverage.visibleNodeCount,
+        0,
+      ),
+      ...(reports.some(
+        (report) => report.coverage.connectionCount !== undefined,
+      )
+        ? {
+            connectionCount: reports.reduce(
+              (count, report) =>
+                count + (report.coverage.connectionCount ?? 0),
+              0,
+            ),
+          }
+        : {}),
+      skipped: reports.flatMap((report) =>
+        report.coverage.skipped.map((skip) =>
+          all ? { ...skip, target: report.selection } : skip,
+        ),
+      ),
+    },
+  };
+  visual.issueCount = visual.issues.length;
+  visual.interactionIssueCount = visual.issues.filter(
+    (issue) => issue.check === "prototype-connections",
+  ).length;
+  visual.interactionStatus = !visual.coverage.checks.includes(
+    "prototype-connections",
+  )
+    ? "not-checked"
+    : visual.interactionIssueCount
+      ? "issues"
+      : "no-issues-found";
+  if (all) {
+    visual.selection = {
+      ...themeSettings(workspace).selection,
+      all: true,
+      ...(option(args, "--component-id")
+        ? {
+            componentId: option(args, "--component-id"),
+            packageId: reports[0].selection.packageId,
+          }
+        : { screenId: option(args, "--screen-id") }),
+    };
+  }
+  return visual;
+}
+
+async function validateCommand(packagePath, args, { named = false } = {}) {
   if (
     flag(args, "--all") &&
     !option(args, "--component-id") &&
@@ -3603,104 +4065,16 @@ async function validateCommand(packagePath, args) {
     "--node-id",
     "--design-system",
   ].some((arg) => flag(args, arg));
+  if (!targeted) return validateWholePackage(packagePath, args, workspace, resolution);
+  if (named) {
+    const ids = ["--screen-id", "--presentation-id", "--component-id", "--package-id", "--variant-id"]
+      .flatMap((name) => (option(args, name) !== undefined ? [name, option(args, name)] : []));
+    const where = option(args, "--page") ?? option(args, "--component");
+    return validateWholePackage(packagePath, args, workspace, resolution, [{ ids: [...ids, ...(flag(args, "--all") ? ["--all"] : [])], where }]);
+  }
   let visual;
   if (targeted || workspace.product.manifest.defaultScreenId) {
-    const designs = await validationDesigns(workspace, args);
-    const reports = [];
-    for (const design of designs) {
-      const report = {
-        ...(await validateDesign(workspace, design)),
-        selection: design.selection,
-      };
-      // A skipped check names its element; its path is a projected node id.
-      const nodes = design.projection?.nodes ?? {};
-      report.coverage.skipped = (report.coverage.skipped ?? []).map((skip) => {
-        if (typeof skip.path !== "string" || !Object.hasOwn(nodes, skip.path)) return skip;
-        const { path, ...rest } = skip;
-        return { ...rest, element: elementPath(nodes, design.projection.rootId, path) || nodes[path].name };
-      });
-      if (design.selection.screenId) {
-        const flow = prototypeConnections(
-          workspace.product,
-          design.selection,
-          {
-            ...workspace,
-            context: design.projection.context,
-            initialProjection: design.projection,
-          },
-        );
-        report.issues.push(
-          ...flow.issues.map((issue) => ({
-            ...issue,
-            check: "prototype-connections",
-          })),
-        );
-        report.coverage.checks.push("prototype-connections");
-        report.coverage.connectionCount = flow.connections.length;
-      }
-      reports.push(report);
-    }
-    const all = flag(args, "--all");
-    visual = {
-      ...reports[0],
-      issues: reports.flatMap((report) =>
-        report.issues.map((issue) =>
-          all ? { ...issue, target: report.selection } : issue,
-        ),
-      ),
-      coverage: {
-        ...reports[0].coverage,
-        targets: reports.map((report) => ({ ...selectionNames(workspace, report.selection), ...report.selection })),
-        targetCount: reports.length,
-        nodeCount: reports.reduce(
-          (count, report) => count + report.coverage.nodeCount,
-          0,
-        ),
-        visibleNodeCount: reports.reduce(
-          (count, report) => count + report.coverage.visibleNodeCount,
-          0,
-        ),
-        ...(reports.some(
-          (report) => report.coverage.connectionCount !== undefined,
-        )
-          ? {
-              connectionCount: reports.reduce(
-                (count, report) =>
-                  count + (report.coverage.connectionCount ?? 0),
-                0,
-              ),
-            }
-          : {}),
-        skipped: reports.flatMap((report) =>
-          report.coverage.skipped.map((skip) =>
-            all ? { ...skip, target: report.selection } : skip,
-          ),
-        ),
-      },
-    };
-    visual.issueCount = visual.issues.length;
-    visual.interactionIssueCount = visual.issues.filter(
-      (issue) => issue.check === "prototype-connections",
-    ).length;
-    visual.interactionStatus = !visual.coverage.checks.includes(
-      "prototype-connections",
-    )
-      ? "not-checked"
-      : visual.interactionIssueCount
-        ? "issues"
-        : "no-issues-found";
-    if (all) {
-      visual.selection = {
-        ...themeSettings(workspace).selection,
-        all: true,
-        ...(option(args, "--component-id")
-          ? {
-              componentId: option(args, "--component-id"),
-              packageId: reports[0].selection.packageId,
-            }
-          : { screenId: option(args, "--screen-id") }),
-      };
-    }
+    visual = await validateTargets(workspace, args);
     const report = {
       packageId: workspace.product.manifest.packageId,
       ...workspaceRevisions(
@@ -3774,7 +4148,7 @@ async function validateCommand(packagePath, args) {
 }
 
 async function main(args) {
-  publicSurface = Boolean(COMMAND_GROUPS[args[0]]?.actions[args[1]]);
+  publicSurface = Boolean(commandMatch(args)?.route);
   const routed = routeCommand(args);
   args = routed.args;
   publicSurface =
@@ -3812,20 +4186,20 @@ async function main(args) {
     // An old flat name ("help init") shows its grouped path's help.
     if (topic && section === undefined && !COMMAND_GROUPS[topic] && Object.hasOwn(COMMAND_CONTRACTS, topic)) {
       const path = publicArgv([topic]);
-      if (path.length === 2 && COMMAND_GROUPS[path[0]]) [topic, section] = path;
+      if (path.length >= 2 && COMMAND_GROUPS[path[0]]) [topic, section] = [path[0], path.slice(1).join(" ")];
     }
     const full = flag(args, "--full");
     const value = helpTopic(topic, section, { full });
     // A grouped action's full help is its engine's text, under its path.
-    const route = topic && section && COMMAND_GROUPS[topic] ? groupRoute(topic, section) : undefined;
+    const route = topic && section && COMMAND_GROUPS[topic] && !groupDefinition(topic, section) ? groupRoute(topic, section) : undefined;
     const fullTopic = route ? route.engine : !COMMAND_GROUPS[topic] && !["workflow", "rules"].includes(topic) ? topic : undefined;
     if (flag(args, "--json"))
       printJson(
         full && fullTopic
-          ? { ...commandContract(route ? route.name : fullTopic), guidance: commandGuidance(fullTopic) }
+          ? { ...commandContract(route ? route.name : fullTopic), guidance: commandGuidance(fullTopic, route) }
           : value,
       );
-    else if (full && fullTopic) printHelp(fullTopic, { full });
+    else if (full && fullTopic) printHelp(fullTopic, { full, route });
     else printBriefHelp(topic, section, { full });
     return;
   }
@@ -3947,8 +4321,11 @@ async function main(args) {
     );
   }
   if (!COMMAND_NAMES.includes(command) && command !== "resource-write") {
-    throw new SmallPenError("unknown_command", `Unknown command: ${command}`, {
+    const path = publicArgv([command]);
+    const suggestion = path[0] !== command ? path.join(" ") : undefined;
+    throw new SmallPenError("unknown_command", `Unknown command: ${command}${suggestion ? `; use smallpen ${suggestion}` : ""}`, {
       validCommands: PUBLIC_COMMANDS.map(({ command }) => command),
+      ...(suggestion ? { suggestion, nextOperations: [{ operation: "smallpen.help", argv: ["help", ...path, "--json"] }] } : {}),
     });
   }
   if (flag(args, "--help")) {
@@ -3973,6 +4350,9 @@ async function main(args) {
     printJson(looked);
     return;
   }
+  // --context Density=Compact names an axis and a value; the engines take
+  // their IDs.
+  if (publicSurface && options(args, "--context").length) args = await namedContextArgs(packagePath, args);
   // export and validate name their target as view does; the engines below
   // take the IDs those names stand for.
   if (command === "export" || command === "validate")
@@ -4018,11 +4398,11 @@ async function main(args) {
     return;
   }
   if (command === "flow-list") {
-    printJson(await flowListCommand(packagePath));
+    printJson(await flowListCommand(packagePath, args));
     return;
   }
   if (NAMED_EDITS.has(command) || (command === "flow-start" && flag(args, "--remove"))) {
-    const intent = command === "flow-start" ? { page: option(args, "--page"), remove: true } : namedEditIntent(command, args);
+    const intent = command === "flow-start" ? { page: option(args, "--page"), platform: option(args, "--platform"), remove: true } : namedEditIntent(command, args);
     // A workspace in Repair takes no edits until its dependency is fixed.
     await readableWorkspace(packagePath);
     const snapshot = await openPackage(packagePath);
@@ -4044,10 +4424,13 @@ async function main(args) {
     }
     const operations =
       command === "flow-start"
-        ? [flowStartRemoveOperation(snapshot, intent.page)]
+        ? [flowStartRemoveOperation(snapshot, intent.page, intent.platform)]
         : await namedEditOperations(command, snapshot, intent, packagePath);
-    if (command === "component-delete")
+    if (command === "component-delete") {
+      // Copies in this package first, then in packages that depend on it.
+      checkNotUsedElsewhere([snapshot], operations, snapshot, { here: true });
       checkNotUsedElsewhere(await dependentPackages(packagePath, snapshot), operations, snapshot);
+    }
     printJson(
       await applyBatch(
         packagePath,
@@ -4057,22 +4440,24 @@ async function main(args) {
     );
     return;
   }
-  if (["component-define", "page-draw", "page-move", "canvas-rename", "canvas-put", "flow-link", "flow-start"].includes(command)) {
+  if (["component-define", "page-draw", "page-set", "component-set", "page-move", "canvas-rename", "canvas-put", "flow-link", "flow-start"].includes(command)) {
     // Elements, components and pages by name: the planners build node
     // tables and IDs; text is measured with the renderer's fonts.
     const intent =
       command === "flow-link"
         ? Object.fromEntries(
-            [["from", "--from"], ["to", "--to"], ["on", "--on"], ["action", "--action"]]
+            [["from", "--from"], ["to", "--to"], ["on", "--on"], ["action", "--action"], ["platform", "--platform"]]
               .map(([key, flagName]) => [key, option(args, flagName)])
               .filter(([, value]) => value !== undefined),
           )
         : command === "flow-start"
-          ? { page: option(args, "--page") }
+          ? { page: option(args, "--page"), ...(option(args, "--platform") ? { platform: option(args, "--platform") } : {}) }
           : command === "canvas-rename"
             ? { canvas: option(args, "--canvas"), to: option(args, "--to") }
           : command === "canvas-put"
             ? { page: option(args, "--page"), canvas: option(args, "--canvas") }
+          : command === "page-set" || command === "component-set"
+            ? await setIntent(command, args)
           : command === "page-move"
             ? {
                 page: option(args, "--page"),
@@ -4109,6 +4494,7 @@ async function main(args) {
       libraries: workspace.libraries ?? [],
     };
     let operations;
+    let flowTarget;
     if (command === "page-move" && intent.element === undefined) {
       // A whole page moves in its business flow's row on the canvas.
       const screen = findPage(snapshot, intent.page);
@@ -4120,17 +4506,21 @@ async function main(args) {
     } else if (command === "canvas-put") {
       const screen = findPage(snapshot, intent.page);
       operations = [placePageOnCanvas(snapshot.manifest, snapshot.entries, screen.id, intent.canvas)];
-    } else if (command === "component-define" || command === "page-draw") {
+    } else if (["component-define", "page-draw", "page-set", "component-set"].includes(command)) {
       // Plan once with estimated text sizes, measure every text with the
       // renderer, then plan again with the measured sizes.
       // Variants share node ids, so sizes are kept per tree, in the order
       // the planner asks for them.
       const trees = [];
       const measured = [];
+      // A text that fills its slot is measured again at the slot's width,
+      // where it wraps: "id@width" -> height, asked for by the planner.
+      const wraps = [];
+      const asked = [];
       let calls = 0;
       const plan = () => {
         calls = 0;
-        return (command === "component-define" ? componentDefineOperation : pageDrawOperation)(
+        return ({ "component-define": componentDefineOperation, "page-draw": pageDrawOperation, "page-set": pageSetOperation, "component-set": componentSetOperation })[command](
           snapshot,
           intent,
           {
@@ -4138,7 +4528,14 @@ async function main(args) {
             measure: (tree) => {
               const index = calls++;
               trees[index] ??= tree;
-              return (id) => measured[index]?.get(id);
+              const size = (id) => measured[index]?.get(id);
+              size.wrapped = (id, width) => {
+                const key = `${id}@${Math.round(width)}`;
+                const known = wraps[index]?.get(key);
+                if (!known) (asked[index] ??= new Map()).set(key, { id, width: Math.round(width), node: tree.nodes[id] });
+                return known;
+              };
+              return size;
             },
           },
         );
@@ -4152,12 +4549,18 @@ async function main(args) {
           [
             ...Object.entries(tree.nodes).filter(([, node]) => node.type === "TEXT"),
             ...Object.entries(tree.probes ?? {}),
-          ].map(([id, node]) => [
-            id,
-            ["fill", "auto"].includes(node["layout-item-h-sizing"])
-              ? { ...node, growType: "auto-width" }
-              : node,
-          ]),
+          ].map(([id, node]) => {
+            // A text bound to a string Token is measured with its longest
+            // translation.
+            const longest = tree.measureTexts?.[id];
+            const measured = longest ? { ...node, text: longest } : node;
+            return [
+              id,
+              ["fill", "auto"].includes(node["layout-item-h-sizing"])
+                ? { ...measured, growType: "auto-width" }
+                : measured,
+            ];
+          }),
         );
         if (!Object.keys(texts).length) continue;
         const metrics = await measureProjectionText(
@@ -4170,26 +4573,45 @@ async function main(args) {
             measured[index].set(item.nodeId, { width: Math.ceil(item.width), height: Math.ceil(item.height) });
       }
       operations = [plan()];
+      if (asked.some((requests) => requests?.size)) {
+        for (const [index, requests] of asked.entries()) {
+          if (!requests?.size) continue;
+          wraps[index] = new Map();
+          const texts = Object.fromEntries([...requests].map(([key, { id, width, node }]) => {
+            const longest = trees[index].measureTexts?.[id];
+            return [key, { ...node, id: key, text: longest ?? node.text, width, growType: "auto-height", "layout-item-h-sizing": "fix" }];
+          }));
+          const metrics = await measureProjectionText(
+            workspace.product,
+            { nodes: texts, rootId: Object.keys(texts)[0] },
+            { foundation: lookups.foundation, libraries: lookups.libraries },
+          );
+          for (const item of metrics.items)
+            if (!item.missingGlyphs?.length) wraps[index].set(item.nodeId, { height: Math.ceil(item.height) });
+        }
+        operations = [plan()];
+      }
       // A page drawn onto a named canvas is placed there (made if new).
       if (command === "page-draw" && intent.canvas !== undefined)
         operations.push(placePageOnCanvas(snapshot.manifest, snapshot.entries, operations[0].screen.id, intent.canvas));
     } else {
       const flowIntent =
         command === "flow-link"
-          ? flowLinkIntent(snapshot, intent)
+          ? flowLinkIntent(snapshot, intent, lookups)
           : flowStartIntent(snapshot, intent.page, () => {
               const hex = createHash("sha256").update(`${batchId}\0start`).digest("hex");
               return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-            });
+            }, intent.platform);
       operations = interactionIntentOperations(snapshot, flowIntent);
+      // Say which page version the link or start went to.
+      flowTarget = versionName(snapshot, flowIntent.screenId, flowIntent.presentationId);
     }
-    printJson(
-      await applyBatch(
-        packagePath,
-        { baseRevision: snapshot.revision, batchId, operations, cliIntent, ...renameNumbering(command) },
-        args,
-      ),
+    const written = await applyBatch(
+      packagePath,
+      { baseRevision: snapshot.revision, batchId, operations, cliIntent, ...renameNumbering(command) },
+      args,
     );
+    printJson(flowTarget ? { target: flowTarget, ...written } : written);
     return;
   }
   if (NAMED_TOKEN_WRITES.has(command)) {
@@ -4430,37 +4852,28 @@ async function main(args) {
     return;
   }
   if (command === "validate") {
-    printJson(await validateCommand(packagePath, args));
+    // A named page or component reads like the whole-package report;
+    // --full keeps every stored check.
+    const named = publicSurface && option(args, "--element") === undefined && !flag(args, "--full") &&
+      (option(args, "--page") !== undefined || option(args, "--component") !== undefined);
+    const report = await validateCommand(packagePath, args, { named });
+    // Sizes the preview cannot compute: one note, not one issue each.
+    const limits = (report.issues ?? []).filter((issue) => issue.code === "layout_projection_partial");
+    if (limits.length && !flag(args, "--full")) {
+      report.issues = report.issues.filter((issue) => issue.code !== "layout_projection_partial");
+      report.issueCount = (report.issueCount ?? limits.length) - limits.length;
+      if (!report.issueCount) report.visualStatus = "no-issues-found";
+      report.previewNote = `The local preview cannot compute some automatic sizes in ${limits.length} place${limits.length === 1 ? "" : "s"}; geometry there may differ in the App.`;
+    }
+    printJson(report);
     return;
   }
   if (command === "inspect") {
     const snapshot = await openPackage(packagePath);
     printJson(
       flag(args, "--full")
-        ? inspect(snapshot)
-        : {
-            ...packageSummary(snapshot),
-            package: {
-              id: snapshot.manifest.packageId,
-              name: snapshot.manifest.name,
-              revision: snapshot.revision,
-              role: snapshot.manifest.role,
-              dependencies: snapshot.manifest.dependencies ?? [],
-            },
-            outputDetail: {
-              omitted: [
-                "components",
-                "contexts",
-                "flows",
-                "requirements",
-                "scenarios",
-                "screens",
-                "tokens",
-                "formatCapabilities",
-              ],
-              fullOption: "--full",
-            },
-          },
+        ? { revision: snapshot.revision, ...inspect(snapshot) }
+        : projectSummary(snapshot),
     );
     return;
   }
@@ -4476,12 +4889,28 @@ async function main(args) {
     // A page version reads as its page and platform; its own name is often
     // just "desktop".
     const pageNames = new Map(snapshot.manifest.entries.screens.map((entry) => [snapshot.entries[entry].id, snapshot.entries[entry].name]));
+    // page list: each page by name with its platforms.
+    if (routed.route?.name === "page list" && !flag(args, "--full")) {
+      const pages = snapshot.manifest.entries.screens.map((entry) => snapshot.entries[entry]);
+      printJson({
+        pages: pages.slice(offset, offset + limit).map((screen) => ({
+          name: screen.name,
+          platforms: screen.presentations.map((presentation) => presentation.platform ?? presentation.name),
+        })),
+        page: { hasMore: offset + limit < pages.length, limit, offset, total: pages.length },
+        revision: snapshot.revision,
+      });
+      return;
+    }
     printJson({
       items: all.slice(offset, offset + limit).map(({ group, item }) => {
         const summary = flag(args, "--full") ? item : discoverySummary(item);
+        const screen = group === "screens" ? snapshot.manifest.entries.screens.map((entry) => snapshot.entries[entry]).find(({ id }) => id === item.id) : undefined;
         const value = group === "presentations" && pageNames.has(item.screenId)
           ? { page: pageNames.get(item.screenId), ...summary }
-          : summary;
+          : screen
+            ? { ...summary, platforms: screen.presentations.map((presentation) => presentation.platform ?? presentation.name) }
+            : summary;
         return routed.route?.name === "page list" ? value : { group, item: value };
       }),
       kind,
@@ -4519,7 +4948,7 @@ async function main(args) {
       const group = option(args, "--group");
       const all = snapshots.flatMap((snapshot) =>
         listTokenDefinitions(snapshot, { group }),
-      );
+      ).filter((item) => tokenNamed(item.token?.path, option(args, "--token")));
       const page = pageItems(all, pagination(args));
       printJson({
         mode: "definitions",
@@ -4556,7 +4985,7 @@ async function main(args) {
       context,
       foundation,
       libraries,
-    }).filter((item) => !requestedType || item.token.type === requestedType);
+    }).filter((item) => (!requestedType || item.token.type === requestedType) && tokenNamed(item.token.path, option(args, "--token")));
     const page = pageItems(all, pagination(args));
     const paginated =
       !flag(args, "--full") ||
@@ -4577,7 +5006,7 @@ async function main(args) {
           ? page.items
           : all
         : page.items.map((item) => ({
-            target: item.target,
+            ...(Object.keys(item.target ?? {}).length ? { target: item.target } : {}),
             token: {
               id: item.token.id,
               path: item.token.path,
@@ -4843,7 +5272,7 @@ async function main(args) {
       kind: option(args, "--kind"),
     }).filter(
       ({ kind }) =>
-        !routed.route?.name.startsWith("asset ") ||
+        routed.route?.name !== "advanced style list" ||
         option(args, "--kind") !== undefined ||
         ["colors", "typographies"].includes(kind),
     );
@@ -4866,7 +5295,7 @@ async function main(args) {
     const taken = listAssets(await openPackage(packagePath), { kind: "media" })
       .find(({ asset }) => fullName(asset.path, asset.name) === fullName(mediaFolder, name));
     if (taken)
-      throw new SmallPenError("duplicate_name", `A media file is already named ${[taken.asset.path, taken.asset.name].filter(Boolean).join("/")}; delete it with media delete or choose another --name`, { kind: "media", name });
+      throw new SmallPenError("duplicate_name", `A media file is already named ${[taken.asset.path, taken.asset.name].filter(Boolean).join("/")}; delete it with asset media delete or choose another --name`, { kind: "media", name });
     const print = await trackedWrite(() =>
       importMedia(packagePath, {
         bytes,
@@ -4959,6 +5388,9 @@ async function main(args) {
       await writeReply(
         {
           batchId: result.batchId,
+          changedFiles: result.changedFiles,
+          family: family_?.asset.family ?? family,
+          variant: variant.name,
           files: variant.files,
           fontId,
           inverseBatch: result.inverseBatch,

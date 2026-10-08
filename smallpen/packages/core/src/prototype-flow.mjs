@@ -313,12 +313,12 @@ export const INTERACTION_INTENT_ACTIONS = Object.freeze({
     purpose: "Delete one named prototype start",
   },
   "set-interaction": {
-    fields: ["screenId", "presentationId?", "nodeId", "index?", "interaction"],
+    fields: ["screenId", "presentationId?", "nodeId", "sourcePath?", "index?", "interaction"],
     purpose:
       "Append native interaction or replace index on one node; stable destination references become App UUIDs",
   },
   "delete-interaction": {
-    fields: ["screenId", "presentationId?", "nodeId", "index"],
+    fields: ["screenId", "presentationId?", "nodeId", "sourcePath?", "index"],
     purpose: "Remove one native interaction by node and index",
   },
 });
@@ -442,9 +442,17 @@ export function interactionIntentOperations(snapshot, intent) {
       },
     ];
   }
-  const source = ownValue(presentation.nodes, intent.nodeId);
-  if (!source) fail("missing_node", `No interaction source ${intent.nodeId}`);
-  const interactions = structuredClone(source.interactions ?? []);
+  const stored = ownValue(presentation.nodes, intent.nodeId);
+  if (!stored) fail("missing_node", `No interaction source ${intent.nodeId}`);
+  // sourcePath: an element inside a copy of a component. Its links are the
+  // copy's override "<sourcePath>:interactions".
+  const overridePath = intent.sourcePath === undefined ? undefined : `${intent.sourcePath}:interactions`;
+  if (overridePath !== undefined && !stored.instance)
+    fail("invalid_interaction_intent", "sourcePath names an element inside a copy; nodeId must be the copy");
+  const source = overridePath === undefined ? stored : { id: `${stored.id}__${intent.sourcePath}`, type: "COPY_CHILD" };
+  const interactions = structuredClone(
+    (overridePath === undefined ? source.interactions : stored.instance.overrides?.[overridePath]) ?? [],
+  );
   const index = intent.index ?? interactions.length;
   if (
     !Number.isInteger(index) ||
@@ -480,6 +488,12 @@ export function interactionIntentOperations(snapshot, intent) {
     if (index === interactions.length) interactions.push(native);
     else interactions[index] = native;
   }
+  if (overridePath !== undefined)
+    return [
+      interactions.length
+        ? { type: "set-instance-override", ...target, nodeId: stored.id, overridePath, value: interactions }
+        : { type: "clear-instance-override", ...target, nodeId: stored.id, overridePath },
+    ];
   return [
     {
       type: "update-presentation-node",

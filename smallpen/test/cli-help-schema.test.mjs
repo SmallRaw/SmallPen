@@ -94,7 +94,7 @@ async function initAcme(root, layout) {
 async function revision(packagePath, root) {
   const inspected = await runCli(["project", "show", packagePath, "--json"], root);
   assert.equal(inspected.code, 0, inspected.stdout);
-  return JSON.parse(inspected.stdout).package.revision;
+  return JSON.parse(inspected.stdout).revision;
 }
 
 // Operation examples in an order where each one's targets exist: create in

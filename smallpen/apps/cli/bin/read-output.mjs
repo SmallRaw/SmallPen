@@ -148,7 +148,9 @@ export function packageSummary(snapshot) {
       requirements: snapshot.domain.requirements.size,
       scenarios: snapshot.domain.scenarios.size,
       screens: screens.length,
-      tokens: snapshot.domain.tokens.size,
+      // Token names; one Token has a value per theme option it sets.
+      tokens: new Set([...snapshot.domain.tokens.values()].map((token) => token.path)).size,
+      tokenValues: snapshot.domain.tokens.size,
     },
   };
 }

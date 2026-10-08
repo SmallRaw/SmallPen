@@ -93,7 +93,7 @@ const PARAMETERS = {
     "cmp_",
     "Component identifier in its owning package",
   ),
-  confirm: flag("--confirm", "Create the proposed workspace"),
+  confirm: flag("--confirm", "With --answers: create the workspace the answers propose (a plain init creates a blank one at once)"),
   confirmUnmatched: flag(
     "--confirm-unmatched",
     "Accept creation of an unmatched component selection",
@@ -104,7 +104,7 @@ const PARAMETERS = {
   context: parameter(
     "--context",
     "assignment",
-    "AXIS_ID=VALUE_ID for this call",
+    "CONTEXT=VALUE by name (Density=Compact) for this call",
     { repeatable: true, uniqueBy: "assignment-key" },
   ),
   contextProfileId: id("context-profile", undefined, "Named Context profile"),
@@ -124,7 +124,7 @@ const PARAMETERS = {
   group: parameter(
     "--group",
     "string",
-    "Filter stored Token definitions to this App Set group; requires --definitions",
+    "Only Tokens that take values in this theme group (Brand); requires --definitions",
   ),
   diff: flag("--diff", "Preview the batch diff without writing"),
   from: parameter("--from", "string", "Source element as \"Page / Element\""),
@@ -152,11 +152,17 @@ const PARAMETERS = {
   mediaName: parameter("--media", "string", "Media file name, as Group/Name"),
   fontFamily: parameter("--font", "string", "Font family name"),
   removeStart: flag("--remove", "Stop the page being a start"),
-  as: parameter("--as", "string", "What to return: text (default), wireframe, png or issues", {
-    values: ["text", "wireframe", "png", "issues"],
+  as: parameter("--as", "string", "What to return: text (default), wireframe, png, issues, or spec (detailed positions, sizes, layout, visual values and Token bindings)", {
+    values: ["text", "wireframe", "png", "issues", "spec"],
     errorCode: "unknown_view_as",
   }),
   component: parameter("--component", "string", "Component name"),
+  setField: parameter(
+    "--set",
+    "assignment",
+    'FIELD=VALUE as in page draw: width=320, fill={color.surface}, padding=[8,16], text="Save", props={"Style":"ghost"}; a JSON value or plain text',
+    { repeatable: true },
+  ),
   variant: parameter("--variant", "string", 'One variant, as "Style=secondary" (or just "secondary")'),
   element: parameter("--element", "string", 'Element name, or "Parent / Element" when the name repeats'),
   platform: parameter("--platform", "string", "Page version: desktop, mobile, ..."),
@@ -324,7 +330,7 @@ const PARAMETERS = {
     "Resolved design representation",
     {
       default: "outline",
-      values: ["outline", "wireframe", "structure", "semantic"],
+      values: ["outline", "wireframe", "spec", "structure", "semantic"],
       errorCode: "unknown_view_format",
     },
   ),
@@ -380,8 +386,9 @@ export const COMMAND_CONTRACTS = {
         name: "section",
         type: "string",
         required: false,
-        when: "topic is workflow or rules",
+        when: "an action, subgroup or rules topic",
       },
+      { name: "action", type: "string", required: false, when: "section is a command subgroup" },
     ],
   }),
   version: command("Print the CLI version", [], { locator: false }),
@@ -398,6 +405,8 @@ export const COMMAND_CONTRACTS = {
           required: false,
           when: "topic is command, operation, workflow or an intent action directory",
         },
+        { name: "action", type: "string", required: false, when: "topic is command" },
+        { name: "subaction", type: "string", required: false, when: "name and action identify a command subgroup" },
       ],
     },
   ),
@@ -420,7 +429,7 @@ export const COMMAND_CONTRACTS = {
     },
   ),
   "token-export": command(
-    "Write Token values to files for application code; --by GROUP writes one file per option",
+    "Export resolved Token values as JSON; --by GROUP writes one file per option",
     ["type", "token", "by", "tokenFormat", "theme", "output"],
     { overrides: { output: { description: "Directory for the files; default a temporary directory" } } },
   ),
@@ -527,6 +536,7 @@ export const COMMAND_CONTRACTS = {
   ),
   tokens: command("Read effective Tokens for this theme and Context", [
     "definitions",
+    "token",
     "group",
     "type",
     "context",
@@ -654,14 +664,39 @@ export const COMMAND_CONTRACTS = {
     { required: [required("intent", "missing_intent")] },
   ),
   "page-move": command(
-    "Move an element up, down, left or right among its siblings, or (without --element) a page left or right in its business flow on the canvas; the CLI picks the coordinates and keeps things from overlapping",
+    "Move an element up, down, left or right among its siblings, or (without --element) a page left or right in its row on the canvas; the CLI picks the coordinates and keeps things from overlapping",
     ["page", "platform", "element", "direction", "moveSteps", "batchId", ...WRITE],
     {
       required: [required("page", "missing_page"), required("direction", "missing_direction")],
       overrides: { element: { description: 'Element to move, or "Parent / Element" when the name repeats' } },
     },
   ),
-  "canvas-list": command("List canvases, the business flows on each and their pages, in layout order", []),
+  "page-set": command(
+    "Change fields of one element, or of the page itself, without drawing it again: sizes, colors, text, layout, a copy's props, text and set. Texts are measured and containers that hug grow, as page draw does",
+    ["page", "platform", "element", "all", "setField", "intent", "batchId", ...WRITE],
+    {
+      required: [required("page", "missing_page")],
+      overrides: {
+        all: { description: "Change every version that has the element; without it an element in several versions needs --platform" },
+        element: { description: 'Element to change ("Parent / Element" when the name repeats); without it the page itself (its size, fill, layout)' },
+        platform: { description: "One version; needed when the element (or the page) is in several, unless --all" },
+        intent: { description: 'JSON file {"set": {...}} for values awkward on a command line; --set adds to it' },
+      },
+    },
+  ),
+  "component-set": command(
+    "Change fields of one element of a component, or of the component itself, without defining it again: in the one variant that has it, the one --variant names, or every one with --all",
+    ["component", "variant", "element", "all", "setField", "intent", "batchId", ...WRITE],
+    {
+      required: [required("component", "missing_component")],
+      overrides: {
+        all: { description: "Change every variant that has the element; without it an element in several variants needs --variant" },
+        element: { description: "Element to change; without it the component itself" },
+        intent: { description: 'JSON file {"set": {...}}; --set adds to it' },
+      },
+    },
+  ),
+  "canvas-list": command("List canvases, the rows on each (one per module) and their pages left to right", []),
   "canvas-rename": command("Rename a canvas", ["canvas", "to", "batchId", ...WRITE], {
     required: [required("canvas", "missing_canvas"), required("to", "missing_to")],
     overrides: { to: { description: "New canvas name" } },
@@ -672,8 +707,8 @@ export const COMMAND_CONTRACTS = {
     { required: [required("page", "missing_page"), required("canvas", "missing_canvas")] },
   ),
   "flow-link": command(
-    "Link an element to a page by name",
-    ["from", "to", "on", "action", "batchId", ...WRITE],
+    "Link an element to a page by name; --platform picks the version (default: the page's main one)",
+    ["from", "to", "on", "action", "platform", "batchId", ...WRITE],
     {
       required: [required("from", "missing_from")],
       overrides: {
@@ -686,21 +721,21 @@ export const COMMAND_CONTRACTS = {
     },
   ),
   "flow-start": command(
-    "Make a page the start of a prototype flow, or (--remove) stop it being one",
-    ["page", "removeStart", "batchId", ...WRITE],
+    "Make a page version the start of a prototype flow, or (--remove) stop it being one; the flow's row on the canvas starts with it",
+    ["page", "platform", "removeStart", "batchId", ...WRITE],
     { required: [required("page", "missing_page")] },
   ),
   "flow-list": command("List prototype starts and element links by page and element name", []),
   "flow-unlink": command(
     "Remove an element's links; --on or --to removes only those",
-    ["from", "on", "to", "batchId", ...WRITE],
+    ["from", "on", "to", "platform", "batchId", ...WRITE],
     {
       required: [required("from", "missing_from")],
       overrides: { to: { description: "Remove only the link to this page" }, on: { description: "Remove only links on this trigger" } },
     },
   ),
   "page-rename": command(
-    "Rename a page (its boards and start follow), or one of its elements (--element). Names do not repeat",
+    "Rename a page (its boards and start follow), or one of its elements (--element). A used name is numbered (\"List 2\")",
     ["page", "platform", "element", "to", "batchId", ...WRITE],
     {
       required: [required("page", "missing_page"), required("to", "missing_to")],
@@ -723,8 +758,8 @@ export const COMMAND_CONTRACTS = {
     },
   ),
   "component-rename": command(
-    "Rename a component (copies keep pointing at it), or one of its elements in every variant (--element). Names do not repeat",
-    ["component", "element", "to", "batchId", ...WRITE],
+    "Rename a component (copies keep pointing at it), or one of its elements in every variant that has it (--element; with --variant only there). A used name is numbered",
+    ["component", "element", "variant", "to", "batchId", ...WRITE],
     {
       required: [required("component", "missing_component"), required("to", "missing_to")],
       overrides: {
@@ -1223,7 +1258,7 @@ export function validateCommandArguments(command, args) {
         field === "context"
           ? "invalid_context_argument"
           : "invalid_initialization_answer_argument",
-        `${parameter.option} requires ${field === "context" ? "AXIS_ID=VALUE_ID" : "QUESTION_ID=JSON"}`,
+        `${parameter.option} requires ${field === "context" ? "CONTEXT=VALUE" : "QUESTION_ID=JSON"}`,
         facts(command, field, value),
       );
     if (parameter.type === "json" || field === "answer") {

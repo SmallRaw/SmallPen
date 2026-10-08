@@ -89,13 +89,13 @@ test("pages move left or right in their flow, onto other canvases, and canvases 
   await run(["canvas", "rename", path, "--canvas", "Pages", "--to", "App", "--json"]);
   const listed = await run(["canvas", "list", path, "--json"]);
   assert.deepEqual(listed.canvases.map(({ name }) => name), ["App", "Account flows"]);
-  assert.match(listed.text, /Tasks \[desktop, mobile\]: Tasks \/ List → Tasks \/ Edit → Tasks \/ Detail/);
+  assert.match(listed.text, /Tasks row \[desktop, mobile\]: Tasks \/ List, Tasks \/ Edit, Tasks \/ Detail/);
 });
 
 test("view --canvas reads and draws the whole canvas", async () => {
   const { path } = await app();
   const text = await run(["view", path, "--canvas", "Pages", "--json"]);
-  assert.match(text.text, /Tasks\n\s+desktop: Tasks \/ List [0-9]+×[0-9]+ → Tasks \/ Detail/);
+  assert.match(text.text, /Tasks row\n\s+desktop: Tasks \/ List [0-9]+×[0-9]+, Tasks \/ Detail/);
   const png = await run(["view", path, "--canvas", "Pages", "--as", "png", "--json"]);
   assert.ok((await stat(png.output)).size > 0);
   const unknown = await run(["view", path, "--canvas", "Nope", "--json"], 1);

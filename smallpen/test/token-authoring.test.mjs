@@ -325,8 +325,7 @@ test("AI creates a Token row by name, fills an empty cell, reads raw definitions
     ),
   );
   await run([
-    "theme",
-    "add",
+    "token", "theme", "add",
     path,
     "--theme",
     "Brand/Default",
@@ -338,7 +337,7 @@ test("AI creates a Token row by name, fills an empty cell, reads raw definitions
     "Other/Default",
     "--json",
   ]);
-  const before = await run(["theme", "list", path, "--full", "--json"]);
+  const before = await run(["token", "theme", "list", path, "--full", "--json"]);
   const card = {
     name: "space.card",
     type: "spacing",
@@ -441,7 +440,7 @@ test("AI creates a Token row by name, fills an empty cell, reads raw definitions
   );
   assert.deepEqual(await stored(), snapshot, "reads leave stored data alone");
   assert.deepEqual(
-    (await run(["theme", "list", path, "--full", "--json"])).appSelection,
+    (await run(["token", "theme", "list", path, "--full", "--json"])).appSelection,
     before.appSelection,
   );
   await writeFile(

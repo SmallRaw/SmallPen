@@ -240,14 +240,16 @@ commands. Expand one step at a time:
 smallpen help token
 smallpen help token show
 smallpen schema command token show --json
-smallpen token show PACKAGE --token-id ID
+smallpen token show PACKAGE --path color.brand
 ```
 
-Project, theme, Token, component, page, configuration, asset, media, font and
-prototype flow commands use `OBJECT ACTION PACKAGE`. `view`, `export` and
+Project, Token, component, page, canvas, asset and prototype flow commands use
+`OBJECT [GROUP] ACTION PACKAGE`. Theme settings are under `token theme`;
+colors, typography and font choice are Token values. Media and font files are
+under `asset media` and `asset font`. `view`, `export` and
 `validate` are the shared design reads, exports and checks. Advanced batches,
-drafts and remote library operations are under `advanced`. Previous flat
-commands remain compatibility aliases, outside ordinary discovery.
+drafts, remote libraries and the App's separate color/typography styles are
+under `advanced`. Previous flat commands return the corresponding grouped path.
 
 The CLI's help/schema explains its operations without a Skill. The independently
 installable [application design Skill](skills/README.md) supplies requirements,
@@ -257,10 +259,10 @@ materials and character boards remain drafts for later work. See
 [CLI and Skill responsibilities](docs/CLI-SKILLS.md).
 
 
-`theme list` frequently reads groups/options/defaults. Unspecified groups use
+`token theme list` frequently reads groups/options/defaults. Unspecified groups use
 project defaults; explicit `--theme GROUP/OPTION` only selects that call. The
 App and CLI share those rules. CLI reads never change App selection or save a
-combination. `token set` writes Tokens by name and `theme add|rename|default|
+combination. `token set` writes Tokens by name and `token theme add|rename|default|
 delete` edit options named `Group/Option`; no IDs or token Sets are needed.
 
 `view` looks at anything by name (`--page`, `--component`, `--token`,

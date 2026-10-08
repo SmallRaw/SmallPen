@@ -74,8 +74,7 @@ async function initAcme(context) {
 }
 
 async function revisionOf(path, root) {
-  return (await runCli(["project", "show", path, "--json"], root)).json.package
-    .revision;
+  return (await runCli(["project", "show", path, "--json"], root)).json.revision;
 }
 
 async function writeJson(root, name, value) {
@@ -474,7 +473,8 @@ test("page drawing instance text compiles to checked instance overrides", async 
   );
   assert.equal(bad.code, 1);
   assert.equal(bad.json.error.code, "unknown_element");
-  assert.deepEqual(bad.json.error.details.elements.sort(), ["Button", "Label"]);
+  // The component's elements by path below its root.
+  assert.deepEqual(bad.json.error.details.elements.sort(), ["Label"]);
   assert.equal(await revisionOf(product, root), before);
 
   const good = await runCli(
@@ -550,7 +550,7 @@ test("--compact drops the inverse batch and --inverse-out keeps undo", async (co
   assert.equal(compact.json.inverseBatch, undefined);
   assert.equal(compact.json.guidance, undefined);
   assert.equal(compact.json.inverseBatchPath, undoPath);
-  assert.equal(compact.json.inverseOperationCount, 1);
+  assert.equal(compact.json.undo.argv.at(-1), undoPath);
   assert.match(compact.json.summary, /^Applied token-set_.*1 changed file\(s\)/);
   assert.ok(compact.stdout.length < full.stdout.length);
 
@@ -567,7 +567,7 @@ test("--compact drops the inverse batch and --inverse-out keeps undo", async (co
   );
 });
 
-test("a font fallback names the available fonts and the font import command", async (context) => {
+test("a font fallback names the available fonts and the asset font import command", async (context) => {
   const { product, root } = await initAcme(context);
   const text = (name) => ({
     fontFamily: "Inter",
@@ -620,10 +620,9 @@ test("a font fallback names the available fonts and the font import command", as
     requestedFont: "Inter",
     substituteFont: "Source Sans Pro",
   });
-  assert.match(fallbacks[0].message, /font import/);
-  assert.deepEqual(fallbacks[0].nextOperations[0].argv.slice(0, 3), [
-    "font",
-    "import",
+  assert.match(fallbacks[0].message, /asset font import/);
+  assert.deepEqual(fallbacks[0].nextOperations[0].argv.slice(0, 4), [
+    "asset", "font", "import",
     product,
   ]);
 });

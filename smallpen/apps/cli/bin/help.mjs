@@ -39,20 +39,19 @@ const WRITE_REPLY = `Reply size:
 
 const HELP = {
   assets: `Usage:
-  smallpen asset list PACKAGE [--kind colors|fonts|media|typographies]
+  smallpen advanced style list PACKAGE [--kind colors|typographies]
                  [--limit N] [--offset N] [--json]
 
-Read stored colors, typographies, fonts (families, variants, files) and media.
-Write shared assets in their owning package.
-Next: asset set/delete edit colors and typographies by name; font import and
-media import add files; media delete and font delete remove them by name.`,
+Read the App's stored color and typography assets. Use token for design values
+and token theme for their options and defaults. File assets are managed through
+asset media and asset font. Write styles in their owning package.`,
   help: `Usage:
-  smallpen help [OBJECT [ACTION]|rules [TOPIC]] [--json]
+  smallpen help [OBJECT [GROUP] [ACTION]|rules [TOPIC]] [--json]
 
 Use COMMAND --help for options, or schema for JSON input shapes. Use help rules for shared operation rules; schema command OBJECT ACTION
 describes one command at a time.`,
   themes: `Usage:
-  smallpen theme list PACKAGE [--theme GROUP/NAME]... [--json]
+  smallpen token theme list PACKAGE [--theme GROUP/NAME]... [--json]
 
 Read project-defined groups, options (named Group/Option), defaults and this
 call's selection. This is a lightweight settings query, with no Token inventory.
@@ -62,7 +61,7 @@ and omitted by default; --full includes appSelection for explicit inspection.
 It never supplies the CLI defaults.
 No --theme uses project defaults; App current selection is independent.
 --theme overrides only named groups. No data or App state is written.
-Write: theme add|rename|default|delete --theme Group/Option.`,
+Write: token theme add|rename|default|delete --theme Group/Option.`,
   view: `Usage:
   smallpen view PACKAGE [what] [--as text|wireframe|png|issues] [--theme G/O]...
 
@@ -86,12 +85,13 @@ Next: changes PACKAGE --since REVISION after someone edits the design.`,
   smallpen token export PACKAGE [--type TYPE] [--token PREFIX] [--by GROUP]
                         [--format json|flat] [--theme G/O]... [--output DIR] [--json]
 
-Write Token values to files for application code. --by GROUP writes one file
-per option of that theme group (--type string --by Language -> en.json,
-zh-CN.json); without it one file holds the default values. json nests by name
+Export resolved Token values as JSON. --by GROUP writes one file
+per option of that theme group, named after the option (--type string
+--by Language with options English and Chinese -> English.json, Chinese.json);
+without it one file, tokens.json, holds the values of the selected themes
+(project defaults, or --theme). json nests by name
 (text.task.new -> {"text":{"task":{"new":...}}}); flat keeps one key per name.
-Other groups use the project defaults or --theme. Code owns switching at run
-time; export again after the design changes.`,
+Other groups use the project defaults or --theme.`,
   changes: `Usage:
   smallpen changes PACKAGE [--since REVISION] [--limit N] [--full] [--json]
 
@@ -297,14 +297,14 @@ Defaults:
 Output:
   Chosen source/value plus all candidates, specificity, rejection reasons, and layer.`,
   "import-media": `Usage:
-  smallpen media import <package.smallpen> --file MEDIA_FILE
+  smallpen asset media import <package.smallpen> --file MEDIA_FILE
                         [--media-path PATH] [--name NAME] [--json]
 
 Import is the public binary Media entry for an existing Product: PNG, JPEG, GIF,
 WebP, and SVG are detected from bytes, dimensions are validated, and the blob is
 content-addressed (identical bytes in one package share one blob). JSON apply
-still forbids blob writes; media import is a file entry, not a batch operation.
-media delete --media NAME deletes the descriptor; the content-addressed blob
+still forbids blob writes; asset media import is a file entry, not a batch operation.
+asset media delete --media NAME deletes the descriptor; the content-addressed blob
 itself is immutable and shared.
 
 Errors and recovery:
@@ -315,7 +315,7 @@ Output:
 
 `,
   "import-font": `Usage:
-  smallpen font import <package.smallpen> --file FONT_FILE --family NAME
+  smallpen asset font import <package.smallpen> --file FONT_FILE --family NAME
                       [--weight 400] [--style normal] [--name NAME] [--json]
 
 Public Font entry for an existing Product. TTF and OTF are validated by SFNT
@@ -563,8 +563,9 @@ Instances whose variant is gone:
   remove-dependent-usage (delete the Instance).`,
 };
 
-export function printHelp(command, { full = false } = {}) {
+export function printHelp(command, { full = false, route } = {}) {
   const say = (text) => printText(publicText(text));
+  const name = route?.name ?? command;
   if (Object.hasOwn(COMMAND_GROUPS, command) || !command) {
     printBriefHelp(command, undefined, { full });
     say(
@@ -592,10 +593,11 @@ export function printHelp(command, { full = false } = {}) {
       say(commandOverview(command).notes.join("\n") + "\n");
     return;
   }
-  if (command && HELP[command]) {
-    say(`SmallPen ${command}\n\n${HELP[command]}
+  const guidance = commandGuidance(command, route);
+  if (command && guidance) {
+    say(`SmallPen ${name}\n\n${guidance}
 
-${commandHelp(command)}
+${commandHelp(name)}
 
 Common output and error contract:
   Default JSON is compact and bounded to 8 KiB. Large complete results are saved
@@ -618,7 +620,7 @@ Common output and error contract:
 
 Help / next:
   smallpen --help
-  smallpen ${command} --help
+  smallpen ${name} --help
 `);
     return;
   }
@@ -634,8 +636,8 @@ Model:
   Component Sets) and a Product (<name>.smallpen: Screens, Presentations,
   Scenarios) instead: write Tokens and components to the Foundation, Screens and
   nodes to the Product, and pass the Product to the reads.
-  Themes are Penpot token sets + themes. themes reads groups/options/defaults;
-  theme add|rename|default|delete write them by Group/Option name. Resolved reads take
+  Themes are Penpot token sets + themes. token theme list reads groups/options/defaults;
+  token theme add|rename|default|delete write them by Group/Option name. Resolved reads take
   --theme GROUP/NAME for this call only: project defaults, then an explicit
   Scenario, then explicit overrides of named groups. App active selection is
   independent. set-active-token-themes explicitly stores the App selection.
@@ -655,9 +657,9 @@ CLI entry point:
   CLI usage is complete without a Skill. Scene Skills supply task-specific rules.
 
 Separate actions:
-  settings    theme/token/component/page/canvas/asset/flow actions save changes by
+  settings    token/component/page/canvas/asset/flow actions save changes by
               name; advanced apply runs an exact batch, such as an undo batch.
-  definitions theme list is a cheap settings query; search finds reusable Tokens
+  definitions token theme list is a cheap settings query; search finds reusable Tokens
               and components.
   view        Compact layout outline, or a page/component/region text wireframe.
   validate    Problems and coverage; data validity is separate from visual QA.
@@ -713,6 +715,11 @@ errors, and relevant next commands.
 }
 
 export const COMMAND_NAMES = Object.freeze(COMMANDS.map(([name]) => name));
-export function commandGuidance(command) {
-  return HELP[command];
+export function commandGuidance(command, route) {
+  if (route && (command === "assets" || route.fixed || !HELP[command])) {
+    const contract = commandContract(route.name);
+    const args = contract.arguments.map(({ name, required }) => required ? `<${name}>` : `[${name}]`).join(" ");
+    return `Usage:\n  smallpen ${route.name} ${args} [options]\n\n${route.purpose}`;
+  }
+  return HELP[command] ? publicText(HELP[command]) : undefined;
 }

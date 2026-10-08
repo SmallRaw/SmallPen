@@ -23,27 +23,14 @@ export const COMMAND_GROUPS = {
       migrate: action("migrate-themes", "Copy a package with migrated themes"),
     },
   },
-  theme: {
-    purpose: "Read and edit theme groups, options and project defaults",
-    actions: {
-      list: action(
-        "themes",
-        "Read groups, options and defaults; --theme selects values for this call only",
-      ),
-      add: action(
-        "theme-add",
-        "Add options by full name: --theme Viewport/Desktop --theme Viewport/Mobile",
-      ),
-      rename: action(
-        "theme-rename",
-        "Rename an option (--theme Viewport/Desktop --to Web) or a group (--group Viewport --to Platform)",
-      ),
-      default: action("theme-default", "Make an option its group's default: --theme Viewport/Mobile"),
-      delete: action("theme-delete", "Delete an option (--theme Viewport/Tablet) or a group (--group Viewport)"),
-    },
-  },
   token: {
-    purpose: "Read, resolve, search and edit Tokens",
+    purpose: "Read and edit design values, theme groups, options and defaults",
+    groups: {
+      theme: {
+        purpose:
+          "Read and edit Token theme groups, options and project defaults",
+      },
+    },
     actions: {
       list: action(
         "tokens",
@@ -67,17 +54,44 @@ export const COMMAND_GROUPS = {
       impact: action("impact", "Locate bindings of one Token"),
       export: action(
         "token-export",
-        "Write Token values to files for code: --type string --by Language writes en.json, zh-CN.json, ...",
+        "Export resolved Token values as JSON: --type string --by Language writes one file per option (English.json, Chinese.json)",
       ),
       import: action("import-tokens", "Review or apply a Token import"),
+      "theme list": action(
+        "themes",
+        "Read groups, options and defaults; --theme selects values for this call only",
+      ),
+      "theme add": action(
+        "theme-add",
+        "Add options by full name: --theme Viewport/Desktop --theme Viewport/Mobile",
+      ),
+      "theme rename": action(
+        "theme-rename",
+        "Rename an option (--theme Viewport/Desktop --to Web) or a group (--group Viewport --to Platform)",
+      ),
+      "theme default": action(
+        "theme-default",
+        "Make an option its group's default: --theme Viewport/Mobile",
+      ),
+      "theme delete": action(
+        "theme-delete",
+        "Delete an option (--theme Viewport/Tablet) or a group (--group Viewport)",
+      ),
     },
   },
   canvas: {
-    purpose: "Arrange pages on canvases; the CLI lays every canvas out (one row per business flow)",
+    purpose:
+      "Arrange pages on canvases; the CLI lays every canvas out (one row per module: Tasks / ... pages)",
     actions: {
-      list: action("canvas-list", "List canvases, their business flows and pages"),
-      rename: action("canvas-rename", "Rename a canvas: --canvas Pages --to App"),
-      put: action("canvas-put", "Put a page on a canvas: --page \"Tasks / Board\" --canvas Reviews"),
+      list: action("canvas-list", "List canvases, their rows and pages"),
+      rename: action(
+        "canvas-rename",
+        "Rename a canvas: --canvas Pages --to App",
+      ),
+      put: action(
+        "canvas-put",
+        'Put a page on a canvas: --page "Tasks / Board" --canvas Reviews',
+      ),
     },
   },
   component: {
@@ -90,7 +104,15 @@ export const COMMAND_GROUPS = {
         "Define or redefine a component by name: base elements, properties, variant changes",
         { topic: "component-define" },
       ),
-      rename: action("component-rename", "Rename a component: --component Button --to \"Action button\""),
+      set: action(
+        "component-set",
+        "Change an element's fields without defining again: --element Label --variant Style=ghost --set fontSize=16 (--all for every variant)",
+        { topic: "component-fields" },
+      ),
+      rename: action(
+        "component-rename",
+        'Rename a component: --component Button --to "Action button"',
+      ),
       delete: action(
         "component-delete",
         "Delete a component, or one variant: --component Button [--variant Style=ghost]; used components are protected",
@@ -98,7 +120,8 @@ export const COMMAND_GROUPS = {
     },
   },
   page: {
-    purpose: "Draw and arrange pages from named elements and component instances",
+    purpose:
+      "Draw and arrange pages from named elements and component instances",
     actions: {
       list: action("list", "List pages", { fixed: ["--kind", "screens"] }),
       draw: action(
@@ -106,11 +129,19 @@ export const COMMAND_GROUPS = {
         "Draw a page or one container from named elements and component instances",
         { topic: "page-draw" },
       ),
+      set: action(
+        "page-set",
+        "Change one element's fields (or the page's) without drawing again: --element Card --set width=320 --set fill={color.surface}",
+        { topic: "page-set" },
+      ),
       move: action(
         "page-move",
         "Move an element up, down, left or right; the CLI picks coordinates and avoids overlaps",
       ),
-      rename: action("page-rename", "Rename a page: --page \"Tasks / List\" --to Overview"),
+      rename: action(
+        "page-rename",
+        'Rename a page: --page "Tasks / List" --to Overview',
+      ),
       delete: action(
         "page-delete",
         "Delete a page, a platform version (--platform) or an element (--element)",
@@ -118,47 +149,72 @@ export const COMMAND_GROUPS = {
     },
   },
   asset: {
-    purpose: "Read and edit colors and typographies",
+    purpose: "Import and manage media and font files",
+    groups: {
+      media: { purpose: "Import and manage media files" },
+      font: { purpose: "Import and manage font families and file variants" },
+    },
     actions: {
-      list: action("assets", "List colors and typographies; --kind media or fonts lists those"),
-      set: action(
-        "asset-set",
-        "Create or change by name: --color Brand/Primary --value \"#1f6feb\", or --typography Text/Body --value '{...}'",
+      "media list": action("assets", "List media", {
+        fixed: ["--kind", "media"],
+      }),
+      "media import": action("import-media", "Import a media file"),
+      "media delete": action(
+        "media-delete",
+        "Delete a media file by name: --media Logos/Mark",
       ),
-      delete: action("asset-delete", "Delete by name: --color Brand/Primary or --typography Text/Body"),
-    },
-  },
-  media: {
-    purpose: "Import and manage media files",
-    actions: {
-      list: action("assets", "List media", { fixed: ["--kind", "media"] }),
-      import: action("import-media", "Import a media file"),
-      delete: action("media-delete", "Delete a media file by name: --media Logos/Mark"),
-    },
-  },
-  font: {
-    purpose: "Import and manage font families and variants",
-    actions: {
-      list: action("assets", "List fonts", { fixed: ["--kind", "fonts"] }),
-      import: action("import-font", "Import a font file"),
-      delete: action("font-delete", "Delete a font family, or one variant: --font Inter [--variant Bold]"),
+      "font list": action("assets", "List fonts", {
+        fixed: ["--kind", "fonts"],
+      }),
+      "font import": action("import-font", "Import a font file"),
+      "font delete": action(
+        "font-delete",
+        "Delete a font family, or one variant: --font Inter [--variant Bold]",
+      ),
     },
   },
   flow: {
     purpose: "Read and set prototype starts and element links by name",
     actions: {
-      list: action("flow-list", "List starts and links by page and element name"),
+      list: action(
+        "flow-list",
+        "List starts and links by page and element name",
+      ),
       link: action(
         "flow-link",
-        "Link an element to a page: --from \"Page / Element\" --to Page [--on click] [--action navigate|overlay|back]",
+        'Link an element to a page: --from "Page / Element" --to Page [--platform desktop] [--on click] [--action navigate|overlay|back]',
       ),
-      start: action("flow-start", "Make a page the start of a prototype flow: --page Page; --remove stops it"),
-      unlink: action("flow-unlink", "Remove an element's links: --from \"Page / Element\" [--to Page] [--on click]"),
+      start: action(
+        "flow-start",
+        "Make a page the start of a prototype flow: --page Page [--platform desktop]; --remove stops it",
+      ),
+      unlink: action(
+        "flow-unlink",
+        'Remove an element\'s links: --from "Page / Element" [--to Page] [--on click]',
+      ),
     },
   },
   advanced: {
-    purpose: "Use atomic batches, draft imports and remote libraries",
+    purpose:
+      "Use atomic batches, draft imports, remote libraries and App styles",
+    groups: {
+      style: {
+        purpose:
+          "Manage existing App color and typography assets; use token for design values",
+      },
+    },
     actions: {
+      "style list": action("assets", "List App color and typography assets", {
+        overrides: { kind: { values: ["colors", "typographies"] } },
+      }),
+      "style set": action(
+        "asset-set",
+        "Create or change an App style by name: --color Brand/Primary --value \"#1f6feb\", or --typography Text/Body --value '{...}'",
+      ),
+      "style delete": action(
+        "asset-delete",
+        "Delete an App style by name: --color Brand/Primary or --typography Text/Body",
+      ),
       apply: action(
         "apply",
         "Apply an explicit revision-guarded atomic batch, such as the undo batch a write returns",
@@ -204,7 +260,10 @@ for (const [group, { actions }] of Object.entries(COMMAND_GROUPS)) {
 }
 
 export const PUBLIC_COMMANDS = [
-  ...Object.entries(COMMAND_GROUPS).map(([command, { purpose }]) => ({ command, purpose })),
+  ...Object.entries(COMMAND_GROUPS).map(([command, { purpose }]) => ({
+    command,
+    purpose,
+  })),
   ...["view", "changes", "export", "validate", "help", "schema", "version"].map(
     (command) => ({ command, purpose: COMMAND_CONTRACTS[command].purpose }),
   ),
@@ -224,11 +283,68 @@ export function groupRoute(group, actionName) {
       `Unknown ${group} action: ${actionName}`,
       {
         nextOperations: [
-          { operation: "smallpen.help", argv: ["help", group, "--json"] },
+          {
+            operation: "smallpen.help",
+            argv: [
+              "help",
+              group,
+              ...parentGroup(group, actionName).split(" ").filter(Boolean),
+              "--json",
+            ],
+          },
         ],
       },
     );
   return route;
+}
+
+function parentGroup(group, section = "") {
+  return (
+    Object.keys(COMMAND_GROUPS[group]?.groups ?? {})
+      .filter((name) => section === name || section.startsWith(`${name} `))
+      .sort((a, b) => b.length - a.length)[0] ?? ""
+  );
+}
+
+export function groupDefinition(group, section = "") {
+  if (!Object.hasOwn(COMMAND_GROUPS, group)) return undefined;
+  if (!section) return COMMAND_GROUPS[group];
+  const groups = COMMAND_GROUPS[group].groups;
+  return groups && Object.hasOwn(groups, section) ? groups[section] : undefined;
+}
+
+// Store leaf routes once; discovery shows only the next level of their path.
+export function groupActions(group, section = "") {
+  const prefix = section ? `${section} ` : "";
+  const actions = new Map();
+  for (const [name, route] of Object.entries(COMMAND_GROUPS[group].actions)) {
+    if (!name.startsWith(prefix) || route.hidden) continue;
+    const action = name.slice(prefix.length).split(" ")[0];
+    const child = [section, action].filter(Boolean).join(" ");
+    actions.set(action, {
+      action,
+      purpose: groupDefinition(group, child)?.purpose ?? route.purpose,
+    });
+  }
+  return [...actions.values()];
+}
+
+export function commandMatch(argv) {
+  const group = argv[0];
+  if (!Object.hasOwn(COMMAND_GROUPS, group)) return undefined;
+  let section = "";
+  let length = 1;
+  for (; length < argv.length && !argv[length].startsWith("-"); length++) {
+    section = [section, argv[length]].filter(Boolean).join(" ");
+    const actions = COMMAND_GROUPS[group].actions;
+    const route = Object.hasOwn(actions, section)
+      ? actions[section]
+      : undefined;
+    if (route) return { group, section, route, length: length + 1 };
+    if (!groupDefinition(group, section))
+      return { group, section, length: length + 1 };
+  }
+  return { group, section, length };
 }
 
 export function actionContract(group, actionName) {
@@ -236,7 +352,7 @@ export function actionContract(group, actionName) {
   const contract = commandContract(route.name);
   return {
     ...contract,
-    next: ["schema", "command", group, actionName, "--json"],
+    next: ["schema", "command", ...route.name.split(" "), "--json"],
     nextOperations: inputQueries(route),
   };
 }
@@ -247,14 +363,18 @@ export function inputQueries(route) {
 }
 
 export function routeCommand(argv) {
+  if (!Object.hasOwn(COMMAND_GROUPS, argv[0])) return { args: argv };
   const group = COMMAND_GROUPS[argv[0]];
-  if (!group) return { args: argv };
-  if (argv.length === 1 || ["--help", "-h"].includes(argv[1]))
+  const matched = commandMatch(argv);
+  if (!matched.route && groupDefinition(matched.group, matched.section))
     return {
       args: [
         "help",
-        argv[0],
-        ...argv.slice(1).filter((a) => a !== "--help" && a !== "-h"),
+        matched.group,
+        ...matched.section.split(" ").filter(Boolean),
+        ...argv
+          .slice(matched.length)
+          .filter((a) => a !== "--help" && a !== "-h"),
       ],
     };
   // Existing package-path commands remain compatibility aliases, not discovery entries.
@@ -263,21 +383,23 @@ export function routeCommand(argv) {
     (/[/.\\]/.test(argv[1]) || argv[1].includes("://"))
   )
     return { args: argv };
-  const route = groupRoute(argv[0], argv[1]);
-  if (argv.slice(2).includes("--help") || argv.slice(2).includes("-h"))
+  const route = matched.route ?? groupRoute(matched.group, matched.section);
+  if (
+    argv.slice(matched.length).includes("--help") ||
+    argv.slice(matched.length).includes("-h")
+  )
     return {
       args: [
         "help",
-        argv[0],
-        argv[1],
+        ...route.name.split(" "),
         ...argv
-          .slice(2)
+          .slice(matched.length)
           .filter((a) => ["--json", "--full", "--stdout"].includes(a)),
       ],
     };
   const validated = validateCommandArguments(route.name, [
     route.name,
-    ...argv.slice(2),
+    ...argv.slice(matched.length),
   ]);
   return {
     route,
@@ -292,7 +414,8 @@ const ALIASES = {
   watch: ["project", "watch"],
   repair: ["project", "repair"],
   "migrate-themes": ["project", "migrate"],
-  themes: ["theme", "list"],
+  theme: ["token", "theme"],
+  themes: ["token", "theme", "list"],
   tokens: ["token", "list"],
   "effective-token": ["token", "show"],
   "explain-token": ["token", "explain"],
@@ -302,9 +425,11 @@ const ALIASES = {
   catalog: ["component", "list"],
   "token-export": ["token", "export"],
   "search-components": ["component", "search"],
-  assets: ["asset", "list"],
-  "import-media": ["media", "import"],
-  "import-font": ["font", "import"],
+  assets: ["advanced", "style", "list"],
+  "import-media": ["asset", "media", "import"],
+  "import-font": ["asset", "font", "import"],
+  media: ["asset", "media"],
+  font: ["asset", "font"],
   apply: ["advanced", "apply"],
   "import-draft": ["advanced", "import-draft"],
   "draft-diff": ["advanced", "draft-diff"],
@@ -344,7 +469,11 @@ export function publicArgv(argv) {
 const ENGINE_ROUTES = new Map();
 for (const [group, { actions }] of Object.entries(COMMAND_GROUPS))
   for (const [name, route] of Object.entries(actions))
-    if (!route.fixed) ENGINE_ROUTES.set(route.engine, ENGINE_ROUTES.has(route.engine) ? null : [group, name]);
+    if (!route.fixed)
+      ENGINE_ROUTES.set(
+        route.engine,
+        ENGINE_ROUTES.has(route.engine) ? null : route.name.split(" "),
+      );
 
 // Rewrite only command guidance; design strings and stored operation payloads stay exact.
 export function publicGuidance(value) {
@@ -358,7 +487,7 @@ export function publicGuidance(value) {
         return [
           key,
           `smallpen.${publicArgv(value.argv)
-            .slice(0, COMMAND_GROUPS[publicArgv(value.argv)[0]] ? 2 : 1)
+            .slice(0, commandMatch(publicArgv(value.argv))?.length ?? 1)
             .join(".")}`,
         ];
       if (

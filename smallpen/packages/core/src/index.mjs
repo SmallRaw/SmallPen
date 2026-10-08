@@ -101,6 +101,8 @@ export {
   flowStartIntent,
   PAGE_DRAW_FIELDS,
   pageDrawOperation,
+  pageSetOperation,
+  componentSetOperation,
   elementMoveOperation,
   MOVE_DIRECTIONS,
 } from "./simple-design.mjs";

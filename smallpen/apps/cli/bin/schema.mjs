@@ -31,6 +31,7 @@ import { pageItems } from "./read-output.mjs";
 import {
   COMMAND_GROUPS,
   PUBLIC_COMMANDS,
+  groupDefinition,
   actionContract,
 } from "./command-tree.mjs";
 
@@ -438,7 +439,7 @@ function nodeTopic() {
       lineHeight:
         "A multiplier of fontSize: 1.4 means 140% (Penpot's line height). Not px: the editor reads 24 as 24 times the font size. The same holds for lineHeight in a typography Token. Default 1.2.",
       fonts:
-        "Only Source Sans Pro (Latin) is bundled. Any other fontFamily, including one for Chinese or another script, must be imported into the package first with smallpen font import; otherwise render falls back to Source Sans Pro, reports font_render_fallback, and text it cannot draw is a text_missing_glyphs issue.",
+        "Only Source Sans Pro (Latin) is bundled. Any other fontFamily, including one for Chinese or another script, must be imported into the package first with smallpen asset font import; otherwise render falls back to Source Sans Pro, reports font_render_fallback, and text it cannot draw is a text_missing_glyphs issue.",
       values: CANONICAL_SCHEMA_RULES.textStyleEnums,
       note: "Text alignment is textStyle.textAlign, not a node field.",
     },
@@ -463,7 +464,7 @@ function nodeTypesTopic() {
       ELLIPSE: "Ellipse inside x/y/width/height",
       FRAME: "Container; fills, strokes, cornerRadius, layout",
       GROUP: "Plain group of children",
-      IMAGE: "Requires mediaRef (import with smallpen media import)",
+      IMAGE: "Requires mediaRef (import with smallpen asset media import)",
       INSTANCE: "Requires instance; see: smallpen schema instance",
       PATH: "pathData or points; strokes with capStart/capEnd for arrows",
       RECTANGLE: "Rectangle; fills, strokes, cornerRadius",
@@ -530,7 +531,7 @@ function themeTopic() {
       "bind nodes to tok_color_surface (the base id); Theme/Dark shows #1c1b1f",
       'smallpen view PACKAGE --theme Theme/Dark --json (read only); set-active-token-themes {themePaths:["Theme/Dark"]} stores it',
     ],
-    read: "theme list, view, validate and export use project defaults, not App active themes; --theme GROUP/NAME overrides only named groups. None of these reads write. A Presentation alone does not choose themes. Use themes PACKAGE to discover project-defined groups/options/defaults; platform, language and light/dark are optional examples, not required dimensions.",
+    read: "token theme list, view, validate and export use project defaults, not App active themes; --theme GROUP/NAME overrides only named groups. None of these reads write. A Presentation alone does not choose themes. Use token theme list PACKAGE to discover project-defined groups/options/defaults; platform, language and light/dark are optional examples, not required dimensions.",
     foundationProduct:
       "In the foundation-product layout the Foundation owns the sets and themes. The Product stores which Foundation themes it uses in manifest dependencies[0].activeThemeIds (Foundation theme ids); set-active-token-themes on the Product writes it. The Product's own active sets sit on top of the Foundation's by name.",
     operations: {
@@ -560,7 +561,7 @@ function componentSetTopic() {
   return {
     summary:
       "A Component Set is one component with variants. Axes name the choices; each variant selects one value per Axis and holds its own node tree.",
-    variantNodeTypes: `${VARIANT_NODE_TYPES.join(", ")} only. ELLIPSE, GROUP and PATH are rejected in variants (they work in Screen Presentations): use a RECTANGLE with cornerRadius for a circle, a FRAME to group, an IMAGE (media import) for an icon.`,
+    variantNodeTypes: `${VARIANT_NODE_TYPES.join(", ")} only. ELLIPSE, GROUP and PATH are rejected in variants (they work in Screen Presentations): use a RECTANGLE with cornerRadius for a circle, a FRAME to group, an IMAGE (asset media import) for an icon.`,
     fields: {
       id: "cmp_...",
       name: "non-empty string",
@@ -758,6 +759,31 @@ function initTopic() {
   };
 }
 
+// page set and component set take the same fields.
+function setTopic(command) {
+  return {
+    command,
+    fields: {
+      set: "FIELD=VALUE, repeatable; VALUE is JSON (320, [8,16], {\"Style\":\"ghost\"}, true) or plain text; {token.path} binds a Token",
+      element: "fields: width, height (number, fill, hug), fill, stroke, radius, opacity, shadow, visible, rotation, margin, min/max sizes; texts: text, color, font, fontFamily, fontSize, fontWeight, lineHeight, letterSpacing, textTransform, textDecoration, textAlign; containers: layout (row|column|none), gap, padding, align, justify",
+      copy: "a copy of a component: props, text {\"Element\": \"text\"}, set {\"Element.field\": value}, width, height (numbers), visible, opacity",
+      itself: "without --element: the page version (or the variant) itself, for example its width and height",
+    },
+    example: [
+      "page set app.smallpen --page Board --element Card --set width=320 --set fill={color.surface}",
+      "page set app.smallpen --page Board --element \"Top bar / Title\" --set text={text.board.title} --set fontSize=24",
+      "page set app.smallpen --page Board --element Save --set props={\"Style\":\"ghost\"}",
+      "page set app.smallpen --page Board --platform mobile --set width=390 --set height=900",
+      "component set app.smallpen --component Button --element Label --all --set fontWeight=600",
+    ],
+    notes: [
+      "Only the named fields change; everything else, links included, stays. Texts are measured again and containers that hug grow or shrink, as page draw does.",
+      "Versions and variants often differ on purpose: an element (or the page or component itself) in several of them needs --platform (--variant) to name one, or --all to change every one; the refusal lists where it is.",
+      "A value written over a Token binding replaces the binding.",
+    ],
+  };
+}
+
 const TOPICS = {
   workflow: {
     build: () => CLI_RULES,
@@ -774,12 +800,12 @@ const TOPICS = {
       },
       element: {
         name: "element name; children are found by name in set paths and instance text",
-        text: "makes a text element; color, font ({typography token}), fontFamily (a family imported with font import, or {font-family token}), fontSize, fontWeight, lineHeight, textAlign",
+        text: "makes a text element; color, font ({typography token}), fontFamily (a family imported with asset font import, or {font-family token}), fontSize, fontWeight, lineHeight, textAlign",
         children: "child elements; a container lays them out as a column unless layout says row or none",
         layout: "row | column | none; in none the CLI places children so they do not overlap: give place (\"below Header\", {rightOf: \"Sidebar\", gap: 24}) or nothing, x/y only to pin one",
         "gap / padding": "number or {token}; padding takes 1, 2 or 4 values",
         "align / justify": "start | center | end (align also stretch; justify also space-between)",
-        "width / height": 'number, "fill" (or "100%") or "hug"; a text in a row fills by default',
+        "width / height": 'number, "fill" (or "100%") or "hug"; the only text in a row fills by default, several texts in a row hug',
         "fill / stroke / radius / opacity / shadow": 'value or {token}; stroke is a color or {color, width, style}, width one value or four sides [top, right, bottom, left]; radius is one value or four corners [top-left, top-right, bottom-right, bottom-left]',
         margin: "number or {token}; 1, 2 or 4 values, like padding",
         "minWidth / maxWidth / minHeight / maxHeight": "number or {token}",
@@ -834,12 +860,21 @@ const TOPICS = {
         "An instance whose new text is longer than its slot grows by the measured difference.",
         "Link elements with flow link --from \"Page / Element\" --to Page.",
         "Move an element later with page move --page Page --element Name --direction up|down|left|right [--steps N]; the CLI picks the coordinates.",
-        "The CLI lays the canvas out: each business flow (module) is a block of rows, one per platform, pages left to right in flow order (from the flow start along links), more room between flows. Reorder a page with page move --page Page --direction left|right; see it with canvas list or view --canvas NAME.",
-        "Strings are Tokens: bind text with \"{text.path}\" (string Token) and visibility with \"{flag.path}\" (boolean Token); check a language with view --theme Language/zh-CN.",
+        "The CLI lays the canvas out: each module (Tasks / ... pages) is a row block, one line per platform, pages left to right from the start page along links, more room between modules. Reorder a page with page move --page Page --direction left|right; see it with canvas list or view --canvas NAME.",
+        "Strings are Tokens: bind text with \"{text.path}\" (string Token) and visibility with \"{flag.path}\" (boolean Token); check a language with view --theme Language/<option>, for example Language/Chinese.",
       ],
     }),
     summary: "Draw a page or one container from named elements and component instances",
   },
+  "page-set": {
+    build: () => setTopic("page set PACKAGE --page NAME [--platform P] [--element NAME] --set FIELD=VALUE ... --json"),
+    summary: "Change some fields of one element (or of a page itself) without drawing it again",
+  },
+  "component-fields": {
+    build: () => setTopic("component set PACKAGE --component NAME [--variant V] [--element NAME] --set FIELD=VALUE ... --json"),
+    summary: "Change some fields of one element of a component (or of the component itself) in its variants without defining it again",
+  },
+
   "token-set": {
     build: () => ({
       command: "token set PACKAGE --intent FILE --json",
@@ -856,7 +891,7 @@ const TOPICS = {
         "value is the Token's value wherever no option overrides it; values override named options. Each call changes only what it names.",
         "group (optional) names the theme group whose options a new Token should vary by. type is required for a new Token.",
         "Write an alias as a value in braces, for example {color.brand}. Read results with token list: each row lists values that differ under other options.",
-        "Strings and flags are Tokens too: type string (with a Language group, values per language) and boolean. token export --type string --by Language writes one file per language for code.",
+        "Strings and flags are Tokens too: type string (with a Language group, values per language) and boolean. token export --type string --by Language writes one JSON file per language.",
       ],
     }),
     summary: "Set Tokens by name: default and per-option values in one call",
@@ -946,7 +981,7 @@ export function schemaTopic(
   }
   if (name === "command") {
     if (Object.hasOwn(COMMAND_GROUPS, argument)) {
-      if (!action) return { topic: name, ...helpTopic(argument) };
+      if (groupDefinition(argument, action)) return { topic: name, ...helpTopic(argument, action) };
       return { topic: name, ...actionContract(argument, action) };
     }
     if (action !== undefined)
