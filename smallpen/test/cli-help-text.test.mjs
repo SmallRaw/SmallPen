@@ -100,8 +100,7 @@ test("help and schema write examples execute against a fresh package", async (co
   // The default layout is one self-contained Package for both roles.
   const pkg = "acme/acme.smallpen";
   const revision = async (path) =>
-    JSON.parse((await runCli(["project", "show", path, "--json"], root)).stdout).package
-      .revision;
+    JSON.parse((await runCli(["project", "show", path, "--json"], root)).stdout).revision;
   const example = async (topic) =>
     JSON.parse((await runCli(["schema", topic, "--json"], root)).stdout)
       .example;

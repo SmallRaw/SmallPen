@@ -217,7 +217,7 @@ test("a mobile Presentation hints at its theme option and at another platform's 
   const { root, path } = await workspace();
   // Replies leave out ids; an apply batch reads the stored packageId.
   const { packageId } = (await openPackage(path)).manifest;
-  await run(["theme", "add", path, "--theme", "Viewport/Desktop", "--theme", "Viewport/Mobile", "--json"]);
+  await run(["token", "theme", "add", path, "--theme", "Viewport/Desktop", "--theme", "Viewport/Mobile", "--json"]);
   const set = await buttonSet(path);
   const [base] = set.variants;
   set.axes = [{ id: "axis_platform", name: "Platform", domain: ["desktop", "mobile"], role: "configuration" }];

@@ -8,6 +8,8 @@ import {
   actionContract,
   inputQueries,
   groupRoute,
+  groupDefinition,
+  groupActions,
   publicGuidance,
 } from "./command-tree.mjs";
 
@@ -143,16 +145,17 @@ export function helpTopic(topic, section, { full = false } = {}) {
     };
   }
   if (Object.hasOwn(COMMAND_GROUPS, topic)) {
-    if (!section)
+    const definition = groupDefinition(topic, section);
+    if (definition)
       return {
-        command: topic,
-        purpose: COMMAND_GROUPS[topic].purpose,
-        usage: `smallpen ${topic} ACTION [arguments] [options]`,
+        command: [topic, section].filter(Boolean).join(" "),
+        purpose: definition.purpose,
+        usage: `smallpen ${[topic, section].filter(Boolean).join(" ")} ACTION [arguments] [options]`,
         options: ["--help", "--json"],
-        actions: Object.entries(COMMAND_GROUPS[topic].actions)
-          .filter(([, { hidden }]) => !hidden)
-          .map(([action, { purpose }]) => ({ action, purpose })),
-        nextOperations: [query("schema", "command", topic)],
+        actions: groupActions(topic, section),
+        nextOperations: [
+          query("schema", "command", topic, ...(section?.split(" ") ?? [])),
+        ],
       };
     const route = groupRoute(topic, section);
     const contract = actionContract(topic, section);
@@ -175,7 +178,7 @@ export function helpTopic(topic, section, { full = false } = {}) {
       options: Object.values(contract.parameters).map((p) => p.option),
       ...(engineNotes ? { notes: engineNotes } : {}),
       nextOperations: [
-        query("schema", "command", topic, section),
+        query("schema", "command", ...route.name.split(" ")),
         ...inputQueries(route),
       ],
       ...(full

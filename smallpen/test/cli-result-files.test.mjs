@@ -295,10 +295,10 @@ test("large render diagnostics remain visible as counts and partial coverage", a
     };
   await writeFile(screenPath, JSON.stringify(screen));
   const reply = (await run(png(packagePath), root)).value;
-  const complete = JSON.parse(await readFile(reply.resultFile.path, "utf8"));
-  assert.equal(reply.diagnosticCount, complete.diagnostics.length);
-  assert.ok(reply.diagnosticCount >= 60);
-  assert.equal(reply.partialRender, true);
+  // Sixty sizes the preview cannot compute read as one counted note.
+  const limits = reply.diagnostics.find(({ code }) => code === "layout_projection_partial");
+  assert.ok(limits.count >= 60, JSON.stringify(reply.diagnostics));
+  assert.equal(reply.resultFile, undefined, "the counted note keeps the reply small");
   const replacements = new Map(
     ids.map((id) => [id, `${id}_${"x".repeat(1000)}`]),
   );
@@ -312,10 +312,12 @@ test("large render diagnostics remain visible as counts and partial coverage", a
   await writeFile(screenPath, JSON.stringify(screen));
   const validated = (await run(["validate", packagePath, "--json"], root))
     .value;
-  const report = JSON.parse(await readFile(validated.resultFile.path, "utf8"));
-  assert.equal(validated.coverage.complete, false);
-  assert.equal(validated.coverage.skippedCount, report.coverage.skippedCount);
-  assert.ok(validated.coverage.skippedCount >= 60);
+  // Checking the whole package keeps its reply small: sizes the preview
+  // cannot compute are one note, skipped checks are counted by kind.
+  assert.match(validated.previewNote, /in \d+ places/);
+  assert.ok(validated.outputBytes < 8128, `${validated.outputBytes} bytes`);
+  assert.equal(validated.coverage.skippedCount, validated.coverage.skipped.reduce((sum, { count }) => sum + count, 0));
+  assert.ok(validated.coverage.skipped.every(({ count }) => count > 0));
 });
 
 test("old CLI files are removed after 30 minutes; fresh, active and unrelated files remain", async (t) => {

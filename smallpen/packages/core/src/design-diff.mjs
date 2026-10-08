@@ -48,7 +48,12 @@ function tokenChanges(before, after, options) {
   for (const [path, entry] of now) {
     const previous = old.get(path);
     if (!previous) {
-      changes.push({ kind: "token", name: path, change: "added", detail: `${entry.type} ${short(entry.value)}` });
+      changes.push({
+        kind: "token",
+        name: path,
+        change: "added",
+        detail: [`${entry.type} ${short(entry.value)}`, ...Object.entries(entry.values ?? {}).map(([option, value]) => `${option} ${short(value)}`)].join("; "),
+      });
       continue;
     }
     const details = [];
@@ -64,6 +69,34 @@ function tokenChanges(before, after, options) {
   }
   for (const [path] of old)
     if (!now.has(path)) changes.push({ kind: "token", name: path, change: "removed" });
+  return changes.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+// --- colors, typographies, fonts and media -------------------------------------
+
+const ASSET_WORDS = { colors: "color", typographies: "typography", fonts: "font", media: "media" };
+
+function assetTable(snapshot) {
+  const table = new Map();
+  for (const entry of snapshot?.manifest.entries.assets ?? [])
+    for (const kind of Object.keys(ASSET_WORDS))
+      for (const asset of snapshot.entries[entry]?.[kind] ?? []) table.set(`${kind}\0${asset.id}`, { kind, asset });
+  return table;
+}
+
+function assetChanges(before, after) {
+  const old = assetTable(before), now = assetTable(after);
+  const nameOf = (asset) => asset.name ?? asset.family ?? asset.fontFamily ?? asset.id;
+  const changes = [];
+  for (const [key, { kind, asset }] of now) {
+    const was = old.get(key)?.asset;
+    const name = `${ASSET_WORDS[kind]} ${nameOf(asset)}`;
+    if (!was) changes.push({ kind: "asset", name, change: "added", ...(asset.variants ? { detail: `${asset.variants.length} variant${asset.variants.length === 1 ? "" : "s"}` } : {}) });
+    else if (nameOf(was) !== nameOf(asset)) changes.push({ kind: "asset", name, change: "renamed", detail: `was ${nameOf(was)}` });
+    else if (!same(was, asset)) changes.push({ kind: "asset", name, change: "changed" });
+  }
+  for (const [key, { kind, asset }] of old)
+    if (!now.has(key)) changes.push({ kind: "asset", name: `${ASSET_WORDS[kind]} ${nameOf(asset)}`, change: "removed" });
   return changes;
 }
 
@@ -157,8 +190,14 @@ function nodeFieldChanges(old, now, names, decided = {}) {
     for (const field of fields) {
       if (field === "text" || field === "visible") continue;
       const from = old.tokenBindings?.[field], to = now.tokenBindings?.[field];
-      if (!same(from, to)) details.push(`${field} token ${from ? names.token(from) : "none"} → ${to ? names.token(to) : "none"}`);
+      if (!same(from, to)) details.push(`${STYLE_WORDS[field] ?? FIELD_WORDS[field] ?? field} token ${from ? names.token(from) : "none"} → ${to ? names.token(to) : "none"}`);
     }
+  }
+  // A text style reads key by key: "font size 13 → 16".
+  if (take("textStyle")) {
+    const from = old.textStyle ?? {}, to = now.textStyle ?? {};
+    for (const key of new Set([...Object.keys(from), ...Object.keys(to)]))
+      if (!same(from[key], to[key]) && !/Id$/.test(key)) details.push(`${STYLE_WORDS[key] ?? key} ${short(from[key] ?? "none")} → ${short(to[key] ?? "none")}`);
   }
   if (take("instance")) {
     const from = old.instance ?? {}, to = now.instance ?? {};
@@ -169,9 +208,42 @@ function nodeFieldChanges(old, now, names, decided = {}) {
     if (!same(from.component, to.component))
       details.push(`component ${names.component(from.component)} → ${names.component(to.component)}`);
   }
-  for (const key of changed) details.push(`${key} ${short(old[key])} → ${short(now[key])}`);
+  for (const key of changed) {
+    const word = FIELD_WORDS[key];
+    if (word === null) continue;
+    const value = (node) => short(VALUE_WORDS[node[key]] ?? node[key]);
+    details.push(`${word ?? key} ${value(old)} → ${value(now)}`);
+  }
   return details;
 }
+
+const STYLE_WORDS = {
+  fontSize: "font size", fontWeight: "font weight", fontFamily: "font", lineHeight: "line height",
+  letterSpacing: "letter spacing", textAlign: "text align", textTransform: "text case", textDecoration: "text decoration",
+  typography: "typography", fill: "fill", stroke: "stroke", cornerRadius: "radius", itemSpacing: "gap",
+  paddingTop: "padding top", paddingRight: "padding right", paddingBottom: "padding bottom", paddingLeft: "padding left",
+};
+
+// Stored field names in the words page draw uses; null is not a design
+// change of its own (it comes with another field).
+const FIELD_WORDS = {
+  growType: "text size",
+  "layout-item-h-sizing": "width",
+  "layout-item-v-sizing": "height",
+  "layout-flex-dir": "direction",
+  "layout-gap": "gap",
+  "layout-padding": "padding",
+  "layout-padding-type": null,
+  "layout-align-items": "align",
+  "layout-justify-content": "justify",
+  "layout-item-absolute": "placed freely",
+  "layout-wrap-type": "wrap",
+  "layout-item-margin": "margin",
+  cornerRadius: "radius",
+  textStyle: "text style",
+  layout: "layout",
+};
+const VALUE_WORDS = { fix: "fixed", auto: "hug", "auto-width": "hug", "auto-height": "hug height", fixed: "fixed", flex: "auto layout" };
 
 // A side that fills its parent is laid out by the App; say "fill".
 function sizeOf(node) {
@@ -211,6 +283,8 @@ function overrideChanges(old, now, component, names) {
     const separator = key.lastIndexOf(":");
     const element = key.slice(0, separator);
     const field = key.slice(separator + 1);
+    // Links from inside a copy are reported as links.
+    if (field === "interactions") continue;
     if (field === "tokenBindings") {
       const before = old[key] ?? {}, after = now[key] ?? {};
       for (const binding of new Set([...Object.keys(before), ...Object.keys(after)]))
@@ -223,10 +297,19 @@ function overrideChanges(old, now, component, names) {
     pairs.set(`${element}:${field}`, { element, field });
   }
   const label = { fills: "fill", strokes: "stroke", cornerRadius: "radius", textStyle: "text style" };
-  return [...pairs.values()]
-    .sort((left, right) => `${left.element}:${left.field}`.localeCompare(`${right.element}:${right.field}`))
-    .map(({ element, field }) =>
-      `${names.element(component, element)} ${label[field] ?? field} ${shown(old, element, field)} → ${shown(now, element, field)}`);
+  // One line per element and field, by name: an element whose id changed
+  // (one "none → X", one "X → none") reads as what really changed, or not
+  // at all.
+  const merged = new Map();
+  for (const { element, field } of [...pairs.values()].sort((left, right) => `${left.element}:${left.field}`.localeCompare(`${right.element}:${right.field}`))) {
+    const key = `${names.element(component, element)} ${label[field] ?? field}`;
+    const from = shown(old, element, field), to = shown(now, element, field);
+    const entry = merged.get(key) ?? { from: "none", to: "none" };
+    if (from !== "none") entry.from = from;
+    if (to !== "none") entry.to = to;
+    merged.set(key, entry);
+  }
+  return [...merged].filter(([, { from, to }]) => from !== to).map(([key, { from, to }]) => `${key} ${from} → ${to}`);
 }
 
 function nodeChanges(where, before, after, names) {
@@ -234,14 +317,27 @@ function nodeChanges(where, before, after, names) {
   const oldNodes = before?.nodes ?? {}, newNodes = after?.nodes ?? {};
   for (const [id, node] of Object.entries(newNodes)) {
     if (!ownNode(id)) continue;
-    const name = elementPath(newNodes, after.rootId, id) || node.name;
+    // The root is the page version or variant itself.
+    const name = id === after.rootId ? undefined : elementPath(newNodes, after.rootId, id) || node.name;
     const previous = oldNodes[id];
     if (!previous) {
       changes.push({ where, element: name, change: "added" });
       continue;
     }
     const parent = Object.values(newNodes).find((candidate) => candidate.children?.includes(id));
-    const details = nodeFieldChanges(previous, node, names, layoutDecided(node, parent));
+    // The root's name is the page's or the variant's: their rename says it.
+    const details = id === after.rootId
+      ? nodeFieldChanges({ ...previous, name: node.name }, node, names, layoutDecided(node, parent))
+      : nodeFieldChanges(previous, node, names, layoutDecided(node, parent));
+    // The same children in another order (in reading order: a flex line
+    // places its last stored child first).
+    const kept = (node.children ?? []).filter((child) => (previous.children ?? []).includes(child));
+    const keptBefore = (previous.children ?? []).filter((child) => kept.includes(child));
+    if (kept.length > 1 && !same(kept, keptBefore)) {
+      const reading = (ids, holder) => (holder.layout === "flex" && !String(holder["layout-flex-dir"] ?? "row").endsWith("reverse") ? [...ids].reverse() : ids);
+      const label = (ids, holder, table) => reading(ids, holder).map((child) => table[child]?.name ?? child).join(", ");
+      details.push(`order ${label(keptBefore, previous, oldNodes)} → ${label(kept, node, newNodes)}`);
+    }
     if (details.length) changes.push({ where, element: name, change: "changed", detail: details.join("; ") });
   }
   for (const [id, node] of Object.entries(oldNodes))
@@ -256,13 +352,29 @@ function variantLabel(set, variant) {
   return set.axes.map((axis) => `${axis.name}=${variant.selection?.[axis.id]}`).join(", ");
 }
 
+// Several variants in one phrase: "Content=leading|trailing|icon" when they
+// are every combination of those values, else "36 of 48 variants".
+function variantsText(set, variants, labels) {
+  if (variants.length <= 3) return labels.filter(Boolean).join("; ");
+  const values = set.axes.map((axis) => [...new Set(variants.map((variant) => variant.selection?.[axis.id]))]);
+  const combinations = values.reduce((total, list) => total * list.length, 1);
+  if (combinations === variants.length) {
+    const parts = set.axes
+      .map((axis, index) => [axis, values[index]])
+      .filter(([axis, list]) => list.length < axis.domain.length)
+      .map(([axis, list]) => `${axis.name}=${list.join("|")}`);
+    if (parts.length) return `${parts.join(", ")}; ${variants.length} variants`;
+  }
+  return `${variants.length} of ${set.variants.length} variants`;
+}
+
 function componentChanges(before, after, names) {
   const changes = [];
   const old = before.domain.componentSets;
   for (const set of after.domain.componentSets.values()) {
     const previous = old.get(set.id);
     if (!previous) {
-      changes.push({ kind: "component", name: set.name, change: "added", detail: `${set.variants.length} variants` });
+      changes.push({ kind: "component", name: set.name, change: "added", detail: `${set.variants.length} variant${set.variants.length === 1 ? "" : "s"}` });
       continue;
     }
     if (previous.name !== set.name)
@@ -281,14 +393,18 @@ function componentChanges(before, after, names) {
       }
       for (const change of nodeChanges(label, before, variant, names)) {
         const key = `${change.element}\0${change.change}\0${change.detail ?? ""}`;
-        if (!grouped.has(key)) grouped.set(key, { ...change, labels: [] });
+        if (!grouped.has(key)) grouped.set(key, { ...change, labels: [], variants: [] });
         grouped.get(key).labels.push(label);
+        grouped.get(key).variants.push(variant);
       }
     }
     for (const change of grouped.values())
       changes.push({
         kind: "component",
-        name: `${set.name} (${change.labels.length === set.variants.length && set.variants.length > 1 ? "all variants" : change.labels.join("; ")})`,
+        name: (() => {
+          const labels = change.labels.length === set.variants.length && set.variants.length > 1 ? "all variants" : variantsText(set, change.variants, change.labels);
+          return labels ? `${set.name} (${labels})` : set.name;
+        })(),
         element: change.element,
         change: change.change,
         ...(change.detail ? { detail: change.detail } : {}),
@@ -308,13 +424,25 @@ function screensOf(snapshot) {
   return new Map(snapshot.manifest.entries.screens.map((entry) => [snapshot.entries[entry].id, snapshot.entries[entry]]));
 }
 
+// "desktop 840×501, 21 elements, uses Title, Badge, Button".
+function pageContents(presentation, names) {
+  const root = presentation.nodes[presentation.rootId] ?? {};
+  const own = Object.keys(presentation.nodes).filter((id) => ownNode(id) && id !== presentation.rootId);
+  const used = [...new Set(own.map((id) => presentation.nodes[id].instance?.component).filter(Boolean).map(names.component))];
+  return [
+    `${presentation.platform ?? presentation.name} ${Math.round(root.width ?? 0)}×${Math.round(root.height ?? 0)}`,
+    `${own.length} element${own.length === 1 ? "" : "s"}`,
+    ...(used.length ? [`uses ${used.join(", ")}`] : []),
+  ].join(", ");
+}
+
 function pageChanges(before, after, names) {
   const changes = [];
   const old = screensOf(before), now = screensOf(after);
   for (const [id, screen] of now) {
     const previous = old.get(id);
     if (!previous) {
-      changes.push({ kind: "page", name: screen.name, change: "added" });
+      changes.push({ kind: "page", name: screen.name, change: "added", detail: screen.presentations.map((presentation) => pageContents(presentation, names)).join("; ") });
       continue;
     }
     if (previous.name !== screen.name)
@@ -323,7 +451,7 @@ function pageChanges(before, after, names) {
       const platform = presentation.platform ?? presentation.name;
       const was = previous.presentations.find(({ id: other }) => other === presentation.id);
       if (!was) {
-        changes.push({ kind: "page", name: `${screen.name} (${platform})`, change: "added" });
+        changes.push({ kind: "page", name: `${screen.name} (${platform})`, change: "added", detail: pageContents(presentation, names) });
         continue;
       }
       for (const change of nodeChanges(platform, was, presentation, names))
@@ -344,17 +472,17 @@ function pageChanges(before, after, names) {
 
 const linkText = (link) => `${link.on} → ${link.to ?? link.action}${link.to && link.action !== "navigate" ? ` (${link.action})` : ""}`;
 
-function linkChanges(before, after) {
+function linkChanges(before, after, options = {}) {
   const changes = [];
   const index = (links) => {
     const map = new Map();
     for (const link of links) {
-      const at = `${link.screenId}\0${link.presentationId}\0${link.nodeId}`;
+      const at = `${link.screenId}\0${link.presentationId}\0${link.nodeId}\0${link.sourcePath ?? ""}`;
       map.set(at, [...(map.get(at) ?? []), link]);
     }
     return map;
   };
-  const old = flowLinks(before), now = flowLinks(after);
+  const old = flowLinks(before, { foundation: options.beforeFoundation }), now = flowLinks(after, { foundation: options.afterFoundation });
   const oldLinks = index(old.links), newLinks = index(now.links);
   for (const at of new Set([...oldLinks.keys(), ...newLinks.keys()])) {
     const was = (oldLinks.get(at) ?? []).map(linkText), is = (newLinks.get(at) ?? []).map(linkText);
@@ -414,19 +542,27 @@ function canvasChanges(before, after) {
       }
     return map;
   };
+  // Order follows starts and links, which are reported themselves; only a
+  // page moved in the stored order (a drag in the App, canvas put) is news.
+  const storedMoved = (canvasId) => {
+    const was = old.find(({ id }) => id === canvasId)?.screens ?? [];
+    const is = now.find(({ id }) => id === canvasId)?.screens ?? [];
+    const kept = is.filter((id) => was.includes(id));
+    return !same(kept, was.filter((id) => kept.includes(id)));
+  };
   const oldOrders = orders(before);
   for (const [at, list] of orders(after)) {
     const was = oldOrders.get(at);
-    if (!was) continue;
+    if (!was || !storedMoved(at.split("\0")[0])) continue;
     const kept = list.pages.filter((id) => was.pages.includes(id));
     const keptBefore = was.pages.filter((id) => list.pages.includes(id));
     if (kept.length > 1 && !same(kept, keptBefore))
       changes.push({
         kind: "canvas",
         name: list.canvas,
-        element: list.flow || "(no module)",
-        change: "flow order",
-        detail: `${kept.map((id) => pageNames.get(id)).join(" → ")} (was ${keptBefore.map((id) => pageNames.get(id)).join(" → ")})`,
+        element: list.flow ? `${list.flow} row` : "Other pages",
+        change: "page order",
+        detail: `${kept.map((id) => pageNames.get(id)).join(", ")} (was ${keptBefore.map((id) => pageNames.get(id)).join(", ")})`,
       });
   }
   return changes;
@@ -468,14 +604,15 @@ export function designChanges(before, after, options = {}) {
   return [
     ...themeChanges(before, after, options),
     ...tokenChanges(before, after, options),
+    ...assetChanges(before, after),
     ...componentChanges(before, after, names),
     ...pageChanges(before, after, names),
-    ...linkChanges(before, after),
+    ...linkChanges(before, after, options),
     ...canvasChanges(before, after),
   ];
 }
 
-const HEADINGS = { theme: "Themes", token: "Tokens", component: "Components", page: "Pages", canvas: "Canvases" };
+const HEADINGS = { theme: "Themes", token: "Tokens", asset: "Assets", component: "Components", page: "Pages", canvas: "Canvases" };
 
 export function designChangesText(changes) {
   const lines = [];

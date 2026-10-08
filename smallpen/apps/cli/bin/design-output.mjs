@@ -371,9 +371,14 @@ export function selectedDesign(workspace, selector, target = {}) {
   };
 }
 
-function descendantTexts(node) {
+// Texts in reading order: a flex line places its last stored child first.
+function descendantTexts(node, projection) {
   if (!node.visible) return [];
-  return [node.text, ...(node.children ?? []).flatMap(descendantTexts)].filter(
+  const raw = projection?.nodes?.[node.id];
+  const direction = raw?.layout === "flex" ? raw["layout-flex-dir"] ?? "row" : null;
+  const stored = node.children ?? [];
+  const children = direction && !direction.endsWith("reverse") ? [...stored].reverse() : stored;
+  return [node.text, ...children.flatMap((child) => descendantTexts(child, projection))].filter(
     Boolean,
   );
 }
@@ -384,9 +389,11 @@ function instanceReference(node, projection) {
     : undefined;
 }
 
+// Quoted; a long text says how much the outline left out, so a cut here is
+// not read as text the design clips.
 function shortText(texts, limit = 60) {
   const text = texts.join(" / ");
-  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+  return text.length > limit ? `"${text.slice(0, limit - 1)}…" (+${text.length - limit + 1} chars)` : `"${text}"`;
 }
 
 // Visual values written as literals: the places a Token could be bound.
@@ -436,8 +443,11 @@ export function outlineTree(tree, projection, { full = false, components, ids = 
     const raw = projection.nodes[node.id];
     const { reference, set, pairs } = describe(node);
     if (reference) {
-      const texts = descendantTexts(node);
-      return `${set?.name ?? reference.assetId}${pairs.length ? ` (${pairs.map(([, text]) => text).join(", ")})` : ""}${texts.length ? ` "${shortText(texts)}"` : ""} · ${size(node)}${ids ? ` #${node.id}` : ""}`;
+      const texts = descendantTexts(node, projection);
+      // The element's own name first when it is not the component's, so
+      // --element finds it: "Save button: Button (Style=primary)".
+      const own = node.name && set?.name && node.name.trim().toLowerCase() !== set.name.trim().toLowerCase() ? `${node.name}: ` : "";
+      return `${own}${set?.name ?? reference.assetId}${pairs.length ? ` (${pairs.map(([, text]) => text).join(", ")})` : ""}${texts.length ? ` ${shortText(texts)}` : ""} · ${size(node)}${ids ? ` #${node.id}` : ""}`;
     }
     const children = node.children.filter(({ visible }) => visible).length;
     const layout = raw.layout === "flex"
@@ -448,7 +458,7 @@ export function outlineTree(tree, projection, { full = false, components, ids = 
           ? ` · ${children} item${children === 1 ? "" : "s"}`
           : "";
     const literal = literalFields(raw);
-    return `${node.name} · ${node.type} ${size(node)}${layout}${node.text ? ` "${shortText([node.text])}"` : ""}${literal.length ? ` · literal ${literal.join(",")}` : ""}${ids ? ` #${node.id}` : ""}`;
+    return `${node.name} · ${node.type} ${size(node)}${layout}${node.text ? ` ${shortText([node.text])}` : ""}${literal.length ? ` · literal ${literal.join(",")}` : ""}${ids ? ` #${node.id}` : ""}`;
   };
   const visit = (node, depth) => {
     if (!node.visible) return;
@@ -481,11 +491,11 @@ export function outlineTree(tree, projection, { full = false, components, ids = 
         const sizes = new Set(group.map(({ item }) => size(item)));
         const items = group.map(({ item, pairs }) => {
           const own = pairs.filter(([id]) => !shared.some(([other]) => other === id)).map(([, text]) => text);
-          const texts = descendantTexts(item);
+          const texts = descendantTexts(item, projection);
           // Without IDs a copy is named, so --element can find it.
           const shown = ids
-            ? (texts.length ? `"${shortText(texts, 48)}"` : item.name)
-            : `${item.name}${texts.length ? ` "${shortText(texts, 48)}"` : ""}`;
+            ? (texts.length ? shortText(texts, 48) : item.name)
+            : `${item.name}${texts.length ? ` ${shortText(texts, 48)}` : ""}`;
           return `${shown}${own.length ? ` (${own.join(", ")})` : ""}${sizes.size > 1 ? ` ${size(item)}` : ""}${ids ? ` #${item.id}` : ""}`;
         });
         lines.push(
@@ -494,6 +504,159 @@ export function outlineTree(tree, projection, { full = false, components, ids = 
       } else visit(child, depth + 1);
       i = end;
     }
+  };
+  visit(tree.root, 0);
+  return lines.join("\n");
+}
+
+// Detailed design values: one line per element with its place (x,y from
+// the top-left of the page or component), size and how it is sized, its
+// layout, and every visual value with the Token it follows ({path}) or as
+// a literal. Copies of a component name the component, variant and what
+// they change; the component's own spec is view --component NAME --as spec.
+export function specTree(tree, projection, { components, tokenName, heading, stored = {} } = {}) {
+  const lines = heading ? [heading] : [];
+  const origin = tree.root.bounds;
+  const round = (value) => Math.round(Number(value) * 100) / 100;
+  const tokenOf = (raw, ...fields) => {
+    const applied = appliedTokenFields(raw.appliedTokens);
+    for (const field of fields) {
+      const reference = raw.tokenBindings?.[field];
+      if (reference) return `{${tokenName(reference) ?? "unknown Token"}}`;
+      if (applied[field]) return `{${applied[field]}}`;
+    }
+    return "";
+  };
+  const withToken = (value, token) => (token ? `${value} ${token}` : String(value));
+  const paint = (list) => {
+    const first = Array.isArray(list) ? list.find((item) => item && item.hidden !== true) : undefined;
+    if (!first) return undefined;
+    const color = first.color ?? first.type ?? "paint";
+    const opacity = first.opacity !== undefined && first.opacity < 1 ? ` ${Math.round(first.opacity * 100)}%` : "";
+    return `${color}${opacity}`;
+  };
+  const sizing = (raw, node) => {
+    const word = (mode) => (mode === "fill" ? "fill" : mode === "auto" ? "hug" : undefined);
+    const width = node.type === "TEXT" && raw.growType === "auto-width" ? "hug" : word(raw["layout-item-h-sizing"]);
+    const height = node.type === "TEXT" && ["auto-width", "auto-height"].includes(raw.growType) ? "hug" : word(raw["layout-item-v-sizing"]);
+    const parts = [width && `width ${width}`, height && `height ${height}`].filter(Boolean);
+    return parts.length ? ` (${parts.join(", ")})` : "";
+  };
+  const box = (raw) => {
+    const parts = [];
+    if (raw.layout === "flex") {
+      const direction = raw["layout-flex-dir"]?.startsWith("column") ? "column" : "row";
+      parts.push(direction);
+      const gap = raw["layout-gap"];
+      const gapValue = direction === "column" ? gap?.["row-gap"] ?? gap?.["column-gap"] : gap?.["column-gap"] ?? gap?.["row-gap"];
+      if (gapValue) parts.push(`gap ${withToken(round(gapValue), tokenOf(raw, "itemSpacing", direction === "column" ? "rowGap" : "columnGap"))}`);
+      const pad = raw["layout-padding"];
+      if (pad && [pad.p1, pad.p2, pad.p3, pad.p4].some((value) => Number(value))) {
+        const sides = [pad.p1, pad.p2, pad.p3, pad.p4].map((value) => round(value ?? 0));
+        const tokens = ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"].map((field) => tokenOf(raw, field));
+        const same = sides.every((value) => value === sides[0]) && tokens.every((token) => token === tokens[0]);
+        parts.push(same ? `padding ${withToken(sides[0], tokens[0])}` : `padding ${sides.map((value, index) => withToken(value, tokens[index])).join(" ")}`);
+      }
+      if (raw["layout-align-items"]) parts.push(`align ${raw["layout-align-items"]}`);
+      if (raw["layout-justify-content"]) parts.push(`justify ${raw["layout-justify-content"]}`);
+      if (raw["layout-wrap-type"] === "wrap") parts.push("wrap");
+    } else if (raw.layout) parts.push(`${raw.layout} layout`);
+    return parts;
+  };
+  const visuals = (raw) => {
+    const parts = [];
+    const isText = raw.type === "TEXT";
+    const fill = paint(raw.fills);
+    if (fill) parts.push(`${isText ? "color" : "fill"} ${withToken(fill, tokenOf(raw, "fill", "fills.0"))}`);
+    const stroke = Array.isArray(raw.strokes) ? raw.strokes.find((item) => item && item.hidden !== true) : undefined;
+    if (stroke) {
+      const sides = ["Top", "Right", "Bottom", "Left"].map((side) => stroke[`width${side}`]);
+      const width = sides.every((value) => value !== undefined) && !sides.every((value) => value === sides[0])
+        ? sides.map((value) => `${round(value)}`).join(" ")
+        : `${round(stroke.width ?? 1)}`;
+      parts.push(`stroke ${withToken(`${width}px ${paint([stroke])}${stroke.style && stroke.style !== "solid" ? ` ${stroke.style}` : ""}${stroke.alignment ? ` ${stroke.alignment}` : ""}`, tokenOf(raw, "stroke", "strokes.0"))}`);
+    }
+    if (Array.isArray(raw.cornerRadius) ? raw.cornerRadius.some(Number) : Number(raw.cornerRadius)) {
+      const corners = Array.isArray(raw.cornerRadius) ? raw.cornerRadius.map(round).join(" ") : round(raw.cornerRadius);
+      parts.push(`radius ${withToken(corners, tokenOf(raw, "cornerRadius", "radiusTopLeft"))}`);
+    }
+    if (raw.opacity !== undefined && raw.opacity < 1) parts.push(`opacity ${withToken(round(raw.opacity), tokenOf(raw, "opacity"))}`);
+    const shadows = (Array.isArray(raw.shadow) ? raw.shadow : raw.shadow ? [raw.shadow] : []).filter((item) => item && item.hidden !== true);
+    if (shadows.length)
+      parts.push(`shadow ${withToken(shadows.map((item) => `${round(item["offset-x"] ?? item.offsetX ?? 0)} ${round(item["offset-y"] ?? item.offsetY ?? 0)} ${round(item.blur ?? 0)} ${round(item.spread ?? 0)} ${paint([item.color ?? {}]) ?? item.color?.color ?? ""}`).join(", "), tokenOf(raw, "shadow"))}`);
+    if (raw.rotation) parts.push(`rotation ${round(raw.rotation)}°`);
+    for (const [key, field, word] of [["layout-item-min-w", "minWidth", "min width"], ["layout-item-max-w", "maxWidth", "max width"], ["layout-item-min-h", "minHeight", "min height"], ["layout-item-max-h", "maxHeight", "max height"]])
+      if (raw[key] !== undefined) parts.push(`${word} ${withToken(round(raw[key]), tokenOf(raw, field))}`);
+    const margin = raw["layout-item-margin"];
+    if (margin && [margin.m1, margin.m2, margin.m3, margin.m4].some(Number))
+      parts.push(`margin ${[margin.m1, margin.m2, margin.m3, margin.m4].map((value) => round(value ?? 0)).join(" ")}`);
+    return parts;
+  };
+  const typeSpec = (raw) => {
+    const style = raw.textStyle ?? {};
+    const typography = tokenOf(raw, "typography");
+    const parts = [];
+    const font = [style.fontFamily, style.fontSize !== undefined ? `${round(style.fontSize)}${style.lineHeight !== undefined ? `/${round(style.lineHeight)}` : ""}` : undefined, style.fontWeight !== undefined ? `weight ${style.fontWeight}` : undefined].filter(Boolean).join(" ");
+    // Unset text styles use the App's defaults.
+    parts.push(`font ${font ? withToken(font, typography) : "default"}`);
+    if (!paint(raw.fills)) parts.push("color default");
+    for (const [key, field, word] of [["fontFamily", "fontFamily", "family"], ["fontSize", "fontSize", "size"], ["fontWeight", "fontWeight", "weight"], ["lineHeight", "lineHeight", "line height"]]) {
+      const token = typography ? "" : tokenOf(raw, field);
+      if (token && style[key] !== undefined) parts.push(`${word} ${token}`);
+    }
+    if (style.letterSpacing) parts.push(`letter spacing ${withToken(round(style.letterSpacing), tokenOf(raw, "letterSpacing"))}`);
+    if (style.textAlign && style.textAlign !== "left") parts.push(`align ${style.textAlign}`);
+    if (style.textTransform && style.textTransform !== "none") parts.push(`case ${style.textTransform}`);
+    if (style.textDecoration && style.textDecoration !== "none") parts.push(style.textDecoration);
+    return parts;
+  };
+  const place = (node) => `at ${Math.round(node.bounds.x - origin.x)},${Math.round(node.bounds.y - origin.y)} · ${Math.round(node.bounds.width)}×${Math.round(node.bounds.height)}`;
+  const overrideLines = (raw, set) => {
+    const overrides = (stored[raw.id] ?? raw).instance?.overrides ?? {};
+    const variant = set?.variants.find((candidate) => Object.entries(raw.instance?.variant ?? {}).every(([axis, value]) => candidate.selection?.[axis] === value)) ?? set?.variants[0];
+    const nameOf = (id) => variant?.nodes?.[id]?.name ?? set?.variants.map((candidate) => candidate.nodes?.[id]?.name).find(Boolean) ?? id;
+    const parts = [];
+    for (const [key, value] of Object.entries(overrides)) {
+      const at = key.lastIndexOf(":");
+      const element = nameOf(key.slice(0, at)), field = key.slice(at + 1);
+      if (field === "tokenBindings") {
+        for (const [binding, reference] of Object.entries(value ?? {})) if (reference) parts.push(`${element} ${binding} {${tokenName(reference) ?? "unknown Token"}}`);
+      } else if (field === "text") parts.push(`${element} text ${JSON.stringify(String(value))}`);
+      else if (field === "fills" || field === "strokes") parts.push(`${element} ${field === "fills" ? "fill" : "stroke"} ${paint(value) ?? "none"}`);
+      else if (field === "variant") parts.push(`${element} variant ${Object.values(value ?? {}).join(", ")}`);
+      else if (field === "textStyle") parts.push(`${element} text style ${Object.entries(value ?? {}).filter(([name]) => !/Id$/.test(name)).map(([name, part]) => `${name} ${part}`).join(", ")}`);
+      else parts.push(`${element} ${field} ${typeof value === "object" ? JSON.stringify(value) : value}`);
+    }
+    return parts;
+  };
+  const visit = (node, depth) => {
+    if (!node.visible) return;
+    const raw = projection.nodes[node.id];
+    const reference = instanceReference(node, projection);
+    const indent = "  ".repeat(depth);
+    if (reference && node !== tree.root) {
+      const set = components?.(reference);
+      const pairs = variantPairs(node.variant ?? raw.instance?.variant, set).map(([, text]) => text);
+      const changes = overrideLines(raw, set);
+      const texts = descendantTexts(node, projection);
+      lines.push(`${indent}${node.name} · copy of ${set?.name ?? "a component"}${pairs.length ? ` (${pairs.join(", ")})` : ""} · ${place(node)}${sizing(raw, node)}${texts.length ? ` · texts ${texts.map((text) => JSON.stringify(text)).join(", ")}` : ""}${changes.length ? ` · changes ${changes.join("; ")}` : ""}`);
+      return;
+    }
+    const parts = [
+      `${node.name} · ${node.type === "TEXT" ? "text" : node.type.toLowerCase()} · ${place(node)}${sizing(raw, node)}`,
+      ...box(raw),
+      ...visuals(raw),
+      ...(node.type === "TEXT" ? typeSpec(raw) : []),
+    ];
+    if (node.type === "TEXT") {
+      const token = tokenOf(raw, "text");
+      parts.push(`text ${token ? `${token} ` : ""}${JSON.stringify(String(node.text ?? raw.text ?? ""))}`);
+    }
+    lines.push(`${indent}${parts.join(" · ")}`);
+    const direction = raw.layout === "flex" ? raw["layout-flex-dir"] ?? "row" : null;
+    const stored = node.children.filter(({ visible }) => visible);
+    const children = direction && !direction.endsWith("reverse") ? [...stored].reverse() : stored;
+    for (const child of children) visit(child, depth + 1);
   };
   visit(tree.root, 0);
   return lines.join("\n");
@@ -632,7 +795,7 @@ export async function validateDesign(workspace, design) {
         code: "text_missing_glyphs",
         severity: "warning",
         nodeId: node.id,
-        message: `The font has no glyphs for ${[...new Set(item.missingGlyphs)].slice(0, 6).join(" ")}; import a font that covers this language with font import and use it in the text style`,
+        message: `The font has no glyphs for ${[...new Set(item.missingGlyphs)].slice(0, 6).join(" ")}; import a font that covers this language with asset font import and use it in the text style`,
       });
     } else if (
       // Sub-pixel line-height rounding is not an overflow; a clipped word
@@ -654,6 +817,7 @@ export async function validateDesign(workspace, design) {
   }
   for (const diagnostic of metrics.diagnostics)
     skipped.push({ check: "text-fit", ...diagnostic });
+  const measuredText = new Map(metrics.items.filter((item) => !item.missingGlyphs.length).map((item) => [item.nodeId, item]));
   // Where each node sits, by name, so an issue reads without its ID.
   const places = new Map();
   const painted = [];
@@ -689,9 +853,23 @@ export async function validateDesign(workspace, design) {
     bounds.y < parent.y - 0.5 ||
     bounds.x + bounds.width > parent.x + parent.width + 0.5 ||
     bounds.y + bounds.height > parent.y + parent.height + 0.5;
-  const walk = (semantic, ancestors = []) => {
+  const walk = (semantic, ancestors = [], holder = undefined) => {
     if (!semantic.visible) return;
     const node = nodes[semantic.id];
+    // A text that hugs grows with a longer text; past its container's edge
+    // it is cut (the box alone does not show that).
+    const measured = measuredText.get(semantic.id);
+    if (holder && node.type === "TEXT" && measured && node.growType === "auto-width" &&
+      measured.width > semantic.bounds.width + Math.max(1, semantic.bounds.width * 0.02) &&
+      semantic.bounds.x + measured.width > holder.bounds.x + holder.bounds.width + 0.5)
+      issues.push({
+        code: "text_overflow",
+        severity: "warning",
+        nodeId: node.id,
+        message: `Text needs ${Math.ceil(measured.width)}px and runs past ${holder.name}; give it room, let it wrap (width fill) or shorten it`,
+        measured: { width: measured.width, height: measured.height },
+        box: { width: semantic.bounds.width, height: semantic.bounds.height },
+      });
     if (semantic !== design.tree.root && outside(semantic.bounds, rootBounds))
       issues.push({
         code: "outside_root",
@@ -745,6 +923,34 @@ export async function validateDesign(workspace, design) {
         });
     }
     const children = semantic.children.filter(({ visible }) => visible);
+    // Content wider or taller than its container runs past its edge (the
+    // root's own edge is outside_root). An auto layout says how much room
+    // its content needs.
+    if (semantic !== design.tree.root && children.length && ["FRAME", "COMPONENT"].includes(node.type)) {
+      const past = children.filter((child) => nodes[child.id]?.["layout-item-absolute"] !== true && outside(child.bounds, semantic.bounds));
+      if (past.length) {
+        const flex = node.layout === "flex";
+        const row = flex && !String(node["layout-flex-dir"] ?? "row").startsWith("column");
+        const inFlow = children.filter((child) => nodes[child.id]?.["layout-item-absolute"] !== true);
+        const gap = Number((row ? node["layout-gap"]?.["column-gap"] : node["layout-gap"]?.["row-gap"]) ?? 0);
+        const pad = node["layout-padding"] ?? {};
+        const needed = flex
+          ? Math.round(inFlow.reduce((sum, child) => sum + (row ? child.bounds.width : child.bounds.height), 0) + gap * Math.max(0, inFlow.length - 1) +
+            (row ? (pad.p2 ?? 0) + (pad.p4 ?? 0) : (pad.p1 ?? 0) + (pad.p3 ?? 0)))
+          : undefined;
+        const side = row ? "wide" : "tall";
+        const has = Math.round(row ? semantic.bounds.width : semantic.bounds.height);
+        issues.push({
+          code: "content_overflow",
+          severity: "warning",
+          nodeId: node.id,
+          message: flex && needed > has
+            ? `Its content needs ${needed}px ${side} but it is ${has}px; give it more room, let it hug, or make a child smaller`
+            : "Children run past its edge; give it more room or move them in",
+          past: past.map((child) => child.name),
+        });
+      }
+    }
     for (let i = 0; i < children.length; i++)
       for (let j = i + 1; j < children.length; j++) {
         const a = children[i],
@@ -770,7 +976,7 @@ export async function validateDesign(workspace, design) {
             area: width * height,
           });
       }
-    for (const child of children) walk(child, [...ancestors, node]);
+    for (const child of children) walk(child, [...ancestors, node], semantic);
   };
   walk(design.tree.root, design.ancestors);
   for (const issue of issues) {

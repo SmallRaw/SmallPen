@@ -39,11 +39,13 @@ const pageNames = async (path) => {
 
 test("help lists only name-based actions and the id routes are gone", async () => {
   const page = await run(["help", "page", "--json"]);
-  assert.deepEqual(page.actions.map(({ action }) => action), ["list", "draw", "move", "rename", "delete"]);
+  assert.deepEqual(page.actions.map(({ action }) => action), ["list", "draw", "set", "move", "rename", "delete"]);
   const flow = await run(["help", "flow", "--json"]);
   assert.deepEqual(flow.actions.map(({ action }) => action), ["list", "link", "start", "unlink"]);
   const asset = await run(["help", "asset", "--json"]);
-  assert.deepEqual(asset.actions.map(({ action }) => action), ["list", "set", "delete"]);
+  assert.deepEqual(asset.actions.map(({ action }) => action), ["media", "font"]);
+  const styles = await run(["help", "advanced", "style", "--json"]);
+  assert.deepEqual(styles.actions.map(({ action }) => action), ["list", "set", "delete"]);
   const top = await run(["help", "--json"]);
   const commands = top.commands.map(({ command }) => command);
   assert.ok(!commands.includes("config"), "page configurations take ids");
@@ -60,14 +62,14 @@ test("pages are renamed and deleted by name; linked pages are protected", async 
 
   // A taken name is numbered like an App edit, not refused.
   const taken = await run(["page", "rename", path, "--page", "Detail", "--to", "List", "--json"]);
-  assert.deepEqual(taken.renamed, [{ kind: "page", from: "Tasks / List", to: "Tasks / List 2" }]);
+  assert.deepEqual(taken.renamed, [{ kind: "page", requested: "Tasks / List", to: "Tasks / List 2" }]);
   assert.deepEqual((await pageNames(path)).filter((name) => name.startsWith("Tasks")), ["Tasks / List", "Tasks / List 2"]);
   assert.match((await run(["view", path, "--page", "List 2", "--json"])).text, /^List 2 · desktop/, "the board follows the numbered page name");
   await run(["page", "rename", path, "--page", "List 2", "--to", "Item", "--json"]);
   assert.deepEqual((await pageNames(path)).filter((name) => name.startsWith("Tasks")), ["Tasks / List", "Tasks / Item"]);
   const outline = await run(["view", path, "--page", "Item", "--json"]);
   assert.match(outline.text, /^Item · desktop/, "the board follows the page name");
-  const flows = await run(["flow", "list", path, "--json"]);
+  const flows = await run(["flow", "list", path, "--full", "--json"]);
   assert.deepEqual(flows.links, [{ page: "Tasks / List", platform: "desktop", element: "Open", on: "click", action: "navigate", to: "Tasks / Item" }]);
   assert.deepEqual(flows.starts.map(({ page }) => page), ["Tasks / List"]);
 
@@ -102,7 +104,7 @@ test("components are renamed and deleted by name, elements in every variant", as
   await run(["component", "rename", path, "--component", "Action button", "--element", "Label", "--to", "Text", "--json"]);
   const taken = await run(["component", "rename", path, "--component", "Action button", "--element", "Icon", "--to", "text", "--json"]);
   // One numbered element per variant.
-  assert.deepEqual(taken.renamed.map(({ kind, from, to }) => [kind, from, to]), [["element", "text", "text 2"], ["element", "text", "text 2"]]);
+  assert.deepEqual(taken.renamed.map(({ kind, requested, to }) => [kind, requested, to]), [["element", "text", "text 2"], ["element", "text", "text 2"]]);
   assert.ok(taken.renamed.every(({ where }) => where.startsWith("Action button")));
   const snapshot = await openPackage(path);
   const set = [...snapshot.domain.componentSets.values()].find(({ name }) => name === "Action button");
@@ -124,21 +126,21 @@ test("components are renamed and deleted by name, elements in every variant", as
 
 test("colors and typographies are set and deleted by name", async () => {
   const { path } = await app();
-  await run(["asset", "set", path, "--color", "Brand/Primary", "--value", "#1f6feb", "--json"]);
-  await run(["asset", "set", path, "--color", "Brand / Primary", "--value", "#ff0000", "--json"]);
-  await run(["asset", "set", path, "--typography", "Text/Body", "--value", JSON.stringify({ fontSize: 16 }), "--json"]);
-  await run(["asset", "set", path, "--typography", "Text/Body", "--value", JSON.stringify({ fontWeight: 600 }), "--json"]);
-  const listed = await run(["asset", "list", path, "--json"]);
+  await run(["advanced", "style", "set", path, "--color", "Brand/Primary", "--value", "#1f6feb", "--json"]);
+  await run(["advanced", "style", "set", path, "--color", "Brand / Primary", "--value", "#ff0000", "--json"]);
+  await run(["advanced", "style", "set", path, "--typography", "Text/Body", "--value", JSON.stringify({ fontSize: 16 }), "--json"]);
+  await run(["advanced", "style", "set", path, "--typography", "Text/Body", "--value", JSON.stringify({ fontWeight: 600 }), "--json"]);
+  const listed = await run(["advanced", "style", "list", path, "--json"]);
   const color = listed.items.find(({ kind }) => kind === "colors").asset;
   assert.deepEqual([color.path, color.name, color.paint.color], ["Brand", "Primary", "#ff0000"]);
   const typography = listed.items.find(({ kind }) => kind === "typographies").asset;
   assert.deepEqual([typography.style.fontSize, typography.style.fontWeight, typography.style.fontFamily], [16, 600, "sourcesanspro"]);
-  assert.equal((await run(["asset", "set", path, "--typography", "Text/Body", "--value", '{"textAlign":"left"}', "--json"], 1)).error.code, "invalid_typography");
-  await run(["asset", "delete", path, "--color", "brand/primary", "--json"]);
-  await run(["asset", "delete", path, "--typography", "Text/Body", "--json"]);
-  assert.equal((await run(["asset", "list", path, "--json"])).items.length, 0);
-  assert.equal((await run(["media", "delete", path, "--media", "Logo", "--json"], 1)).error.code, "missing_asset");
-  assert.equal((await run(["font", "delete", path, "--font", "Inter", "--json"], 1)).error.code, "missing_asset");
+  assert.equal((await run(["advanced", "style", "set", path, "--typography", "Text/Body", "--value", '{"textAlign":"left"}', "--json"], 1)).error.code, "invalid_typography");
+  await run(["advanced", "style", "delete", path, "--color", "brand/primary", "--json"]);
+  await run(["advanced", "style", "delete", path, "--typography", "Text/Body", "--json"]);
+  assert.equal((await run(["advanced", "style", "list", path, "--json"])).items.length, 0);
+  assert.equal((await run(["asset", "media", "delete", path, "--media", "Logo", "--json"], 1)).error.code, "missing_asset");
+  assert.equal((await run(["asset", "font", "delete", path, "--font", "Inter", "--json"], 1)).error.code, "missing_asset");
 });
 
 test("names never repeat: siblings, new repeats from any writer, and stored repeats are issues that can be fixed", async () => {
@@ -178,11 +180,12 @@ test("names never repeat: siblings, new repeats from any writer, and stored repe
 });
 
 test("changes reports canvases, flow order and links by name", async () => {
-  const { path } = await app();
+  const { path, draw } = await app();
+  await draw({ page: "Scratch", children: [{ name: "Note", text: "Idea" }] });
   const seen = (await run(["flow", "list", path, "--json"])).revision;
   await run(["page", "move", path, "--page", "Detail", "--direction", "left", "--json"]);
   await run(["canvas", "rename", path, "--canvas", "Pages", "--to", "App", "--json"]);
-  await run(["canvas", "put", path, "--page", "Page 1", "--canvas", "Drafts", "--json"]);
+  await run(["canvas", "put", path, "--page", "Scratch", "--canvas", "Drafts", "--json"]);
   await run(["flow", "unlink", path, "--from", "List / Open", "--json"]);
   await run(["flow", "link", path, "--from", "List / Open", "--to", "Detail", "--on", "mouse-enter", "--json"]);
   await run(["flow", "start", path, "--page", "List", "--remove", "--json"]);
@@ -190,8 +193,8 @@ test("changes reports canvases, flow order and links by name", async () => {
   assert.match(changes.text, /Canvases\n/);
   assert.match(changes.text, /App: renamed — was Pages/);
   assert.match(changes.text, /Drafts: added/);
-  assert.match(changes.text, /Drafts \/ Page 1: page moved here — from Pages/);
-  assert.match(changes.text, /App \/ Tasks: flow order — Tasks \/ Detail → Tasks \/ List \(was Tasks \/ List → Tasks \/ Detail\)/);
+  assert.match(changes.text, /Drafts \/ Scratch: page moved here — from Pages/);
+  assert.match(changes.text, /App \/ Tasks row: page order — Tasks \/ Detail, Tasks \/ List \(was Tasks \/ List, Tasks \/ Detail\)/);
   assert.match(changes.text, /Tasks \/ List \(desktop\) \/ Open: link added — mouse-enter → Tasks \/ Detail/);
   assert.match(changes.text, /Tasks \/ List \(desktop\) \/ Open: link removed — click → Tasks \/ Detail/);
   assert.match(changes.text, /Tasks \/ List \(desktop\): no longer a start/);
@@ -247,7 +250,7 @@ test("an App edit that repeats a name is numbered like a copied folder: Card 2, 
     root.children = [...root.children, id];
     return [{ type: "put-screen", entry, screen }];
   });
-  assert.deepEqual((await copyTitle("copy1")).renamed, [{ kind: "element", from: "Title", to: "Title 2", where: "Tasks / List / List · desktop" }]);
+  assert.deepEqual((await copyTitle("copy1")).renamed, [{ kind: "element", requested: "Title", to: "Title 2", where: "Tasks / List / List · desktop" }]);
   assert.equal((await copyTitle("copy2")).renamed[0].to, "Title 3");
 
   // A page renamed to a taken name, and a copied component.

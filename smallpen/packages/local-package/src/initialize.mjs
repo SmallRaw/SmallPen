@@ -385,6 +385,23 @@ function singlePackageFiles(proposal) {
   ]);
 }
 
+// A package without pages: the CLI draws the first one with page draw.
+function withoutPages(files) {
+  const manifest = files.get("manifest.json");
+  for (const entry of manifest.entries.screens) files.delete(entry);
+  manifest.entries.screens = [];
+  delete manifest.defaultScreenId;
+  return files;
+}
+
+// The package file is named after --name when given ("Team App" ->
+// team-app.smallpen), else after its folder.
+function packageFileStem(name, folder) {
+  const slug = String(name ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+  return slug || folder;
+}
+
 async function writeFiles(packagePath, files) {
   for (const [entry, value] of files) {
     const output = join(packagePath, entry);
@@ -531,9 +548,10 @@ export async function initializeBlankWorkspace(locator, options = {}) {
   );
   const candidate = join(transaction, folder);
   try {
-    const files = blankPackageFiles(name, { neutral: true });
+    const files = options.page === false ? withoutPages(blankPackageFiles(name, { neutral: true })) : blankPackageFiles(name, { neutral: true });
+    const stem = options.name !== undefined ? packageFileStem(options.name, folder) : folder;
     if (layout === "single") {
-      const filename = `${folder}.smallpen`;
+      const filename = `${stem}.smallpen`;
       await writeFiles(join(candidate, filename), files);
       await openPackage(join(candidate, filename));
       await rename(candidate, workspacePath);
@@ -544,8 +562,8 @@ export async function initializeBlankWorkspace(locator, options = {}) {
         workspacePath,
       };
     }
-    const foundationName = `${folder}-foundation.smallpen`;
-    const productName = `${folder}.smallpen`;
+    const foundationName = `${stem}-foundation.smallpen`;
+    const productName = `${stem}.smallpen`;
     const foundationFiles = blankPackageFiles(`${name} Foundation`, {
       neutral: true,
     });
@@ -615,7 +633,8 @@ export async function createBlankPackage(packageLocator, options = {}) {
   const transactionPath = await mkdtemp(join(parent, ".smallpen-create-"));
   const candidatePath = join(transactionPath, basename(packagePath));
   try {
-    await writeFiles(candidatePath, blankPackageFiles(name, options));
+    const files = blankPackageFiles(name, options);
+    await writeFiles(candidatePath, options.page === false ? withoutPages(files) : files);
     await openPackage(candidatePath);
     await rename(candidatePath, packagePath);
     await rm(transactionPath, { force: true, recursive: true });

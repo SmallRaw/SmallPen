@@ -868,7 +868,7 @@ function validateDomainInstance(value, path) {
         );
       }
       const field = overridePath.slice(overridePath.lastIndexOf(":") + 1);
-      if (["tokenBindings", "variant", "strokes", "textStyle", "width", "height", "cornerRadius", "shadow"].includes(field)) {
+      if (["tokenBindings", "variant", "strokes", "textStyle", "width", "height", "cornerRadius", "shadow", "interactions"].includes(field)) {
         validateOverrideValue(field, override, `${path}.overrides.${overridePath}`);
       } else if (Array.isArray(override)) {
         validateFills(override, `${path}.overrides.${overridePath}`);
@@ -6918,7 +6918,8 @@ function numberNewRepeats(before, candidate, changedFiles) {
         let number = 2;
         while (taken.has(key(`${base} ${number}`))) number += 1;
         const to = `${base} ${number}`;
-        renamed.push({ kind, from: item.name, to, ...(where ? { where } : {}) });
+        // requested: the name the edit asked for; to: the name it got.
+        renamed.push({ kind, requested: item.name, to, ...(where ? { where } : {}) });
         item.rename(to);
         if (item.entry) changedFiles.add(item.entry);
         taken.add(key(to));

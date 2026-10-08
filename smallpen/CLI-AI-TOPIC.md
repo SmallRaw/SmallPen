@@ -29,18 +29,23 @@ drafts. See [CLI/Skill responsibilities](docs/CLI-SKILLS.md).
 | Object          | Actions                                                                               |
 | --------------- | ------------------------------------------------------------------------------------- |
 | `project`       | `init`, `show`, `list`, `watch`, `repair`, `migrate`                                  |
-| `theme`         | `list`, `add`, `rename`, `default`, `delete`                                          |
-| `token`         | `list`, `show`, `search`, `explain`, `set`, `delete`, `impact`, `export`, `import`    |
+| `token`         | `list`, `show`, `search`, `explain`, `set`, `delete`, `impact`, `export`, `import`, `theme` |
+| `token theme`   | `list`, `add`, `rename`, `default`, `delete`                                          |
 | `canvas`        | `list`, `rename`, `put`                                                               |
 | `component`     | `list`, `search`, `define`, `rename`, `delete`                                        |
 | `page`          | `list`, `draw`, `move`, `rename`, `delete`                                            |
-| `asset`         | `list`, `set`, `delete`                                                               |
-| `media`, `font` | `list`, `import`, `delete`                                                            |
+| `asset`         | `media`, `font`                                                                       |
+| `asset media`, `asset font` | `list`, `import`, `delete`                                                |
 | `flow`          | `list`, `link`, `start`, `unlink`                                                     |
-| `advanced`      | `apply`, `import-draft`, `draft-diff`, `draft-compile`, `library-refresh`, `discover` |
+| `advanced`      | `apply`, `import-draft`, `draft-diff`, `draft-compile`, `library-refresh`, `style`    |
+| `advanced style` | `list`, `set`, `delete`                                                              |
 
 Actions take a package path after the action: `smallpen page list PACKAGE`.
-`project init` takes a `.smallpen` path or a new workspace directory and creates a blank canvas without a business brief.
+Use `token` for all design values, including colors, typography and font choice;
+`token theme` manages their theme settings. `asset` manages actual media and font
+files. `advanced style` preserves access to the App's separate color and
+typography assets when those existing styles need maintenance.
+`project init` takes a `.smallpen` path or a new workspace directory and creates a blank package without pages or a business brief; `--name "Team App"` names it and its file (`team-app.smallpen`). `page draw` makes the first page.
 Every action names things the way outlines show them: pages ("Tasks / List"),
 elements ("Card / Title"), components, variants ("Style=ghost"), canvases,
 colors ("Brand/Primary") and fonts. No action needs an ID.
@@ -68,7 +73,7 @@ the grouped commands above and `view`, `changes`, `export`, `validate`,
 
 ## Themes and Tokens
 
-`theme list PACKAGE` reads groups, options and project defaults. Any selected
+`token theme list PACKAGE` reads groups, options and project defaults. Any selected
 combination in its reply comes only from that call's arguments and defaults.
 It is not remembered. Omitted groups use their project defaults; an explicit
 Scenario overlays its saved themes, and explicit `--theme GROUP/OPTION` overrides
@@ -78,14 +83,15 @@ leaves the App's active selection unchanged.
 Groups are project-defined. Platform, language, brand, density and light/dark
 are examples, never required dimensions. `--locale` changes CLI labels only.
 A page configuration chooses structure and does not silently choose themes.
-Theme options are named `Group/Option` everywhere. `theme add --theme
-Viewport/Tablet` adds an option (and its group when new); `theme rename`,
-`theme default` and `theme delete` take the same names. `theme default`
+Theme options are named `Group/Option` everywhere. `token theme add --theme
+Viewport/Tablet` adds an option (and its group when new); `token theme rename`,
+`token theme default` and `token theme delete` take the same names. `token theme default`
 explicitly changes a project default.
 
 `token list` reads effective values; `token show` resolves one Token;
-`token explain` reports its sources. `token list --definitions [--group GROUP]`
-reads stored option values. `token set` writes Tokens by name: `value` applies
+`token explain` reports its sources. `token list --token color` lists one Token
+or every Token under a name; `token list --definitions [--group GROUP]` reads
+stored option values (GROUP is a theme group such as Brand). `token set` writes Tokens by name: `value` applies
 wherever no option has its own value, `values` set named `Group/Option`s.
 `token delete --path NAME` removes a Token. Agents never name token Sets or
 IDs.
@@ -104,7 +110,7 @@ smallpen page draw PACKAGE --intent page.json --batch-id draw-settings
 smallpen page rename PACKAGE --page "Tasks / List" --to Overview
 smallpen page delete PACKAGE --page Overview --element "Card / Badge"
 smallpen component rename PACKAGE --component Button --element Label --to Text
-smallpen asset set PACKAGE --color Brand/Primary --value "#1f6feb"
+smallpen token set PACKAGE --intent tokens.json
 ```
 
 The action help identifies its input format. `token set`, `component define`
@@ -119,9 +125,11 @@ and `--diff` preview supported writes without committing. Choose a stable
 Retries replay the confirmed result; conflicting or superseded identities fail.
 The local ledger retains at most 500 identities.
 
-Read `changed`, `noChange`, revisions and warning counts. `changeReportPath`
-contains exact before/after values. `reverseEdit` describes a new write guarded
-by the confirmed revision, not history rollback. `--inverse-out FILE` retains it.
+Read `changed`, `noChange`, `done` (what the write did, in the words `changes`
+uses) and the warnings, grouped by element name. `changeReportPath` contains
+exact before/after values. `undo.argv` is a new write of the saved inverse
+batch, guarded by the confirmed revision, not history rollback.
+`--inverse-out FILE` retains it.
 After later edits, restore only intended current fields in a new edit; never
 force an old snapshot by changing its base revision.
 
@@ -157,8 +165,9 @@ displaying them in monospace without soft wrapping.
 
 ## Prototype interactions
 
-`flow list` shows starts and links by page and element name.
-`flow link --from "Page / Element" --to Page [--on click]` adds a link;
+`flow list` shows starts and links by page and element name in one text;
+`--full` adds them as fields.
+`flow link --from "Page / Element" --to Page [--on click]` adds a link; an element inside a copy of a component is `"Page / Copy / Element"`;
 `flow unlink --from "Page / Element" [--to Page] [--on click]` removes it.
 `flow start --page Page` makes a start and `--remove` undoes it. Links only
 work between pages on one canvas, so by default every page shares one. A page
@@ -193,3 +202,21 @@ Errors contain a typed code, an executable recovery query and `writeState`:
 `not-applied`, `committed` or `unknown`. Check committed or uncertain outcomes
 before retrying. Stale revisions and unsupported changes never justify using an
 older result or claiming a check passed.
+
+## Partial edits and detailed design reads
+
+`page set --page P [--platform X] [--element E] --set FIELD=VALUE ...` and
+`component set --component C [--variant V] [--element E] --set ...` change
+some fields without drawing again; fields mean what they mean in `page draw`
+(`schema page-set`). Texts are measured again and containers that hug follow.
+Without `--element` they change the page version or the component itself.
+An element (or page, or component) in several versions or variants is refused
+with the list of where it is, because they often differ on purpose: name one
+with `--platform` / `--variant`, or pass `--all` to change every one.
+
+`view ... --as spec` lists each element's position (x/y from the top-left of
+the page or component), size and sizing, layout, gap and padding, and every
+visual value with the Token it follows (`{path}`) or as a literal; copies name
+their component, variant, texts and changes. `token export --format json|flat`
+writes resolved design data; without `--by` the file is `tokens.json` under
+the call's theme options.

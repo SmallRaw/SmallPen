@@ -488,7 +488,7 @@ test("Default Design View, Discovery, semantic, wireframe, and Compare share one
   assert.equal(semantic.root.children[0].component.assetId, "cmp_button");
   assert.match(
     asciiWireframe(semantic),
-    /\[02\] INSTANCE "Continue" #node_button/,
+    /\[02\] INSTANCE "Continue"$/m,
   );
   assert.deepEqual(diffSemanticTrees(semantic, structuredClone(semantic)), []);
 
@@ -654,11 +654,11 @@ test("ASCII wireframe preserves spatial relationships and labels every layer", (
   }
   assert.match(
     wireframe,
-    /\[05\] TEXT "Page title" #node_title/,
+    /\[05\] TEXT "Page title"$/m,
   );
   assert.match(
     wireframe,
-    /\(06\) HIDDEN TEXT "Hidden helper" #node_hidden/,
+    /\(06\) HIDDEN TEXT "Hidden helper"$/m,
   );
   assert.doesNotMatch(wireframe, /\bparent=/);
   assert.doesNotMatch(wireframe, /\balign=/);

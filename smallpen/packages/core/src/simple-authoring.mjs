@@ -135,7 +135,12 @@ export function tokenSetOperations(snapshot, input, newTokenId) {
       for (const [key, value] of Object.entries(values)) write(optionSet(library, key), value, base);
       continue;
     }
-    const groupSets = tokenGroupSets(library, group);
+    // Only sets a theme option uses: a set no option shows (an archived
+    // one) never takes a value it cannot show.
+    const shown = new Set((library.themes ?? []).flatMap((theme) => theme.setIds ?? []));
+    const allGroupSets = tokenGroupSets(library, group);
+    const visibleSets = allGroupSets.filter((set) => shown.has(set.id));
+    const groupSets = visibleSets.length ? visibleSets : allGroupSets;
     if (!groupSets.length) fail("unknown_token_theme_group", `No theme group ${group}`, { groups });
     if (!home) {
       const initial = token.value ?? values[Object.keys(values)[0]];

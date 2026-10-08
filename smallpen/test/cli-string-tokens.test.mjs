@@ -29,10 +29,10 @@ async function file(root, name, value) {
   return path;
 }
 
-test("strings are Tokens in a Language group: bound text, instance labels, checks and files for code", async () => {
+test("strings are Tokens in a Language group: bound text, instance labels, checks and JSON exports", async () => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-strings-"));
   const path = (await run(["project", "init", join(root, "demo"), "--json"])).packagePath;
-  await run(["theme", "add", path, "--theme", "Language/en", "--theme", "Language/zh-CN", "--json"]);
+  await run(["token", "theme", "add", path, "--theme", "Language/en", "--theme", "Language/zh-CN", "--json"]);
   await run(["token", "set", path, "--intent", await file(root, "strings.json", {
     tokens: [
       { name: "text.board.title", type: "string", group: "Language", value: "Sprint board", values: { "Language/zh-CN": "冲刺看板" } },
@@ -67,7 +67,7 @@ test("strings are Tokens in a Language group: bound text, instance labels, check
   // The bundled font is Latin only: Chinese needs a font in the package.
   const issues = await run(["view", path, "--page", "Board", "--theme", "Language/zh-CN", "--as", "issues", "--json"]);
   assert.ok(issues.issues.some(({ code, message, where }) =>
-    code === "text_missing_glyphs" && /Title/.test(where) && /font import/.test(message)),
+    code === "text_missing_glyphs" && /Title/.test(where) && /asset font import/.test(message)),
     "text the fonts cannot draw is an issue that says to import a font");
 
   const exported = await run(["token", "export", path, "--type", "string", "--by", "Language", "--output", join(root, "i18n"), "--json"]);
@@ -102,7 +102,7 @@ test("a project that needs Chinese imports a font into its package and uses it b
   const path = (await run(["project", "init", join(root, "demo"), "--json"])).packagePath;
   const fontFile = join(root, "test-hei.otf");
   await chineseFont(fontFile, "冲刺看板");
-  await run(["font", "import", path, "--family", "Test Hei", "--file", fontFile, "--json"]);
+  await run(["asset", "font", "import", path, "--family", "Test Hei", "--file", fontFile, "--json"]);
   await run(["token", "set", path, "--intent", await file(root, "font.json", {
     tokens: [{ name: "font.family.base", type: "font-family", value: "Test Hei" }],
   }), "--json"]);

@@ -46,6 +46,7 @@ test("help expands from objects to actions to one command contract", async () =>
       "impact",
       "export",
       "import",
+      "theme",
     ],
   );
   assert.equal(group.parameters, undefined);
@@ -64,8 +65,8 @@ test("grouped commands read and edit real data by name, guard bad input and pres
   t.after(() => rm(root, { recursive: true, force: true }));
   const path = join(root, "acme.smallpen");
   await cp(fixture, path, { recursive: true });
-  assert.ok((await run(["page", "list", path])).items.length);
-  assert.ok((await run(["theme", "list", path])).groups.length);
+  assert.ok((await run(["page", "list", path])).pages.length);
+  assert.ok((await run(["token", "theme", "list", path])).groups.length);
   const input = join(root, "page.json");
   await writeFile(
     input,
@@ -104,12 +105,12 @@ test("grouped commands read and edit real data by name, guard bad input and pres
   assert.match(page.text, /Button/);
   await run(["page", "delete", path, "--page", "Settings"]);
   assert.ok(
-    !(await run(["page", "list", path])).items.some(
+    !(await run(["page", "list", path])).pages.some(
       ({ name }) => name === "Settings",
     ),
   );
   const before = await readFile(join(path, "manifest.json"), "utf8");
-  const rejected = await run(["theme", "add", path, "--theme", "Theme"], 1);
+  const rejected = await run(["token", "theme", "add", path, "--theme", "Theme"], 1);
   assert.equal(rejected.error.code, "invalid_theme_name");
   assert.equal(await readFile(join(path, "manifest.json"), "utf8"), before);
 });
@@ -145,7 +146,7 @@ test("flow means actual page interactions, set by page and element name", async 
   await run(["page", "draw", path, "--intent", input]);
   await run(["flow", "link", path, "--from", "Settings / Back", "--to", "Home"]);
   await run(["flow", "start", path, "--page", "Settings"]);
-  const flows = await run(["flow", "list", path]);
+  const flows = await run(["flow", "list", path, "--full"]);
   assert.deepEqual(
     flows.starts.map(({ page }) => page),
     ["Settings"],
@@ -156,7 +157,7 @@ test("flow means actual page interactions, set by page and element name", async 
   );
   await run(["flow", "unlink", path, "--from", "Settings / Back"]);
   await run(["flow", "start", path, "--page", "Settings", "--remove"]);
-  const cleared = await run(["flow", "list", path]);
+  const cleared = await run(["flow", "list", path, "--full"]);
   assert.deepEqual([cleared.starts, cleared.links], [[], []]);
 });
 
@@ -221,7 +222,7 @@ test("component, Token and asset actions persist the intended resource by name",
     beforeUsed,
     "a component a page uses stays",
   );
-  await run(["theme", "add", path, "--theme", "Brand/Default"]);
+  await run(["token", "theme", "add", path, "--theme", "Brand/Default"]);
   await writeFile(
     file,
     JSON.stringify({
@@ -246,14 +247,14 @@ test("component, Token and asset actions persist the intended resource by name",
     false,
   );
   const colors = async () =>
-    (await run(["asset", "list", path, "--kind", "colors"])).items.map(
+    (await run(["advanced", "style", "list", path, "--kind", "colors"])).items.map(
       ({ asset }) => [asset.path, asset.name, asset.paint.color],
     );
-  await run(["asset", "set", path, "--color", "Brand/Accent", "--value", "#006699"]);
+  await run(["advanced", "style", "set", path, "--color", "Brand/Accent", "--value", "#006699"]);
   assert.deepEqual(await colors(), [["Brand", "Accent", "#006699"]]);
-  await run(["asset", "set", path, "--color", "Brand/Accent", "--value", "#112233"]);
+  await run(["advanced", "style", "set", path, "--color", "Brand/Accent", "--value", "#112233"]);
   assert.deepEqual(await colors(), [["Brand", "Accent", "#112233"]]);
-  await run(["asset", "delete", path, "--color", "Brand/Accent"]);
+  await run(["advanced", "style", "delete", path, "--color", "Brand/Accent"]);
   assert.deepEqual(await colors(), []);
 });
 

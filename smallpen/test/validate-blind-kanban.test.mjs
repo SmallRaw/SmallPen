@@ -111,7 +111,7 @@ async function apply(root, packagePath, operations) {
   await writeFile(
     file,
     JSON.stringify({
-      baseRevision: inspected.json.package.revision,
+      baseRevision: inspected.json.revision,
       batchId: `blind-${intentCount}`,
       operations,
     }),
@@ -540,7 +540,7 @@ test("schema states variant node types, node ids, shadow shape, caps, constraint
   assert.match(node.fields["constraints-h"], /leftright/);
   assert.match(node.fields["constraints-v"], /topbottom/);
   assert.match(node.textStyle.lineHeight, /multiplier of fontSize/);
-  assert.match(node.textStyle.fonts, /Source Sans Pro.*font import/);
+  assert.match(node.textStyle.fonts, /Source Sans Pro.*asset font import/);
   const tokenTopic = await schema("token");
   assert.match(tokenTopic.setToken.name, /token_name_collision/);
   assert.match(tokenTopic.dtcgFiles, /must not be the token library entry/);

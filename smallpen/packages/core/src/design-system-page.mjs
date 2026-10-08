@@ -356,6 +356,22 @@ export function allTokenSpecimens(specimens, combinations) {
     shown.add(ref.path);
     return true;
   }));
+  // A string shows in the font its theme option uses (a Chinese value needs
+  // the font that holds Chinese): the font-family Token of that option.
+  const fontOf = new Map();
+  for (const ref of entries)
+    if (["font-family", "fontFamilies"].includes(ref.type))
+      for (const id of [ref.combinationId, ...(ref.combinationIds ?? [])].filter(Boolean))
+        if (!fontOf.has(id)) {
+          const value = ref.resolved ?? ref.value;
+          const family = Array.isArray(value) ? value[0] : value;
+          if (typeof family === "string" && family) fontOf.set(id, family);
+        }
+  for (const [index, ref] of cells.entries())
+    if (ref.type === "string") {
+      const family = [ref.combinationId, ...(ref.combinationIds ?? [])].map((id) => fontOf.get(id)).find(Boolean);
+      if (family) cells[index] = { ...ref, fontFamily: family };
+    }
   const pathOrder = new Map();
   for (const ref of cells) if (!pathOrder.has(ref.path)) pathOrder.set(ref.path, pathOrder.size);
   const pathCount = new Map();
@@ -687,7 +703,7 @@ function specimenVisual(builder, ref, comboLabel) {
       return card(height + 10, (x, y) => [
         builder.rect(x, y, VISUAL_WIDTH, height + 10, "#f8fafc"),
         specimenText(builder, ref, comboLabel, x + 8, y + 5, VISUAL_WIDTH - 16, text,
-          { fontSize: 14, lineHeight: 1.3 }),
+          { fontSize: 14, lineHeight: 1.3, ...(ref.fontFamily ? { fontFamily: ref.fontFamily } : {}) }),
       ]);
     }
   }
@@ -726,7 +742,7 @@ function specimenItem(builder, ref, comboLabel, width, align = "left") {
           { role: "caption", runtimeId: ref.caption },
           { height: nameHeight, name: `Label · ${ref.path}`, width }),
         builder.text(x, y + layout.visualHeight + 8 + layout.nameHeight, valueText,
-          { fontSize: 10, opacity: 0.45, textAlign: align }, undefined,
+          { fontSize: 10, opacity: 0.45, textAlign: align, ...(ref.fontFamily ? { fontFamily: ref.fontFamily } : {}) }, undefined,
           { height: valueHeight, width }),
       );
       return ids;
@@ -1073,7 +1089,12 @@ function sampleCaption(builder, baseline, sample) {
     if (value === sampleAxisValue(baseline, axis)) return [];
     return [axis === THEME_AXIS ? builder.axisLabel(sample.combinationLabel) : axisValueLabel(builder, axis, value)];
   });
-  return changes.length > 0 ? changes.join(" · ") : builder.label("axis.default");
+  if (changes.length > 0) return changes.join(" · ");
+  // The first sample names its own values ("todo"), not "Default": a reader
+  // looks for the variant by the names the component uses.
+  const own = (sample.axes ?? []).filter((axis) => sampleAxisValue(sample, axis) !== undefined)
+    .map((axis) => axisValueLabel(builder, axis, sampleAxisValue(sample, axis)));
+  return own.length > 0 ? own.join(" · ") : builder.label("axis.default");
 }
 
 // One line naming every axis and its values, the way a designer captions a

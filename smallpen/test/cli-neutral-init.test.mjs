@@ -56,28 +56,14 @@ test("an AI can discover and create a blank package without a business brief or 
   assert.equal(snapshot.domain.componentSets.size, 0);
   assert.equal(snapshot.domain.contextAxes.size, 0);
   assert.equal(snapshot.domain.scenarios.size, 0);
-  assert.equal(snapshot.manifest.entries.screens.length, 1);
-  assert.equal(
-    snapshot.entries[snapshot.manifest.entries.screens[0]].presentations.length,
-    1,
-  );
-  assert.equal(
-    snapshot.entries[snapshot.manifest.entries.screens[0]].presentations[0]
-      .name,
-    "Base",
-  );
-  assert.equal(
-    snapshot.entries[snapshot.manifest.entries.screens[0]].presentations[0]
-      .platform,
-    undefined,
-  );
+  assert.equal(snapshot.manifest.entries.screens.length, 0, "page draw makes the first page");
   assert.equal(result.nextQuestion, undefined);
   assert.equal(result.statePath, undefined);
   assert.deepEqual((await readdir(parent)).sort(), [
     ".素材.smallpen.write-lock",
     "素材.smallpen",
   ]);
-  const themes = await run(["theme", "list", path]);
+  const themes = await run(["token", "theme", "list", path]);
   assert.deepEqual(themes.selection.themes, ["Theme/Default"]);
   const before = await readFile(join(path, "manifest.json"), "utf8");
   const duplicate = await run(["project", "init", path], 1);

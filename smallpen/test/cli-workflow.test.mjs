@@ -149,9 +149,9 @@ async function stored(path) {
   return structuredClone({ revision, manifest, entries });
 }
 const theme = (path, action, ...args) =>
-  run(["theme", action, path, ...args, "--json"]);
+  run(["token", "theme", action, path, ...args, "--json"]);
 const group = async (path, name) =>
-  (await run(["theme", "list", path, "--full", "--json"])).groups.find(
+  (await run(["token", "theme", "list", path, "--full", "--json"])).groups.find(
     (item) => item.name === name,
   );
 
@@ -165,20 +165,19 @@ test("CLI defaults and partial theme overrides ignore stored App selection in bo
       },
     ]);
     const before = await stored(path);
-    const defaults = await run(["theme", "list", path, "--json"]);
+    const defaults = await run(["token", "theme", "list", path, "--json"]);
     assert.deepEqual(defaults.selection.themes, [
       "Mode/Light",
       "Scale/Regular",
     ]);
     assert.equal(defaults.appSelection, undefined);
-    const appSettings = await run(["theme", "list", path, "--full", "--json"]);
+    const appSettings = await run(["token", "theme", "list", path, "--full", "--json"]);
     assert.deepEqual(appSettings.appSelection.themes, [
       "Mode/Dark",
       "Scale/Large",
     ]);
     const partial = await run([
-      "theme",
-      "list",
+      "token", "theme", "list",
       path,
       "--theme",
       "Mode/Dark",
@@ -228,7 +227,7 @@ test("group rename/delete preserves default identities and rejects duplicate/reu
   assert.equal(
     (
       await run(
-        ["theme", "delete", path, "--theme", "Identity/Default", "--json"],
+        ["token", "theme", "delete", path, "--theme", "Identity/Default", "--json"],
         1,
       )
     ).error.code,
@@ -238,8 +237,7 @@ test("group rename/delete preserves default identities and rejects duplicate/reu
     (
       await run(
         [
-          "theme",
-          "add",
+          "token", "theme", "add",
           path,
           "--theme",
           "Different/Default",
@@ -381,7 +379,7 @@ test("theme renames preserve saved local Scenario choices and referenced options
   assert.equal(
     (
       await run(
-        ["theme", "delete", path, "--theme", "Identity/Alternate", "--json"],
+        ["token", "theme", "delete", path, "--theme", "Identity/Alternate", "--json"],
         1,
       )
     ).error.code,

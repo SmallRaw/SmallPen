@@ -59,7 +59,10 @@ export function pageRenameOperations(snapshot, { page, platform, element, to }) 
     const root = presentation.nodes[presentation.rootId];
     const platform = presentation.platform ?? presentation.name;
     if (root && root.name === `${before} · ${platform}`) root.name = `${after} · ${platform}`;
-    for (const flow of presentation.prototypeFlows ?? []) if (flow.name === found.name) flow.name = name;
+    for (const flow of presentation.prototypeFlows ?? []) {
+      if (flow.name === found.name) flow.name = name;
+      else if (flow.name === `${found.name} (${platform})`) flow.name = `${name} (${platform})`;
+    }
   }
   return [{ type: "put-screen", screen, entry }];
 }
@@ -93,22 +96,35 @@ export function pageDeleteOperations(snapshot, { page, platform, element }) {
 function ownComponent(snapshot, name, lookups) {
   const { owner, set } = findComponent(snapshot, name, lookups);
   if (owner !== snapshot)
-    fail("component_not_here", `${set.name} belongs to ${owner.manifest.packageId}; edit it there`);
+    fail("component_not_here", `${set.name} belongs to ${owner.manifest.name ?? "another package"}${owner.locator ? ` (${owner.locator})` : ""}; edit it there`, { package: owner.manifest.name, path: owner.locator });
   return set;
 }
 
-export function componentRenameOperation(snapshot, { component, element, to }, lookups = {}) {
+export function componentRenameOperation(snapshot, { component, element, variant, to }, lookups = {}) {
   const set = ownComponent(snapshot, component, lookups);
   if (typeof to !== "string" || !to.trim()) fail("invalid_name", "--to names the new name");
   const name = to.trim();
   if (element !== undefined) {
-    // One element keeps one node id in every variant: rename it in all.
-    const first = set.variants[0];
-    const nodeId = findElement(first.nodes, first.rootId, element, set.name);
+    // Only in the named variant, or in every variant that has an element at
+    // that path: variants drawn separately give one element different node
+    // ids, so the path decides.
+    const candidates = variant !== undefined ? [findVariant(set, variant)] : set.variants;
+    const found = [], candidatesWithIt = [];
+    let firstError;
+    for (const candidate of candidates) {
+      try {
+        const nodeId = findElement(candidate.nodes, candidate.rootId, element, `${set.name} (${variantLabel(set, candidate) || "default"})`);
+        found.push({ nodeId });
+        candidatesWithIt.push(candidate);
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+    if (!found.length) throw firstError;
     const renamed = structuredClone(set);
-    for (const variant of renamed.variants) {
-      if (!variant.nodes[nodeId]) continue;
-      variant.nodes[nodeId].name = name;
+    for (const [index, { nodeId }] of found.entries()) {
+      const each = renamed.variants.find(({ id }) => id === candidatesWithIt[index].id);
+      each.nodes[nodeId].name = name;
     }
     return { type: "put-component-set", componentSet: renamed };
   }
@@ -144,58 +160,84 @@ export function componentDeleteOperation(snapshot, { component, variant }, looku
 const ACTION_NAMES = { navigate: "navigate", "open-overlay": "overlay", "toggle-overlay": "overlay", "close-overlay": "close", "prev-screen": "back", "open-url": "url" };
 
 // Every prototype start and element link, by page and element names.
-export function flowLinks(snapshot) {
+// Links from elements inside copies are the copies' "<element>:interactions"
+// overrides; lookups name the component's element when it is not here.
+export function flowLinks(snapshot, { foundation, libraries = [] } = {}) {
   const byId = new Map(screens(snapshot).map(({ screen }) => [screen.id, screen]));
+  const owners = [snapshot, foundation, ...libraries].filter(Boolean);
+  const elementName = (copy, sourcePath) => {
+    const set = owners.map((owner) => owner.domain.componentSets.get(copy.instance.component.assetId)).find(Boolean);
+    return set?.variants.map((variant) => variant.nodes?.[sourcePath]?.name).find(Boolean) ?? "element";
+  };
   const starts = [], links = [];
   for (const { screen } of screens(snapshot))
     for (const presentation of screen.presentations) {
       const platform = presentation.platform ?? presentation.name;
       for (const flow of presentation.prototypeFlows ?? [])
         starts.push({ page: screen.name, platform, name: flow.name, screenId: screen.id, presentationId: presentation.id, flowId: flow.id });
-      for (const [nodeId, node] of Object.entries(presentation.nodes))
-        for (const [index, native] of (node.interactions ?? []).entries()) {
+      const add = (nodeId, element, list, sourcePath) => {
+        for (const [index, native] of (list ?? []).entries()) {
           const target = typeof native.destination === "string" ? snapshot.runtime?.reverseNodes?.[native.destination] : undefined;
           const destination = target ? byId.get(target.screenId) : undefined;
           const version = destination?.presentations.find(({ id }) => id === target.presentationId);
           links.push({
             page: screen.name,
             platform,
-            element: elementPath(presentation.nodes, presentation.rootId, nodeId),
+            element,
             on: native["event-type"],
             action: ACTION_NAMES[native["action-type"]] ?? native["action-type"],
             ...(destination ? { to: destination.name, toScreenId: destination.id, toPlatform: version?.platform ?? version?.name } : {}),
             screenId: screen.id,
             presentationId: presentation.id,
             nodeId,
+            ...(sourcePath !== undefined ? { sourcePath } : {}),
             index,
           });
         }
+      };
+      for (const [nodeId, node] of Object.entries(presentation.nodes)) {
+        const path = elementPath(presentation.nodes, presentation.rootId, nodeId);
+        add(nodeId, path, node.interactions);
+        for (const [key, list] of Object.entries(node.instance?.overrides ?? {}))
+          if (key.endsWith(":interactions")) {
+            const sourcePath = key.slice(0, -":interactions".length);
+            add(nodeId, `${path} / ${elementName(node, sourcePath)}`, list, sourcePath);
+          }
+      }
     }
   return { starts, links };
 }
 
 export function flowLinksText({ starts, links }) {
   const lines = [];
-  if (starts.length) lines.push("Starts", ...starts.map((start) => `  ${start.page} (${start.platform})${start.name !== start.page ? ` "${start.name}"` : ""}`));
+  if (starts.length) lines.push("Starts", ...starts.map((start) => `  ${start.page} (${start.platform})${![start.page, `${start.page} (${start.platform})`].includes(start.name) ? ` "${start.name}"` : ""}`));
   if (links.length)
     lines.push("Links", ...links.map((link) =>
-      `  ${link.page} / ${link.element} —${link.on}→ ${link.to ?? link.action}${link.to && link.action !== "navigate" ? ` (${link.action})` : ""}`));
+      `  ${link.page} (${link.platform}) / ${link.element} —${link.on}→ ${link.to ?? link.action}${link.to && link.action !== "navigate" ? ` (${link.action})` : ""}`));
   return lines.join("\n") || "No starts or links.";
 }
 
 // Removes an element's links, or only those on one trigger or to one page.
-export function flowUnlinkOperation(snapshot, { from, on, to }) {
-  const { screen, presentation, nodeId } = findPageElement(snapshot, from);
+export function flowUnlinkOperation(snapshot, { from, on, to, platform }, lookups = {}) {
+  const { screen, presentation, nodeId, inside } = findPageElement(snapshot, from, platform, lookups);
   const node = presentation.nodes[nodeId];
   const target = to === undefined ? undefined : findPage(snapshot, to);
   const matches = (link) =>
     (on === undefined || link.on === on) && (target === undefined || link.toScreenId === target.id);
-  const mine = flowLinks(snapshot).links.filter((link) => link.screenId === screen.id && link.presentationId === presentation.id && link.nodeId === nodeId);
+  const mine = flowLinks(snapshot, lookups).links.filter((link) => link.screenId === screen.id && link.presentationId === presentation.id &&
+    link.nodeId === nodeId && link.sourcePath === inside?.sourcePath);
   const drop = new Set(mine.filter(matches).map((link) => link.index));
   if (!drop.size)
     fail("no_link", `${from} has no ${[on, target && `link to ${target.name}`].filter(Boolean).join(" ") || "link"}`, {
       links: mine.map((link) => `${link.on} → ${link.to ?? link.action}`),
     });
+  if (inside) {
+    const overridePath = `${inside.sourcePath}:interactions`;
+    const kept = (node.instance.overrides?.[overridePath] ?? []).filter((_, index) => !drop.has(index));
+    return kept.length
+      ? { type: "set-instance-override", screenId: screen.id, presentationId: presentation.id, nodeId, overridePath, value: kept }
+      : { type: "clear-instance-override", screenId: screen.id, presentationId: presentation.id, nodeId, overridePath };
+  }
   return {
     type: "update-presentation-node",
     screenId: screen.id,
@@ -206,9 +248,9 @@ export function flowUnlinkOperation(snapshot, { from, on, to }) {
 }
 
 // The page stops being a prototype start.
-export function flowStartRemoveOperation(snapshot, page) {
+export function flowStartRemoveOperation(snapshot, page, platform) {
   const screen = findPage(snapshot, page);
-  const presentation = findPresentation(screen);
+  const presentation = findPresentation(screen, platform);
   if (!(presentation.prototypeFlows ?? []).length) fail("no_start", `${screen.name} is not a start`);
   return { type: "update-presentation", screenId: screen.id, presentationId: presentation.id, changes: { prototypeFlows: [] } };
 }
@@ -361,20 +403,27 @@ export function duplicateNameIssues(snapshot, { foundation } = {}) {
 // Every node of a package, with where it sits, by name.
 function* namedNodes(snapshot) {
   const owner = snapshot.manifest.name ?? snapshot.manifest.packageId;
+  // Each place once: a page with several versions names the platform, a
+  // component with several variants names the variant.
   for (const { screen } of screens(snapshot))
-    for (const presentation of screen.presentations)
+    for (const presentation of screen.presentations) {
+      const page = screen.presentations.length > 1 ? `${screen.name} (${presentation.platform ?? presentation.name})` : screen.name;
       for (const [id, node] of Object.entries(presentation.nodes))
-        yield { node, where: () => `${owner}: ${screen.name} / ${elementPath(presentation.nodes, presentation.rootId, id)}` };
+        yield { node, where: () => `${owner}: ${page} / ${elementPath(presentation.nodes, presentation.rootId, id) || node.name}` };
+    }
   for (const set of snapshot.domain.componentSets.values())
-    for (const variant of set.variants)
+    for (const variant of set.variants) {
+      const label = set.variants.length > 1 ? variantLabel(set, variant) : "";
+      const component = label ? `${set.name} (${label})` : set.name;
       for (const [id, node] of Object.entries(variant.nodes))
-        yield { node, where: () => `${owner}: ${set.name} / ${elementPath(variant.nodes, variant.rootId, id)}` };
+        yield { node, where: () => `${owner}: ${component} / ${elementPath(variant.nodes, variant.rootId, id) || node.name}` };
+    }
 }
 
 // A package that depends on this one (a Product on its Foundation, or a
 // package on a Library) still uses a component, one of its variants, or a
 // Token: deleting it would break that package. Fails with the places.
-export function checkNotUsedElsewhere(dependents, operations, snapshot) {
+export function checkNotUsedElsewhere(dependents, operations, snapshot, { here = false } = {}) {
   const packageId = snapshot.manifest.packageId;
   const uses = [];
   for (const operation of operations) {
@@ -391,8 +440,11 @@ export function checkNotUsedElsewhere(dependents, operations, snapshot) {
           uses.push(where());
       }
   }
-  if (uses.length)
-    fail("used_elsewhere", `Another package still uses this: ${uses[0]}${uses.length > 1 ? ` and ${uses.length - 1} more` : ""}; change those first`, {
-      uses: [...new Set(uses)].slice(0, 20),
+  const places = [...new Set(uses)];
+  if (places.length)
+    fail(here ? "in_use" : "used_elsewhere",
+      `${here ? "Still used" : "Another package still uses this"}: ${places[0]}${places.length > 1 ? ` and ${places.length - 1} more` : ""}; change or delete those first`, {
+      uses: places.slice(0, 20),
+      ...(places.length > 20 ? { moreUses: places.length - 20 } : {}),
     });
 }

@@ -119,7 +119,7 @@ test("command help includes conventional options; machine contracts remain separ
     assert.ok(groupedNames.has(error.details.suggestion), engine);
     assert.ok(!error.details.validCommands.includes(engine), engine);
   }
-  const complete = await run(["help", "theme", "add", "--full", "--json"]);
+  const complete = await run(["help", "token", "theme", "add", "--full", "--json"]);
   assert.ok(complete.value.parameters.theme.required);
   assert.ok(!complete.value.parameters.intent);
 });
@@ -172,7 +172,7 @@ test("help rejects unknown or extra topics and returns a small recovery query", 
   for (const argv of [
     ["help", "workflow", "unknown"],
     ["help", "rules", "unknown"],
-    ["help", "theme", "unused"],
+    ["help", "token", "theme", "unused"],
     ["help", "workflow", "tokens", "extra"],
   ]) {
     const error = (await run([...argv, "--json"], 1)).value.error;

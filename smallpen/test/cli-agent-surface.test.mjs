@@ -193,7 +193,7 @@ async function configuredCliPackage(context, operations = []) {
   await writeFile(
     batchPath,
     JSON.stringify({
-      baseRevision: JSON.parse(inspected.stdout).package.revision,
+      baseRevision: JSON.parse(inspected.stdout).revision,
       batchId: "batch_cli_configured_setup",
       operations,
     }),
@@ -296,7 +296,7 @@ test("root and every public command provide standalone help", async () => {
 
   // Engine names no longer run; each failure names its grouped path.
   for (const [command, suggestion] of [
-    ["themes", "theme list"],
+    ["themes", "token theme list"],
     ["init", "project init"],
     ["inspect", "project show"],
     ["list", "project list"],
@@ -412,7 +412,7 @@ test("project creation preserves spaces in paths and does not write question sta
   const created = JSON.parse(result.stdout);
   assert.equal(
     created.packagePath,
-    join(path, "workspace with spaces.smallpen"),
+    join(path, "my-app.smallpen"),
   );
   assert.equal(created.statePath, undefined);
   assert.equal(created.nextQuestion, undefined);
@@ -434,7 +434,7 @@ test("apply returns Design Token warnings for hard-coded style values", async (c
   await writeFile(
     batchPath,
     JSON.stringify({
-      baseRevision: JSON.parse(inspected.stdout).package.revision,
+      baseRevision: JSON.parse(inspected.stdout).revision,
       batchId: "batch_cli_hard_coded_color",
       operations: [
         {
@@ -472,7 +472,7 @@ test("apply returns Design Token warnings for hard-coded style values", async (c
   await writeFile(
     unmatchedPath,
     JSON.stringify({
-      baseRevision: JSON.parse(after.stdout).package.revision,
+      baseRevision: JSON.parse(after.stdout).revision,
       batchId: "batch_cli_unmatched_color",
       operations: [
         {
@@ -506,7 +506,7 @@ test("bulk write warnings are compact, actionable-first, and losslessly expandab
     tokenOperation(),
   ]);
   const inspected = await runCli(["project", "show", packagePath, "--json"]);
-  const revision = JSON.parse(inspected.stdout).package.revision;
+  const revision = JSON.parse(inspected.stdout).revision;
   const batchPath = join(parent, "bulk-warning-batch.json");
   await writeFile(
     batchPath,
@@ -594,7 +594,7 @@ test("bulk write warnings are compact, actionable-first, and losslessly expandab
   assert.equal(invalid.code, 1);
   assert.equal(JSON.parse(invalid.stdout).error.code, "invalid_warning_detail");
   const after = await runCli(["project", "show", packagePath, "--json"]);
-  assert.equal(JSON.parse(after.stdout).package.revision, revision);
+  assert.equal(JSON.parse(after.stdout).revision, revision);
 });
 
 test("search-tokens rejects a type that conflicts with --color", async (context) => {
@@ -739,7 +739,7 @@ test("malformed package JSON names its file and gives a safe validation continua
   await symlink(packagePath, alias, "dir");
   const before = JSON.parse(
     (await runCli(["project", "show", packagePath, "--json"])).stdout,
-  ).package.revision;
+  ).revision;
 
   for (const entry of ["screens/roundtrip.json", "manifest.json"]) {
     const file = join(packagePath, entry);
@@ -805,7 +805,7 @@ test("component search includes linked Libraries and executable owner-scoped det
     await writeFile(
       batchPath,
       JSON.stringify({
-        baseRevision: JSON.parse(inspected.stdout).package.revision,
+        baseRevision: JSON.parse(inspected.stdout).revision,
         batchId: `batch_${id}`,
         operations: [operation],
       }),
@@ -976,9 +976,9 @@ test("an external Agent can initialize, inspect, view and export by name using o
   const inspect = await runCli(["project", "show", initialized.productPath, "--json"]);
   assert.equal(inspect.code, 0, inspect.stderr);
   const inspected = JSON.parse(inspect.stdout);
-  assert.equal(inspected.package.role, "product");
+  assert.equal(inspected.role, "product");
   assertNoIds(inspected);
-  assert.equal(inspected.counts.scenarios, 1);
+  assert.equal(inspected.counts.pages, 1);
   const stored = await openPackage(initialized.productPath);
   assert.equal(stored.manifest.defaultScreenId, "scr_home");
 
@@ -1198,7 +1198,7 @@ for (const [label, extra] of [
       assert.equal(value.imagePath, undefined);
       assert.equal(value.evidencePath, undefined);
       const image = value.image ?? value;
-      assertInlineImage(image, inspected.package.revision);
+      assertInlineImage(image, inspected.revision);
       images.push(image);
     }
     assert.equal(images[0].width, images[1].width * 2);
@@ -1310,7 +1310,7 @@ test("inline image delivery follows committed edits", async (context) => {
   const current = JSON.parse(
     (await runCli(["project", "show", packagePath, "--json"])).stdout,
   );
-  assertInlineImage(second, current.package.revision);
+  assertInlineImage(second, current.revision);
   assert.notEqual(second.revision, first.revision);
   assert.notEqual(second.renderHash, first.renderHash);
   assert.deepEqual(await imageDeliveryTree(parent), tree);
@@ -1455,7 +1455,7 @@ test("high-level write commands refuse a Product workspace in Repair", async (co
   manifest.dependencies[0].path = "missing.smallpen";
   await writeFile(manifestPath, JSON.stringify(manifest));
   const before = await runCli(["project", "show", initialized.productPath, "--json"]);
-  const beforeRevision = JSON.parse(before.stdout).package.revision;
+  const beforeRevision = JSON.parse(before.stdout).revision;
   const pageIntent = join(initialized.parent, "repair-page.json");
   const tokenIntent = join(initialized.parent, "repair-token.json");
   await writeFile(
@@ -1492,7 +1492,7 @@ test("high-level write commands refuse a Product workspace in Repair", async (co
     );
     assert.equal(JSON.parse(result.stdout).error.code, "repair_required");
     const unchanged = await runCli(["project", "show", initialized.productPath, "--json"]);
-    assert.equal(JSON.parse(unchanged.stdout).package.revision, beforeRevision);
+    assert.equal(JSON.parse(unchanged.stdout).revision, beforeRevision);
   }
 
   const batchPath = join(initialized.parent, "repair-generic-apply.json");
@@ -1532,7 +1532,7 @@ test("high-level write commands refuse a Product workspace in Repair", async (co
     `${genericApply.stderr}\n${genericApply.stdout}`,
   );
   const after = await runCli(["project", "show", initialized.productPath, "--json"]);
-  assert.notEqual(JSON.parse(after.stdout).package.revision, beforeRevision);
+  assert.notEqual(JSON.parse(after.stdout).revision, beforeRevision);
 });
 
 test("impact reports Product usages of a Foundation Token", async (context) => {
@@ -1544,7 +1544,7 @@ test("impact reports Product usages of a Foundation Token", async (context) => {
     await writeFile(
       batchPath,
       JSON.stringify({
-        baseRevision: JSON.parse(inspected.stdout).package.revision,
+        baseRevision: JSON.parse(inspected.stdout).revision,
         batchId,
         operations,
       }),
@@ -1613,9 +1613,9 @@ test("impact reports Product usages of a Foundation Token", async (context) => {
     (await runCli(["project", "show", initialized.productPath, "--json"])).stdout,
   );
   assertNoIds(result);
-  assert.equal(result.ownerRevision, foundation.package.revision);
-  assert.equal(result.foundationRevision, foundation.package.revision);
-  assert.equal(result.productRevision, product.package.revision);
+  assert.equal(result.ownerRevision, foundation.revision);
+  assert.equal(result.foundationRevision, foundation.revision);
+  assert.equal(result.productRevision, product.revision);
   assert.deepEqual(result.token, {
     path: "color.foundation-impact",
     type: "color",
@@ -1752,7 +1752,7 @@ test("apply dry-run and real apply reject JSON blob fields consistently", async 
   await writeFile(
     batchPath,
     JSON.stringify({
-      baseRevision: JSON.parse(inspected.stdout).package.revision,
+      baseRevision: JSON.parse(inspected.stdout).revision,
       batchId: "batch_invalid_json_blobs",
       blobs: {},
       operations: [],
@@ -1778,7 +1778,7 @@ test("concurrent CLI writers reject the stale batch instead of losing an update"
   const { packagePath, parent } = await configuredCliPackage(context);
   const inspected = await runCli(["project", "show", packagePath, "--json"]);
   assert.equal(inspected.code, 0, inspected.stderr);
-  const revision = JSON.parse(inspected.stdout).package.revision;
+  const revision = JSON.parse(inspected.stdout).revision;
   const batch = (batchId, opacity) => ({
     baseRevision: revision,
     batchId,

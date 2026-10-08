@@ -5157,6 +5157,7 @@ function compileInstanceOverrides(snapshot, updateStatesByNode, operations) {
 const NODE_FIELD_DEFAULTS = new Map([
   ["flipX", false],
   ["flipY", false],
+  ["interactions", []],
   ["locked", false],
   ["opacity", 1],
   ["proportionLock", false],
