@@ -146,6 +146,53 @@ test("spacing draws as a bar six times the value, whose gap is the Cell value", 
   }
 });
 
+test("large spacing samples and their captions stay clear of other Token sections", () => {
+  for (const value of [224, 800]) {
+    const spacing = cell({ attribute: "gap", children: [uuid(), uuid()], path: "space.pageX", raw: value, tokenId: "pageX", type: "spacing", value });
+    const dimension = cell({ attribute: "width", path: "size.frameWidth", raw: 1280, tokenId: "frameWidth", type: "dimensions", value: 1280 });
+    const page = buildDesignSystemPage({ specimens: { spacing, dimension } }, {}, { locale: "en" });
+    const frame = roleNodes(page, "token-cell").find((node) => page.runtimeIds[node.id] === spacing.shape);
+    const caption = roleNodes(page, "caption").find((node) => page.runtimeIds[node.id] === spacing.caption);
+    assert.ok(frame.x + frame.width <= caption.x || caption.x + caption.width <= frame.x, "the bar does not cover its caption");
+    assert.ok(Math.max(frame.x + frame.width, caption.x + caption.width) <= page.width, "the whole row fits on the board");
+    for (const node of Object.values(page.nodes).filter((node) => node.name === "Token type · dimensions" || page.runtimeIds[node.id] === dimension.shape)) {
+      const overlaps = frame.x < node.x + node.width && node.x < frame.x + frame.width && frame.y < node.y + node.height && node.y < frame.y + frame.height;
+      assert.equal(overlaps, false, "the bar does not enter the Dimensions section");
+    }
+    assert.equal(frame["layout-gap"]["column-gap"], value, "the editable gap retains the actual Token value");
+  }
+});
+
+test("spacing labels sit immediately before aligned bar starts", () => {
+  const specimens = Object.fromEntries([4, 16, 224].map((value) => [
+    `gap${value}`,
+    cell({ attribute: "gap", path: `space.${value}`, raw: value, tokenId: `gap${value}`, type: "spacing", value }),
+  ]));
+  const page = buildDesignSystemPage({ specimens }, {}, { locale: "en" });
+  const starts = [];
+  for (const ref of Object.values(specimens)) {
+    const frame = roleNodes(page, "token-cell").find((node) => page.runtimeIds[node.id] === ref.shape);
+    const caption = roleNodes(page, "caption").find((node) => page.runtimeIds[node.id] === ref.caption);
+    const distance = frame.x - caption.x - caption.width;
+    assert.ok(distance > 0 && distance <= 16, "short and long bars both sit next to their label");
+    assert.equal(caption.textStyle.textAlign, "right", "label text ends next to the bar");
+    starts.push(frame.x);
+  }
+  assert.equal(new Set(starts).size, 1, "bar lengths share a starting point for comparison");
+});
+
+test("wrapped spacing captions have enough height and do not touch the next row", () => {
+  const first = cell({ attribute: "gap", path: "space.reading.details.content.horizontal.padding", raw: 224, tokenId: "first", type: "spacing", value: 224 });
+  const second = cell({ attribute: "gap", path: "space.reading.details.content.vertical.padding", raw: 240, tokenId: "second", type: "spacing", value: 240 });
+  const page = buildDesignSystemPage({ specimens: { first, second } }, {}, { locale: "en" });
+  const captions = [first, second].map((ref) => roleNodes(page, "caption").find((node) => page.runtimeIds[node.id] === ref.caption));
+  for (const caption of captions) {
+    assert.ok(caption.text.includes("\n"), "a long Token name wraps explicitly");
+    assert.ok(caption.height >= caption.text.split("\n").length * 12 * 1.4, "all caption lines fit");
+  }
+  assert.ok(captions[0].y + captions[0].height < captions[1].y, "caption rows have a gap");
+});
+
 test("typography shows each style at its own size with its numbers", () => {
   const value = { fontFamily: "Source Sans Pro", fontSize: 32, fontWeight: 700, lineHeight: 1.25 };
   const ref = cell({ attribute: "typography", path: "type.display", raw: value, tokenId: "display", type: "typography", value });

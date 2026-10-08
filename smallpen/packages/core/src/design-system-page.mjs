@@ -403,26 +403,6 @@ function colorShortName(path, family) {
   return rest || String(path);
 }
 
-// Masonry of equal-width cards in `columns` columns: each card goes into
-// the shortest column.
-function cardColumns(cards, x, y, columns) {
-  const width = Math.max(0, ...cards.map((card) => card.width));
-  const bottoms = Array.from({ length: Math.max(1, columns) }, () => y);
-  const positions = [];
-  let maxX = x;
-  let endY = y;
-  for (const card of cards) {
-    const column = bottoms.indexOf(Math.min(...bottoms));
-    const px = x + column * (width + CARD_GAP);
-    const py = bottoms[column];
-    positions.push([px, py]);
-    bottoms[column] = py + card.height + CARD_GAP;
-    maxX = Math.max(maxX, px + card.width);
-    endY = Math.max(endY, py + card.height);
-  }
-  return { endY, maxX, positions };
-}
-
 // Masonry where a card may span several equal columns: it goes where the
 // columns it covers end highest.
 function spanColumns(cards, x, y, columns, columnWidth) {
@@ -868,14 +848,26 @@ const BAR_SCALE = 6;
 
 function spacingSection(builder, refs, members, width, titleId) {
   const sorted = [...members].sort((left, right) => Number(displayValue(left)) - Number(displayValue(right)));
-  const longest = Math.max(0, ...sorted.map((ref) => BAR_SCALE * (Number(displayValue(ref)) || 0)));
-  const labelX = Math.min(width - 120, Math.max(48, longest) + 12);
-  const rowHeight = 26;
-  return section(builder, builder.label("type.spacing"), "Token type · spacing", width, sorted.length * rowHeight, (x, y) =>
-    sorted.flatMap((ref, index) => {
-      const gap = Math.max(0, Number(displayValue(ref)) || 0);
-      const block = Math.max(2, ((BAR_SCALE - 1) * gap) / 2);
-      const top = y + index * rowHeight;
+  const rows = sorted.map((ref) => {
+    const gap = Math.max(0, Number(displayValue(ref)) || 0);
+    const block = Math.max(2, ((BAR_SCALE - 1) * gap) / 2);
+    const caption = `${ref.themeLabel ? `${ref.path} · ${ref.themeLabel}` : ref.path}  ${valueCaption(builder, ref)}`;
+    return { block, caption, gap, ref, width: 2 * block + gap };
+  });
+  const longest = Math.max(48, ...rows.map((row) => row.width));
+  const captionWidth = Math.min(240, Math.max(120, ...rows.map((row) => designSystemTextMetrics(row.caption, 12).width)));
+  const barX = captionWidth + 12;
+  const sectionWidth = Math.max(width, barX + longest);
+  for (const row of rows) {
+    row.caption = wrapText(row.caption, 12, captionWidth);
+    row.height = Math.max(26, designSystemTextMetrics(row.caption, 12).height + 8);
+  }
+  const bodyHeight = rows.reduce((sum, row) => sum + row.height, 0);
+  return section(builder, builder.label("type.spacing"), "Token type · spacing", sectionWidth, bodyHeight, (x, y) => {
+    let top = y;
+    return rows.flatMap(({ block, caption, gap, height, ref, width: barWidth }) => {
+      const rowY = top;
+      top += height;
       const [left, right] = ref.children ?? [];
       const blockLeft = builder.rect(0, 0, block, 12, BRAND, { name: "Specimen filler" },
         left ? { runtimeId: left } : undefined);
@@ -895,17 +887,18 @@ function spacingSection(builder, refs, members, width, titleId) {
         "layout-padding-type": "multiple",
         name: specimenName(ref, comboLabelOf(refs, ref, builder)),
         type: "FRAME",
-        width: 2 * block + gap,
-        x,
-        y: top + 3,
+        width: barWidth,
+        x: x + barX,
+        y: rowY + 3,
       }, tokenMeta(ref));
       return [
         frame,
-        builder.text(x + labelX, top, `${ref.themeLabel ? `${ref.path} · ${ref.themeLabel}` : ref.path}  ${valueCaption(builder, ref)}`,
-          { fontSize: 12, opacity: 0.6 }, { role: "caption", runtimeId: ref.caption },
-          { name: `Label · ${ref.path}`, width: width - labelX }),
+        builder.text(x, rowY, caption,
+          { fontSize: 12, opacity: 0.6, textAlign: "right" }, { role: "caption", runtimeId: ref.caption },
+          { name: `Label · ${ref.path}`, width: captionWidth }),
       ];
-    }), titleId);
+    });
+  }, titleId);
 }
 
 // Typography as real-size lines, its numbers in the line itself.
@@ -1295,7 +1288,7 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
   const contentWidth = Math.max(options.minWidth ?? 2000, columns * columnWidth + (columns - 1) * CARD_GAP);
 
   // Tokens, top to bottom: each color family, typography, then the smaller
-  // sections four to a row.
+  // sections across four columns. Wide specimens reserve more columns.
   const specimens = options.only === "components" ? [] : allTokenSpecimens(refs.specimens, refs.combinations);
   const families = [];
   const byFamily = new Map();
@@ -1326,7 +1319,12 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
   for (const type of TOKEN_TYPES) {
     if (type === "color" || type === "typography") continue;
     const members = specimens.filter((ref) => ref.type === type);
-    if (members.length > 0) small.push(tokenSection(builder, refs, type, members, smallWidth, typeIds[type]));
+    if (members.length > 0) {
+      const item = tokenSection(builder, refs, type, members, smallWidth, typeIds[type]);
+      const span = Math.ceil((item.width + CARD_GAP) / (smallWidth + CARD_GAP));
+      if (span > 4) wide.push(item);
+      else small.push({ ...item, span });
+    }
   }
 
   const children = [];
@@ -1343,7 +1341,7 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
       y += item.height + SECTION_GAP;
     }
     if (small.length > 0) {
-      const placed = cardColumns(small.map((item) => ({ ...item, width: smallWidth })), PAD, y, 4);
+      const placed = spanColumns(small, PAD, y, 4, smallWidth);
       small.forEach((item, index) => children.push(...item.draw(placed.positions[index][0], placed.positions[index][1])));
       y = placed.endY + SECTION_GAP;
     }
@@ -1351,7 +1349,7 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
   }
 
   // Components under the tokens, grouped by classification.
-  let right = PAD + contentWidth;
+  let right = PAD + Math.max(contentWidth, ...wide.map((item) => item.width ?? 0));
   if (options.only !== "tokens") {
     children.push(builder.text(PAD, y, builder.label("components-source"), { fontSize: 22, fontWeight: 700 }, { runtimeId: ids.componentsSection }));
     y += 48;
