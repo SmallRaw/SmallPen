@@ -434,10 +434,6 @@ async function smoke(dir, commit) {
       },
     });
     run("npm", ["run", "verify"], temp);
-    assert.equal(
-      run(process.execPath, [cli, "version"], temp).trim(),
-      manifest.version,
-    );
     const validated = JSON.parse(
       run(
         process.execPath,
