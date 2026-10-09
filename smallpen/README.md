@@ -33,47 +33,54 @@ Those upstream Penpot features remain unchanged outside the SmallPen profile.
 - `packages/penpot-adapter/` maps supported completed Penpot changes to typed SmallPen Operations.
 - `apps/cli/` is the complete public Agent surface and never starts Web or Background.
 - `apps/background/` exposes session-scoped local HTTP services used by the Penpot adapter.
-- `apps/web/` only serves a compiled `frontend/resources/public` tree, emits the Penpot workspace URL, proxies Google Fonts files and stylesheets, and handles the native open-file control route. It contains no product UI implementation.
+- `apps/web/` starts the shared local services, serves the compiled frontend, proxies Google Fonts, and provides local directory browsing. Desktop uses the same host with its native file dialogs. The editor stays in the frontend.
 - Web and Background bind to loopback only. They answer only `127.0.0.1`, `localhost`, or `[::1]` Host headers with their own port (`forbidden_host` otherwise), which blocks DNS rebinding. Web accepts only loopback origins on its own port; Background grants CORS to plain-HTTP loopback origins (`forbidden_origin` otherwise).
 - These checks stop web pages, not local programs. There is no per-launch token: any process or other user on the same machine can read the Background URL from the Web index page and act as you. Run SmallPen only on a single-user machine.
 - `frontend/src/app/main/smallpen*` is the bounded CLJS integration. Unsupported Penpot reads and writes fail explicitly rather than pretending to persist.
 
-## Install and run
+## Browser editor
 
-Materialize the eight local workspace links without lifecycle scripts:
+The independent npm package is `@smallpen/web`. It includes the browser
+editor and local file service; it does not install the AI CLI or Electron.
+Requires Node.js 24 or newer. After publication:
+
+```sh
+npx @smallpen/web@alpha
+# Or open a package directly:
+npx @smallpen/web@alpha ./project.smallpen
+```
+
+The service opens your default browser. **Open Package** browses folders
+on the machine running the service, and edits save to the original folder.
+**New Package** creates a folder at the location you select. Browser file
+permissions and uploads are not needed. Ctrl+C stops the service;
+`--no-open` prints the URL without opening a browser, and `--port NUMBER`
+sets a local port.
+
+Build from source with installed frontend dependencies:
 
 ```sh
 cd smallpen
 npm ci --ignore-scripts
-```
-
-Start the Background for one package:
-
-```sh
-node apps/background/bin/smallpen-background.mjs test/fixtures/roundtrip.smallpen
-```
-
-The process prints its session-scoped `backend` URL. Build the Penpot frontend, then serve that exact frontend tree against the Background session:
-
-```sh
 cd ../frontend
 pnpm run build:app
 cd ../smallpen
-node apps/web/bin/smallpen-web.mjs \
-  http://127.0.0.1:43127/<session-id> \
-  --frontend-root ../frontend/resources/public
+npm run build:web
+node dist/SmallPen-Web/bin/smallpen-web.cjs
 ```
 
-Open the emitted `frontend` URL. The root origin is always the SmallPen Home entry. Background and package-session details never appear in the address bar.
+The build outputs a publishable npm package in `dist/SmallPen-Web`, with
+compiled frontend assets and bundled runtime dependencies. To create a
+local tarball:
 
-On supported browsers, **Open Package** selects a local folder and saves edits
-there. Other browsers offer **Upload folder…**, which opens a copy under
-`imports/` beside the App's state file. Select the folder containing
-`manifest.json`; the limit is 50 MB and 2000 files. Both appear in recent
-Packages. You can also enter a Package path on the SmallPen server.
-Desktop opens and saves the original directory.
-On macOS, if the browser disables a `.smallpen` package, select its parent
-folder containing just that Package.
+```sh
+npm pack ./dist/SmallPen-Web --ignore-scripts --pack-destination ./dist
+```
+
+The source workspace remains private; only this built distribution is
+published as `@smallpen/web`. Other integrations can still use browser
+folder access or upload copies through `servePenpotFrontend` without the
+local directory picker.
 
 The equivalent route shape is:
 
@@ -145,8 +152,9 @@ Node.js runtime check. Users install with `npm install -g smallpen` and run
 Publish in this order: `@smallpen/core`, `@smallpen/local-package`,
 `@smallpen/cli`, then `smallpen`. Each package pins the exact version of the
 packages it depends on; `release.mjs prepare` updates those pins with the
-version. All four packages are configured for public access. Other workspace
-packages remain private.
+version. These four CLI packages are configured for public access.
+`@smallpen/web` is published separately from its generated distribution.
+Other workspace packages remain private.
 
 Build the standalone Alpha directory with `npm run build:cli`. The resulting
 `dist/SmallPen-CLI` directory includes Unix and Windows launchers and all
@@ -154,7 +162,7 @@ SmallPen JavaScript modules; it requires Node.js 24 or newer on `PATH`.
 
 Use **CI** (`.github/workflows/smallpen.yml`) in GitHub
 Actions. Click **Run workflow**; there are no custom inputs. Every run builds
-CLI and Desktop, then publishes npm packages after all checks pass.
+CLI, Web and Desktop, then publishes npm packages after all checks pass.
 CI reads the version from
 `smallpen/package.json` and derives the npm channel: `alpha`, `beta`, `rc`,
 or `latest` for a stable version. There are no version or channel inputs.
@@ -172,8 +180,9 @@ build in parallel. Desktop consumes that frontend artifact and builds on its
 own platform runners (macOS arm64 and Windows x64). CLI install verification
 runs on Linux, macOS and Windows; npm tarballs are uploaded and published only
 once, from Linux. Only after every selected platform passes can npm publication
-start. Web and Linux Desktop are not enabled yet.
-There is one workflow, with Test, CLI, Frontend, Desktop and Publish jobs.
+start. Web bundles the same frontend and verifies an offline tarball install
+and service startup before publication. Linux Desktop is not enabled yet.
+There is one workflow, with Test, CLI, Frontend, Desktop, Web and Publish jobs.
 The old Alpha entry and nested product workflows have been removed.
 Do not rerun a historical old-workflow run to test the new pipeline: start a
 new run from a branch that contains these files. GitHub's manual entry also
@@ -196,8 +205,8 @@ stay on the runner. A failed desktop test still blocks npm publication.
 
 ### Enable npm publication
 
-The four public package names are `@smallpen/core`, `@smallpen/local-package`,
-`@smallpen/cli`, and `smallpen`. Configure a GitHub Actions trusted publisher
+The five public package names are `@smallpen/core`, `@smallpen/local-package`,
+`@smallpen/cli`, `smallpen`, and `@smallpen/web`. Configure a GitHub Actions trusted publisher
 in **each package's npm settings**:
 
 - Organization/user: `SmallRaw`
@@ -229,7 +238,7 @@ retention. Already published versions are skipped only when their integrity
 matches exactly; a mismatch stops the run before any upload. Publication
 does not wait for the registry to show new versions and does not check or
 move dist-tags of versions already published. Expired
-artifacts require a new build. npm cannot atomically publish four packages,
+artifacts require a new build. npm cannot atomically publish five packages,
 so a failed run can leave some dependencies published; versions are never
 overwritten or automatically unpublished.
 

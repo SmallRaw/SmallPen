@@ -2,6 +2,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { listDirectories } from "./directories.mjs";
 
 import {
   compressBuffer,
@@ -32,6 +33,9 @@ const defaultFrontendRoot = fileURLToPath(
 );
 const browserFilesPath = fileURLToPath(
   new URL("./browser-files.mjs", import.meta.url),
+);
+const localFilesPath = fileURLToPath(
+  new URL("./local-files.mjs", import.meta.url),
 );
 
 const contentTypes = new Map([
@@ -520,20 +524,33 @@ async function serveStatic(request, response, frontendRoot, pathname) {
   return true;
 }
 
-function runtimeScript(backendUrl, desktop) {
+function runtimeScript(backendUrl, desktop, localFiles) {
   const runtime = JSON.stringify({
     backendUrl: backendUrl.href,
     desktop,
+    ...(localFiles ? { localFiles: true } : {}),
   }).replaceAll("<", "\\u003c");
-  return `<script>globalThis.smallpenRuntime=${runtime};${desktop ? "" : 'globalThis.smallpenNativeFilesReady=import("/smallpen/browser-files.mjs");'}</script>`;
+  const files = localFiles
+    ? 'globalThis.smallpenLocalFilesReady=import("/smallpen/local-files.mjs");'
+    : desktop
+      ? ""
+      : 'globalThis.smallpenNativeFilesReady=import("/smallpen/browser-files.mjs");';
+  return `<script>globalThis.smallpenRuntime=${runtime};${files}</script>`;
 }
 
-function writeRuntimeIndex(request, response, indexBody, backendUrl, desktop) {
+function writeRuntimeIndex(
+  request,
+  response,
+  indexBody,
+  backendUrl,
+  desktop,
+  localFiles,
+) {
   const source = indexBody.toString("utf8");
   const doctype = /^\s*<!doctype\s+html[^>]*>/i.exec(source);
   const insertion = doctype ? doctype.index + doctype[0].length : 0;
   const body = Buffer.from(
-    `${source.slice(0, insertion)}${runtimeScript(backendUrl, desktop)}${source.slice(insertion)}`,
+    `${source.slice(0, insertion)}${runtimeScript(backendUrl, desktop, localFiles)}${source.slice(insertion)}`,
   );
   response.writeHead(200, {
     "cache-control": "no-store",
@@ -572,6 +589,8 @@ function workspaceFileId(value, origin) {
 export async function servePenpotFrontend({
   backendUrl: backendValue,
   desktop = false,
+  directoryRoot = process.cwd(),
+  localFiles = false,
   frontendRoot: frontendValue = defaultFrontendRoot,
   host = "127.0.0.1",
   port = 43128,
@@ -628,6 +647,43 @@ export async function servePenpotFrontend({
         return;
       }
       const url = new URL(request.url ?? "/", origin);
+      if (
+        localFiles &&
+        request.method === "POST" &&
+        url.pathname === "/local/directories"
+      ) {
+        const params = await readJson(request);
+        try {
+          writeJson(
+            response,
+            200,
+            await listDirectories(params.path, directoryRoot),
+          );
+        } catch (error) {
+          writeError(
+            response,
+            error.status ?? 500,
+            error.code ?? "directory_unavailable",
+            error.message,
+          );
+        }
+        return;
+      }
+      if (
+        localFiles &&
+        request.method === "GET" &&
+        url.pathname === "/smallpen/local-files.mjs"
+      ) {
+        const body = await readFile(localFilesPath);
+        response.writeHead(200, {
+          "cache-control": "no-store",
+          "content-type": "text/javascript; charset=utf-8",
+          "content-length": body.length,
+          "x-content-type-options": "nosniff",
+        });
+        response.end(body);
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/health") {
         writeJson(response, 200, { status: "ok", ui: "penpot" });
         return;
@@ -783,6 +839,7 @@ export async function servePenpotFrontend({
             await readFile(indexPath),
             backendUrl,
             desktop,
+            localFiles,
           );
           return;
         }

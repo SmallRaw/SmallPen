@@ -185,7 +185,7 @@ test("desktop artifacts are uploaded before smoke tests without bypassing public
   assert.ok(testStep > workflow.indexOf("name: SmallPen-macOS-arm64-"));
   assert.ok(testStep > workflow.indexOf("name: SmallPen-Windows-x64-"));
   assert.match(workflow, /failure\(\) && steps\.smoke\.outcome == 'failure'/);
-  assert.match(workflow, /publish:[\s\S]*needs: \[test, cli, desktop\]/);
+  assert.match(workflow, /publish:[\s\S]*needs: \[test, cli, desktop, web\]/);
   assert.doesNotMatch(workflow, /continue-on-error/);
 });
 
@@ -195,11 +195,11 @@ test("intermediate artifacts are removed after all consumers finish", async () =
     "utf8",
   );
   const cleanup = workflow.slice(workflow.indexOf("  cleanup:"));
-  assert.match(cleanup, /needs: \[cli, frontend, desktop, publish\]/);
+  assert.match(cleanup, /needs: \[cli, frontend, desktop, web, publish\]/);
   assert.match(cleanup, /if: always\(\)/);
   assert.match(
     cleanup,
-    /select\(\.name == env.FRONTEND_ARTIFACT or \(\.name == env.NPM_ARTIFACT and env.PUBLISH_RESULT == "success"\)\)/,
+    /select\(\.name == env.FRONTEND_ARTIFACT or \(\(\.name == env.NPM_ARTIFACT or \.name == env.WEB_NPM_ARTIFACT\) and env.PUBLISH_RESULT == "success"\)\)/,
   );
   assert.match(cleanup, /PUBLISH_RESULT: \$\{\{ needs.publish.result \}\}/);
   assert.match(cleanup, /actions\/runs\/\$RUN_ID\/artifacts/);

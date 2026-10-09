@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
@@ -34,7 +34,7 @@ const registry = "https://registry.npmjs.org";
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 const save = (path, value) =>
   writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
-function commandLine(command, args) {
+export function commandLine(command, args) {
   if (command !== "npm") return [command, args];
   const npm = [
     process.env.npm_execpath,
@@ -190,13 +190,44 @@ async function pack(dir, version, channel, commit) {
   await verifyManifest(dir, commit);
 }
 
-export async function verifyManifest(dir, commit) {
+export async function packWeb(
+  dir,
+  version,
+  channel,
+  commit,
+  web = join(root, "dist/SmallPen-Web"),
+) {
+  const manifest = await verifyManifest(dir, commit);
+  assert.equal(manifest.version, version, "Web release version mismatch");
+  assert.equal(manifest.channel, channel, "Web release channel mismatch");
+  const pkg = await json(join(web, "package.json"));
+  assert.equal(pkg.name, "@smallpen/web");
+  assert.equal(pkg.version, version, "Run build:web after prepare");
+  assert.notEqual(pkg.private, true, "Pack the built Web distribution");
+  const [result] = JSON.parse(
+    run(
+      "npm",
+      ["pack", "--ignore-scripts", "--json", "--pack-destination", dir],
+      web,
+    ),
+  );
+  manifest.packages.push({
+    name: pkg.name,
+    version,
+    filename: result.filename,
+    integrity: result.integrity,
+  });
+  await save(join(dir, "manifest.json"), manifest);
+  await verifyManifest(dir, commit, true);
+}
+
+export async function verifyManifest(dir, commit, includeWeb = false) {
   const manifest = await json(join(dir, "manifest.json"));
   assert.equal(manifest.commit, commit, "Artifact commit mismatch");
   validateRelease(manifest.version, manifest.channel);
   assert.deepEqual(
     manifest.packages.map((pkg) => pkg.name),
-    publicNames,
+    includeWeb ? [...publicNames, "@smallpen/web"] : publicNames,
     "Unexpected release packages",
   );
   for (const pkg of manifest.packages) {
@@ -249,7 +280,9 @@ export async function smokeRender(cli, temp) {
   const screenPath = join(packagePath, "screens/roundtrip.json");
   const screen = await json(screenPath);
   const nodes = screen.presentations[0].nodes;
-  nodes.node_rectangle.fills = [{ mediaRef: imported.descriptor.id, type: "image" }];
+  nodes.node_rectangle.fills = [
+    { mediaRef: imported.descriptor.id, type: "image" },
+  ];
   nodes.node_canvas.children.push("node_smoke_text");
   nodes.node_smoke_text = {
     children: [],
@@ -457,6 +490,97 @@ async function smoke(dir, commit) {
   }
 }
 
+export async function smokeWeb(dir, commit) {
+  const manifest = await verifyManifest(dir, commit, true);
+  const temp = await mkdtemp(join(tmpdir(), "smallpen-web-smoke-"));
+  let child;
+  let stopped;
+  try {
+    const pkg = manifest.packages.find(
+      (entry) => entry.name === "@smallpen/web",
+    );
+    run(
+      "npm",
+      [
+        "install",
+        "--offline",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        "--cache",
+        join(temp, "cache"),
+        join(dir, pkg.filename),
+      ],
+      temp,
+    );
+    child = spawn(
+      process.execPath,
+      [
+        join(temp, "node_modules/@smallpen/web/bin/smallpen-web.cjs"),
+        "--no-open",
+        "--json",
+      ],
+      {
+        cwd: temp,
+        env: {
+          ...process.env,
+          SMALLPEN_APPLICATION_STATE_PATH: join(temp, "state.json"),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    stopped = new Promise((resolve) => child.once("close", resolve));
+    let stderr = "";
+    child.stderr.on("data", (data) => {
+      stderr += data;
+    });
+    const ready = await new Promise((resolve, reject) => {
+      let output = "";
+      const timer = setTimeout(
+        () => reject(new Error(`Web startup timed out: ${stderr}`)),
+        30000,
+      );
+      child.stdout.on("data", (data) => {
+        output += data;
+        for (const line of output.split("\n")) {
+          if (line.startsWith('{"status":"ready"')) {
+            clearTimeout(timer);
+            resolve(JSON.parse(line));
+          }
+        }
+      });
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.once("close", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Web exited ${code}: ${stderr}`));
+      });
+    });
+    const html = await fetch(ready.url).then((response) => response.text());
+    assert.match(html, /smallpenLocalFilesReady/);
+    assert.equal(
+      (await fetch(new URL("/js/main-workspace.js", ready.url))).status,
+      200,
+    );
+    assert.equal(
+      (
+        await fetch(new URL("/local/directories", ready.url), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        })
+      ).status,
+      200,
+    );
+  } finally {
+    if (child?.exitCode === null) child.kill("SIGTERM");
+    if (stopped) await stopped;
+    await rm(temp, { recursive: true, force: true });
+  }
+}
+
 async function published(name, version) {
   const response = await fetch(
     `${registry}/${encodeURIComponent(name)}/${version}`,
@@ -473,7 +597,7 @@ async function publish(dir, commit) {
     "true",
     "Publish only from the approved GitHub workflow",
   );
-  const manifest = await verifyManifest(dir, commit);
+  const manifest = await verifyManifest(dir, commit, true);
   const [major, minor, patch] = run("npm", ["--version"])
     .trim()
     .split(".")
@@ -517,10 +641,15 @@ async function main() {
   }
   if (command === "prepare") return prepare(...args);
   if (command === "pack") return pack(resolve(args[0]), ...args.slice(1));
+  if (command === "pack-web")
+    return packWeb(resolve(args[0]), ...args.slice(1));
   if (command === "verify") return verifyManifest(resolve(args[0]), args[1]);
   if (command === "smoke") return smoke(resolve(args[0]), args[1]);
+  if (command === "smoke-web") return smokeWeb(resolve(args[0]), args[1]);
   if (command === "publish") return publish(resolve(args[0]), args[1]);
-  throw new Error("Expected info, prepare, pack, verify, smoke or publish");
+  throw new Error(
+    "Expected info, prepare, pack, pack-web, verify, smoke, smoke-web or publish",
+  );
 }
 
 if (
