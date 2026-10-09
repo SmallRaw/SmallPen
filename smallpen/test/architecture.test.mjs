@@ -55,7 +55,9 @@ test("CLI, Background, Web, and Desktop are separate executable entry points", a
     desktopManifest.bin["smallpen-desktop"],
     "./bin/smallpen-desktop.mjs",
   );
-  assert.deepEqual(webManifest.dependencies ?? {}, {});
+  assert.deepEqual(Object.keys(webManifest.dependencies ?? {}), [
+    "@smallpen/background",
+  ]);
 
   const cli = await readFile(join(cliRoot, cliManifest.bin.smallpen), "utf8");
   assert.doesNotMatch(cli, /serveLocalPackage|background\/server/);

@@ -119,6 +119,18 @@
                     {:type :validation :action action})))
   (str "smallpen://" action))
 
+(defn local-files-runtime?
+  ([] (local-files-runtime? (unchecked-get js/globalThis "smallpenRuntime")))
+  ([runtime] (true? (some-> runtime (unchecked-get "localFiles")))))
+
+(defn choose-local-package!
+  [action]
+  (if-let [ready (unchecked-get js/globalThis "smallpenLocalFilesReady")]
+    (-> ready
+        (.then (fn [module] ((unchecked-get module "choosePackage") action)))
+        (.then #(js->clj % :keywordize-keys true)))
+    (js/Promise.reject (js/Error. "Local file service is unavailable"))))
+
 (defn request-desktop-action!
   [action]
   (set! (.-href js/location) (desktop-action-url action)))
@@ -176,6 +188,7 @@
 (defn native-directory-supported?
   []
   (and (not (desktop-runtime?))
+       (not (local-files-runtime?))
        (true? (unchecked-get js/globalThis "isSecureContext"))
        (fn? (unchecked-get js/globalThis "showDirectoryPicker"))
        (some? (unchecked-get js/globalThis "smallpenNativeFilesReady"))))

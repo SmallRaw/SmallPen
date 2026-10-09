@@ -209,6 +209,10 @@
         (mf/use-fn
          (fn [_]
            (cond
+             (smallpen/local-files-runtime?)
+             (-> (smallpen/choose-local-package! "open")
+                 (.then (fn [result] (when-let [url (:url result)] (set! (.-href globals/location) url))))
+                 (.catch (fn [cause] (swap! state assoc :error (ex-message cause)))))
              (smallpen/desktop-runtime?) (smallpen/request-desktop-action! "open")
              native-directory? (browse-package nil)
              :else (show-package-dialog :open))))
@@ -216,9 +220,13 @@
         new-package
         (mf/use-fn
          (fn [_]
-           (if (smallpen/desktop-runtime?)
-             (smallpen/request-desktop-action! "create")
-             (show-package-dialog :create))))
+           (cond
+             (smallpen/local-files-runtime?)
+             (-> (smallpen/choose-local-package! "create")
+                 (.then (fn [result] (when-let [url (:url result)] (set! (.-href globals/location) url))))
+                 (.catch (fn [cause] (swap! state assoc :error (ex-message cause)))))
+             (smallpen/desktop-runtime?) (smallpen/request-desktop-action! "create")
+             :else (show-package-dialog :create))))
 
         close-package-dialog
         (mf/use-fn

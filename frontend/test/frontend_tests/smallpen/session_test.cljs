@@ -204,6 +204,11 @@
   (t/is (= {:file-id "aaaaaaaa-aaaa-aaaa-8aaa-aaaaaaaaaaaa"}
            (#'smallpen/selected-file-state fixture/file-id))))
 
+(t/deftest browser-file-service-is-distinct-from-the-desktop-shell
+  (t/is (true? (smallpen/local-files-runtime? #js {:localFiles true :desktop false})))
+  (t/is (false? (smallpen/desktop-runtime? #js {:localFiles true :desktop false})))
+  (t/is (false? (smallpen/local-files-runtime? #js {:desktop true}))))
+
 (t/deftest direct-assets-prefer-the-stable-file-selector
   (t/is (= ["file-id" "file-2"]
            (#'smallpen/package-selector

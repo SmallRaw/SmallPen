@@ -10,5 +10,8 @@
   "files": [
     "bin",
     "src"
-  ]
+  ],
+  "dependencies": {
+    "@smallpen/background": "0.1.0-alpha.9"
+  }
 }

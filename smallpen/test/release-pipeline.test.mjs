@@ -300,7 +300,7 @@ test("CI reads the committed version without dispatch version overrides", async 
   assert.match(workflow, /release\.mjs info/);
   assert.match(workflow, /workflow_dispatch: \{\}/);
   assert.doesNotMatch(workflow, /inputs[.:]/);
-  assert.match(workflow, /needs: \[test, cli, desktop\]/);
+  assert.match(workflow, /needs: \[test, cli, desktop, web\]/);
 });
 
 test("the release smoke renders text and a WebP image with the CLI", async (t) => {
@@ -311,9 +311,12 @@ test("the release smoke renders text and a WebP image with the CLI", async (t) =
     new URL("../apps/cli/bin/smallpen.mjs", import.meta.url).pathname,
     temp,
   );
-  const evidence = JSON.parse(await readFile(join(temp, "render-smoke.json"), "utf8"));
+  const evidence = JSON.parse(
+    await readFile(join(temp, "render-smoke.json"), "utf8"),
+  );
   assert.ok(
-    evidence.semanticTree && JSON.stringify(evidence.semanticTree).includes("Smoke"),
+    evidence.semanticTree &&
+      JSON.stringify(evidence.semanticTree).includes("Smoke"),
   );
   // Replies leave out IDs by default; the smoke must still bind the stored
   // media id, or the image fill silently points at nothing.
