@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.1.0-alpha.10 (2026-10-09)
+
+- Add the independent `@smallpen/web` browser editor and local file service.
+  Open or create `.smallpen` folders through the service and save edits to
+  the original files. The package runs through npx without the AI CLI or
+  Electron.
+- Share service startup and shutdown with Desktop. Bundle the compiled
+  frontend and runtime dependencies, and add Web packaging to release CI.
+- Rebase onto Penpot develop through `d0351a3ee`, including drawing, text
+  editing, layout, SVG shadow and WASM rendering fixes.
+- Synchronize package versions, dependency pins and the generated Skill.
+
 ## 0.1.0-alpha.9 (2026-10-08)
 
 - Keep Design System spacing labels on the left, next to aligned preview
