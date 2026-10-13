@@ -20,6 +20,8 @@ rm -rf node_modules;
 
 pnpm install;
 
+node scripts/check-smallpen-i18n.js;
+
 rm -rf target/dist;
 rm -rf resources/public;
 
