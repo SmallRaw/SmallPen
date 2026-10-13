@@ -165,7 +165,10 @@ Build the frontend once, including `smallpen-render`, then run
 `pnpm run build:app:assets` and `pnpm run build:app:renderer` in `frontend/`
 before packaging the CLI. The package includes the runtime. Packaging checks
 that its kernel matches the App bundle. Tests use at most four parallel files
-to bound the memory used by native rendering modules.
+to bound the memory used by native rendering modules. Clean package installation
+and startup checks run once in their CLI, Web and Desktop release jobs.
+The base test suite does not start a long-running Web service through npm exec.
+The frontend build checks translations with its existing dependencies.
 
 Build the standalone Alpha directory with `npm run build:cli`. The resulting
 `dist/SmallPen-CLI` directory includes Unix and Windows launchers and all
