@@ -167,8 +167,12 @@ before packaging the CLI. The package includes the runtime. Packaging checks
 that its kernel matches the App bundle. Tests use at most four parallel files
 to bound the memory used by native rendering modules. Clean package installation
 and startup checks run once in their CLI, Web and Desktop release jobs.
-The base test suite does not start a long-running Web service through npm exec.
-The frontend build checks translations with its existing dependencies.
+CI uses `npm run test:ci` for data, layout, text and rendering regressions plus
+one complete CLI workflow. `npm test` keeps the full CLI command and help
+matrix for local checks. New non-CLI regression files enter CI automatically.
+The base suite does not repeat standalone release packaging or start a Web
+service through npm exec. The frontend build checks translations with its
+existing dependencies.
 
 Build the standalone Alpha directory with `npm run build:cli`. The resulting
 `dist/SmallPen-CLI` directory includes Unix and Windows launchers and all

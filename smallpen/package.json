@@ -16,6 +16,7 @@
     "build:web": "node scripts/build-web.mjs",
     "pack:check": "npm pack --workspaces --dry-run --ignore-scripts",
     "test": "node scripts/prepare-renderer.mjs && node --test --test-concurrency=4 --test-timeout=120000",
+    "test:ci": "node scripts/test-ci.mjs",
     "test:desktop": "node e2e/desktop-smoke.mjs",
     "test:e2e": "node e2e/package-workspace.mjs && node e2e/render-parity.mjs",
     "test:render-parity": "node e2e/render-parity.mjs"

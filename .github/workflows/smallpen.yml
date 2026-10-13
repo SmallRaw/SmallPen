@@ -39,8 +39,8 @@ jobs:
         with:
           name: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
           path: frontend/resources/public
-      - name: Check CLI, data and rendering regressions
-        run: npm test
+      - name: Check data, rendering and a CLI workflow
+        run: npm run test:ci
         working-directory: smallpen
   cli:
     name: CLI (${{ matrix.os }})
