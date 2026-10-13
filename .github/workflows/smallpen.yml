@@ -152,7 +152,7 @@ jobs:
           path: frontend/resources/public
       - name: Install browser for render verification
         working-directory: frontend
-        run: pnpm exec playwright install --with-deps chromium
+        run: corepack pnpm exec playwright install --with-deps chromium
       - run: node smallpen/scripts/prepare-renderer.mjs
       - name: Compare CLI, SVG and WebGL
         working-directory: smallpen
