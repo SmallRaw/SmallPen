@@ -83,6 +83,14 @@
 
 ;; --- Rasterizer
 
+(t/deftest rasterizer-scales-before-allocating-wide-thumbnails
+  (let [[width height] (#'rasterizer/svg-get-adjusted-size 79593 3700 3700)]
+    (t/is (= 3700 width))
+    (t/is (< 171 height 173))
+    (t/is (< (* width height) (* 3700 173))))
+  (t/is (= [300 600] (#'rasterizer/svg-get-adjusted-size 100 200 300)))
+  (t/is (nil? (#'rasterizer/svg-get-adjusted-size 0 200 300))))
+
 (t/deftest rasterizer-keeps-width-only-sizing-without-height
   (let [options (#'rasterizer/bitmap-resize-options 1024 nil "medium")]
     (t/is (= 1024 (unchecked-get options "resizeWidth")))

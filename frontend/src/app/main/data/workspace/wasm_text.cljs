@@ -12,9 +12,8 @@
   (:require
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
-   [app.common.geom.matrix :as gmt]
-   [app.common.geom.point :as gpt]
    [app.common.render-wasm.api.select :as wselect]
+   [app.common.render-wasm.api.text-layout :as text-layout]
    [app.common.types.modifiers :as ctm]
    [app.main.data.helpers :as dsh]
    [app.main.data.workspace :as-alias dw]
@@ -22,6 +21,7 @@
    [app.main.data.workspace.reflow :as wrf]
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
+   [app.main.smallpen :as smallpen]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.api.fonts :as wasm.fonts]
    [beicon.v2.core :as rx]
@@ -51,32 +51,14 @@
        (wasm.api/set-shape-text-images id content))
      (let [dimension (when (not= :fixed grow-type)
                        (wasm.api/get-text-dimensions))]
-       ;; nil dimension = shape not present in WASM state; skip the resize.
-       (when (or (= :fixed grow-type) (some? dimension))
-         {:width  (if (#{:fixed :auto-height} grow-type)
-                    (:width selrect)
-                    (:width dimension))
-          :height (if (= :fixed grow-type)
-                    (:height selrect)
-                    (:height dimension))})))))
+       (text-layout/new-size shape dimension)))))
 
 (defn resize-wasm-text-modifiers
   ([shape]
    (resize-wasm-text-modifiers shape (:content shape)))
-
-  ([{:keys [id points selrect] :as shape} content]
-   (when-let [new-size (get-wasm-text-new-size shape content)]
-     (let [width-scale  (/ (:width new-size) (:width selrect))
-           height-scale (/ (:height new-size) (:height selrect))
-           resize-v     (gpt/point width-scale height-scale)
-           origin       (first points)]
-       {id
-        {:modifiers
-         (ctm/resize-modifiers
-          resize-v
-          origin
-          (:transform shape (gmt/matrix))
-          (:transform-inverse shape (gmt/matrix)))}}))))
+  ([{:keys [id] :as shape} content]
+   (when-let [size (get-wasm-text-new-size shape content)]
+     {id {:modifiers (text-layout/resize-modifiers shape size)}})))
 
 (defn resize-wasm-text
   "Resize a single text shape (auto-width/auto-height) by id.
@@ -92,7 +74,7 @@
      (watch [_ state _]
        (let [objects (dsh/lookup-page-objects state)
              shape   (get objects id)
-             apply-opts (or opts {})
+             apply-opts (smallpen/derived-layout-options opts)
              resize-stream
              (if (and (some? shape)
                       (cfh/text-shape? shape)
@@ -132,10 +114,11 @@
             ;; When undo-id is present, extend the current undo transaction instead of
             ;; creating a new one, and commit it after the resize (single undo action).
             extend-tx? (some? undo-id)
-            apply-opts (cond-> {}
-                         (some? undo-group) (assoc :undo-group undo-group)
-                         extend-tx? (assoc :undo-transation? false)
-                         skip-component-sync? (assoc :skip-component-sync? true))]
+            apply-opts (smallpen/derived-layout-options
+                        (cond-> {}
+                          (some? undo-group) (assoc :undo-group undo-group)
+                          extend-tx? (assoc :undo-transation? false)
+                          skip-component-sync? (assoc :skip-component-sync? true)))]
         (cond
           (not (empty? modifiers))
           (if extend-tx?

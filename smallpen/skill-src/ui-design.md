@@ -36,6 +36,8 @@ Look at exactly what you need with `view`, by name: nothing for the whole packag
 
 Check bounds, text, layout, Token bindings, shared instances and preserved business capabilities. Data validity alone does not prove design quality.
 
+When CLI/App appearance must agree, compare exports with the actual App renderer at the same package revision, themes, scale and device pixel ratio. Cover the requested pages and component variants, and verify prototype clicks separately. Check that opening and measuring the design leaves its revision unchanged. Record renderer errors, pixel differences and unsupported layout coverage; do not report pixel identity from data checks alone. SmallPen maintainers can run `npm run test:render-parity` from `smallpen/` after building the frontend to check shared paint/layout semantics in CLI, SVG and WebGL.
+
 People review the design in the SmallPen App and may fix small things there. Keep the latest `revision` any command reports; before writing code or continuing the design, run `changes PACKAGE --since REVISION` to read, by name, what changed (Tokens with old and new values, component variants and elements, page elements, links) and align your code and notes with it.
 
 Connect the requested clickable elements, triggers and destinations. Use explicit prototype steps to verify navigation. Distinguish page transitions from working input, real data saving or a finished application.

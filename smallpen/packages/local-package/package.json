@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/local-package",
-  "version": "0.1.0-alpha.10",
+  "version": "0.1.0-alpha.11",
   "publishConfig": {
     "access": "public"
   },
@@ -8,11 +8,11 @@
   "exports": "./src/index.mjs",
   "files": [
     "assets",
-    "src"
+    "src",
+    "runtime"
   ],
   "dependencies": {
-    "@jsquash/webp": "1.5.0",
-    "@smallpen/core": "0.1.0-alpha.10",
+    "@smallpen/core": "0.1.0-alpha.11",
     "opentype.js": "2.0.0"
   },
   "repository": {

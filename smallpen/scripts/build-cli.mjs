@@ -14,6 +14,7 @@ import {
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyRuntimeDependencies } from "./copy-runtime-dependencies.mjs";
+import { prepareRenderer } from "./prepare-renderer.mjs";
 import { buildSkills } from "./build-skills.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -62,6 +63,7 @@ async function build(output) {
   }
   await assertReplaceable(output);
   await buildSkills();
+  await prepareRenderer();
   await mkdir(dirname(output), { recursive: true });
   const transaction = await mkdtemp(
     join(dirname(output), ".smallpen-cli-build-"),
@@ -80,7 +82,7 @@ async function build(output) {
       join(appRoot, "node_modules", "@smallpen"),
       "packages/local-package",
       "local-package",
-      ["assets", "package.json", "src"],
+      ["assets", "package.json", "src", "runtime"],
     );
     await copyRuntimeDependencies(smallpenRoot, appRoot);
     await cp(

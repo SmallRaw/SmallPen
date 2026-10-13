@@ -32,6 +32,7 @@
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
+   [app.main.smallpen :as smallpen]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
@@ -113,14 +114,15 @@
               (let [modif-tree (dwm/create-modif-tree ids (ctm/reflow-modifiers))]
                 (if (features/active-feature? state "render-wasm/v1")
                   (rx/of (dwm/apply-wasm-modifiers modif-tree
-                                                   :stack-undo? true
-                                                   :undo-group undo-group
-                                                   :ignore-touched true))
-                  (rx/of (dwm/apply-modifiers {:page-id page-id
-                                               :modifiers modif-tree
-                                               :stack-undo? true
-                                               :ignore-touched true
-                                               :undo-group undo-group}))))
+                                                   (smallpen/derived-layout-options
+                                                    {:stack-undo? true
+                                                     :undo-group undo-group
+                                                     :ignore-touched true})))
+                  (rx/of (dwm/apply-modifiers
+                          (smallpen/derived-layout-options
+                           {:page-id page-id :modifiers modif-tree
+                            :stack-undo? true :ignore-touched true
+                            :undo-group undo-group})))))
               (rx/empty))
 
             ;; The apply events above are dispatched and applied synchronously,

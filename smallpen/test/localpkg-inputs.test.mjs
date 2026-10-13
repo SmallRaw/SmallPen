@@ -343,13 +343,13 @@ async function decodeDiagnostics(bytes, mimeType) {
     y: 96,
   };
   const snapshot = await loadPackageFromValues("memory://hostile-media.smallpen", values);
-  const evidence = await createEvidence(snapshot, {
-    scale: 1,
-    selector: { viewFormat: "screenshot" },
-  });
-  return evidence.render.diagnostics
-    .filter(({ code }) => code === "media_decode_failed")
-    .map(({ message }) => message);
+  try {
+    const evidence = await createEvidence(snapshot, { scale: 1, selector: { viewFormat: "screenshot" } });
+    return evidence.render.diagnostics.filter(({ code }) => code === "media_decode_failed").map(({ message }) => message);
+  } catch (error) {
+    return [error.message];
+  }
+
 }
 
 test("every raster decoder applies the same size limits (M7)", async () => {
@@ -367,16 +367,11 @@ test("every raster decoder applies the same size limits (M7)", async () => {
   }
 });
 
-test("PNG pixel data cannot inflate past its declared size (M7)", async () => {
-  // A 2x2 image whose compressed stream expands to 16 MB.
-  const messages = await decodeDiagnostics(
-    png(2, 2, Buffer.alloc(16 * 1024 * 1024)),
-    "image/png",
-  );
-  assert.ok(
-    messages.some((message) => /larger than its declared size/.test(message)),
-    JSON.stringify(messages),
-  );
+test("Skia bounds PNG decoding to the declared image dimensions", async () => {
+  // Skia reads only the declared 2x2 image, rather than inflating all trailing
+  // compressed data into a JavaScript buffer.
+  const messages = await decodeDiagnostics(png(2, 2, Buffer.alloc(16 * 1024 * 1024)), "image/png");
+  assert.deepEqual(messages, []);
 });
 
 // --- Bundled font licenses (L2) -------------------------------------------

@@ -21,6 +21,7 @@
    [app.main.data.comments :as dc]
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
+   [app.main.data.persistence :as-alias dps]
    [app.main.data.workspace.collapse :as dwco]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.reflow :as wrf]
@@ -45,6 +46,18 @@
                          (contains? (:tags prev-item) :alt-duplication))] ;; This is a copy-and-move with mouse+alt
 
     (cond-> changes add-undo-group? (assoc :undo-group undo-group))))
+
+(defn- mark-derived-changes
+  "Mark only newly appended computed changes. Save buffers can also contain user edits."
+  [changes offset derived?]
+  (if-not derived?
+    changes
+    (update changes :redo-changes
+            #(into [] (map-indexed
+                       (fn [index change]
+                         (if (< index offset)
+                           change
+                           (vary-meta change assoc ::dps/derived-layout true)))) %))))
 
 (defn update-shapes-buffer-start
   []
@@ -110,7 +123,7 @@
   ([ids update-fn
     {:keys [reg-objects? save-undo? stack-undo? attrs ignore-tree page-id
             ignore-touched undo-group with-objects? changed-sub-attr changed-item-index
-            translation? skip-grid-reassignment? skip-component-sync? resize-ids]
+            translation? skip-grid-reassignment? skip-component-sync? resize-ids derived-layout?]
      :or {reg-objects? false
           save-undo? true
           stack-undo? false
@@ -155,7 +168,8 @@
                           :skip-grid-reassignment? skip-grid-reassignment?})
                         (cond-> reg-objects? (pcb/resize-parents (or resize-ids ids)))
                         (pcb/set-translation? translation?)
-                        (pcb/set-skip-component-sync? skip-component-sync?))))]
+                        (pcb/set-skip-component-sync? skip-component-sync?)
+                        (mark-derived-changes (count (:redo-changes changes)) derived-layout?))))]
              ;; Check buffered text candidates when the buffer is committed.
              (if (or (empty? text-ids)
                      (not (wrfs/text-reflow-candidate? state props)))
@@ -211,7 +225,7 @@
     {:as props
      :keys [reg-objects? save-undo? stack-undo? attrs ignore-tree page-id
             ignore-touched undo-group with-objects? changed-sub-attr changed-item-index translation?
-            skip-grid-reassignment? skip-component-sync? resize-ids]
+            skip-grid-reassignment? skip-component-sync? resize-ids derived-layout?]
      :or {reg-objects? false
           save-undo? true
           stack-undo? false
@@ -276,7 +290,7 @@
 
             (if (seq (:redo-changes changes))
               (let [changes (cond-> changes reg-objects? (pcb/resize-parents (or resize-ids ids)))]
-                (rx/of (dch/commit-changes changes)))
+                (rx/of (dch/commit-changes (mark-derived-changes changes 0 derived-layout?))))
               (rx/empty))
 
             ;; Update layouts for properties marked

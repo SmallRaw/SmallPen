@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 // Canonical node geometry is parent-relative: x/y, rotation and flips apply
 // inside the parent's FULL transform (render.mjs `nodeTransform`). Penpot is
 // page-absolute. The Penpot values below are exactly what the frontend
@@ -428,7 +429,7 @@ function pngPixel(bytes, width, x, y) {
     }
     offset += length + 12;
   }
-  const pixels = inflateSync(Buffer.concat(chunks));
+  const pixels = pngPixels(bytes, width);
   const row = y * (width * 4 + 1);
   return [...pixels.subarray(row + 1 + x * 4, row + 1 + x * 4 + 3)];
 }

@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/workspace",
-  "version": "0.1.0-alpha.10",
+  "version": "0.1.0-alpha.11",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -15,8 +15,12 @@
     "build:cli": "node scripts/build-cli.mjs",
     "build:web": "node scripts/build-web.mjs",
     "pack:check": "npm pack --workspaces --dry-run --ignore-scripts",
-    "test": "node --test --test-timeout=120000",
+    "test": "node scripts/prepare-renderer.mjs && node --test --test-concurrency=4 --test-timeout=120000",
     "test:desktop": "node e2e/desktop-smoke.mjs",
-    "test:e2e": "node e2e/package-workspace.mjs"
+    "test:e2e": "node e2e/package-workspace.mjs && node e2e/render-parity.mjs",
+    "test:render-parity": "node e2e/render-parity.mjs"
+  },
+  "devDependencies": {
+    "pngjs": "7.0.0"
   }
 }

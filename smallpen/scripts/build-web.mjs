@@ -15,6 +15,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, parse, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { prepareRenderer } from "./prepare-renderer.mjs";
 import { copyRuntimeDependencies } from "./copy-runtime-dependencies.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,6 +42,7 @@ export async function buildWeb({
   }
   for (const required of ["index.html", "js/main.js", "js/main-workspace.js"])
     await access(join(frontendRoot, required));
+  await prepareRenderer();
   await mkdir(dirname(output), { recursive: true });
   const transaction = await mkdtemp(
     join(dirname(output), ".smallpen-web-build-"),
@@ -61,7 +63,7 @@ export async function buildWeb({
       [
         "local-package",
         "packages/local-package",
-        ["package.json", "src", "assets"],
+        ["package.json", "src", "assets", "runtime"],
       ],
       ["penpot-adapter", "packages/penpot-adapter", ["package.json", "src"]],
     ]) {
@@ -76,7 +78,7 @@ export async function buildWeb({
       ).version;
     }
     await copyRuntimeDependencies(root, candidate);
-    for (const name of ["opentype.js", "@jsquash/webp", "wasm-feature-detect"])
+    for (const name of ["opentype.js"])
       dependencies[name] = JSON.parse(
         await readFile(join(candidate, "node_modules", name, "package.json")),
       ).version;

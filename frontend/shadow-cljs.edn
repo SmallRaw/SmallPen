@@ -107,6 +107,8 @@
 
    :js-options
    {:entry-keys ["module" "browser" "main"]
+    :resolve {"smallpen-stroke-geometry"
+              {:target :file :file "node_modules/@smallpen/core/src/stroke-geometry.mjs"}}
     :export-conditions ["module" "import", "browser" "require" "default"]}
 
    :compiler-options
@@ -156,7 +158,10 @@
    :runtime :custom
    :js-options {:js-provider :import
                 ;; Native ESM shim runs from target/tests/cljs-runtime.
-                :resolve {"smallpen-token-authoring"
+                :resolve {"smallpen-stroke-geometry"
+                          {:target :npm
+                           :require "esm:../../../../smallpen/packages/core/src/stroke-geometry.mjs"}
+                          "smallpen-token-authoring"
                           {:target :npm
                            :require "esm:../../../../smallpen/packages/core/src/token-authoring.mjs"}}}
 
@@ -164,6 +169,20 @@
    :modules
    {:test {:init-fn frontend-tests.runner/init
            :prepend-js ";if (typeof globalThis.navigator?.userAgent === 'undefined') { globalThis.navigator = {userAgent: ''}; };"}}}
+
+  :smallpen-render
+  {:target :esm
+   :runtime :node
+   :output-dir "target/smallpen-render"
+   :js-options {:js-provider :import}
+   :modules {:renderer {:exports {render app.main.smallpen.headless/render-request
+                                  initialize app.main.smallpen.headless/initialize
+                                  builtinFonts app.main.smallpen.headless/builtin-fonts
+                                  describe app.main.smallpen.headless/describe-request
+                                  errorDetails app.main.smallpen.headless/error-details}}}
+   :compiler-options {:output-feature-set :es2020
+                      :warnings {:fn-deprecated false}}
+   :release {:compiler-options {:optimizations :simple}}}
 
   :bench
   {:target :node-script

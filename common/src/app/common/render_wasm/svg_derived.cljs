@@ -376,6 +376,9 @@
         type (dm/get-prop shape :type)]
     (cond
       (seq base-fills) base-fills
+      (and (= :image type) (:metadata shape))
+      [{:fill-image (assoc (:metadata shape) :keep-aspect-ratio false)
+        :fill-opacity 1}]
       (seq fallback) fallback
       (and (contains? shape :svg-attrs)
            (or (= :svg-raw type)

@@ -171,8 +171,16 @@ function setup {
 function build {
     (
         set -o pipefail;
-        cargo build --message-format=json-render-diagnostics "${CARGO_ARGS[@]}" \
-            | node ./scripts/cargo-build.cjs "$RENDER_WASM_BUILD_INFO" "$PWD/Cargo.toml";
+        # Select rustc explicitly even when PATH contains a direct cargo binary.
+        local TOOLCHAIN="${RENDER_RUST_TOOLCHAIN:-$RUST_VERSION}";
+        if command -v rustup >/dev/null 2>&1; then
+            local COMPILER;
+            COMPILER=$(rustup which --toolchain "$TOOLCHAIN" rustc);
+            RUSTC="$COMPILER" rustup run "$TOOLCHAIN" cargo build \
+                --message-format=json-render-diagnostics "${CARGO_ARGS[@]}";
+        else
+            cargo build --message-format=json-render-diagnostics "${CARGO_ARGS[@]}";
+        fi | node ./scripts/cargo-build.cjs "$RENDER_WASM_BUILD_INFO" "$PWD/Cargo.toml";
     )
 }
 

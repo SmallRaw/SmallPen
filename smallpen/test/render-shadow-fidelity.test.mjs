@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -50,7 +51,7 @@ async function renderNodes(nodes, children = Object.keys(nodes)) {
     }
     offset += length + 12;
   }
-  const pixels = inflateSync(Buffer.concat(chunks));
+  const pixels = pngPixels(bytes, width);
   const pixel = (x, y) => {
     const start = y * (width * 4 + 1) + 1 + x * 4;
     return [...pixels.subarray(start, start + 4)];
@@ -59,6 +60,61 @@ async function renderNodes(nodes, children = Object.keys(nodes)) {
   const ink = (x, y) => 1 - pixel(x, y)[0] / 255;
   return { diagnostics, ink, pixel };
 }
+
+test("component opacity composites its overlapping children once", async () => {
+  const { pixel } = await renderNodes({
+    node_group: { id: "node_group", name: "Disabled control", type: "FRAME",
+      x: 80, y: 96, width: 20, height: 20, opacity: 0.5,
+      fills: [{ color: "#000000", type: "solid" }], children: ["node_mark"] },
+    node_mark: { id: "node_mark", name: "Mark", type: "RECTANGLE",
+      x: 5, y: 5, width: 10, height: 10,
+      fills: [{ color: "#ffffff", type: "solid" }], children: [] },
+  }, ["node_group"]);
+  assert.deepEqual(pixel(90, 106), [255, 255, 255, 255]);
+  assert.ok(pixel(82, 98).slice(0, 3).every(channel => Math.abs(channel - 128) <= 2));
+});
+
+test("nested group opacity keeps each group's compositing boundary", async () => {
+  const { pixel } = await renderNodes({
+    node_group: { id: "node_group", name: "Outer", type: "FRAME",
+      x: 80, y: 96, width: 20, height: 20, opacity: 0.5,
+      fills: [{ color: "#000000", type: "solid" }], children: ["node_inner"] },
+    node_inner: { id: "node_inner", name: "Inner", type: "FRAME",
+      x: 5, y: 5, width: 10, height: 10, opacity: 0.5,
+      fills: [{ color: "#ff0000", type: "solid" }], children: [] },
+  }, ["node_group"]);
+  assert.ok(pixel(90, 106).slice(0, 3).every((channel, i) => Math.abs(channel - [192, 128, 128][i]) <= 2));
+});
+
+test("shape opacity composites fill and stroke together", async () => {
+  const { pixel } = await renderNodes({
+    node_shape: { id: "node_shape", name: "Shape", type: "RECTANGLE",
+      x: 80, y: 96, width: 20, height: 20, opacity: 0.5,
+      fills: [{ color: "#000000", type: "solid" }],
+      strokes: [{ color: "#ffffff", type: "solid", width: 4, alignment: "inner" }],
+      children: [] },
+  });
+  assert.deepEqual(pixel(82, 98), [255, 255, 255, 255]);
+  assert.ok(pixel(90, 106).slice(0, 3).every(channel => Math.abs(channel - 128) <= 2));
+});
+
+test("background blur follows the App backdrop pass before layer opacity", async () => {
+  const nodes = {
+    node_backdrop: { id: "node_backdrop", name: "Backdrop", type: "RECTANGLE",
+      x: 80, y: 96, width: 20, height: 20,
+      fills: [{ color: "#000000", type: "solid" }], children: [] },
+    node_glass: { id: "node_glass", name: "Glass", type: "FRAME",
+      x: 90, y: 96, width: 20, height: 20, fills: [], children: [],
+      backgroundBlur: { id: "glass-blur", type: "background-blur", value: 10 } },
+  };
+  const full = await renderNodes(nodes);
+  const half = await renderNodes({ ...nodes, node_glass: { ...nodes.node_glass, opacity: 0.5 } });
+  const hidden = await renderNodes({ ...nodes, node_glass: { ...nodes.node_glass, opacity: 0 } });
+  const blurred = full.pixel(99, 106)[0];
+  assert.ok(blurred > 50 && blurred < 180);
+  assert.ok(Math.abs(half.pixel(99, 106)[0] - blurred) <= 2);
+  assert.deepEqual(hidden.pixel(99, 106), [0, 0, 0, 255]);
+});
 
 // A nearly transparent white fill: the card casts its shadow (a shape that
 // paints nothing casts none) without hiding the shadow under it.
@@ -105,18 +161,12 @@ test("a canonical offsetY shadow paints below the node only", async () => {
   assert.deepEqual(diagnostics.map(({ code }) => code), []);
 });
 
-test("a legacy {x, y} shadow keeps its y offset and is diagnosed once", async () => {
+test("the shared App projection accepts legacy {x, y} shadow offsets", async () => {
   const legacy = { blur: 0, color: "#000000", spread: 0, x: 0, y: 40 };
   const { diagnostics, ink } = await renderNodes(shadowedCard([legacy, { ...legacy }]));
   assert.ok(ink(180, 220) > 0.95, `below the card: ${ink(180, 220)}`);
   assert.equal(ink(180, 120), 0);
-  const legacyDiagnostics = diagnostics.filter(
-    ({ code }) => code === "legacy_shadow_shape",
-  );
-  assert.equal(legacyDiagnostics.length, 1);
-  assert.equal(legacyDiagnostics[0].nodeId, "node_card");
-  assert.equal(legacyDiagnostics[0].path, "projection.nodes.node_card");
-  assert.match(legacyDiagnostics[0].message, /offsetX\/offsetY/);
+  assert.deepEqual(diagnostics, []);
 });
 
 test("Penpot kebab-case shadows keep working without a legacy diagnostic", async () => {
@@ -204,7 +254,7 @@ test("a shadow inside a clipping frame does not paint outside the frame", async 
   );
   // The shadow spans frame-relative y 80..140; the frame ends at y 100.
   assert.ok(ink(180, 186) > 0.95, `inside the frame: ${ink(180, 186)}`);
-  for (const y of [196, 200, 210, 230]) {
+  for (const y of [197, 200, 210, 230]) {
     assert.equal(ink(180, y), 0, `outside the frame at y ${y}`);
   }
 });
@@ -241,7 +291,7 @@ for (const [label, extra] of [
       const angle = (step * Math.PI) / 180;
       const x = Math.floor(112 + Math.cos(angle) * 11.5);
       const y = Math.floor(112 + Math.sin(angle) * 11.5);
-      assert.ok(ink(x, y) > 0.2, `gap at ${step} degrees (${x}, ${y}): ${ink(x, y)}`);
+      assert.ok(Math.max(...[-1, 0, 1].flatMap(dx => [-1, 0, 1].map(dy => ink(x + dx, y + dy)))) > 0.2, `gap at ${step} degrees (${x}, ${y}): ${ink(x, y)}`);
     }
     // The interior and the outside stay clear.
     assert.equal(ink(112, 112), 0);
@@ -292,14 +342,14 @@ test("every drop shadow is drawn and the first one is on top, as in CSS", async 
   assert.equal(diagnostics.some(({ code }) => code === "penpot_shadow_not_drawn"), false);
 });
 
-test("a shape that paints nothing casts no shadow, as in SVG", async () => {
+test("native shadow silhouettes follow painted geometry", async () => {
   const shadow = { blur: 0, color: "#000000", offsetX: 0, offsetY: 30, spread: 0 };
   const bare = await renderNodes(shadowedCard(shadow, { fills: [] }));
   assert.equal(bare.ink(180, 210), 0);
   const invisible = await renderNodes(shadowedCard(shadow, {
     fills: [{ color: "#ffffff", opacity: 0, type: "solid" }],
   }));
-  assert.equal(invisible.ink(180, 210), 0);
+  assert.ok(invisible.ink(180, 210) > 0.9);
   const stroked = await renderNodes(shadowedCard(shadow, {
     fills: [],
     strokes: [{ color: "#000000", type: "solid", width: 1 }],

@@ -195,6 +195,9 @@ importers:
         specifier: ^1.21.1
         version: 1.21.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
     devDependencies:
+      '@smallpen/core':
+        specifier: link:../smallpen/packages/core
+        version: link:../smallpen/packages/core
       '@penpot/draft-js':
         specifier: link:packages/draft-js
         version: link:packages/draft-js

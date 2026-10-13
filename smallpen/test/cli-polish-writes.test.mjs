@@ -570,7 +570,7 @@ test("--compact drops the inverse batch and --inverse-out keeps undo", async (co
 test("a font fallback names the available fonts and the asset font import command", async (context) => {
   const { product, root } = await initAcme(context);
   const text = (name) => ({
-    fontFamily: "Inter",
+    fontFamily: "Missing Fixture Sans",
     fontSize: 16,
     name,
     text: "Hello",
@@ -612,12 +612,12 @@ test("a font fallback names the available fonts and the asset font import comman
     ({ code }) => code === "font_render_fallback",
   );
   assert.equal(fallbacks.length, 1);
-  assert.equal(fallbacks[0].requestedFont, "Inter");
+  assert.equal(fallbacks[0].requestedFont, "Missing Fixture Sans");
   assert.deepEqual([...fallbacks[0].elements].sort(), names);
   assert.equal(fallbacks[0].nodeIds, undefined);
   assert.deepEqual(fallbacks[0].availableFonts, ["Source Sans Pro (bundled)"]);
   assert.deepEqual(fallbacks[0].details, {
-    requestedFont: "Inter",
+    requestedFont: "Missing Fixture Sans",
     substituteFont: "Source Sans Pro",
   });
   assert.match(fallbacks[0].message, /asset font import/);

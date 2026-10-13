@@ -300,7 +300,7 @@ test("CI reads the committed version without dispatch version overrides", async 
   assert.match(workflow, /release\.mjs info/);
   assert.match(workflow, /workflow_dispatch: \{\}/);
   assert.doesNotMatch(workflow, /inputs[.:]/);
-  assert.match(workflow, /needs: \[test, cli, desktop, web\]/);
+  assert.match(workflow, /needs: \[test, cli, desktop, web, render-parity\]/);
 });
 
 test("the release smoke renders text and a WebP image with the CLI", async (t) => {

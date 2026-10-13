@@ -16,11 +16,15 @@
    [app.common.fonts :as cfnt]
    [app.common.logging :as log]
    [app.common.math :as mth]
+   [app.common.render-wasm.api.geometry :as geometry]
+   [app.common.render-wasm.api.layout :as layout-api]
    [app.common.render-wasm.api.props :as props]
    [app.common.render-wasm.api.select :as wselect]
+   [app.common.render-wasm.api.text-layout :as text-layout]
    [app.common.render-wasm.helpers :as h]
    [app.common.render-wasm.mem :as mem]
    [app.common.render-wasm.mem.heap32 :as mem.h32]
+   [app.common.render-wasm.precision :as precision]
    [app.common.render-wasm.serialize-shape :as serialize-shape]
    [app.common.render-wasm.serializers :as sr]
    [app.common.render-wasm.serializers.color :as sr-clr]
@@ -832,11 +836,11 @@
 
 (defn set-shape-selrect
   [selrect]
-  (h/call wasm/internal-module "_set_shape_selrect"
-          (dm/get-prop selrect :x1)
-          (dm/get-prop selrect :y1)
-          (dm/get-prop selrect :x2)
-          (dm/get-prop selrect :y2)))
+  (let [[x1 x2] (precision/size-preserving-range (dm/get-prop selrect :x1)
+                                                 (dm/get-prop selrect :x2))
+        [y1 y2] (precision/size-preserving-range (dm/get-prop selrect :y1)
+                                                 (dm/get-prop selrect :y2))]
+    (h/call wasm/internal-module "_set_shape_selrect" x1 y1 x2 y2)))
 
 (defn set-shape-transform
   [transform]
@@ -1146,195 +1150,13 @@
   (let [[r1 r2 r3 r4] (map #(d/nilv % 0) corners)]
     (h/call wasm/internal-module "_set_shape_corners" r1 r2 r3 r4)))
 
-(defn set-flex-layout
-  [shape]
-  (let [dir        (-> (get shape :layout-flex-dir :row)
-                       (sr/translate-layout-flex-dir))
-        gap        (get shape :layout-gap)
-        row-gap    (get gap :row-gap 0)
-        column-gap (get gap :column-gap 0)
-
-        align-items     (-> (get shape :layout-align-items) sr/translate-layout-align-items)
-        align-content   (-> (get shape :layout-align-content) sr/translate-layout-align-content)
-        justify-items   (-> (get shape :layout-justify-items) sr/translate-layout-justify-items)
-        justify-content (-> (get shape :layout-justify-content) sr/translate-layout-justify-content)
-        wrap-type       (-> (get shape :layout-wrap-type) sr/translate-layout-wrap-type)
-
-        padding         (get shape :layout-padding)
-        padding-top     (get padding :p1 0)
-        padding-right   (get padding :p2 0)
-        padding-bottom  (get padding :p3 0)
-        padding-left    (get padding :p4 0)]
-
-    (h/call wasm/internal-module
-            "_set_flex_layout_data"
-            dir
-            row-gap
-            column-gap
-            align-items
-            align-content
-            justify-items
-            justify-content
-            wrap-type
-            padding-top
-            padding-right
-            padding-bottom
-            padding-left)))
-
-(defn set-grid-layout-data
-  [shape]
-  (let [dir        (-> (get shape :layout-grid-dir :row)
-                       (sr/translate-layout-grid-dir))
-        gap        (get shape :layout-gap)
-        row-gap    (get gap :row-gap 0)
-        column-gap (get gap :column-gap 0)
-
-        align-items     (-> (get shape :layout-align-items) sr/translate-layout-align-items)
-        align-content   (-> (get shape :layout-align-content) sr/translate-layout-align-content)
-        justify-items   (-> (get shape :layout-justify-items) sr/translate-layout-justify-items)
-        justify-content (-> (get shape :layout-justify-content) sr/translate-layout-justify-content)
-
-        padding         (get shape :layout-padding)
-        padding-top     (get padding :p1 0)
-        padding-right   (get padding :p2 0)
-        padding-bottom  (get padding :p3 0)
-        padding-left    (get padding :p4 0)]
-
-    (h/call wasm/internal-module
-            "_set_grid_layout_data"
-            dir
-            row-gap
-            column-gap
-            align-items
-            align-content
-            justify-items
-            justify-content
-            padding-top
-            padding-right
-            padding-bottom
-            padding-left)))
-
-(defn set-grid-layout-rows
-  [entries]
-  ;; Only allocate when there are entries; an empty list would alloc 0 bytes.
-  ;; The wasm side reads an empty buffer as zero rows.
-  (when (seq entries)
-    (let [size    (mem/get-alloc-size entries GRID-LAYOUT-ROW-U8-SIZE)
-          offset  (mem/alloc size)
-          dview   (mem/get-data-view)]
-
-      (reduce (fn [offset {:keys [type value]}]
-                (-> offset
-                    (mem/write-u8 dview (sr/translate-grid-track-type type))
-                    (+ 3) ;; padding
-                    (mem/write-f32 dview value)
-                    (mem/assert-written offset GRID-LAYOUT-ROW-U8-SIZE)))
-
-              offset
-              entries)))
-
-  (h/call wasm/internal-module "_set_grid_rows"))
-
-(defn set-grid-layout-columns
-  [entries]
-  ;; Only allocate when there are entries; an empty list would alloc 0 bytes.
-  ;; The wasm side reads an empty buffer as zero columns.
-  (when (seq entries)
-    (let [size   (mem/get-alloc-size entries GRID-LAYOUT-COLUMN-U8-SIZE)
-          offset (mem/alloc size)
-          dview  (mem/get-data-view)]
-
-      (reduce (fn [offset {:keys [type value]}]
-                (-> offset
-                    (mem/write-u8 dview (sr/translate-grid-track-type type))
-                    (+ 3) ;; padding
-                    (mem/write-f32 dview value)
-                    (mem/assert-written offset GRID-LAYOUT-COLUMN-U8-SIZE)))
-              offset
-              entries)))
-
-  (h/call wasm/internal-module "_set_grid_columns"))
-
-(defn set-grid-layout-cells
-  [cells]
-  ;; Only allocate when there are cells; an empty collection would alloc 0
-  ;; bytes. The wasm side reads an empty buffer as zero cells.
-  (when (seq cells)
-    (let [size    (mem/get-alloc-size cells GRID-LAYOUT-CELL-U8-SIZE)
-          offset  (mem/alloc size)
-          dview   (mem/get-data-view)]
-
-      (reduce-kv (fn [offset _ cell]
-                   (let [shape-id  (-> (get cell :shapes) first)]
-                     (-> offset
-                         (mem/write-i32 dview (get cell :row))
-                         (mem/write-i32 dview (get cell :row-span))
-                         (mem/write-i32 dview (get cell :column))
-                         (mem/write-i32 dview (get cell :column-span))
-
-                         (mem/write-u8 dview (sr/translate-align-self (get cell :align-self)))
-                         (mem/write-u8 dview (sr/translate-justify-self (get cell :justify-self)))
-
-                         ;; padding
-                         (+ 2)
-
-                         (mem/write-uuid dview (d/nilv shape-id uuid/zero))
-                         (mem/assert-written offset GRID-LAYOUT-CELL-U8-SIZE))))
-
-                 offset
-                 cells)))
-
-  (h/call wasm/internal-module "_set_grid_cells"))
-
-(defn set-grid-layout
-  [shape]
-  (set-grid-layout-data shape)
-  (set-grid-layout-rows (get shape :layout-grid-rows))
-  (set-grid-layout-columns (get shape :layout-grid-columns))
-  (set-grid-layout-cells (get shape :layout-grid-cells)))
-
-(defn set-layout-data
-  [shape]
-  (let [margins       (get shape :layout-item-margin)
-        margin-top    (get margins :m1 0)
-        margin-right  (get margins :m2 0)
-        margin-bottom (get margins :m3 0)
-        margin-left   (get margins :m4 0)
-
-        h-sizing      (-> (get shape :layout-item-h-sizing) sr/translate-layout-sizing)
-        v-sizing      (-> (get shape :layout-item-v-sizing) sr/translate-layout-sizing)
-        align-self    (-> (get shape :layout-item-align-self) sr/translate-align-self)
-
-        max-h         (get shape :layout-item-max-h)
-        has-max-h     (some? max-h)
-        min-h         (get shape :layout-item-min-h)
-        has-min-h     (some? min-h)
-        max-w         (get shape :layout-item-max-w)
-        has-max-w     (some? max-w)
-        min-w         (get shape :layout-item-min-w)
-        has-min-w     (some? min-w)
-        is-absolute   (boolean (get shape :layout-item-absolute))
-        z-index       (get shape :layout-item-z-index)]
-    (h/call wasm/internal-module
-            "_set_layout_data"
-            margin-top
-            margin-right
-            margin-bottom
-            margin-left
-            h-sizing
-            v-sizing
-            has-max-h
-            (d/nilv max-h 0)
-            has-min-h
-            (d/nilv min-h 0)
-            has-max-w
-            (d/nilv max-w 0)
-            has-min-w
-            (d/nilv min-w 0)
-
-            (d/nilv align-self 0)
-            is-absolute
-            (d/nilv z-index 0))))
+(def set-flex-layout layout-api/set-flex-layout)
+(def set-grid-layout-data layout-api/set-grid-layout-data)
+(def set-grid-layout-rows layout-api/set-grid-layout-rows)
+(def set-grid-layout-columns layout-api/set-grid-layout-columns)
+(def set-grid-layout-cells layout-api/set-grid-layout-cells)
+(def set-grid-layout layout-api/set-grid-layout)
+(def set-layout-data layout-api/set-layout-data)
 
 (defn has-any-layout-prop? [shape]
   (some #(and (keyword? %)
@@ -1359,39 +1181,14 @@
   (props/set-shape-shadows shadows))
 
 (defn fonts-from-text-content [content fallback-fonts-only?]
-  (let [paragraph-set (first (get content :children))
-        paragraphs    (get paragraph-set :children)
-        total         (count paragraphs)]
-    (loop [index  0
-           emoji? false
-           langs  #{}]
-
-      (if (< index total)
-        (let [paragraph (nth paragraphs index)
-              spans    (get paragraph :children)]
-          (if (empty? (seq spans))
-            (recur (inc index)
-                   emoji?
-                   langs)
-
-            (let [text   (apply str (map :text spans))
-                  emoji? (if emoji? emoji? (cfnt/contains-emoji? text))
-                  langs  (cfnt/collect-used-languages langs text)]
-
-              ;; FIXME: this should probably be somewhere else
-              (when fallback-fonts-only? (t/write-shape-text spans paragraph text))
-
-              (recur (inc index)
-                     emoji?
-                     langs))))
-
-        (let [updated-fonts
-              (-> #{}
-                  (cond-> ^boolean emoji? (cfnt/add-emoji-font))
-                  (cfnt/add-noto-fonts langs))
-              fallback-fonts (filter #(get % :is-fallback) updated-fonts)]
-
-          (if fallback-fonts-only? updated-fonts fallback-fonts))))))
+  (let [paragraphs (get-in content [:children 0 :children])
+        text (apply str (mapcat #(map :text (:children %)) paragraphs))]
+    (when fallback-fonts-only?
+      (doseq [paragraph paragraphs]
+        (let [spans (:children paragraph)]
+          (when (seq spans)
+            (t/write-shape-text spans paragraph (apply str (map :text spans)))))))
+    (cfnt/fallback-fonts-for-text text)))
 
 (defn set-shape-grow-type
   [grow-type]
@@ -1403,21 +1200,9 @@
    (wselect/use-shape id)
    (get-text-dimensions))
   ([]
-   (if-not (initialized?)
-     {:x 0 :y 0 :width 0 :height 0 :max-width 0}
-     (let [ptr (h/call wasm/internal-module "_get_text_dimensions")]
-       ;; NULL pointer when there is no current shape or it is not a text.
-       (when-not (zero? ptr)
-         (let [offset    (mem/->offset-32 ptr)
-               heapf32   (mem/get-heap-f32)
-               width     (aget heapf32 (+ offset 0))
-               height    (aget heapf32 (+ offset 1))
-               max-width (aget heapf32 (+ offset 2))
-
-               x (aget heapf32 (+ offset 3))
-               y (aget heapf32 (+ offset 4))]
-           (mem/free)
-           {:x x :y y :width width :height height :max-width max-width}))))))
+   (if (initialized?)
+     (text-layout/get-dimensions)
+     {:x 0 :y 0 :width 0 :height 0 :max-width 0})))
 
 (defn intersect-position-in-shape
   [id position]
@@ -2113,66 +1898,12 @@
 
       (h/call wasm/internal-module "_set_structure_modifiers"))))
 
-;; Axes the pixel grid rounds, as `propagate_modifiers` expects them.
-(def ^:private pixel-precision
-  {:disabled 0
-   :both     1
-   :only-x   2
-   :only-y   3})
-
-(defn- pixel-precision-mode
-  "Encodes the pixel grid snapping for the renderer. `snap-ignore-axis`
-  names the axis to leave alone (`:x`, `:y` or nil)."
-  [snap-pixel? snap-ignore-axis]
-  (pixel-precision
-   (cond
-     (not snap-pixel?)       :disabled
-     (= :x snap-ignore-axis) :only-y
-     (= :y snap-ignore-axis) :only-x
-     :else                   :both)))
-
 (defn propagate-modifiers
-  "Propagates geometry modifiers through the WASM shape tree.
-
-  Rounds the resulting geometry to the pixel grid when `snap-pixel?` is set,
-  skipping the axis named by `snap-ignore-axis` (`:x`, `:y` or nil).
-
-  Always returns a vector. When the context is not ready (lost / mid-reload)
-  or `entries` is empty, returns `[]` so callers never receive `nil` (which
-  would trip `set-modifiers`' vector assert)."
+  "Propagates layout through the same portable WASM bridge used by Node."
   [entries snap-pixel? snap-ignore-axis]
-  (if-not (and (initialized?) (not ^boolean (empty? entries)))
-    []
-    (let [heapf32 (mem/get-heap-f32)
-          heapu32 (mem/get-heap-u32)
-          size    (mem/get-alloc-size entries INPUT-MODIFIER-U8-SIZE)
-          offset  (mem/alloc->offset-32 size)]
-
-      (reduce (fn [offset [id data]]
-                (let [transform (:transform data)
-                      kind (:kind data)]
-                  (-> offset
-                      (mem.h32/write-uuid heapu32 id)
-                      (mem.h32/write-matrix heapf32 transform)
-                      (mem.h32/write-u32 heapu32 (sr/translate-transform-entry-kind kind)))))
-              offset
-              entries)
-
-      (let [precision  (pixel-precision-mode snap-pixel? snap-ignore-axis)
-            offset     (-> (h/call wasm/internal-module "_propagate_modifiers" precision)
-                           (mem/->offset-32))
-            length     (aget heapu32 offset)
-            max-offset (+ offset 1 (* length MODIFIER-U32-SIZE))
-            result     (loop [result (transient [])
-                              offset (inc offset)]
-                         (if (< offset max-offset)
-                           (let [entry (dr/read-modifier-entry heapu32 heapf32 offset)]
-                             (recur (conj! result entry)
-                                    (+ offset MODIFIER-U32-SIZE)))
-                           (persistent! result)))]
-
-        (mem/free)
-        result))))
+  (if (initialized?)
+    (geometry/propagate-modifiers entries snap-pixel? snap-ignore-axis)
+    []))
 
 (defn get-selection-rect
   [entries]

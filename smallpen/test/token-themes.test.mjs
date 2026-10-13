@@ -708,7 +708,7 @@ test("migrate-themes copies a pair to token sets and themes and renders the same
     assert.equal(before.code, 0, before.stdout);
     assert.equal(after.code, 0, after.stdout);
     assert.equal(after.json.renderHash, before.json.renderHash, theme);
-    assert.ok(before.json.diagnostics.some(({ code }) => code === "legacy_shadow_shape"));
+    assert.equal(before.json.diagnostics.some(({ code }) => code === "legacy_shadow_shape"), false);
     assert.ok(!after.json.diagnostics.some(({ code }) => code === "legacy_shadow_shape"));
   }
 

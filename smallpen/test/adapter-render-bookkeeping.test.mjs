@@ -76,3 +76,48 @@ test("a Library travels to the Web with its nested Instances expanded", async ()
   assert.deepEqual(library.entries[path].componentSets
     .find((item) => item.id === "cmp_canvas_card").variants[0].nodes.node_nested_button.children, []);
 });
+
+test("automatic text measurement on Components keeps the source size", async () => {
+  const values = buildEditorPackageValues();
+  const path = values.get("manifest.json").entries.components[0];
+  const button = values.get(path).componentSets.find((set) => set.id === "cmp_canvas_button");
+  const variant = button.variants[0];
+  const label = Object.values(variant.nodes).find((node) => node.type === "TEXT");
+  label.growType = "auto-height";
+  const snapshot = await loadPackageFromValues("memory://auto-text.smallpen", values);
+  const changes = [{
+    type: "mod-obj",
+    id: snapshot.runtime.componentNodes[button.id][variant.id][label.id],
+    "page-id": snapshot.runtime.componentsPage,
+    operations: [{ type: "set", attr: "height", val: label.height + 4, "ignore-touched": true }],
+  }];
+  const measured = compilePenpotChanges(snapshot, { commitId: "measured", changes });
+  assert.deepEqual(measured.operations, []);
+  changes[0].operations[0]["ignore-touched"] = false;
+  const edited = compilePenpotChanges(snapshot, { commitId: "edited", changes });
+  assert.ok(edited.operations.some((operation) => operation.changes?.height === label.height + 4));
+});
+
+test("expanded copy geometry on Components is only render bookkeeping", async () => {
+  const values = buildEditorPackageValues();
+  const path = values.get("manifest.json").entries.components[0];
+  const card = values.get(path).componentSets.find((set) => set.id === "cmp_canvas_card").variants[0];
+  card.nodes[card.rootId].children.push("node_nested_button");
+  card.nodes.node_nested_button = {
+    id: "node_nested_button", name: "Button", type: "INSTANCE", children: [],
+    x: 0, y: 50, width: 120, height: 40,
+    instance: { component: { packageId: "pkg_canvas", assetId: "cmp_canvas_button" },
+      variant: { axis_variant: "primary" } },
+  };
+  const snapshot = await loadPackageFromValues("memory://nested-measure.smallpen", values);
+  const web = await createWebLibrarySnapshot(snapshot);
+  const id = web.runtime.componentNodes.cmp_canvas_card[card.id]
+    .node_nested_button__node_canvas_button_primary_label;
+  assert.ok(id);
+  const batch = compilePenpotChanges({ ...snapshot, runtime: web.runtime }, {
+    commitId: "nested-measure",
+    changes: [{ type: "mod-obj", id, "page-id": snapshot.runtime.componentsPage,
+      operations: [{ type: "set", attr: "height", val: 23, "ignore-touched": true }] }],
+  });
+  assert.deepEqual(batch.operations, []);
+});

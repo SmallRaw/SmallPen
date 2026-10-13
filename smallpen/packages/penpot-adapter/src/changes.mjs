@@ -7055,10 +7055,13 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
           String(change.pageId ?? change["page-id"]) === String(snapshot.runtime.componentsPage) &&
           change.operations.every((item) =>
             isRecord(item) && normalizeType(item.type) === "set" &&
-            normalizeType(item.attr) === "position-data")
+            (normalizeType(item.attr) === "position-data" ||
+              (item["ignore-touched"] === true &&
+                (PENPOT_GEOMETRY_ATTRIBUTES.has(normalizeType(item.attr)) ||
+                  PENPOT_DERIVED_ATTRIBUTES.has(normalizeType(item.attr))))))
         ) {
           // Expanded nested instances have projected-only text IDs. Their
-          // browser measurements are not edits to a canonical source node.
+          // browser measurements/reflow are not canonical source edits.
           acceptedNoOp = true;
           continue;
         }

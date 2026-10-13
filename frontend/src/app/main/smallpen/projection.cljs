@@ -7,11 +7,14 @@
    [app.common.data :as d]
    [app.common.features :as features]
    [app.common.files.tokens :as cfo]
+   [app.common.fonts :as cfnt]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
    [app.common.geom.rect :as grc]
+   [app.common.i18n :refer [tr]]
    [app.common.math :as mth]
    [app.common.path-names :as cpn]
+   [app.common.types.color :as color]
    [app.common.types.file :as ctf]
    [app.common.types.page :as ctp]
    [app.common.types.path :as path]
@@ -20,7 +23,6 @@
    [app.common.types.variant :as ctv]
    [app.common.uuid :as uuid]
    [app.main.smallpen.token-state :as spts]
-   [app.util.i18n :refer [tr]]
    [cuerdas.core :as str]
    [shadow.resource :as rc]))
 
@@ -95,6 +97,17 @@
                      :code :unsupported-smallpen-node-type
                      :node-type value}))))
 
+(declare css-color->attrs)
+
+(defn- project-paint-color
+  [color opacity]
+  (let [parsed (or (css-color->attrs color)
+                   (throw (ex-info "Unsupported SmallPen paint color"
+                                   {:type :validation :code :unsupported-smallpen-paint-color
+                                    :color color})))]
+    {:color (:color parsed)
+     :opacity (* (or opacity 1) (:opacity parsed))}))
+
 (defn- project-gradient
   [{:keys [endX endY gradientWidth startX startY stops type]}]
   {:type (case type
@@ -110,8 +123,10 @@
    :end-y endY
    :width gradientWidth
    :stops (mapv (fn [{:keys [color offset opacity]}]
-                  (cond-> {:color color :offset offset}
-                    (number? opacity) (assoc :opacity opacity)))
+                  (let [paint (project-paint-color color opacity)]
+                    (cond-> {:color (:color paint) :offset offset}
+                      (or (number? opacity) (not= 1 (:opacity paint)))
+                      (assoc :opacity (:opacity paint)))))
                 stops)})
 
 (defn- media-asset
@@ -149,7 +164,8 @@
                              :fill-type type})))
           (cond-> {:fill-opacity (or opacity 1)}
             (= type "solid")
-            (assoc :fill-color color)
+            (merge (let [paint (project-paint-color color opacity)]
+                     {:fill-color (:color paint) :fill-opacity (:opacity paint)}))
 
             (= type "image")
             (assoc :fill-image (project-media-reference snapshot
@@ -189,7 +205,8 @@
                    :stroke-width-left (or widthLeft width 1))
 
             (= type "solid")
-            (assoc :stroke-color color)
+            (merge (let [paint (project-paint-color color opacity)]
+                     {:stroke-color (:color paint) :stroke-opacity (:opacity paint)}))
 
             (= type "image")
             (assoc :stroke-image (project-media-reference snapshot
@@ -252,15 +269,26 @@
           (str/lower)
           (str/replace #"[^a-z0-9]" "")))
 
+(defn- embedded-fonts
+  [snapshot]
+  (->> (get-in snapshot [:manifest :entries :assets])
+       (mapcat #(get (lookup (:entries snapshot) %) :fonts))))
+
 (defn- project-font-id
   [snapshot font-id font-family]
-  (let [family-id (font-identity font-family)]
+  (let [family-id (font-identity font-family)
+        fonts (get-in snapshot [:runtime :fonts])
+        embedded-id (or (lookup fonts font-id)
+                        (some (fn [font]
+                                (when (= family-id (font-identity (:family font)))
+                                  (lookup fonts (:id font))))
+                              (embedded-fonts snapshot)))]
     (cond
       (contains? built-in-font-family-ids family-id)
       family-id
 
-      (lookup (get-in snapshot [:runtime :fonts]) font-id)
-      (str "custom-" (lookup (get-in snapshot [:runtime :fonts]) font-id))
+      embedded-id
+      (str "custom-" embedded-id)
 
       :else
       font-id)))
@@ -280,12 +308,27 @@
    [900 "italic"] "blackitalic"})
 
 (defn- project-font-variant-id
-  [font-id font-variant-id font-weight font-style]
-  (if (= font-id "sourcesanspro")
+  [snapshot font-id font-variant-id font-weight font-style]
+  (cond
+    (= font-id "sourcesanspro")
     (get source-sans-pro-variants
          [font-weight font-style]
          font-variant-id)
-    font-variant-id))
+
+    (and (string? font-id) (str/starts-with? font-id "custom-"))
+    (let [font (->> (embedded-fonts snapshot)
+                    (d/seek #(= font-id (project-font-id snapshot (:id %) (:family %)))))
+          variants (:variants font)
+          matching-style (filter #(= font-style (:style %)) variants)
+          variant (cfnt/closest-variant (if (seq matching-style) matching-style variants)
+                                        font-weight font-style)]
+      ;; Native custom font IDs use style-weight, rather than package variant IDs.
+      ;; Resolve after Token overrides for every rendering host.
+      (if variant
+        (str (:style variant) "-" (:weight variant))
+        font-variant-id))
+
+    :else font-variant-id))
 
 (defn- project-text-span
   [snapshot text fills style]
@@ -298,7 +341,8 @@
              :font-id projected-font-id
              :font-size (str fontSize)
              :font-style fontStyle
-             :font-variant-id (project-font-variant-id projected-font-id
+             :font-variant-id (project-font-variant-id snapshot
+                                                       projected-font-id
                                                        fontVariantId
                                                        fontWeight
                                                        fontStyle)
@@ -656,7 +700,11 @@
                            :name name
                            :path path}
                     (number? opacity) (assoc :opacity opacity)
-                    (= type "solid") (assoc :color color)
+                    (= type "solid")
+                    (merge (let [paint (project-paint-color color opacity)]
+                             (cond-> {:color (:color paint)}
+                               (or (number? opacity) (not= 1 (:opacity paint)))
+                               (assoc :opacity (:opacity paint)))))
                     (= type "image")
                     (assoc :image (project-media-reference snapshot
                                                            (:mediaRef paint)))
@@ -704,7 +752,8 @@
                    :font-id projected-font-id
                    :font-size (str fontSize)
                    :font-style fontStyle
-                   :font-variant-id (project-font-variant-id projected-font-id
+                   :font-variant-id (project-font-variant-id snapshot
+                                                             projected-font-id
                                                              fontVariantId
                                                              fontWeight
                                                              fontStyle)
@@ -981,8 +1030,6 @@
                                                startingNodeId)}])))
         flows))
 
-(declare css-color->attrs)
-
 (defn- invalid-shadow
   [value]
   (throw (ex-info "unsupported SmallPen shadow"
@@ -1016,8 +1063,9 @@
                        :code :unsupported-smallpen-shadow-color
                        :color (field ["color"])})))
     {:id nil
-     :style (if (true? (field ["inset"])) :inner-shadow :drop-shadow)
-     :hidden false
+     :style (if (or (true? (field ["inset"]))
+                    (= "inner-shadow" (field ["style"]))) :inner-shadow :drop-shadow)
+     :hidden (true? (field ["hidden"]))
      :blur (shadow-length value (field ["blur"]))
      :offset-x (shadow-length value (field ["offsetX" "offset-x" "x"]))
      :offset-y (shadow-length value (field ["offsetY" "offset-y" "y"]))
@@ -1058,8 +1106,7 @@
     (when-not (and (sequential? records) (every? map? records))
       (invalid-shadow value))
     (mapv (fn [record]
-            (if (or (some? (lookup record "style"))
-                    (map? (lookup record "color")))
+            (if (map? (lookup record "color"))
               (native-shadow record)
               (dtcg-shadow record)))
           records)))
@@ -1351,6 +1398,39 @@
 
        (some? touched)
        (assoc :touched (set (map keyword touched)))))))
+
+(defn project-render-tree
+  "Read-only shape tree for Node export, using the App's node projector.
+  Resolved component geometry is retained; authoring references are unnecessary
+  for rendering and are removed from this temporary tree."
+  [snapshot nodes root-id node-ids]
+  (let [snapshot (assoc-in snapshot [:runtime :renderNodes] node-ids)
+        nodes (into {}
+                    (map (fn [[key node]]
+                           [key (cond-> (-> node
+                                            (dissoc :componentId :componentVariantId :sourceNodeId)
+                                            (update :children #(filterv (fn [id] (some? (lookup nodes id))) %)))
+                                  (= "INSTANCE" (:type node)) (assoc :type "FRAME")
+                                  (and (= root-id (:id node)) (= "FRAME" (:type node))
+                                       (empty? (:fills node)))
+                                  (assoc :fills [{:type "solid" :color "#ffffff"}]))]))
+                    (subtree-nodes nodes root-id))
+        root-node (lookup nodes root-id)
+        origins (absolute-origins nodes [root-id] (- (or (:x root-node) 0))
+                                  (- (or (:y root-node) 0)))
+        parents (parent-index nodes)
+        objects (into {}
+                      (map (fn [[_ node]]
+                             (let [shape (project-node snapshot {} [:renderNodes]
+                                                       (constantly {}) origins nodes
+                                                       parents #{root-id} node)]
+                               [(:id shape) shape])))
+                      nodes)
+        root (node-runtime-id snapshot [:renderNodes] root-id)]
+    {:root-id root
+     :objects (assoc objects uuid/zero
+                     (assoc (get-in ctp/empty-page-data [:objects uuid/zero])
+                            :shapes [root]))}))
 
 (defn- show-interaction-destinations
   "A nested board an interaction navigates to stays a View mode screen, as
@@ -2206,6 +2286,9 @@
                (let [h (.toString (js/Math.round (js/Math.min 255 (js/Math.max 0 n))) 16)]
                  (if (< (count h) 2) (str "0" h) h)))]
     (cond
+      (= "transparent" s)
+      {:color "#000000" :opacity 0}
+
       rgba
       {:color (str "#" (hex2 (js/parseFloat (nth rgba 1)))
                    (hex2 (js/parseFloat (nth rgba 2)))
@@ -2215,11 +2298,16 @@
       (and (string? s) (str/starts-with? s "#"))
       (let [hex (subs s 1)]
         (case (count hex)
-          3 {:color s :opacity 1}
+          3 {:color (str "#" (apply str (mapcat #(repeat 2 %) hex))) :opacity 1}
+          4 {:color (str "#" (apply str (mapcat #(repeat 2 %) (subs hex 0 3))))
+             :opacity (/ (js/parseInt (apply str (repeat 2 (subs hex 3 4))) 16) 255)}
           6 {:color s :opacity 1}
           8 {:color (str "#" (subs hex 0 6))
              :opacity (/ (js/parseInt (subs hex 6 8) 16) 255)}
-          nil)))))
+          nil))
+
+      (color/parse s)
+      {:color (color/parse s) :opacity (if (= "transparent" s) 0 1)})))
 
 (defn- board-text-metrics
   [text size]

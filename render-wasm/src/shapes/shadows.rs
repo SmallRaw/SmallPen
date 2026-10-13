@@ -1,6 +1,5 @@
 use skia_safe::{self as skia, image_filters, ImageFilter, Paint};
 
-use super::blurs::{radius_to_sigma, sigma_to_radius};
 use super::Color;
 use crate::render::filters::compose_filters;
 
@@ -91,13 +90,14 @@ impl Shadow {
             return None;
         }
 
-        let sigma = radius_to_sigma(self.blur);
+        let sigma = self.sigma();
+        let input = self.negative_spread_filter(None);
         let mut filter = image_filters::drop_shadow_only(
             (self.offset.0, self.offset.1),
             (sigma, sigma),
             self.color,
             None,
-            None,
+            input,
             None,
         );
 
@@ -123,9 +123,11 @@ impl Shadow {
         if self.spread > 0. {
             // Masked-group shadows are already in device space.
             filter = Self::chained_dilate(self.spread, filter);
+        } else if self.spread < 0. {
+            filter = self.negative_spread_filter(filter);
         }
 
-        let sigma = radius_to_sigma(self.blur);
+        let sigma = self.sigma();
         if sigma > 0.0 {
             filter = image_filters::blur((sigma, sigma), None, filter, None);
         }
@@ -161,7 +163,7 @@ impl Shadow {
     }
 
     pub fn get_inner_shadow_filter(&self) -> Option<ImageFilter> {
-        let sigma = radius_to_sigma(self.blur);
+        let sigma = self.sigma();
         let mut filter = skia::image_filters::drop_shadow_only(
             (self.offset.0, self.offset.1), // DPR?
             (sigma, sigma),
@@ -196,17 +198,23 @@ impl Shadow {
     /// Scales this shadow into device units, for a filter built on a canvas
     /// that carries no transform of its own.
     ///
-    /// Not the same as [`Self::scale_content`]. `radius_to_sigma` is affine
-    /// (`k·r + 0.5`), so scaling the radius applies its constant term once at
-    /// device scale, while a filter built in document space has that term
-    /// scaled by the canvas matrix along with everything else. The radius is
-    /// pre-compensated here so both land on the same sigma — otherwise the
-    /// same shadow blurs differently depending on which path drew it, by
-    /// `0.5 · (scale - 1)` sigma.
+    /// Sigma is linear in CSS shadow blur, so both filter paths agree.
     pub fn scale_to_device(&mut self, scale: f32) {
-        let device_sigma = radius_to_sigma(self.blur) * scale;
         self.scale_content(scale);
-        self.blur = sigma_to_radius(device_sigma);
+    }
+
+    /// CSS/DTCG shadow blur is twice Gaussian sigma, as in the SVG renderer.
+    pub fn sigma(&self) -> f32 {
+        self.blur.max(0.0) / 2.0
+    }
+
+    /// Shared erosion for GPU viewport and CPU export shadow passes.
+    pub fn negative_spread_filter(&self, input: Option<ImageFilter>) -> Option<ImageFilter> {
+        if self.spread < 0.0 {
+            image_filters::erode((-self.spread, -self.spread), input, None)
+        } else {
+            input
+        }
     }
 }
 
@@ -254,8 +262,7 @@ mod tests {
             device.scale_to_device(scale);
 
             assert!(
-                (radius_to_sigma(device.blur) - radius_to_sigma(original.blur) * scale).abs()
-                    < 0.001,
+                (device.sigma() - original.sigma() * scale).abs() < 0.001,
                 "sigma disagreement at scale {scale}"
             );
 
@@ -266,20 +273,14 @@ mod tests {
         }
     }
 
-    /// Scaling the radius instead would apply the affine constant once at
-    /// device scale, blurring narrower by `0.5 · (scale - 1)` sigma.
     #[test]
-    fn scale_to_device_differs_from_scale_content_above_unit_scale() {
-        let mut device = shadow(10.0, 0.0, 0.0, 0.0);
+    fn shadow_sigma_follows_css_blur_at_every_scale() {
+        let original = shadow(8.0, -10.0, 4.0, 6.0);
+        assert_eq!(original.sigma(), 4.0);
+        let mut device = original;
         device.scale_to_device(4.0);
-        let mut naive = shadow(10.0, 0.0, 0.0, 0.0);
-        naive.scale_content(4.0);
-
-        let gap = radius_to_sigma(device.blur) - radius_to_sigma(naive.blur);
-        assert!(
-            (gap - 0.5 * 3.0).abs() < 0.001,
-            "expected 1.5 sigma, got {gap}"
-        );
+        assert_eq!(device.sigma(), 16.0);
+        assert_eq!(device.spread, -40.0);
     }
 
     #[test]

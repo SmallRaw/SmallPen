@@ -1208,6 +1208,15 @@ function variantNodeEdit(context, change) {
       ({ id }) => id === descriptor.variantId,
     );
   const node = variant?.nodes[descriptor.nodeId];
+  if (node?.type === "TEXT" && ["auto-width", "auto-height"].includes(node.growType)) {
+    // Measuring a font changes the native box, not the authored source.
+    // Explicit size edits still pass through without ignore-touched.
+    operations = operations.filter((item) =>
+      !isRecord(item) || item["ignore-touched"] !== true ||
+      !(PLACEMENT_ATTRIBUTES.has(normalizeType(item.attr)) ||
+        PENPOT_DERIVED_ATTRIBUTES.has(normalizeType(item.attr))),
+    );
+  }
   if (!main && node) {
     const parentNodeId = Object.values(variant.nodes).find((candidate) =>
       (candidate.children ?? []).includes(node.id),

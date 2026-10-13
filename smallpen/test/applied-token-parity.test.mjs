@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
@@ -187,7 +188,7 @@ test("a stroke can have its own width per side, bound and rendered", async () =>
     offset += length + 12;
   }
   const { inflateSync } = await import("node:zlib");
-  const pixels = inflateSync(Buffer.concat(chunks));
+  const pixels = pngPixels(bytes, png.width);
   const red = (x, y) => pixels[y * (png.width * 4 + 1) + 1 + x * 4];
   assert.ok(red(70, 77) < 80, "the bottom side is drawn");
   assert.ok(red(70, 22) > 200, "the top side is not");

@@ -52,6 +52,7 @@ popd
 pnpm run build:app:main $EXTRA_PARAMS;
 pnpm run build:app:libs;
 pnpm run build:app:assets;
+pnpm run build:app:renderer;
 
 sed -i "s/\.\/render.js/.\/render.js?version=$VERSION_TAG/g" resources/public/js/worker/main*.js
 

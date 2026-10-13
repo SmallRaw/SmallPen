@@ -64,11 +64,9 @@ test("strings are Tokens in a Language group: bound text, instance labels, check
   assert.doesNotMatch(chinese.text, /Sidebar/, "a boolean Token hides the sidebar");
   assert.match(chinese.text, /"冲刺看板"/);
   assert.match(chinese.text, /Button "新建任务"/, "an instance label follows its string Token");
-  // The bundled font is Latin only: Chinese needs a font in the package.
   const issues = await run(["view", path, "--page", "Board", "--theme", "Language/zh-CN", "--as", "issues", "--json"]);
-  assert.ok(issues.issues.some(({ code, message, where }) =>
-    code === "text_missing_glyphs" && /Title/.test(where) && /asset font import/.test(message)),
-    "text the fonts cannot draw is an issue that says to import a font");
+  assert.equal(issues.issues.some(({ code }) => code === "text_missing_glyphs"), false,
+    "the App's shared Noto fallback covers Chinese without a separate CLI font workaround");
 
   const exported = await run(["token", "export", path, "--type", "string", "--by", "Language", "--output", join(root, "i18n"), "--json"]);
   assert.deepEqual(exported.files.map(({ option }) => option), ["Language/en", "Language/zh-CN"]);
@@ -114,7 +112,8 @@ test("a project that needs Chinese imports a font into its package and uses it b
   }), "--json"]);
   const issues = await run(["view", path, "--page", "Board", "--as", "issues", "--json"]);
   const missing = issues.issues.filter(({ code }) => code === "text_missing_glyphs").map(({ where }) => where);
-  assert.deepEqual(missing, ["Plain"], "the imported font draws Chinese; the bundled one does not");
+  assert.deepEqual(missing, [], "both the embedded font and App fallback cover Chinese");
   const view = await run(["view", path, "--page", "Board", "--json"]);
-  assert.match(view.text, /Title · TEXT 64×/, "four glyphs of one em at 16px");
+  const width = Number(/Title · TEXT (\d+)×/.exec(view.text)[1]);
+  assert.ok(width >= 64 && width <= 66, "four one-em glyphs plus App text margin and pixel rounding");
 });

@@ -119,6 +119,21 @@
                    :redo-changes [{:type :mod-page :id (uuid/next) :name "Edited"}]
                    :undo-changes []}))
 
+(t/deftest ^:async merged-commits-keep-derived-provenance-per-change
+  (let [file-id (uuid/next)
+        computed (with-meta {:type :mod-page :id (uuid/next) :name "Computed"}
+                   {::dps/derived-layout true})
+        edited {:type :mod-page :id (uuid/next) :name "Edited"}
+        result (atom nil)]
+    (await (async/observe
+            (#'dps/merge-commit [{:file-id file-id :redo-changes [computed] :undo-changes []}
+                                 {:file-id file-id :redo-changes [edited] :undo-changes []}])
+            :on-next #(reset! result %)))
+    (t/is (= [computed edited] (:changes @result)))
+    (t/is (true? (::dps/derived-layout (meta (first (:changes @result))))))
+    (t/is (nil? (::dps/derived-layout (meta (second (:changes @result))))))
+    (t/is (not (.includes (js/JSON.stringify (clj->js (:changes @result))) "derived-layout")))))
+
 (defn- ^:async run-read-only-phases
   "Drives the read-only save scenario presuming asynchronous APIs: every
   phase emits its triggers, awaits the transport round-trip, and only

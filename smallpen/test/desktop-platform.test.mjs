@@ -60,7 +60,7 @@ test(
     await access(
       join(resources, "app/node_modules/@smallpen/local-package/assets/fonts"),
     );
-    await access(join(resources, "app/node_modules/@jsquash/webp/utils.js"));
+    await access(join(resources, "app/node_modules/@smallpen/local-package/runtime/render-wasm.wasm"));
     const child = spawn(
       process.execPath,
       [

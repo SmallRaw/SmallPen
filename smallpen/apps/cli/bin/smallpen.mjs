@@ -2126,6 +2126,7 @@ async function renderCommand(packagePath, args, evidenceOnly) {
     libraries,
     scale: numberOption(args, "--scale"),
     selector: designSelector(args, "screenshot"),
+    forExport: true,
   });
   const full = flag(args, "--full");
   const inline = flag(args, "--base64");
@@ -3745,12 +3746,10 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
       });
     }
   }
-  // Sizes the local preview cannot compute are the tool's limit, not the
-  // design's: one note instead of one issue each.
+  // Layout limits belong to the tool, with full diagnostics kept separately
+  // from design issues and every skipped layout check counted in coverage.
   const limits = issues.filter((issue) => issue.code === "layout_projection_partial");
-  // The visual-intent reminder repeats per target and the preview limit has
-  // its own note; neither is a check the tool skipped.
-  const notChecked = skipped.filter((skip) => skip.check !== "visual-intent" && skip.code !== "layout_projection_partial");
+  const notChecked = skipped.filter((skip) => skip.check !== "visual-intent");
   const design = [...(only ? [] : packageNameIssues(workspace)), ...issues.filter((issue) => issue.code !== "layout_projection_partial")];
   const full = flag(args, "--full");
   const page = pageItems(design, pagination(args));
@@ -3766,6 +3765,7 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
     ...(limits.length
       ? { previewNote: `The local preview cannot compute some automatic sizes in ${limits.length} place${limits.length === 1 ? "" : "s"}; geometry there may differ in the App.` }
       : {}),
+    ...(full && limits.length ? { diagnostics: limits } : {}),
     // The theme options every target was checked under.
     selection: { themes: themeSettings(workspace).selection.themes },
     coverage: {
@@ -3785,8 +3785,12 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
       // One line per kind of check the tool could not run, with where.
       skipped: Object.values(notChecked.reduce((groups, skip) => {
         const code = skip.code ?? skip.check ?? "skipped";
-        const group = (groups[code] ??= { code, count: 0, reason: skip.reason ?? skip.message, where: [] });
+        const group = (groups[code] ??= { code, check: skip.check, count: 0, reason: skip.reason ?? skip.message, where: [], ...(full ? { details: [] } : {}) });
         group.count += 1;
+        if (full) {
+          const { label, target: _target, ...detail } = skip;
+          group.details.push({ target: label, ...detail });
+        }
         const where = skip.element ? `${skip.label} / ${skip.element}` : skip.label;
         if (!group.where.includes(where)) group.where.push(where);
         return groups;
