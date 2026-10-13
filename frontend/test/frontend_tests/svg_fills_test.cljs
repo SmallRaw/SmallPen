@@ -7,6 +7,7 @@
 (ns frontend-tests.svg-fills-test
   (:require
    [app.common.render-wasm.svg-derived :as svg-derived]
+   [app.common.uuid :as uuid]
    [cljs.test :refer [deftest is testing]]))
 
 (def sample-shape
@@ -77,6 +78,11 @@
   (let [fills [{:fill-color "#ff00ff" :fill-opacity 0.75}]
         resolved (svg-derived/resolve-shape-fills {:fills fills})]
     (is (= fills resolved))))
+
+(deftest legacy-image-renders-through-shared-image-fill
+  (let [metadata {:id uuid/zero :width 8 :height 8 :mtype "image/png"}
+        result (svg-derived/resolve-shape-fills {:type :image :metadata metadata :fills []})]
+    (is (= [{:fill-image (assoc metadata :keep-aspect-ratio false) :fill-opacity 1}] result))))
 
 (deftest resolve-shape-fills-falls-back-to-svg-fill
   (let [resolved (svg-derived/resolve-shape-fills (assoc sample-shape :fills []))]

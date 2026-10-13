@@ -117,7 +117,35 @@ function setup {
 }
 
 function build {
-    cargo build $CARGO_PARAMS;
+    # Match the compiler used by the prebuilt Skia library. A direct cargo
+    # binary on PATH can otherwise ignore RUSTUP_TOOLCHAIN/rustup defaults.
+    local TOOLCHAIN="${RENDER_RUST_TOOLCHAIN:-1.91.0}";
+    local MESSAGES="$CARGO_TARGET_DIR/$CARGO_BUILD_TARGET/$CARGO_PROFILE_DIR/render-build.jsonl";
+    mkdir -p "$(dirname "$MESSAGES")";
+    if command -v rustup >/dev/null 2>&1; then
+        local COMPILER;
+        COMPILER=$(rustup which --toolchain "$TOOLCHAIN" rustc);
+        RUSTC="$COMPILER" rustup run "$TOOLCHAIN" cargo build $CARGO_PARAMS \
+            --message-format=json-render-diagnostics > "$MESSAGES";
+    else
+        cargo build $CARGO_PARAMS --message-format=json-render-diagnostics > "$MESSAGES";
+    fi
+    python3 - "$MESSAGES" "$CARGO_TARGET_DIR/$CARGO_BUILD_TARGET/$CARGO_PROFILE_DIR/shared-artifact.path" <<'PY'
+import json
+import pathlib
+import sys
+
+outputs = []
+for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    record = json.loads(line)
+    if record.get("reason") == "build-script-executed":
+        candidate = pathlib.Path(record["out_dir"]) / "render_wasm_shared.js"
+        if candidate.is_file():
+            outputs.append(candidate)
+if len(outputs) != 1:
+    raise SystemExit("Cannot identify this build's WASM serialization bridge")
+pathlib.Path(sys.argv[2]).write_text(str(outputs[0]))
+PY
 }
 
 function copy_artifacts {
@@ -151,7 +179,7 @@ function copy_artifacts {
 
 function copy_shared_artifact {
     DEST=$1;
-    SHARED_FILE=$(find $CARGO_TARGET_DIR/$CARGO_BUILD_TARGET -name render_wasm_shared.js | head -n 1);
+    SHARED_FILE=$(cat "$CARGO_TARGET_DIR/$CARGO_BUILD_TARGET/$CARGO_PROFILE_DIR/shared-artifact.path");
 
     cp $SHARED_FILE $DEST;
 }

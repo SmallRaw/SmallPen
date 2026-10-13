@@ -1,31 +1,17 @@
+import { pngPixels } from "./png-pixels.mjs";
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { inflateSync } from "node:zlib";
 
-import { loadPackageFromValues } from "@smallpen/core";
+import { stableRuntimeUuid, loadPackageFromValues } from "@smallpen/core";
 import { createEvidence } from "@smallpen/local-package";
 import { openPackage } from "@smallpen/local-package";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
 
-function pngPixels(bytes, width) {
-  const chunks = [];
-  let offset = 8;
-  while (offset < bytes.length) {
-    const length = Buffer.from(bytes).readUInt32BE(offset);
-    const type = Buffer.from(bytes.slice(offset + 4, offset + 8)).toString("ascii");
-    if (type === "IDAT") chunks.push(bytes.slice(offset + 8, offset + 8 + length));
-    offset += length + 12;
-  }
-  const pixels = inflateSync(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))));
-  for (let row = 0; row < pixels.length; row += width * 4 + 1) {
-    assert.equal(pixels[row], 0);
-  }
-  return pixels;
-}
 
 function pngPixel(bytes, width, x, y) {
   const pixels = pngPixels(bytes, width);
@@ -609,6 +595,7 @@ test("the local renderer rasterizes qualified SVG Media references", async () =>
     typographies: [],
   };
   library.blobs.set(blob, svg);
+  library.runtime.media.media_test_svg = await stableRuntimeUuid(library.manifest.packageId, "media", "media_test_svg");
   const node =
     product.entries["screens/roundtrip.json"].presentations[0].nodes
       .node_rectangle;

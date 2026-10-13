@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 // A resized Instance found wrong by the Flowboard blind test: its children
 // kept their Component positions and sizes whatever their constraints.
 // Expected values are what Penpot itself commits when the same copy is
@@ -92,7 +93,7 @@ function probeNodes() {
 function flexNodes() {
   return {
     node_row: {
-      children: ["node_fill", "node_fixed"],
+      children: ["node_fill", "node_fixed", "node_focus"],
       fills: [],
       height: 20,
       id: "node_row",
@@ -107,6 +108,11 @@ function flexNodes() {
     node_fixed: rect("node_fixed", { height: 20, width: 20, x: 0, y: 0 }),
     node_fill: rect("node_fill", { height: 20, width: 80, x: 20, y: 0 }, {
       "layout-item-h-sizing": "fill",
+    }),
+    node_focus: rect("node_focus", { height: 28, width: 108, x: -4, y: -4 }, {
+      "layout-item-absolute": true,
+      "constraints-h": "leftright",
+      "constraints-v": "topbottom",
     }),
   };
 }
@@ -123,6 +129,15 @@ async function snapshotWith(instances, extraNodes = {}) {
     componentSets: [
       ["cmp_probe", probeNodes(), "node_root"],
       ["cmp_row", flexNodes(), "node_row"],
+      ["cmp_nested", {
+        node_nested: { ...flexNodes().node_row, id: "node_nested", children: ["node_copy"] },
+        node_copy: {
+          id: "node_copy", name: "Nested row", type: "INSTANCE", children: [],
+          x: 0, y: 0, width: 100, height: 20,
+          "layout-item-h-sizing": "fill", "layout-item-v-sizing": "fill",
+          instance: { component: { assetId: "cmp_row", packageId: "pkg_roundtrip" }, variant: { axis_kind: "base" }, overrides: {} },
+        },
+      }, "node_nested"],
     ].map(([id, nodes, rootId]) => ({
       axes,
       category: "Probes",
@@ -192,6 +207,27 @@ test("a resized Instance of a flex Component lays its children out again", async
   assert.deepEqual(box(nodes.node_row_copy__node_fixed), [0, 0, 20, 20]);
 });
 
+for (const direction of ["row", "column"])
+  for (const component of ["cmp_row", "cmp_nested"])
+    test(`a ${direction} fill ${component} resizes its absolute focus frame without accumulating changes`, async () => {
+      const snapshot = await snapshotWith([
+        ["node_input", component, {
+          height: 20, width: 100, x: 0, y: 0,
+          "layout-item-h-sizing": "fill", "layout-item-v-sizing": "fill",
+        }],
+      ]);
+      const canvas = snapshot.entries["screens/roundtrip.json"].presentations[0].nodes.node_canvas;
+      Object.assign(canvas, { layout: "flex", "layout-flex-dir": direction,
+        "layout-padding": { p1: 24, p2: 24, p3: 24, p4: 24 } });
+      for (const [width, height] of [[720, 120], [480, 96], [720, 120]]) {
+        Object.assign(canvas, { width, height });
+        const projection = projectScreen(snapshot, "scr_roundtrip");
+        const prefix = component === "cmp_nested" ? "node_input__node_copy" : "node_input";
+        assert.deepEqual(box(projection.nodes[`${prefix}__node_focus`]), [-4, -4, width - 48 + 8, height - 48 + 8]);
+        assert.deepEqual(projectScreen(snapshot, "scr_roundtrip").nodes, projection.nodes);
+      }
+    });
+
 test("boards clip their children unless they show their content", async () => {
   const overflowing = (id, extra) => ({
     [id]: {
@@ -229,7 +265,7 @@ test("boards clip their children unless they show their content", async () => {
     }
     offset += length + 12;
   }
-  const pixels = inflateSync(Buffer.concat(chunks));
+  const pixels = pngPixels(evidence.render.bytes, evidence.render.width);
   const pixel = (x, y) => {
     const offset = y * (width * 4 + 1) + 1 + x * 4;
     return [pixels[offset], pixels[offset + 1], pixels[offset + 2]];

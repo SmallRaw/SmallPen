@@ -37,6 +37,7 @@ export {
   projectScreen,
 } from "./design-projection.mjs";
 export { componentCombinationSnapshot } from "./component-samples.mjs";
+export { perSideStrokeWidths, rectangularStrokeBand } from "./stroke-geometry.mjs";
 export { staleInstanceDiagnostics } from "./design-validation.mjs";
 export {
   THEME_INTENT_ACTIONS,

@@ -100,7 +100,7 @@ async function counting(target, method, action) {
 for (const rich of [false, true]) {
   const kind = rich ? "rich" : "plain";
 
-  test(`${kind} text builds outlines only for glyphs that can reach the canvas`, async () => {
+  test(`${kind} text draws through Skia without JavaScript glyph outlines`, async () => {
     const text = longText(50_000);
     const node = textNode(text, {
       growType: "auto-width",
@@ -112,7 +112,7 @@ for (const rich of [false, true]) {
       () => render({ node_rectangle: node }, 0.1),
     );
     // The 800px canvas shows about a hundred glyphs of one 14px line.
-    assert.ok(outlines > 0, "visible glyphs still draw");
+    assert.equal(outlines, 0, "Skia draws glyphs; the CLI does not construct JavaScript outlines");
     assert.ok(outlines < 1_000, `outlined ${outlines} of ${text.length} glyphs`);
   });
 
@@ -178,24 +178,12 @@ test("a 200k character text renders inside a 192MB heap", async () => {
   assert.equal(stdout, "80");
 });
 
-test("an unsupported paint color is reported once, not once per pixel", async () => {
-  const { render: result } = await render({
-    node_rectangle: {
-      children: [],
-      fills: [{ color: "hsl(0, 0%, 0%)", type: "solid" }],
-      height: 120,
-      id: "node_rectangle",
-      name: "Odd color",
-      type: "RECTANGLE",
-      width: 240,
-      x: 80,
-      y: 96,
-    },
-  });
-  assert.deepEqual(
-    result.diagnostics.map(({ code }) => code),
-    ["unsupported_render_color"],
-  );
+test("unsupported paint fails through the shared App projection instead of returning a misleading image", async () => {
+  await assert.rejects(render({ node_rectangle: {
+    children: [], fills: [{ color: "hsl(0, 0%, 0%)", type: "solid" }],
+    height: 120, id: "node_rectangle", name: "Unsupported color", type: "RECTANGLE",
+    width: 240, x: 80, y: 96,
+  } }), error => error.code === "unsupported_smallpen_paint_color");
 });
 
 test("layer blur buffers cover the blurred subtree, not the whole canvas", async () => {

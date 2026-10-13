@@ -17,6 +17,7 @@ export {
   measureProjectionText,
   renderProjection,
 } from "./render.mjs";
+export { renderAppProjection } from "./render-shared.mjs";
 export {
   decodeFigmaClipboard,
   importDraft,

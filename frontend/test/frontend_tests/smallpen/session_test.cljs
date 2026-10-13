@@ -7,8 +7,14 @@
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.event :as ev]
+   [app.main.data.helpers :as dsh]
    [app.main.data.persistence :as dps]
    [app.main.data.workspace.common :as dwc]
+   [app.main.data.workspace.modifiers :as dwm]
+   [app.main.data.workspace.shape-layout :as shape-layout]
+   [app.main.data.workspace.shapes :as shapes]
+   [app.main.data.workspace.texts :as texts]
+   [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.repo :as rp]
    [app.main.smallpen :as smallpen]
@@ -50,6 +56,54 @@
     (t/is (= session/local-team-id (:team-id project)))
     (t/is (= (:id profile) (:id member)))
     (t/is (= :owner (:role member)))))
+
+(t/deftest automatic-text-measurement-keeps-user-edit-options
+  (let [options {:undo-group :typing :ignore-snap-pixel false}]
+    (with-redefs [smallpen/enabled? (constantly false)]
+      (t/is (= options (smallpen/derived-layout-options options))))
+    (with-redefs [smallpen/enabled? (constantly true)]
+      (let [measured (smallpen/derived-layout-options options)]
+        (t/is (= :typing (:undo-group measured)))
+        (t/is (false? (:save-undo? measured)))
+        (t/is (true? (:ignore-touched measured)))
+        (t/is (true? (:skip-component-sync? measured)))
+        (t/is (true? (:derived-layout? measured)))
+        (t/is (true? (:ignore-snap-pixel measured)))))))
+
+(t/deftest finishing-svg-measurement-does-not-sync-components
+  (let [options (atom nil)]
+    (with-redefs [smallpen/enabled? (constantly true)
+                  dwm/apply-modifiers (mock/stub #(reset! options %))]
+      (ptk/watch (texts/remove-text-modifier (uuid/next)) {} nil))
+    (t/is (false? (:save-undo? @options)))
+    (t/is (true? (:ignore-touched @options)))
+    (t/is (true? (:skip-component-sync? @options)))))
+
+(t/deftest computed-changes-do-not-mark-user-edits-in-the-same-buffer
+  (let [authored {:type :mod-page :name "User"}
+        computed {:type :mod-page :name "Layout"}
+        changes {:redo-changes [authored computed]}
+        marked (#'shapes/mark-derived-changes changes 1 true)]
+    (t/is (nil? (::dps/derived-layout (meta (first (:redo-changes marked))))))
+    (t/is (true? (::dps/derived-layout (meta (second (:redo-changes marked))))))
+    (t/is (= changes (#'shapes/mark-derived-changes changes 0 false)))))
+
+(t/deftest automatic-layout-reflow-does-not-sync-components
+  (doseq [wasm? [false true]]
+    (let [id (uuid/next)
+          options (atom nil)]
+      (with-redefs [smallpen/enabled? (constantly true)
+                    features/active-feature? (mock/stub (constantly wasm?))
+                    dsh/lookup-page-objects (mock/stub (constantly {id {:id id}}))
+                    dwm/create-modif-tree (mock/stub (constantly {}))
+                    dwm/apply-modifiers (mock/stub #(reset! options %))
+                    dwm/apply-wasm-modifiers (fn [_ & arguments]
+                                               (reset! options (if (map? (first arguments))
+                                                                 (first arguments)
+                                                                 (apply hash-map arguments))))]
+        (ptk/watch (#'shape-layout/update-layout-positions {:ids [id]}) {} nil))
+      (t/is (true? (:skip-component-sync? @options)))
+      (t/is (false? (:save-undo? @options))))))
 
 (t/deftest local-session-resolves-the-default-canvas-page
   (t/is (= fixture/page-id (session/default-page-id fixture/snapshot))))
@@ -246,6 +300,34 @@
   (js/Response. (js/JSON.stringify (clj->js body))
                 #js {:status status
                      :headers #js {"content-type" "application/json"}}))
+
+(t/deftest derived-layout-stays-local-while-user-edits-save
+  (t/async done
+    (let [restore (enter-smallpen! {:file-id "file-1" :revision "rev-local"})
+          bodies (atom [])
+          prev-fetch (http/install-fetch-mock!
+                      (fn [_url opts]
+                        (swap! bodies conj (js/JSON.parse (.-body opts)))
+                        (js/Promise.resolve (json-response 200 {:revision "rev-edited"}))))
+          finish (fn [] (http/restore-fetch! prev-fetch) (restore) (done))
+          params {:changes [{:type :mod-page :id fixture/page-id :name "Edited"}]
+                  :commit-id (uuid/next) :revn 2}]
+      (->> (#'smallpen/commit-workspace
+            (update params :changes #(mapv (fn [change] (vary-meta change assoc ::dps/derived-layout true)) %)))
+           (rx/subs!
+            (fn [ack]
+              (t/is (= {:revision "rev-local" :revn 2} ack))
+              (t/is (empty? @bodies))
+              ;; Persistence merges a computed commit followed by a user edit.
+              (->> (#'smallpen/commit-workspace
+                    (update params :changes #(into [(with-meta (first %) {::dps/derived-layout true})] %)))
+                   (rx/subs!
+                    (fn [saved]
+                      (t/is (= "rev-edited" (:revision saved)))
+                      (t/is (= 1 (count @bodies)))
+                      (finish))
+                    (fn [error] (t/is false (str error)) (finish)))))
+            (fn [error] (t/is false (str error)) (finish)))))))
 
 ;; Scenario: an external revision arrives while local edits are queued. The
 ;; queued edit flushes against the revision it was made on, the Background

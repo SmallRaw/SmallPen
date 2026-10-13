@@ -3553,7 +3553,11 @@ impl RenderState {
         // (which defers strokes to render_shape_exit for clipped frames).
         plain_shape_mut.clip_content = false;
 
-        let spread_outset = if shadow.spread > 0.0 && shape.spreads_through_strokes() {
+        let spread_outset = if shadow.spread < 0.0 {
+            // Use the same erosion filter as CPU export. Geometry drawing
+            // accepts positive outsets only and silently drops negative ones.
+            None
+        } else if shadow.spread > 0.0 && shape.spreads_through_strokes() {
             plain_shape_mut.apply_shadow_spread(shadow.spread);
             None
         } else {
@@ -3574,7 +3578,7 @@ impl RenderState {
         }
 
         // blur=0 at high zoom: draw directly on DropShadows with geometric spread (no filter).
-        if scale > 1.0 && shadow.blur <= 0.0 {
+        if scale > 1.0 && shadow.blur <= 0.0 && shadow.spread >= 0.0 {
             let drop_canvas = self.surfaces.canvas(SurfaceId::DropShadows);
             drop_canvas.save();
             //drop_canvas.scale((scale, scale));
@@ -3602,11 +3606,17 @@ impl RenderState {
         }
 
         // Create filter with blur only (no offset, no spread - handled geometrically)
+        let spread_filter = transformed_shadow.negative_spread_filter(None);
         let blur_only_filter = if transformed_shadow.blur > 0.0 {
-            let sigma = radius_to_sigma(transformed_shadow.blur);
-            Some(skia::image_filters::blur((sigma, sigma), None, None, None))
+            let sigma = transformed_shadow.sigma();
+            Some(skia::image_filters::blur(
+                (sigma, sigma),
+                None,
+                spread_filter,
+                None,
+            ))
         } else {
-            None
+            spread_filter.map(Some)
         };
 
         let mut shadow_paint = skia::Paint::default();

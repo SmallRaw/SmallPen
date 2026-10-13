@@ -727,6 +727,7 @@ function reflowFlexLayout(nodes, nodeId) {
   const crossSize = (child) => (column ? child.width : child.height);
   const fillMainField = column ? "layout-item-v-sizing" : "layout-item-h-sizing";
   const fillCrossField = column ? "layout-item-h-sizing" : "layout-item-v-sizing";
+  const beforeSizes = new Map(items.map((child) => [child.id, { width: child.width, height: child.height }]));
   const fillItems = items.filter((child) => child[fillMainField] === "fill");
   if (fillItems.length > 0) {
     const fixedTotal = items
@@ -748,6 +749,9 @@ function reflowFlexLayout(nodes, nodeId) {
     if (column) child.width = innerWidth;
     else child.height = innerHeight;
   }
+  // Fill allocation resizes the copy after instance expansion. Constrained
+  // absolute children must follow that delta too, before their own reflow.
+  for (const child of items) applyResizeConstraints(nodes, child.id, beforeSizes.get(child.id));
   const contentMain =
     items.reduce((sum, child) => sum + mainSize(child), 0) +
     gap * (items.length - 1);
@@ -777,7 +781,7 @@ function reflowFlexLayout(nodes, nodeId) {
     }
     cursor += mainSize(child) + gap + spaceBetween;
     // A fill-sized container must lay out its own children at its new size.
-    if (child.layout === "flex") reflowFlexLayout(nodes, child.id);
+    reflowFlexLayout(nodes, child.id);
   }
 }
 

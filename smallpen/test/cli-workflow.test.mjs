@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -580,7 +581,7 @@ test("a local PNG preserves ancestor backgrounds and scoped contrast uses those 
         chunks.push(bytes.subarray(offset + 8, offset + 8 + length));
       offset += length + 12;
     }
-    return inflateSync(Buffer.concat(chunks));
+    return pngPixels(bytes);
   };
   const fullPixels = decode(fullBytes),
     localPixels = decode(await readFile(local.output));
@@ -647,8 +648,8 @@ test("scoped validation reports visual problems and coverage without mutating se
   ]);
   assert.ok(report.issues.some(({ code }) => code === "text_overflow"));
   assert.ok(report.issues.some(({ code }) => code === "outside_root"));
-  assert.equal(report.coverage.complete, false);
-  assert.ok(report.coverage.skipped.length);
+  assert.equal(report.coverage.complete, true);
+  assert.equal(report.coverage.skipped.length, 0);
   assert.deepEqual(report.selection.themes, ["Mode/Dark", "Scale/Regular"]);
   assert.equal(await revisionOf(path), revision);
   const scoped = await run([

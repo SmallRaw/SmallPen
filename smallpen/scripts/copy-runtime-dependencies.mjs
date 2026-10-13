@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 
 // Keep both distributables on the same complete, locked runtime payload.
 export async function copyRuntimeDependencies(sourceRoot, targetRoot) {
-  for (const name of ["opentype.js", "@jsquash/webp", "wasm-feature-detect"]) {
+  for (const name of ["opentype.js"]) {
     const target = join(targetRoot, "node_modules", name);
     await mkdir(dirname(target), { recursive: true });
     await cp(join(sourceRoot, "node_modules", name), target, {

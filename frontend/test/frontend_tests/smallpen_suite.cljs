@@ -23,6 +23,7 @@
    [frontend-tests.tokens.quick-panel-test]
    [frontend-tests.tokens.smallpen-matrix-test]
    [frontend-tests.ui.colorpicker-reference-input-test]
+   [frontend-tests.ui.per-side-stroke-test]
    [frontend-tests.ui.smallpen-history-test]
    [frontend-tests.ui.smallpen-ui-helpers-test]
    [frontend-tests.ui.workspace-history-test]))
@@ -44,6 +45,7 @@
    'frontend-tests.tokens.quick-panel-test
    'frontend-tests.tokens.smallpen-matrix-test
    'frontend-tests.ui.colorpicker-reference-input-test
+   'frontend-tests.ui.per-side-stroke-test
    'frontend-tests.ui.smallpen-history-test
    'frontend-tests.ui.smallpen-ui-helpers-test
    'frontend-tests.ui.workspace-history-test])

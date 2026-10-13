@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { serveLocalPackage } from "@smallpen/background";
+import { openPackage } from "@smallpen/local-package";
 import { servePenpotFrontend } from "@smallpen/web";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -34,15 +35,21 @@ async function waitForNodeField(screenPath, nodeId, field, expected) {
     if (screen.presentations[0].nodes[nodeId]?.[field] === expected) return;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  assert.fail(`Penpot ${nodeId}.${field} edit was not written to ${screenPath}`);
+  assert.fail(
+    `Penpot ${nodeId}.${field} edit was not written to ${screenPath}`,
+  );
 }
 
 async function waitForNavigateInteraction(screenPath, nodeId) {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const screen = JSON.parse(await readFile(screenPath, "utf8"));
-    const interaction = screen.presentations[0].nodes[nodeId]?.interactions?.[0];
-    if (interaction?.["action-type"] === "navigate" && interaction.destination) {
+    const interaction =
+      screen.presentations[0].nodes[nodeId]?.interactions?.[0];
+    if (
+      interaction?.["action-type"] === "navigate" &&
+      interaction.destination
+    ) {
       return interaction;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -71,13 +78,17 @@ async function waitForThemeNames(packagePath, expected) {
     );
     const entry = manifest.entries.tokens[0];
     if (entry) {
-      const library = JSON.parse(await readFile(join(packagePath, entry), "utf8"));
+      const library = JSON.parse(
+        await readFile(join(packagePath, entry), "utf8"),
+      );
       const names = library.themes.map(({ group }) => group);
       if (expected.every((name) => names.includes(name))) return library;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  assert.fail(`Theme names were not written to ${packagePath}: ${expected.join(", ")}`);
+  assert.fail(
+    `Theme names were not written to ${packagePath}: ${expected.join(", ")}`,
+  );
 }
 
 async function waitForRenderer(backgroundUrl, expected) {
@@ -92,18 +103,10 @@ async function waitForRenderer(backgroundUrl, expected) {
   assert.fail(`Renderer preference was not updated to ${expected}`);
 }
 
-function findNode(value, nodeId) {
-  if (!value || typeof value !== "object") return undefined;
-  if (value.id === nodeId) return value;
-  for (const child of Object.values(value)) {
-    const match = findNode(child, nodeId);
-    if (match) return match;
-  }
-  return undefined;
-}
-
 async function expandCanvas(page) {
-  const canvasLayer = page.getByTestId("layer-row").filter({ hasText: "Canvas" });
+  const canvasLayer = page
+    .getByTestId("layer-row")
+    .filter({ hasText: "Canvas" });
   await canvasLayer.waitFor();
   const toggle = canvasLayer.getByTestId("toggle-content");
   await toggle.waitFor();
@@ -198,7 +201,9 @@ async function main() {
   });
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { height: 900, width: 1440 } });
+    const page = await browser.newPage({
+      viewport: { height: 900, width: 1440 },
+    });
     const pageErrors = [];
     const pageConsoleErrors = [];
     const failedResponses = [];
@@ -215,24 +220,30 @@ async function main() {
       });
     });
 
-    // `web.url` intentionally points at the local SmallPen Home page. The
-    // workspace smoke test must use the resolved Penpot workspace URL so it
-    // validates the editor rather than waiting for an editor on Home.
-    const cleanWorkspaceUrl = new URL(web.workspaceUrl);
-    assert.equal(cleanWorkspaceUrl.search, "");
+    // The host supplies a query-based workspace URL. Runtime credentials
+    // stay in the host configuration, as the web-server contract requires.
+    const workspaceUrl = new URL(web.workspaceUrl);
+    assert.equal(workspaceUrl.hash, "");
     assert.doesNotMatch(web.workspaceUrl, /smallpen-backend|smallpen-package/);
-    const workspaceQuery = new URLSearchParams(cleanWorkspaceUrl.hash.split("?")[1]);
+    const workspaceQuery = workspaceUrl.searchParams;
+    assert.equal(workspaceQuery.get("screen"), "workspace");
     assert.match(workspaceQuery.get("file-id"), /^[a-f0-9-]{36}$/);
     assert.match(workspaceQuery.get("page-id"), /^[a-f0-9-]{36}$/);
     assert.equal(workspaceQuery.get("layout"), "layers");
     assert.equal(workspaceQuery.get("team-id"), null);
     await page.goto(web.workspaceUrl, { waitUntil: "domcontentloaded" });
-    assert.equal(new URL(page.url()).search, "");
+    assert.equal(
+      new URL(page.url()).searchParams.get("smallpen-backend"),
+      null,
+    );
     await page.getByTestId("viewport").waitFor({ timeout: 30_000 });
     await page.getByTestId("left-sidebar").waitFor();
     await page.getByTestId("right-sidebar").waitFor();
     await page.getByTestId("toolbar-options").waitFor();
-    await page.getByText("SmallPen Round Trip", { exact: true }).first().waitFor();
+    await page
+      .getByText("SmallPen Round Trip", { exact: true })
+      .first()
+      .waitFor();
 
     assert.match(await page.title(), /Penpot/);
     assert.equal(await page.getByText("SmallPen Package Workspace").count(), 0);
@@ -241,15 +252,24 @@ async function main() {
 
     const homePage = await browser.newPage();
     await homePage.goto(web.url, { waitUntil: "domcontentloaded" });
-    await homePage.waitForURL(/#\/smallpen$/, { timeout: 30_000 });
-    await homePage.getByRole("heading", { exact: true, name: "SmallPen" }).waitFor();
+    await homePage.waitForURL(
+      (url) => url.searchParams.get("screen") === "smallpen-home",
+      { timeout: 30_000 },
+    );
+    await homePage
+      .getByRole("heading", { exact: true, name: "SmallPen" })
+      .waitFor();
     await homePage.close();
 
     const missingPage = await browser.newPage();
     const missingUrl = new URL("/", web.origin);
-    missingUrl.search = "?screen=workspace&file-id=11111111-1111-4111-8111-111111111111&page-id=22222222-2222-4222-8222-222222222222&layout=layers";
+    missingUrl.search =
+      "?screen=workspace&file-id=11111111-1111-4111-8111-111111111111&page-id=22222222-2222-4222-8222-222222222222&layout=layers";
     await missingPage.goto(missingUrl.href, { waitUntil: "domcontentloaded" });
-    await missingPage.waitForURL(/#\/smallpen$/, { timeout: 30_000 });
+    await missingPage.waitForURL(
+      (url) => url.searchParams.get("screen") === "smallpen-home",
+      { timeout: 30_000 },
+    );
     await missingPage.close();
 
     await expandCanvas(page);
@@ -261,7 +281,9 @@ async function main() {
     await page.getByRole("button", { name: "Add interaction" }).click();
     await page.getByRole("button", { name: "Options" }).click();
     await page.getByRole("searchbox", { name: "Destination" }).click();
-    await page.getByRole("option", { name: "Destination", exact: true }).click();
+    await page
+      .getByRole("option", { name: "Destination", exact: true })
+      .click();
     let interaction;
     try {
       interaction = await waitForNavigateInteraction(
@@ -330,15 +352,17 @@ async function main() {
       );
     }
     assert.deepEqual(viewerErrors, []);
-    const workspaceSnapshot = await fetch(`${background.url}/v1/workspace`).then(
-      (response) => response.json(),
-    );
+    const workspaceSnapshot = await fetch(
+      `${background.url}/v1/workspace`,
+    ).then((response) => response.json());
     const rectangleId =
       workspaceSnapshot.runtime.nodes.scr_roundtrip.pres_desktop.node_rectangle;
     const viewerTextId =
-      workspaceSnapshot.runtime.nodes.scr_roundtrip.pres_desktop.node_viewer_text;
+      workspaceSnapshot.runtime.nodes.scr_roundtrip.pres_desktop
+        .node_viewer_text;
     const destinationId =
-      workspaceSnapshot.runtime.nodes.scr_roundtrip.pres_desktop.node_destination;
+      workspaceSnapshot.runtime.nodes.scr_roundtrip.pres_desktop
+        .node_destination;
     assert.equal(interaction.destination, destinationId);
     const viewerText = viewer.locator(`#shape-${viewerTextId}:visible`).first();
     await viewerText.getByText("Viewer text without cached layout").waitFor();
@@ -364,13 +388,18 @@ async function main() {
     await matrix.getByText("Default", { exact: true }).waitFor();
     const addTheme = matrix.getByRole("button", { name: "Add mode" });
     await addTheme.click();
-    await matrix.getByRole("button", { exact: true, name: "Theme-1" }).waitFor();
+    await matrix
+      .getByRole("button", { exact: true, name: "Theme-1" })
+      .waitFor();
     await addTheme.click();
-    await matrix.getByRole("button", { exact: true, name: "Theme-2" }).waitFor();
-    const tokenLibrary = await waitForThemeNames(
-      packagePath,
-      ["Theme", "Theme-1", "Theme-2"],
-    );
+    await matrix
+      .getByRole("button", { exact: true, name: "Theme-2" })
+      .waitFor();
+    const tokenLibrary = await waitForThemeNames(packagePath, [
+      "Theme",
+      "Theme-1",
+      "Theme-2",
+    ]);
     assert.deepEqual(
       tokenLibrary.sets.map(({ name }) => name),
       ["Theme/Default", "Theme-1/Default", "Theme-2/Default"],
@@ -382,28 +411,34 @@ async function main() {
     await writeFile(
       flowIntentPath,
       JSON.stringify({
-        nodes: [
+        baseRevision: (await openPackage(packagePath)).revision,
+        batchId: "live-create-1",
+        operations: [
           {
-            children: [],
-            height: 64,
-            id: "node_cli_live",
-            name: "CLI Live Node",
-            type: "ELLIPSE",
-            width: 160,
-            x: 420,
-            y: 180,
+            type: "add-presentation-node",
+            screenId: "scr_roundtrip",
+            presentationId: "pres_desktop",
+            parentId: "node_canvas",
+            node: {
+              children: [],
+              height: 64,
+              id: "node_cli_live",
+              name: "CLI Live Node",
+              type: "ELLIPSE",
+              width: 160,
+              x: 420,
+              y: 180,
+            },
           },
         ],
-        screenId: "scr_roundtrip",
       }),
     );
     const created = await runCli([
-      "flow",
+      "advanced",
+      "apply",
       packagePath,
-      "--intent",
+      "--batch",
       flowIntentPath,
-      "--batch-id",
-      "live-create-1",
       "--json",
     ]);
     await page.waitForTimeout(2000);
@@ -436,6 +471,7 @@ async function main() {
       }),
     );
     const modified = await runCli([
+      "advanced",
       "apply",
       packagePath,
       "--batch",
@@ -458,8 +494,10 @@ async function main() {
     await opacity.press("Enter");
     await waitForNodeField(screenPath, "node_cli_live", "opacity", 0.77);
     await page.waitForTimeout(500);
-    const readBack = await runCli(["read-view", packagePath, "--json"]);
-    const cliNode = findNode(readBack, "node_cli_live");
+    const readBack = await openPackage(packagePath);
+    const cliNode =
+      readBack.entries["screens/roundtrip.json"].presentations[0].nodes
+        .node_cli_live;
     assert.match(readBack.revision, /^[a-f0-9]{64}$/);
     assert.notEqual(readBack.revision, modified.revision);
     assert.deepEqual(
@@ -483,10 +521,12 @@ async function main() {
       },
     );
     assert.deepEqual(pageErrors, []);
-    if (await page.getByTestId("viewport").count() === 0) {
+    if ((await page.getByTestId("viewport").count()) === 0) {
       const report = await page.evaluate(() => {
         const value = globalThis.app?.main?.errors?.last_report;
-        return value == null ? "No error report" : globalThis.cljs.core.pr_str(value);
+        return value == null
+          ? "No error report"
+          : globalThis.cljs.core.pr_str(value);
       });
       throw new Error(`Penpot workspace crashed after persistence:\n${report}`);
     }
@@ -525,6 +565,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+  process.stderr.write(
+    `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+  );
   process.exitCode = 1;
 });

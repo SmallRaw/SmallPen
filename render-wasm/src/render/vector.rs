@@ -119,6 +119,9 @@ impl ShapeRenderer for VectorRenderer<'_> {
     }
 
     fn draw_drop_shadows(&mut self, shape: &Shape) -> Result<()> {
+        if !shape.has_fills() && !shape.has_visible_strokes() {
+            return Ok(());
+        }
         let layer_bounds = shape.layer_bounds();
         for shadow in shape.drop_shadows_visible() {
             if let Some(filter) = shadow.get_drop_shadow_filter() {
@@ -523,7 +526,7 @@ fn render_tree_inner(
         return Ok(());
     };
 
-    if element.hidden {
+    if element.hidden || element.opacity <= 0.0 {
         return Ok(());
     }
 

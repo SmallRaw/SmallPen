@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 // The Penpot editor reads a text lineHeight as a multiple of the font size
 // whatever its value; the CLI used to read values above 4 as pixels, so a
 // lineHeight of 6 drew lines 6 px apart in the CLI and 60 px in Penpot.
@@ -48,7 +49,7 @@ async function inkRows(lineHeight) {
     }
     offset += length + 12;
   }
-  const pixels = inflateSync(Buffer.concat(chunks));
+  const pixels = pngPixels(render.bytes, render.width);
   const rows = [];
   for (let y = 100; y < 300; y += 1) {
     for (let x = 100; x < 200; x += 1) {

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { OPERATION_SCHEMAS, prepareOperationBatch } from "@smallpen/core";
-import { createEvidence, openPackage } from "@smallpen/local-package";
+import { createEvidence, renderProjection, openPackage } from "@smallpen/local-package";
 
 import { INIT_ANSWERS_EXAMPLE, INSTANCE_NODE_EXAMPLE } from "../apps/cli/bin/schema.mjs";
 
@@ -109,16 +109,19 @@ test("an override path is checked against a Foundation component", async (contex
 
 test("font fallback diagnostics name both fonts as structured details", async () => {
   const example = await openPackage(join(here, "..", "examples", "common-components.smallpen"));
-  const { render } = await createEvidence(example, {
-    scale: 1,
-    selector: { viewFormat: "screenshot" },
-  });
+  const render = await renderProjection(example, { rootId: "root", nodes: {
+    root: { id: "root", type: "FRAME", name: "Font fallback", x: 0, y: 0,
+      width: 200, height: 100, fills: [], children: ["text"] },
+    text: { id: "text", type: "TEXT", name: "Unknown font", x: 0, y: 0,
+      width: 100, height: 30, children: [], text: "Hello",
+      textStyle: { fontId: "missing-fixture-sans", fontFamily: "Missing Fixture Sans", fontSize: 16 } },
+  } });
   const fallback = render.diagnostics.find(({ code }) => code === "font_render_fallback");
   assert.deepEqual(fallback.details, {
-    requestedFont: "Inter",
+    requestedFont: "Missing Fixture Sans",
     substituteFont: "Source Sans Pro",
   });
-  assert.equal(fallback.message, "Renderer substituted Source Sans Pro for Inter");
+  assert.equal(fallback.message, "Renderer substituted Source Sans Pro for Missing Fixture Sans");
 });
 
 test("many writes to one token file keep one restore in the inverse batch", async (context) => {

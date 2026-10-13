@@ -185,7 +185,7 @@ test("desktop artifacts are uploaded before smoke tests without bypassing public
   assert.ok(testStep > workflow.indexOf("name: SmallPen-macOS-arm64-"));
   assert.ok(testStep > workflow.indexOf("name: SmallPen-Windows-x64-"));
   assert.match(workflow, /failure\(\) && steps\.smoke\.outcome == 'failure'/);
-  assert.match(workflow, /publish:[\s\S]*needs: \[test, cli, desktop, web\]/);
+  assert.match(workflow, /publish:[\s\S]*needs: \[test, cli, desktop, web, render-parity\]/);
   assert.doesNotMatch(workflow, /continue-on-error/);
 });
 
@@ -195,7 +195,7 @@ test("intermediate artifacts are removed after all consumers finish", async () =
     "utf8",
   );
   const cleanup = workflow.slice(workflow.indexOf("  cleanup:"));
-  assert.match(cleanup, /needs: \[cli, frontend, desktop, web, publish\]/);
+  assert.match(cleanup, /needs: \[cli, frontend, desktop, web, render-parity, publish\]/);
   assert.match(cleanup, /if: always\(\)/);
   assert.match(
     cleanup,

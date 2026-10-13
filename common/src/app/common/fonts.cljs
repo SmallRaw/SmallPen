@@ -115,6 +115,14 @@
            variants)]
       (:variant result))))
 
+(defn with-variant-attributes
+  "Normalize a text span/paragraph to its resolved face in every rendering host."
+  [attributes paragraph variant]
+  (assoc attributes
+         :font-variant-id (or (:id variant) (:font-variant-id attributes))
+         :font-weight (or (:weight variant) (:font-weight attributes) (:font-weight paragraph))
+         :font-style (or (:style variant) (:font-style attributes) (:font-style paragraph))))
+
 (defn resolve-ttf-url
   [font-uuid weight style]
   (when-let [font (get by-uuid font-uuid)]
@@ -301,3 +309,10 @@
               acc))
           fonts
           languages))
+
+(defn fallback-fonts-for-text
+  "The same script and emoji fallback families in every rendering host."
+  [text]
+  (-> #{}
+      (cond-> (contains-emoji? text) (add-emoji-font))
+      (add-noto-fonts (collect-used-languages #{} text))))

@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -140,7 +141,7 @@ function pngPixel(render, x, y) {
     }
     offset += length + 12;
   }
-  const pixels = inflateSync(Buffer.concat(chunks));
+  const pixels = pngPixels(bytes, render.width);
   const offset = y * (render.width * 4 + 1) + 1 + x * 4;
   return [...pixels.subarray(offset, offset + 4)];
 }

@@ -6,6 +6,7 @@
 
 (ns app.main.ui.shapes.custom-stroke
   (:require
+   ["smallpen-stroke-geometry" :as stroke-geometry]
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.helpers :as cfh]
@@ -380,6 +381,40 @@
 ;; able to draw the stroke in the three cases. See discussion at:
 ;; https://stackoverflow.com/questions/7241393/can-you-control-how-an-svgs-stroke-width-is-drawn
 
+(defn- per-side-band
+  [shape stroke]
+  (when (and (contains? #{:rect :frame :image} (:type shape))
+             (= :solid (:stroke-style stroke :solid)))
+    (stroke-geometry/rectangularStrokeBand
+     #js {:x (:x shape) :y (:y shape) :width (:width shape) :height (:height shape)
+          :cornerRadius (to-array (map #(or (get shape %) 0) [:r1 :r2 :r3 :r4]))}
+     #js {:width (:stroke-width stroke 1)
+          :widthTop (:stroke-width-top stroke)
+          :widthRight (:stroke-width-right stroke)
+          :widthBottom (:stroke-width-bottom stroke)
+          :widthLeft (:stroke-width-left stroke)
+          :alignment (name (:stroke-alignment stroke :center))})))
+
+(mf/defc per-side-stroke
+  {::mf/wrap-props false}
+  [{:keys [shape stroke child band render-id index]}]
+  (let [props (obj/get child "props")
+        style (-> (obj/get props "style")
+                  (obj/clone))
+        style (-> style
+                  (obj/set! "fill" (obj/get style "stroke"))
+                  (obj/set! "fillOpacity" (obj/get style "strokeOpacity"))
+                  (obj/set! "stroke" "none")
+                  (obj/unset! "strokeOpacity")
+                  (obj/unset! "strokeWidth")
+                  (obj/unset! "strokeDasharray"))]
+    [:g.stroke-shape
+     [:defs
+      [:& stroke-defs {:shape shape :stroke (assoc stroke :stroke-alignment :center)
+                       :render-id render-id :index index}]]
+     [:path {:d (.-pathData band) :fill-rule "evenodd"
+             :transform (obj/get props "transform") :style style}]]))
+
 (mf/defc shape-custom-stroke
   {::mf/wrap-props false}
   [props]
@@ -400,9 +435,14 @@
         closed?         (or (not ^boolean (cfh/path-shape? shape))
                             (not ^boolean (path/shape-with-open-path? shape)))
         inner?          (= :inner stroke-position)
-        outer?          (= :outer stroke-position)]
+        outer?          (= :outer stroke-position)
+        band            (per-side-band shape stroke)]
 
     (cond
+      (some? band)
+      [:& per-side-stroke {:shape shape :stroke stroke :child child :band band
+                           :render-id render-id :index index}]
+
       (and has-stroke? inner? closed?)
       [:& inner-stroke {:shape shape :stroke stroke :index index} child]
 

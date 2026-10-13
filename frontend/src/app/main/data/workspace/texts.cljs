@@ -825,10 +825,10 @@
 
           (let [ids (into #{} (filter changed-text?) (keys props))]
             (rx/of (dwu/start-undo-transaction undo-id)
-                   (dwsh/update-shapes ids update-fn {:with-objects? true
-                                                      :reg-objects? true
-                                                      :stack-undo? true
-                                                      :ignore-touched true})
+                   (dwsh/update-shapes ids update-fn
+                                       (smallpen/derived-layout-options
+                                        {:with-objects? true :reg-objects? true
+                                         :stack-undo? true :ignore-touched true}))
                    (ptk/data-event :layout/update {:ids ids})
                    (dwu/commit-undo-transaction undo-id))))))))
 
@@ -965,7 +965,8 @@
 
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (dwm/apply-modifiers {:stack-undo? true})))))
+      (rx/of (dwm/apply-modifiers
+              (smallpen/derived-layout-options {:stack-undo? true}))))))
 
 (defn commit-position-data
   []

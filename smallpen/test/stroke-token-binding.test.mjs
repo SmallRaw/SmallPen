@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 // Stroke color Token bindings: core validation and resolution per Context,
 // the Web projection, and the Penpot applied stroke-color Token.
 import assert from "node:assert/strict";
@@ -123,9 +124,7 @@ function pngPixel(bytes, width, x, y) {
       chunks.push(bytes.slice(offset + 8, offset + 8 + length));
     offset += length + 12;
   }
-  const pixels = inflateSync(
-    Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))),
-  );
+  const pixels = pngPixels(bytes, width);
   const row = y * (width * 4 + 1);
   return [...pixels.slice(row + 1 + x * 4, row + 1 + x * 4 + 4)];
 }

@@ -7,6 +7,7 @@
    [app.common.files.validate :as cfv]
    [app.common.geom.matrix :as gmt]
    [app.common.geom.point :as gpt]
+   [app.common.render-wasm.serializers.color :as wasm-color]
    [app.common.types.path :as path]
    [app.common.types.shape-tree :as ctst]
    [app.common.types.shape.shadow :as ctss]
@@ -1380,6 +1381,59 @@
                :woff1-file-id library-font-file-id}]
              variants))))
 
+(t/deftest embedded-fonts-follow-resolved-weight-in-text-and-typography
+  ;; Token application can change the weight while retaining normal-400.
+  ;; SVG resolves its face from the variant, so it must agree with CLI/WASM.
+  (doseq [[weight style expected]
+          [[400 "normal" "normal-400"]
+           [500 "normal" "normal-500"]
+           [600 "normal" "normal-600"]
+           [550 "normal" "normal-600"]
+           [700 "normal" "normal-600"]
+           [600 "italic" "italic-700"]]]
+    (doseq [font-id ["font_smallpen" nil "sourcesanspro"]]
+      (let [text-style (cond-> {:fontFamily "SmallPen Sans"
+                                :fontId "font_smallpen"
+                                :fontVariantId "normal-400"
+                                :fontWeight weight
+                                :fontStyle style}
+                         font-id (assoc :fontId font-id)
+                         (nil? font-id) (dissoc :fontId))
+            variants (mapv (fn [[weight style]]
+                             {:id (str "fvar_" style weight)
+                              :weight weight
+                              :style style})
+                           [[400 "normal"] [500 "normal"]
+                            [600 "normal"] [700 "italic"]])
+            candidate
+            (-> snapshot
+                (assoc-in [:manifest :entries :assets] ["assets/fonts.json"])
+                (assoc-in [:entries "assets/fonts.json"]
+                          {:fonts [{:id "font_smallpen"
+                                    :family "SmallPen Sans"
+                                    :variants variants}]
+                           :typographies [{:id "typo_offline"
+                                           :name "Token label"
+                                           :style text-style}]})
+                (assoc-in [:runtime :fonts "font_smallpen"] (str library-font-id))
+                (assoc-in [:runtime :typographies "typo_offline"]
+                          (str library-typography-id))
+                (assoc-in [:entries "screens/roundtrip.json" :presentations 0
+                           :nodes :node_rectangle]
+                          {:id "node_rectangle" :name "Token label"
+                           :type "TEXT" :text "Label" :textStyle text-style
+                           :children [] :width 240 :height 48 :x 80 :y 96}))
+            file (:file (projection/project-snapshot
+                         candidate {:file-id file-id :project-id project-id}))
+            span (get-in file [:data :pages-index page-id :objects rectangle-id
+                               :content :children 0 :children 0 :children 0])
+            typography (get-in file [:data :typographies library-typography-id])]
+        (t/is (= (str "custom-" library-font-id) (:font-id span)))
+        (t/is (= (str "custom-" library-font-id) (:font-id typography)))
+        (t/is (= expected (:font-variant-id span)))
+        (t/is (= expected (:font-variant-id typography)))
+        (t/is (= (str weight) (:font-weight span)))))))
+
 (t/deftest project-snapshot-supports-a-uniform-corner-radius
   (let [candidate (assoc-in snapshot
                             [:entries "screens/roundtrip.json"
@@ -1540,6 +1594,38 @@
     (t/is (= "regular" (:font-variant-id (second runs))))
     (t/is (= [{:fill-color "#2563eb" :fill-opacity 1}]
              (:fills (nth runs 2))))))
+
+(t/deftest css-color-alpha-projects-to-native-opacity-for-svg-and-webgl
+  (doseq [[color rgb alpha] [["#ffffff00" "#ffffff" 0]
+                             ["#3957d780" "#3957d7" (/ 128 255)]
+                             ["#abc8" "#aabbcc" (/ 136 255)]
+                             ["rgba(57,87,215,0.5)" "#3957d7" 0.5]]]
+    (let [candidate (-> snapshot
+                        (assoc-in [:entries "screens/roundtrip.json" :presentations 0 :nodes :node_rectangle :fills]
+                                  [{:type "solid" :color color :opacity 0.5}])
+                        (assoc-in [:entries "screens/roundtrip.json" :presentations 0 :nodes :node_rectangle :strokes]
+                                  [{:type "solid" :color color :opacity 0.5 :width 2}]))
+          shape     (get-in (projection/project-snapshot candidate {:file-id file-id :project-id project-id})
+                            [:file :data :pages-index page-id :objects rectangle-id])
+          fill      (first (:fills shape))
+          stroke    (first (:strokes shape))]
+      (t/is (= rgb (:fill-color fill)))
+      (t/is (close? (* alpha 0.5) (:fill-opacity fill)))
+      (t/is (= rgb (:stroke-color stroke)))
+      (t/is (close? (* alpha 0.5) (:stroke-opacity stroke)))
+      (t/is (= (wasm-color/hex->u32argb rgb (* alpha 0.5))
+               (wasm-color/hex->u32argb (:fill-color fill) (:fill-opacity fill)))))))
+
+(t/deftest gradient-stop-alpha-multiplies-its-opacity
+  (let [gradient  {:type "linear-gradient" :startX 0 :startY 0 :endX 1 :endY 1 :gradientWidth 1
+                   :stops [{:color "#ffffff00" :offset 0}
+                           {:color "#3957d780" :offset 1 :opacity 0.5}]}
+        candidate (assoc-in snapshot [:entries "screens/roundtrip.json" :presentations 0 :nodes :node_rectangle :fills] [gradient])
+        stops     (get-in (projection/project-snapshot candidate {:file-id file-id :project-id project-id})
+                          [:file :data :pages-index page-id :objects rectangle-id :fills 0 :fill-color-gradient :stops])]
+    (t/is (= {:color "#ffffff" :opacity 0 :offset 0} (first stops)))
+    (t/is (= "#3957d7" (:color (second stops))))
+    (t/is (close? (* (/ 128 255) 0.5) (:opacity (second stops))))))
 
 (t/deftest project-snapshot-supports-gradients-and-strokes
   (let [gradient {:endX 1

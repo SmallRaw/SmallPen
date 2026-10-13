@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 // Path rendering found wrong by the Flowboard blind test: curve commands drew
 // straight chords and cap markers stayed a few pixels wide whatever the
 // stroke width. Expected geometry comes from Penpot's SVG renderer
@@ -64,7 +65,7 @@ async function renderPaths(paths) {
     }
     offset += length + 12;
   }
-  const pixels = inflateSync(Buffer.concat(chunks));
+  const pixels = pngPixels(evidence.render.bytes, evidence.render.width);
   return (x, y) => {
     const offset = Math.floor(y) * (width * 4 + 1) + 1 + Math.floor(x) * 4;
     return [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
@@ -167,7 +168,7 @@ test("open path ends are butt and strokes follow Penpot's dash arrays", async ()
   assertBlank(pixel, 40 + 5.5, 120, "between dots");
 });
 
-test("cap markers take Penpot's SVG marker geometry, scaled by stroke width", async () => {
+test("cap markers use the App native geometry, scaled by stroke width", async () => {
   // Each line runs from x=40 to x=120 (the end E) at y = 40 + 60·row, w = 6.
   const caps = [
     "triangle-arrow",
@@ -184,11 +185,10 @@ test("cap markers take Penpot's SVG marker geometry, scaled by stroke width", as
     y: 40 + 60 * row,
   })));
   const end = 120;
-  // Triangle: viewBox 3x6 fitted in 8.5w: tip 1.42w = 8.5 past E, base
-  // 2.83w = 17 behind it, 4.25w = 25.5 either side.
+  // Native triangle size is 4w: tip 2w ahead, base 2w behind and ±4w tall.
   assertInk(pixel, end + 6, 40, "triangle tip");
-  assertBlank(pixel, end + 10, 40, "past the triangle tip");
-  assertInk(pixel, end - 16, 40 + 20, "triangle base");
+  assertBlank(pixel, end + 14, 40, "past the triangle tip");
+  assertInk(pixel, end - 11, 40 + 20, "triangle base");
   assertBlank(pixel, end - 15, 40 + 27, "beside the triangle base");
   // Circle: radius 2w = 12.
   assertInk(pixel, end, 100 + 10, "circle edge");
@@ -196,15 +196,15 @@ test("cap markers take Penpot's SVG marker geometry, scaled by stroke width", as
   // Square: side 4.24w = 25.5 centred on E.
   assertInk(pixel, end + 11, 160 + 11, "square corner");
   assertBlank(pixel, end + 14, 160, "outside the square");
-  // Diamond: vertices 3w = 18 from E.
-  assertInk(pixel, end + 16, 220, "diamond tip");
+  // Diamond: a 4w square rotated 45°, radius 2√2w.
+  assertInk(pixel, end + 15, 220, "diamond tip");
   assertInk(pixel, end + 7, 220 + 7, "diamond side");
   assertBlank(pixel, end + 11, 220 + 11, "outside the diamond side");
   // Line arrow: a filled chevron; its arm crosses (E-5, ±9) and the notch
   // between the arms at (E-12.75, ±4.25) stays open.
-  assertInk(pixel, end - 5, 280 - 9, "chevron arm");
-  assertInk(pixel, end - 5, 280 + 9, "other chevron arm");
-  assertBlank(pixel, end - 12.75, 280 - 4.25 - 1, "inside the chevron notch");
+  assertInk(pixel, end + 4, 280 - 8, "chevron arm");
+  assertInk(pixel, end + 4, 280 + 8, "other chevron arm");
+  assertBlank(pixel, end - 10, 280 - 10, "inside the chevron notch");
 });
 
 test("cap markers grow with the stroke width", async () => {
@@ -230,7 +230,7 @@ test("cap markers grow with the stroke width", async () => {
   assertInk(pixel, 120 + 9, 120, "thick tip");
   // Half the base: 4.25w, 8.5 for w=2 and 34 for w=8.
   assertBlank(pixel, 120 - 5, 40 + 12, "beside the thin base");
-  assertInk(pixel, 120 - 20, 120 + 26, "thick base");
+  assertInk(pixel, 120 - 15, 120 + 26, "thick base");
 });
 
 test("open paths stroke centred whatever their alignment, closed ones align", async () => {

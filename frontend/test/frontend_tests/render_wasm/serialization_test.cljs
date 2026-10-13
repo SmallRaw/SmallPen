@@ -17,9 +17,37 @@
    [app.common.render-wasm.api.props :as props]
    [app.common.render-wasm.api.select :as wselect]
    [app.common.render-wasm.api.upload :as upload]
+   [app.common.render-wasm.precision :as precision]
    [app.common.render-wasm.serialize-shape :as serialize-shape]
    [app.common.render-wasm.svg-derived :as svg-derived]
+   [app.common.render-wasm.wasm :as wasm]
+   [app.common.types.shape :as cts]
+   [app.render-wasm.api :as wasm.api]
    [cljs.test :as t :include-macros true]))
+
+(t/deftest exact-fit-width-survives-float32-endpoint-rounding
+  (doseq [left [2014.16 -2070.16 4070.16 8166.16 32742.16]]
+    (let [[lower upper] (precision/size-preserving-range left (+ left 56))]
+      (t/is (>= (- upper lower) 56))
+      (t/is (< (- (- upper lower) 56) 0.004))))
+  (let [[lower upper] (precision/size-preserving-range 2014.16 (+ 2014.16 55.99))]
+    (t/is (< (- upper lower) 56)))
+  (t/is (= [0 0] (precision/size-preserving-range 0 0)))
+  (t/is (= [20 76] (precision/size-preserving-range 20 76))))
+
+(t/deftest batch-and-incremental-bounds-preserve-the-same-size
+  (let [shape (cts/setup-shape {:type :text :x 2014.16 :y 4070.16 :width 56 :height 21})
+        data  (js/DataView. (js/ArrayBuffer. 256))
+        call  (atom nil)]
+    (#'upload/write-base-props! data 0 shape)
+    (with-redefs [wasm/internal-module #js {"_set_shape_selrect" (fn [x1 y1 x2 y2]
+                                                                   (reset! call [x1 y1 x2 y2]))}]
+      (wasm.api/set-shape-selrect (:selrect shape)))
+    (let [[x1 y1 x2 y2] @call]
+      (t/is (>= (- x2 x1) 56))
+      (t/is (>= (- y2 y1) 21))
+      (t/is (= [x1 y1 x2 y2]
+               (mapv #(.getFloat32 data % true) [72 76 80 84]))))))
 
 (defn- with-ffi-stubs*
   "Stubs the single-arity FFI boundary fns (`flush-shapes-batch!`,

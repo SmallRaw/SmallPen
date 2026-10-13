@@ -1,3 +1,4 @@
+import { pngPixels } from "./png-pixels.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -155,18 +156,6 @@ function screenNodes(values) {
   return values.get("screens/roundtrip.json").presentations[0].nodes;
 }
 
-function pngPixels(bytes, width) {
-  const chunks = [];
-  let offset = 8;
-  const buffer = Buffer.from(bytes);
-  while (offset < buffer.length) {
-    const length = buffer.readUInt32BE(offset);
-    const type = buffer.slice(offset + 4, offset + 8).toString("ascii");
-    if (type === "IDAT") chunks.push(buffer.slice(offset + 8, offset + 8 + length));
-    offset += length + 12;
-  }
-  return inflateSync(Buffer.concat(chunks));
-}
 
 function pngPixel(bytes, width, x, y) {
   const pixels = pngPixels(bytes, width);
@@ -622,7 +611,7 @@ test("auto-height text grows the projected bounds and shows the whole sentence",
   );
 });
 
-test("masked groups clip overflow and show-content re-exposes it", async () => {
+test("masked groups clip overflow until the mask is disabled", async () => {
   const values = await fixtureValues();
   mutateNodes(values, (nodes) => {
     nodes.node_rectangle.fills = [];
@@ -695,7 +684,7 @@ test("masked groups clip overflow and show-content re-exposes it", async () => {
 
   const revealed = await createEvidence(
     await snapshotWith(mutateNodes(values, (nodes) => {
-      nodes.node_masked_group["show-content"] = true;
+      nodes.node_masked_group["masked-group"] = false;
     })),
     { scale: 1, selector: { viewFormat: "screenshot" } },
   );
@@ -783,12 +772,12 @@ test("unsupported glyphs surface a locatable diagnostic instead of silent tofu",
       selector: { viewFormat: "screenshot" },
     });
   };
-  const emoji = await build("Greeting \u{1F600}");
+  const emoji = await build("Greeting \u{10FFFF}");
   const missingCodes = emoji.render.diagnostics.filter(
     (diagnostic) => diagnostic.code === "text_missing_glyph",
   );
   assert.equal(missingCodes.length, 1);
-  assert.match(missingCodes[0].message, /U\+1F600/);
+  assert.match(missingCodes[0].message, /U\+10FFFF/);
   assert.equal(missingCodes[0].nodeId, "node_rectangle");
   const plain = await build("Greeting");
   assert.deepEqual(plain.render.diagnostics, []);
@@ -1202,6 +1191,7 @@ test("hide-fill-on-export suppresses fill ink in the export render (SP-DES-011-B
   });
   const evidence = await createEvidence(await snapshotWith(values), {
     scale: 1,
+    forExport: true,
     selector: { viewFormat: "screenshot" },
   });
   const w = evidence.render.width;
@@ -1219,6 +1209,7 @@ test("hide-fill-on-export suppresses fill ink in the export render (SP-DES-011-B
   });
   const control = await createEvidence(await snapshotWith(controlValues), {
     scale: 1,
+    forExport: true,
     selector: { viewFormat: "screenshot" },
   });
   const controlCenter = pngPixel(control.render.bytes, w, 200, 156).slice(0, 3);

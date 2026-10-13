@@ -58,6 +58,34 @@ test("validate checks every page in every version and every component variant", 
   assert.ok(!JSON.stringify(report).includes("node_"), "no ids in the reply");
 });
 
+test("full package validation retains the same layout limits as local issues and PNG diagnostics", async () => {
+  const { path, root, file } = await app();
+  await run(["page", "draw", path, "--intent", await file("auto.json", {
+    page: "Auto sizing", width: 720, height: 300, layout: "column", padding: 24, gap: 24,
+    children: ["First", "Second"].map(name => ({ name, layout: "row", width: "fill", height: "hug",
+      children: [{ name: "Box", width: "hug", height: 24, fill: "#3957d7" }] })),
+  }), "--json"]);
+  const local = await run(["view", path, "--page", "Auto sizing", "--as", "issues", "--json", "--full"]);
+  const png = await run(["view", path, "--page", "Auto sizing", "--as", "png", "--output", join(root, "auto.png"), "--json"]);
+  const full = await run(["validate", path, "--json", "--full"]);
+  const limits = local.issues.filter(issue => issue.code === "layout_projection_partial");
+  assert.equal(limits.length, 3);
+  assert.deepEqual(full.diagnostics.map(({ target, ...diagnostic }) => diagnostic), limits);
+  assert.ok(full.diagnostics.every(diagnostic => diagnostic.target === "Auto sizing (desktop)" && diagnostic.nodeId && diagnostic.where && diagnostic.unsupportedFields.length));
+  assert.equal(png.diagnostics.find(issue => issue.code === "layout_projection_partial").count, limits.length);
+  const skipped = full.coverage.skipped.find(skip => skip.code === "layout_projection_partial");
+  assert.equal(skipped.check, "layout-reflow");
+  assert.equal(skipped.count, 3);
+  assert.equal(skipped.details.length, 3);
+  assert.ok(skipped.details.every(skip => skip.nodeId && skip.unsupportedFields.length));
+  assert.equal(full.coverage.complete, false);
+  const compact = await run(["validate", path, "--json"]);
+  assert.equal(compact.coverage.complete, false);
+  assert.equal(compact.coverage.skippedCount, full.coverage.skippedCount);
+  assert.match(compact.previewNote, /3 places/);
+  assert.ok(!JSON.stringify(compact).includes("node_"));
+});
+
 test("links and starts pick a page version and say which", async () => {
   const { path, file } = await app();
   for (const [page, platform, children] of [

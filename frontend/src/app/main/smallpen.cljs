@@ -106,6 +106,15 @@
   []
   (some? @backend-url))
 
+(defn derived-layout-options
+  "Font measurement and layout reflow do not edit Package sources or sync components."
+  [options]
+  (cond-> (or options {})
+    (enabled?)
+    (assoc :save-undo? false :ignore-touched true
+           :skip-component-sync? true :ignore-snap-pixel true
+           :derived-layout? true)))
+
 (defn desktop-runtime?
   ([]
    (desktop-runtime? (unchecked-get js/globalThis "smallpenRuntime")))
@@ -1109,7 +1118,8 @@
 (defn- commit-workspace
   [{:keys [changes commit-id revn]}]
   (if-let [changes (not-empty (->> changes
-                                   (into [] (comp (remove no-op-change?)
+                                   (into [] (comp (remove #(true? (::dps/derived-layout (meta %))))
+                                                  (remove no-op-change?)
                                                   (remove (partial decoration-change? @st/state))))
                                    (with-layout-offsets @st/state)))]
     (let [{:keys [file-id]} @workspace-state
