@@ -293,8 +293,27 @@ combination. `token set` writes Tokens by name and `token theme add|rename|defau
 delete` edit options named `Group/Option`; no IDs or token Sets are needed.
 
 `view` looks at anything by name (`--page`, `--component`, `--token`,
-`--canvas`) as text, wireframe, PNG or issues. `export` saves a wireframe or,
-with `--format png`, a PNG. Image inspection requires an image-capable caller.
+`--canvas`). Three design outputs serve different tasks:
+
+| Output | Use | Limits |
+| --- | --- | --- |
+| `view --as spec` / `export --format spec` | Implement authored constraints; inspect native bounds, Token/component sources, overrides and node diagnostics | Cannot prove visual quality or infer undeclared business rules |
+| `view --as wireframe` / `export --format wireframe` | Understand spatial structure | Character positions are approximate; read exact values in the specification |
+| `view --as png` / `export --format png` | Review high-fidelity appearance | Pixels do not expose Token bindings or fill/hug intent; inspection needs image input |
+
+`view --as text` remains a compact navigation outline. Start implementation
+with a specification of one page/component/variant, then expand an `--element`
+for font, color, border and interaction details. Actual bounds come from native
+App layout; authored constraints and provenance remain separate. `?`/`partial`
+means geometry is unavailable, with a reason, rather than a seed rectangle.
+Line counts not exposed by the native API and undeclared business rules are
+explicitly unknown. Read coverage; one selected size/state does not check others.
+
+Compare `layout.hash`, revision and selection across outputs. For an exact
+shared solve, `export --format png --evidence --output REVIEW` writes
+`REVIEW.png`, `REVIEW.spec.txt`, `REVIEW.wireframe.txt` and `REVIEW.json`.
+The fingerprint includes native geometry, themes, dependency revisions,
+rendering runtime and font/media bytes. PNG scale is independent of layout.
 `validate` checks every version of a page or variant of a component unless one
 is named. Read skipped coverage.
 

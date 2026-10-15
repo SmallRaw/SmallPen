@@ -1,10 +1,10 @@
 import {
-  createSemanticTree,
   projectDesignView,
   resolveDesignView,
   sha256Hex,
 } from "@smallpen/core";
 import { renderAppProjection } from "./render-shared.mjs";
+import { inspectProjection } from "./layout-inspection.mjs";
 
 // Rendering and measurement both use the App projector and Skia/WASM runtime.
 export const renderProjection = renderAppProjection;
@@ -38,13 +38,6 @@ export async function measureProjectionText(product, projection, options = {}) {
   return { items: result.textMetrics, diagnostics: result.diagnostics };
 }
 
-function updateBounds(node, bounds, origin) {
-  const actual = bounds[node.id];
-  if (actual)
-    node.bounds = { ...actual, x: actual.x + origin.x, y: actual.y + origin.y };
-  for (const child of node.children) updateBounds(child, bounds, origin);
-}
-
 function flattenRegions(node, scale, width, height, origin, result = []) {
   const left = Math.max(0, Math.min(width, (node.bounds.x - origin.x) * scale));
   const top = Math.max(0, Math.min(height, (node.bounds.y - origin.y) * scale));
@@ -71,23 +64,19 @@ function flattenRegions(node, scale, width, height, origin, result = []) {
 export async function createEvidence(product, options = {}) {
   const resolved = resolveDesignView(product, options);
   const projection = projectDesignView(product, resolved, options);
-  const render = await renderProjection(product, projection, options);
-  const semanticTree = createSemanticTree(product, projection, {
-    foundationRevision: options.foundation?.revision,
-    scenarioId: resolved.scenarioId,
-    selection: resolved.selection,
+  const inspection = await inspectProjection(product, projection, {
+    ...options, raster: true, selection: resolved.selection,
   });
-  const root = projection.nodes[projection.rootId];
-  const origin = {
-    x: root.x + (options.crop?.x ?? 0),
-    y: root.y + (options.crop?.y ?? 0),
-  };
-  updateBounds(semanticTree.root, render.bounds, origin);
+  const render = { ...inspection.render, diagnostics: inspection.snapshot.diagnostics };
+  const semanticTree = inspection.tree;
+  const origin = inspection.snapshot.viewport;
   return {
     projection,
     render,
     evidence: {
       diagnostics: render.diagnostics,
+      layout: inspection.snapshot,
+      snapshotId: inspection.snapshot.id,
       nodeRegions: flattenRegions(
         semanticTree.root,
         options.scale ?? 1,

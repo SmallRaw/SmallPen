@@ -100,7 +100,6 @@ import {
 } from "@smallpen/core";
 import {
   applyOperationBatch,
-  createEvidence,
   defaultLibraryCacheRoot,
   fontVariantName,
   importDraft,
@@ -115,7 +114,6 @@ import {
   readBatchHistory,
   openRemoteLibrary,
   measureProjectionText,
-  renderProjection,
   replayRecordedBatch,
   resolveWorkspace,
   sfntToWoff,
@@ -155,12 +153,13 @@ import {
   componentSummaryText,
   platformHints,
   localWireframe,
-  specTree,
+  resolveDesignLayout,
   outlineTree,
   selectedDesign,
   themeSettings,
   validateDesign,
 } from "./design-output.mjs";
+import { inspectionCoverage, inspectionReport, inspectionText } from "./inspection-output.mjs";
 import { definitionReuseAdvice } from "./reuse-advice.mjs";
 import { warningOutput } from "./warning-output.mjs";
 import {
@@ -471,6 +470,9 @@ function printJson(value) {
       "mimeType",
       "output",
       "imagePath",
+      "specPath",
+      "wireframePath",
+      "layout",
       "evidencePath",
       "matrixPath",
       "status",
@@ -626,6 +628,9 @@ function printJson(value) {
       "answersTemplate",
       "output",
       "imagePath",
+      "specPath",
+      "wireframePath",
+      "layout",
       "evidencePath",
     ]) {
       if (Buffer.byteLength(json) + 1 <= limitBytes) break;
@@ -1641,7 +1646,7 @@ function nameDiagnostics(diagnostics = [], projection) {
   const rest = [];
   for (const diagnostic of diagnostics) {
     if (diagnostic.code === "layout_projection_partial") continue;
-    if (diagnostic.code === "font_render_fallback" && !diagnostic.availableFonts) {
+    if (diagnostic.code === "font_render_fallback" && !Array.isArray(diagnostic.nodeIds)) {
       const family = diagnostic.details?.requestedFont ?? diagnostic.message;
       const entry = fallbacks.get(family);
       if (entry) {
@@ -1675,120 +1680,6 @@ function nameDiagnostics(diagnostics = [], projection) {
   });
 }
 
-// The renderer reports one font_render_fallback per text node. Collapse them
-// to one diagnostic per missing family that names the fonts it can draw and
-// the import-font command that adds the missing one.
-async function renderEvidence(product, options) {
-  const bundle = await createEvidence(product, options);
-  const fallbacks = new Map();
-  const diagnostics = [];
-  for (const diagnostic of bundle.render.diagnostics) {
-    if (diagnostic.code !== "font_render_fallback") {
-      diagnostics.push(diagnostic);
-      continue;
-    }
-    const requestedFont =
-      diagnostic.details?.requestedFont ??
-      /substituted .+ for (.+)$/.exec(diagnostic.message)?.[1] ??
-      "<family>";
-    let collapsed = fallbacks.get(requestedFont);
-    if (!collapsed) {
-      collapsed = { diagnostic, nodeIds: [], paths: [], requestedFont };
-      fallbacks.set(requestedFont, collapsed);
-      diagnostics.push(collapsed);
-    }
-    if (diagnostic.nodeId !== undefined)
-      collapsed.nodeIds.push(diagnostic.nodeId);
-    if (diagnostic.path !== undefined) collapsed.paths.push(diagnostic.path);
-  }
-  if (fallbacks.size === 0) return bundle;
-  const imported = [
-    ...new Set(
-      [options.foundation, ...(options.libraries ?? []), product]
-        .filter(Boolean)
-        .flatMap((snapshot) =>
-          snapshot.manifest.entries.assets.flatMap((entry) =>
-            (snapshot.entries[entry].fonts ?? []).map(({ family }) => family),
-          ),
-        ),
-    ),
-  ].sort(compareText);
-  const availableFonts = [
-    "Source Sans Pro (bundled)",
-    ...imported.map((family) => `${family} (imported)`),
-  ];
-  const collapsedEntries = new Set(fallbacks.values());
-  const explained = diagnostics.map((entry) => {
-    if (!collapsedEntries.has(entry)) return entry;
-    const { requestedFont } = entry;
-    return {
-      availableFonts,
-      code: entry.diagnostic.code,
-      nodeIds: entry.nodeIds,
-      details: {
-        ...entry.diagnostic.details,
-        requestedFont,
-        substituteFont:
-          entry.diagnostic.details?.substituteFont ?? "Source Sans Pro",
-      },
-      message:
-        `${entry.diagnostic.message} on ${entry.nodeIds.length} text node(s): ` +
-        `${requestedFont} is neither bundled nor imported. Available fonts: ` +
-        `${availableFonts.join(", ")}. Import ${requestedFont} with smallpen asset font import ` +
-        "(once per weight/style; see nextOperations), or use an available family.",
-      nextOperations: [
-        {
-          argv: [
-            "import-font",
-            product.locator,
-            "--file",
-            `<${requestedFont} .ttf|.otf|.woff file>`,
-            "--family",
-            requestedFont,
-            "--weight",
-            "<400|700|...>",
-            "--json",
-          ],
-          operation: "smallpen.import-font",
-        },
-      ],
-      nodeIds: entry.nodeIds,
-      paths: entry.paths,
-      requestedFont,
-    };
-  });
-  bundle.render.diagnostics = explained;
-  bundle.evidence.diagnostics = explained;
-  return bundle;
-}
-
-async function deliverImage(
-  bundle,
-  { product, foundation, libraries },
-  output,
-  includeBase64 = false,
-) {
-  return {
-    diagnostics: bundle.render.diagnostics,
-    height: bundle.render.height,
-    mimeType: bundle.render.mimeType,
-    packageId: product.manifest.packageId,
-    renderHash: bundle.render.renderHash,
-    ...workspaceRevisions(product, foundation, libraries),
-    selection: bundle.evidence.selector,
-    width: bundle.render.width,
-    ...(output === undefined
-      ? {}
-      : { output: await writeAtomic(output, bundle.render.bytes) }),
-    ...(includeBase64
-      ? { base64: Buffer.from(bundle.render.bytes).toString("base64") }
-      : {}),
-  };
-}
-
-// The generated Design System page, the same node tree the editor draws:
-// every Token Cell and representative samples of each Component Set.
-// part narrows the page: {only, tokenPrefix, componentSetIds, allVariants}.
 async function designSystemProjection(workspace, args, part) {
   const { foundation, libraries, product } = workspace;
   const runtime = await createWorkspaceRuntime(product, { foundation });
@@ -1830,25 +1721,6 @@ async function designSystemProjection(workspace, args, part) {
   return tree;
 }
 
-async function renderDesignSystem(workspace, args) {
-  const { product, foundation, libraries } = workspace;
-  const tree = await designSystemProjection(workspace, args);
-  const render = await renderProjection(product, tree, {
-    foundation,
-    libraries,
-    scale: numberOption(args, "--scale"),
-  });
-  return {
-    evidence: {
-      selector: {
-        designSystem: true,
-        locale: option(args, "--locale") ?? "en",
-      },
-    },
-    render,
-  };
-}
-
 async function designForCommand(workspace, args) {
   if (flag(args, "--design-system")) {
     const projection = await designSystemProjection(workspace, args);
@@ -1872,9 +1744,22 @@ async function designForCommand(workspace, args) {
 
 async function designCommand(packagePath, args, override) {
   const workspace = await tokenWorkspace(packagePath, args);
-  const design = override ?? (await designForCommand(workspace, args));
+  let design = override ?? (await designForCommand(workspace, args));
   const format =
     option(args, "--format") ?? (args[0] === "view" ? "outline" : "wireframe");
+  if (["spec", "wireframe", "png"].includes(format))
+    design = await resolveDesignLayout(workspace, design, {
+      raster: format === "png", scale: numberOption(args, "--scale"),
+      forExport: flag(args, "--evidence"),
+    });
+  let report;
+  if (design.layoutSnapshot) {
+    design.validation = await validateDesign(workspace, design);
+    report = inspectionReport(workspace, design, {
+      components: componentLookup(workspace), stored: storedNodesOf(workspace, design.selection),
+      full: flag(args, "--full"),
+    });
+  }
   const receipt = {
     packageId: workspace.product.manifest.packageId,
     ...workspaceRevisions(
@@ -1891,7 +1776,58 @@ async function designCommand(packagePath, args, override) {
         : design.tokenSources?.map(({ path, value }) => ({ path, value })),
     }),
     diagnostics: nameDiagnostics(design.projection.diagnostics ?? [], design.projection),
+    ...(report ? {
+      layout: { ...report.snapshot, diagnostics: undefined, diagnosticCount: report.snapshot.diagnostics.length },
+      coverage: flag(args, "--full") ? report.coverage : inspectionCoverage(report.coverage),
+      issueCount: report.issues.length,
+      ...(flag(args, "--full") ? { inspection: report } : {}),
+    } : {}),
   };
+  if (flag(args, "--evidence")) {
+    const prefix = option(args, "--output");
+    if (flag(args, "--base64") && !prefix) return {
+      ...receipt, renderHash: design.render.renderHash, semanticTree: design.tree,
+      specification: inspectionText(report), wireframe: localWireframe(design),
+      image: { imageBase64: Buffer.from(design.render.bytes).toString("base64"),
+        ...workspaceRevisions(workspace.product, workspace.foundation, workspace.libraries),
+        width: design.render.width, height: design.render.height,
+        mimeType: "image/png", renderHash: design.render.renderHash },
+    };
+    const path = (kind, extension) => prefix ? `${prefix}${kind ? `.${kind}` : ""}.${extension}` : artifactPath(kind || "render", extension);
+    const imagePath = await writeAtomic(path("", "png"), design.render.bytes);
+    const specPath = await writeAtomic(path("spec", "txt"), inspectionText(report));
+    const wireframePath = await writeAtomic(path("wireframe", "txt"), localWireframe(design));
+    const regions = [];
+    const viewport = design.layoutSnapshot.viewport;
+    const scale = numberOption(args, "--scale") ?? 1;
+    const regionsOf = node => {
+      if (node.bounds) {
+        const left = Math.max(0, Math.min(design.render.width, (node.bounds.x - viewport.x) * scale));
+        const top = Math.max(0, Math.min(design.render.height, (node.bounds.y - viewport.y) * scale));
+        const right = Math.max(0, Math.min(design.render.width, (node.bounds.x + node.bounds.width - viewport.x) * scale));
+        const bottom = Math.max(0, Math.min(design.render.height, (node.bounds.y + node.bounds.height - viewport.y) * scale));
+        regions.push({ nodeId: node.id, x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) });
+      }
+      node.children.forEach(regionsOf);
+    };
+    regionsOf(design.tree.root);
+    const evidencePath = await writeAtomic(prefix ? `${prefix}.json` : artifactPath("evidence", "json"), canonicalJSON({
+      ...report, semanticTree: { ...design.tree, selection: design.selection }, renderHash: design.render.renderHash,
+      packageId: workspace.product.manifest.packageId,
+      packageHash: workspace.foundation
+        ? createHash("sha256").update(`${workspace.product.revision}\0${workspace.foundation.revision}`).digest("hex")
+        : workspace.product.revision,
+      ...workspaceRevisions(workspace.product, workspace.foundation, workspace.libraries),
+      renderer: design.layoutSnapshot.renderer, kernelHash: design.layoutSnapshot.kernelHash,
+      selector: design.selection,
+      snapshotId: design.layoutSnapshot.id, nodeRegions: regions,
+      viewport: { width: design.render.width, height: design.render.height, scale },
+    }));
+    return { ...receipt, imagePath, specPath, wireframePath, evidencePath,
+      renderHash: design.render.renderHash, width: design.render.width, height: design.render.height,
+      ...(flag(args, "--base64") ? { imageBase64: Buffer.from(design.render.bytes).toString("base64") } : {}),
+    };
+  }
   const hints = platformHints(workspace, design);
   if (hints.length) receipt.hints = hints;
   const textLayout = {
@@ -1951,12 +1887,7 @@ async function designCommand(packagePath, args, override) {
       format === "wireframe"
         ? localWireframe(design, { full: flag(args, "--full") })
         : format === "spec"
-          ? specTree(design.tree, design.projection, {
-              components,
-              tokenName: tokenNamer(workspace),
-              stored: storedNodesOf(workspace, design.selection),
-              heading: `Spec · px, x/y from the top-left of ${design.tree.root.name} · themes ${themeSettings(workspace).selection.themes.join(", ") || "defaults"} · {path} = Token`,
-            })
+          ? inspectionText(report, { details: flag(args, "--full") || Boolean(design.selection.nodeId) })
           : outline;
     const lines = text.split("\n");
     // A page outline reads whole; long ones page at 80 lines.
@@ -1996,11 +1927,7 @@ async function designCommand(packagePath, args, override) {
     };
   }
   if (format === "png") {
-    const render = await renderProjection(
-      workspace.product,
-      design.renderProjection ?? design.projection,
-      { ...workspace, crop: design.crop, scale: numberOption(args, "--scale") },
-    );
+    const render = design.render;
     const output = await writeAtomic(
       option(args, "--output") ?? artifactPath("render", "png"),
       render.bytes,
@@ -2021,7 +1948,7 @@ async function designCommand(packagePath, args, override) {
         ? { imageBase64: Buffer.from(render.bytes).toString("base64") }
         : {}),
       diagnostics: nameDiagnostics(
-        render.diagnostics.filter(
+        design.layoutSnapshot.diagnostics.filter(
           (diagnostic) =>
             diagnostic.code !== "layout_projection_partial" ||
             relevant.has(diagnostic.nodeId),
@@ -2030,7 +1957,8 @@ async function designCommand(packagePath, args, override) {
       ),
     };
   }
-  const text = `${JSON.stringify(receipt)}\n\n${format === "wireframe" ? localWireframe(design) : outline}\n`;
+  const text = format === "spec" ? `${inspectionText(report, { details: flag(args, "--full") || Boolean(design.selection.nodeId) })}\n`
+    : `${JSON.stringify(receipt)}\n\n${format === "wireframe" ? localWireframe(design) : outline}\n`;
   const output = await writeAtomic(
     option(args, "--output") ?? artifactPath(format, "txt"),
     text,
@@ -2103,88 +2031,6 @@ function designArgs(args) {
     else if (args[index] === "--design-system") result.push(args[index]);
   }
   return [...result, "--json"];
-}
-
-async function renderCommand(packagePath, args, evidenceOnly) {
-  const workspace = await tokenWorkspace(packagePath, args);
-  const { foundation, libraries, product } = workspace;
-  if (!evidenceOnly && flag(args, "--design-system")) {
-    const bundle = await renderDesignSystem(workspace, args);
-    const inline = flag(args, "--base64");
-    const output =
-      option(args, "--output") ??
-      (inline ? undefined : artifactPath("render", "png"));
-    return deliverImage(
-      bundle,
-      workspace,
-      output,
-      (inline && output === undefined) || flag(args, "--base64"),
-    );
-  }
-  const bundle = await renderEvidence(product, {
-    foundation,
-    libraries,
-    scale: numberOption(args, "--scale"),
-    selector: designSelector(args, "screenshot"),
-    forExport: true,
-  });
-  const full = flag(args, "--full");
-  const inline = flag(args, "--base64");
-  const output =
-    option(args, "--output") ??
-    (inline ? undefined : artifactPath("render", "png"));
-  const evidenceJson = evidenceOnly
-    ? canonicalJSON({
-        ...bundle.evidence,
-        ...workspaceRevisions(product, foundation, libraries),
-      })
-    : undefined;
-  if (evidenceOnly && !inline) {
-    const prefix = option(args, "--output");
-    const imagePath = await writeAtomic(
-      prefix === undefined ? output : `${prefix}.png`,
-      bundle.render.bytes,
-    );
-    const evidencePath = await writeAtomic(
-      prefix === undefined
-        ? artifactPath("evidence", "json")
-        : `${prefix}.json`,
-      evidenceJson,
-    );
-    return {
-      ...(full ? bundle.evidence : {}),
-      diagnostics: nameDiagnostics(bundle.render.diagnostics, bundle.projection),
-      renderHash: bundle.render.renderHash,
-      selection: bundle.evidence.selector,
-      packageId: product.manifest.packageId,
-      ...workspaceRevisions(product, foundation, libraries),
-      evidencePath,
-      imagePath,
-    };
-  }
-  if (evidenceOnly && output !== undefined) {
-    const imagePath = await writeAtomic(`${output}.png`, bundle.render.bytes);
-    const evidencePath = await writeAtomic(`${output}.json`, evidenceJson);
-    return {
-      ...bundle.evidence,
-      ...workspaceRevisions(product, foundation, libraries),
-      imagePath,
-      evidencePath,
-    };
-  }
-  const image = await deliverImage(
-    bundle,
-    workspace,
-    output,
-    (output === undefined && inline) || flag(args, "--base64"),
-  );
-  return evidenceOnly
-    ? {
-        ...bundle.evidence,
-        ...workspaceRevisions(product, foundation, libraries),
-        image,
-      }
-    : image;
 }
 
 function tokenImpact(snapshot, tokenId, packageId) {
@@ -3104,6 +2950,8 @@ async function lookCommand(packagePath, args) {
       "too_many_view_targets",
       "Look at one thing per call: --page, --component, --token, --tokens, --components or --pages",
     );
+  if (as === "spec" && page === undefined && component === undefined)
+    throw new SmallPenError("missing_spec_target", "Choose one --page or --component for its specification; use --as text to navigate first");
   const needs = (name, parents, text) => {
     if (option(args, name) !== undefined && !parents.some((parent) => args.includes(parent)))
       throw new SmallPenError("incomplete_view_target", `${name} ${text}`);
@@ -3881,14 +3729,6 @@ function storedNodesOf(workspace, selection = {}) {
   return {};
 }
 
-// Token id -> name across the workspace, for specs.
-function tokenNamer(workspace) {
-  const names = new Map();
-  for (const snapshot of [workspace.product, workspace.foundation, ...(workspace.libraries ?? [])].filter(Boolean))
-    for (const token of snapshot.domain.tokens.values()) if (!names.has(token.id)) names.set(token.id, token.path);
-  return (reference) => names.get(reference?.assetId ?? reference);
-}
-
 // --token: one Token by name, or every Token under a name ("color").
 function tokenNamed(path, wanted) {
   if (wanted === undefined) return true;
@@ -4364,16 +4204,7 @@ async function main(args) {
   if (command === "export" && flag(args, "--evidence")) {
     if (option(args, "--format") !== "png")
       throw new SmallPenError("missing_png_format", "--evidence requires --format png");
-    const translated = ["export", packagePath];
-    for (let i = 2; i < args.length; i++) {
-      if (args[i] === "--evidence") continue;
-      if (args[i] === "--format") {
-        i++;
-        continue;
-      }
-      translated.push(args[i]);
-    }
-    printJson(await renderCommand(packagePath, translated, true));
+    printJson(await designCommand(packagePath, args));
     return;
   }
 

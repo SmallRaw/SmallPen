@@ -62,8 +62,11 @@ test("alias positive control resolves through base without rewriting the source"
   const alias = resolveEffectiveToken(snapshot, {
     assetId: "tok_alias_demo_radius",
     packageId: "pkg_design_system",
-  });
+  }, { traceSources: true });
   assert.equal(alias.value, 8);
+  assert.equal(alias.aliasChain.length, 2);
+  assert.equal(alias.aliasChain.at(-1).path, "base");
+  assert.equal(alias.aliasChain[0].tokenId, "tok_alias_demo_radius");
   // The alias token keeps its expression; resolution never overwrites it.
   const library = (await fixtureValues()).get("tokens/tokens.json");
   const aliasToken = library.sets

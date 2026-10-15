@@ -535,15 +535,14 @@ test("a page checks every version and layout gaps are never silently approved", 
   const before = await stored(path);
   const brief = await run(["validate", path, "--page", "Home"]);
   assert.equal(brief.coverage.targetCount, 2, "both versions are checked");
-  // Sizes the preview cannot compute read as one note.
-  assert.match(brief.previewNote, /cannot compute some automatic sizes/);
+  assert.equal(brief.previewNote, undefined, "native layout solves grids instead of reporting JS projection limits");
   const report = await run(["validate", path, "--page", "Home", "--full"]);
   assert.deepEqual(
     report.coverage.targets.map((t) => t.presentationId),
     [screen.basePresentationId, "pres_wide"],
   );
   assert.ok(
-    report.coverage.skipped.some(
+    !report.coverage.skipped.some(
       (item) => item.code === "layout_projection_partial",
     ),
   );

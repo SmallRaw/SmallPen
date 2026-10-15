@@ -2,7 +2,7 @@ import { pngPixels } from "./png-pixels.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -12,6 +12,38 @@ import { INIT_ANSWERS_EXAMPLE } from "../apps/cli/bin/schema.mjs";
 import { componentSummary } from "../apps/cli/bin/design-output.mjs";
 
 const cli = new URL("../apps/cli/bin/smallpen.mjs", import.meta.url);
+
+test("one review export gives AI specifications, wireframe and PNG with one native layout fingerprint", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "smallpen-layout-export-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const fixture = new URL("fixtures/roundtrip.smallpen", import.meta.url).pathname;
+  const before = (await openPackage(fixture)).revision;
+  const bundle = await run(["export", fixture, "--page", "Round Trip", "--format", "png", "--evidence",
+    "--output", join(root, "review"), "--json"]);
+  const evidence = JSON.parse(await readFile(bundle.evidencePath, "utf8"));
+  const spec = await readFile(bundle.specPath, "utf8");
+  const wireframe = await readFile(bundle.wireframePath, "utf8");
+  const image = await readFile(bundle.imagePath);
+  assert.equal(evidence.snapshot.hash, bundle.layout.hash);
+  assert.ok(spec.includes(`Snapshot: ${bundle.layout.hash}`));
+  assert.ok(wireframe.includes(`Snapshot: ${bundle.layout.hash}`));
+  assert.equal(evidence.nodes.find(node => node.name === "Editable Rectangle").geometry.bounds.x, 80);
+  assert.equal(image.readUInt32BE(16), 800);
+  const standalone = await run(["view", fixture, "--page", "Round Trip", "--as", "spec", "--json"]);
+  assert.equal(standalone.layout.hash, bundle.layout.hash);
+  assert.equal((await openPackage(fixture)).revision, before);
+  const componentFixture = new URL("fixtures/variant-acme.smallpen", import.meta.url).pathname;
+  const componentProduct = await openPackage(componentFixture);
+  const set = [...componentProduct.domain.componentSets.values()][0];
+  const selected = set.variants[0];
+  const variant = set.axes.map(axis => `${axis.name}=${selected.selection[axis.id]}`).join(",");
+  const component = await run(["export", componentFixture, "--component", set.name,
+    ...(variant ? ["--variant", variant] : []), "--format", "png", "--evidence", "--output", join(root, "component"), "--json"]);
+  const componentEvidence = JSON.parse(await readFile(component.evidencePath, "utf8"));
+  assert.equal(componentEvidence.nodes[0].source.role, "definition");
+  assert.equal(componentEvidence.nodes[0].source.name, set.name);
+  assert.ok((await readFile(component.specPath, "utf8")).includes(`Snapshot: ${component.layout.hash}`));
+});
 
 test("component summaries compare actual fields across variants with different node IDs", () => {
   const variant = (suffix, color) => ({

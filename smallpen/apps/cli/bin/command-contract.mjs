@@ -111,7 +111,7 @@ const PARAMETERS = {
   contexts: path("--contexts", "JSON file containing render-matrix selectors"),
   evidence: flag(
     "--evidence",
-    "Export PNG and its review evidence; requires --format png",
+    "Export PNG, specification, wireframe and JSON evidence from one native layout; requires --format png",
   ),
   designSystem: flag(
     "--design-system",
@@ -152,7 +152,7 @@ const PARAMETERS = {
   mediaName: parameter("--media", "string", "Media file name, as Group/Name"),
   fontFamily: parameter("--font", "string", "Font family name"),
   removeStart: flag("--remove", "Stop the page being a start"),
-  as: parameter("--as", "string", "What to return: text (default), wireframe, png, issues, or spec (detailed positions, sizes, layout, visual values and Token bindings)", {
+  as: parameter("--as", "string", "Three design outputs: spec for implementation and sources; wireframe for structure; png for appearance. text (default) navigates; issues checks. Compare layout.hash", {
     values: ["text", "wireframe", "png", "issues", "spec"],
     errorCode: "unknown_view_as",
   }),
@@ -327,16 +327,16 @@ const PARAMETERS = {
   designFormat: parameter(
     "--format",
     "string",
-    "Resolved design representation",
+    "Design output: spec for implementation and provenance, wireframe for structure, png for appearance",
     {
       default: "outline",
       values: ["outline", "wireframe", "spec", "structure", "semantic"],
       errorCode: "unknown_view_format",
     },
   ),
-  artifactFormat: parameter("--format", "string", "Export artifact", {
+  artifactFormat: parameter("--format", "string", "spec implements and traces sources; wireframe shows structure; png reviews appearance; text is a navigation outline", {
     default: "wireframe",
-    values: ["text", "wireframe", "png"],
+    values: ["text", "spec", "wireframe", "png"],
     errorCode: "unknown_export_format",
   }),
   warningDetail: parameter(
@@ -438,7 +438,7 @@ export const COMMAND_CONTRACTS = {
     ["since", "limit"],
   ),
   view: command(
-    "Look at anything by name: the package, every or one page, component, variant, element or Tokens, as text, wireframe, png or issues",
+    "Look by name: spec for implementation, wireframe for structure, PNG for appearance; text navigates, issues checks",
     [
       "as",
       "canvas",
@@ -461,7 +461,7 @@ export const COMMAND_CONTRACTS = {
     { conflicts: { designSystem: ["page", "component", "canvas", "token", "allTokens", "allComponents", "allPages"] } },
   ),
   export: command(
-    "Export a page, component or the design system page as a text wireframe or PNG file, by name",
+    "Export specification, wireframe or PNG by name; --format png --evidence exports all three from one layout",
     [
       ...TARGET,
       ...VIEW,
@@ -475,7 +475,6 @@ export const COMMAND_CONTRACTS = {
     ],
     {
       conflicts: {
-        evidence: ["component", "variant", "designSystem", "locale"],
         designSystem: ["page", "component"],
       },
       requires: [

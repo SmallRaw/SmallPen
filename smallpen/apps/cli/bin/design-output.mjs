@@ -13,7 +13,46 @@ import {
   SmallPenError,
   tokenLibraryOf,
 } from "@smallpen/core";
-import { measureProjectionText } from "@smallpen/local-package";
+import { inspectProjection } from "@smallpen/local-package";
+
+export async function resolveDesignLayout(workspace, design, options = {}) {
+  if (design.layoutSnapshot && (!options.raster || design.render?.bytes?.length)) return design;
+  const result = await inspectProjection(workspace.product, design.renderProjection ?? design.projection, {
+    ...workspace, ...options, selection: design.selection, nodeId: design.tree.root.id,
+  });
+  const tree = structuredClone(design.tree);
+  const update = node => {
+    node.bounds = result.snapshot.nodes[node.id]?.bounds ?? null;
+    node.visible = result.snapshot.nodes[node.id]?.visible ?? node.visible;
+    node.children.forEach(update);
+  };
+  update(tree.root);
+  const nodes = Object.fromEntries(Object.entries(design.projection.nodes).map(([id, node]) => {
+    const bounds = result.snapshot.nodes[id]?.layoutBox;
+    return [id, bounds ? { ...node, width: bounds.width, height: bounds.height } : node];
+  }));
+  const relevant = new Set([...Object.keys(design.projection.nodes), ...(design.ancestors ?? []).map(node => node.id)]);
+  const imported = [...new Set([workspace.product, workspace.foundation, ...(workspace.libraries ?? [])]
+    .filter(Boolean).flatMap(owner => owner.manifest.entries.assets.flatMap(entry =>
+      (owner.entries[entry].fonts ?? []).map(font => font.family))))].sort();
+  const snapshot = { ...result.snapshot, diagnostics: result.snapshot.diagnostics.filter(issue =>
+    !issue.nodeId || relevant.has(issue.nodeId)).map(issue => {
+      if (issue.code !== "font_render_fallback") return issue;
+      const requestedFont = issue.details.requestedFont;
+      const availableFonts = ["Source Sans Pro (bundled)", ...imported.map(name => `${name} (imported)`)];
+      return { ...issue, requestedFont, availableFonts,
+        message: `${issue.message}. Available fonts: ${availableFonts.join(", ")}. Import with smallpen asset font import, or use an available family.`,
+        nextOperations: [{ operation: "smallpen.import-font", argv: ["import-font", workspace.product.locator,
+          "--file", `<${requestedFont} .ttf|.otf|.woff file>`, "--family", requestedFont, "--weight", "<400|700|...>", "--json"] }],
+      };
+    }) };
+  return {
+    ...design, tree, ancestors: design.ancestors ?? [], authoredProjection: design.authoredProjection ?? design.projection,
+    projection: { ...design.projection, nodes,
+      diagnostics: snapshot.diagnostics },
+    layoutSnapshot: snapshot, render: result.render,
+  };
+}
 
 export function themeSettings(workspace, { full = false } = {}) {
   const { product, foundation } = workspace;
@@ -509,159 +548,6 @@ export function outlineTree(tree, projection, { full = false, components, ids = 
   return lines.join("\n");
 }
 
-// Detailed design values: one line per element with its place (x,y from
-// the top-left of the page or component), size and how it is sized, its
-// layout, and every visual value with the Token it follows ({path}) or as
-// a literal. Copies of a component name the component, variant and what
-// they change; the component's own spec is view --component NAME --as spec.
-export function specTree(tree, projection, { components, tokenName, heading, stored = {} } = {}) {
-  const lines = heading ? [heading] : [];
-  const origin = tree.root.bounds;
-  const round = (value) => Math.round(Number(value) * 100) / 100;
-  const tokenOf = (raw, ...fields) => {
-    const applied = appliedTokenFields(raw.appliedTokens);
-    for (const field of fields) {
-      const reference = raw.tokenBindings?.[field];
-      if (reference) return `{${tokenName(reference) ?? "unknown Token"}}`;
-      if (applied[field]) return `{${applied[field]}}`;
-    }
-    return "";
-  };
-  const withToken = (value, token) => (token ? `${value} ${token}` : String(value));
-  const paint = (list) => {
-    const first = Array.isArray(list) ? list.find((item) => item && item.hidden !== true) : undefined;
-    if (!first) return undefined;
-    const color = first.color ?? first.type ?? "paint";
-    const opacity = first.opacity !== undefined && first.opacity < 1 ? ` ${Math.round(first.opacity * 100)}%` : "";
-    return `${color}${opacity}`;
-  };
-  const sizing = (raw, node) => {
-    const word = (mode) => (mode === "fill" ? "fill" : mode === "auto" ? "hug" : undefined);
-    const width = node.type === "TEXT" && raw.growType === "auto-width" ? "hug" : word(raw["layout-item-h-sizing"]);
-    const height = node.type === "TEXT" && ["auto-width", "auto-height"].includes(raw.growType) ? "hug" : word(raw["layout-item-v-sizing"]);
-    const parts = [width && `width ${width}`, height && `height ${height}`].filter(Boolean);
-    return parts.length ? ` (${parts.join(", ")})` : "";
-  };
-  const box = (raw) => {
-    const parts = [];
-    if (raw.layout === "flex") {
-      const direction = raw["layout-flex-dir"]?.startsWith("column") ? "column" : "row";
-      parts.push(direction);
-      const gap = raw["layout-gap"];
-      const gapValue = direction === "column" ? gap?.["row-gap"] ?? gap?.["column-gap"] : gap?.["column-gap"] ?? gap?.["row-gap"];
-      if (gapValue) parts.push(`gap ${withToken(round(gapValue), tokenOf(raw, "itemSpacing", direction === "column" ? "rowGap" : "columnGap"))}`);
-      const pad = raw["layout-padding"];
-      if (pad && [pad.p1, pad.p2, pad.p3, pad.p4].some((value) => Number(value))) {
-        const sides = [pad.p1, pad.p2, pad.p3, pad.p4].map((value) => round(value ?? 0));
-        const tokens = ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"].map((field) => tokenOf(raw, field));
-        const same = sides.every((value) => value === sides[0]) && tokens.every((token) => token === tokens[0]);
-        parts.push(same ? `padding ${withToken(sides[0], tokens[0])}` : `padding ${sides.map((value, index) => withToken(value, tokens[index])).join(" ")}`);
-      }
-      if (raw["layout-align-items"]) parts.push(`align ${raw["layout-align-items"]}`);
-      if (raw["layout-justify-content"]) parts.push(`justify ${raw["layout-justify-content"]}`);
-      if (raw["layout-wrap-type"] === "wrap") parts.push("wrap");
-    } else if (raw.layout) parts.push(`${raw.layout} layout`);
-    return parts;
-  };
-  const visuals = (raw) => {
-    const parts = [];
-    const isText = raw.type === "TEXT";
-    const fill = paint(raw.fills);
-    if (fill) parts.push(`${isText ? "color" : "fill"} ${withToken(fill, tokenOf(raw, "fill", "fills.0"))}`);
-    const stroke = Array.isArray(raw.strokes) ? raw.strokes.find((item) => item && item.hidden !== true) : undefined;
-    if (stroke) {
-      const sides = ["Top", "Right", "Bottom", "Left"].map((side) => stroke[`width${side}`]);
-      const width = sides.every((value) => value !== undefined) && !sides.every((value) => value === sides[0])
-        ? sides.map((value) => `${round(value)}`).join(" ")
-        : `${round(stroke.width ?? 1)}`;
-      parts.push(`stroke ${withToken(`${width}px ${paint([stroke])}${stroke.style && stroke.style !== "solid" ? ` ${stroke.style}` : ""}${stroke.alignment ? ` ${stroke.alignment}` : ""}`, tokenOf(raw, "stroke", "strokes.0"))}`);
-    }
-    if (Array.isArray(raw.cornerRadius) ? raw.cornerRadius.some(Number) : Number(raw.cornerRadius)) {
-      const corners = Array.isArray(raw.cornerRadius) ? raw.cornerRadius.map(round).join(" ") : round(raw.cornerRadius);
-      parts.push(`radius ${withToken(corners, tokenOf(raw, "cornerRadius", "radiusTopLeft"))}`);
-    }
-    if (raw.opacity !== undefined && raw.opacity < 1) parts.push(`opacity ${withToken(round(raw.opacity), tokenOf(raw, "opacity"))}`);
-    const shadows = (Array.isArray(raw.shadow) ? raw.shadow : raw.shadow ? [raw.shadow] : []).filter((item) => item && item.hidden !== true);
-    if (shadows.length)
-      parts.push(`shadow ${withToken(shadows.map((item) => `${round(item["offset-x"] ?? item.offsetX ?? 0)} ${round(item["offset-y"] ?? item.offsetY ?? 0)} ${round(item.blur ?? 0)} ${round(item.spread ?? 0)} ${paint([item.color ?? {}]) ?? item.color?.color ?? ""}`).join(", "), tokenOf(raw, "shadow"))}`);
-    if (raw.rotation) parts.push(`rotation ${round(raw.rotation)}°`);
-    for (const [key, field, word] of [["layout-item-min-w", "minWidth", "min width"], ["layout-item-max-w", "maxWidth", "max width"], ["layout-item-min-h", "minHeight", "min height"], ["layout-item-max-h", "maxHeight", "max height"]])
-      if (raw[key] !== undefined) parts.push(`${word} ${withToken(round(raw[key]), tokenOf(raw, field))}`);
-    const margin = raw["layout-item-margin"];
-    if (margin && [margin.m1, margin.m2, margin.m3, margin.m4].some(Number))
-      parts.push(`margin ${[margin.m1, margin.m2, margin.m3, margin.m4].map((value) => round(value ?? 0)).join(" ")}`);
-    return parts;
-  };
-  const typeSpec = (raw) => {
-    const style = raw.textStyle ?? {};
-    const typography = tokenOf(raw, "typography");
-    const parts = [];
-    const font = [style.fontFamily, style.fontSize !== undefined ? `${round(style.fontSize)}${style.lineHeight !== undefined ? `/${round(style.lineHeight)}` : ""}` : undefined, style.fontWeight !== undefined ? `weight ${style.fontWeight}` : undefined].filter(Boolean).join(" ");
-    // Unset text styles use the App's defaults.
-    parts.push(`font ${font ? withToken(font, typography) : "default"}`);
-    if (!paint(raw.fills)) parts.push("color default");
-    for (const [key, field, word] of [["fontFamily", "fontFamily", "family"], ["fontSize", "fontSize", "size"], ["fontWeight", "fontWeight", "weight"], ["lineHeight", "lineHeight", "line height"]]) {
-      const token = typography ? "" : tokenOf(raw, field);
-      if (token && style[key] !== undefined) parts.push(`${word} ${token}`);
-    }
-    if (style.letterSpacing) parts.push(`letter spacing ${withToken(round(style.letterSpacing), tokenOf(raw, "letterSpacing"))}`);
-    if (style.textAlign && style.textAlign !== "left") parts.push(`align ${style.textAlign}`);
-    if (style.textTransform && style.textTransform !== "none") parts.push(`case ${style.textTransform}`);
-    if (style.textDecoration && style.textDecoration !== "none") parts.push(style.textDecoration);
-    return parts;
-  };
-  const place = (node) => `at ${Math.round(node.bounds.x - origin.x)},${Math.round(node.bounds.y - origin.y)} · ${Math.round(node.bounds.width)}×${Math.round(node.bounds.height)}`;
-  const overrideLines = (raw, set) => {
-    const overrides = (stored[raw.id] ?? raw).instance?.overrides ?? {};
-    const variant = set?.variants.find((candidate) => Object.entries(raw.instance?.variant ?? {}).every(([axis, value]) => candidate.selection?.[axis] === value)) ?? set?.variants[0];
-    const nameOf = (id) => variant?.nodes?.[id]?.name ?? set?.variants.map((candidate) => candidate.nodes?.[id]?.name).find(Boolean) ?? id;
-    const parts = [];
-    for (const [key, value] of Object.entries(overrides)) {
-      const at = key.lastIndexOf(":");
-      const element = nameOf(key.slice(0, at)), field = key.slice(at + 1);
-      if (field === "tokenBindings") {
-        for (const [binding, reference] of Object.entries(value ?? {})) if (reference) parts.push(`${element} ${binding} {${tokenName(reference) ?? "unknown Token"}}`);
-      } else if (field === "text") parts.push(`${element} text ${JSON.stringify(String(value))}`);
-      else if (field === "fills" || field === "strokes") parts.push(`${element} ${field === "fills" ? "fill" : "stroke"} ${paint(value) ?? "none"}`);
-      else if (field === "variant") parts.push(`${element} variant ${Object.values(value ?? {}).join(", ")}`);
-      else if (field === "textStyle") parts.push(`${element} text style ${Object.entries(value ?? {}).filter(([name]) => !/Id$/.test(name)).map(([name, part]) => `${name} ${part}`).join(", ")}`);
-      else parts.push(`${element} ${field} ${typeof value === "object" ? JSON.stringify(value) : value}`);
-    }
-    return parts;
-  };
-  const visit = (node, depth) => {
-    if (!node.visible) return;
-    const raw = projection.nodes[node.id];
-    const reference = instanceReference(node, projection);
-    const indent = "  ".repeat(depth);
-    if (reference && node !== tree.root) {
-      const set = components?.(reference);
-      const pairs = variantPairs(node.variant ?? raw.instance?.variant, set).map(([, text]) => text);
-      const changes = overrideLines(raw, set);
-      const texts = descendantTexts(node, projection);
-      lines.push(`${indent}${node.name} · copy of ${set?.name ?? "a component"}${pairs.length ? ` (${pairs.join(", ")})` : ""} · ${place(node)}${sizing(raw, node)}${texts.length ? ` · texts ${texts.map((text) => JSON.stringify(text)).join(", ")}` : ""}${changes.length ? ` · changes ${changes.join("; ")}` : ""}`);
-      return;
-    }
-    const parts = [
-      `${node.name} · ${node.type === "TEXT" ? "text" : node.type.toLowerCase()} · ${place(node)}${sizing(raw, node)}`,
-      ...box(raw),
-      ...visuals(raw),
-      ...(node.type === "TEXT" ? typeSpec(raw) : []),
-    ];
-    if (node.type === "TEXT") {
-      const token = tokenOf(raw, "text");
-      parts.push(`text ${token ? `${token} ` : ""}${JSON.stringify(String(node.text ?? raw.text ?? ""))}`);
-    }
-    lines.push(`${indent}${parts.join(" · ")}`);
-    const direction = raw.layout === "flex" ? raw["layout-flex-dir"] ?? "row" : null;
-    const stored = node.children.filter(({ visible }) => visible);
-    const children = direction && !direction.endsWith("reverse") ? [...stored].reverse() : stored;
-    for (const child of children) visit(child, depth + 1);
-  };
-  visit(tree.root, 0);
-  return lines.join("\n");
-}
-
 export function localWireframe(design, { full = false } = {}) {
   const collapse = (node) => ({
     ...node,
@@ -670,8 +556,17 @@ export function localWireframe(design, { full = false } = {}) {
       node !== design.tree.root &&
       instanceReference(node, design.projection)
         ? []
-        : node.children.filter(({ visible }) => visible).map(collapse),
+        : node.children.filter(({ visible }) => design.layoutSnapshot || visible).map(collapse),
   });
+  if (design.layoutSnapshot) {
+    const snapshot = design.layoutSnapshot;
+    const header = `Geometry: ${snapshot.status} · renderer: ${snapshot.renderer} · revision: ${snapshot.revision}\nSnapshot: ${snapshot.id}\nWireframe: spatial orientation only; use spec for constraints and PNG for appearance.\n`;
+    const unknown = Object.entries(snapshot.nodes).filter(([, value]) => !value.bounds);
+    if (unknown.length)
+      return `${header}No spatial drawing: native geometry is incomplete.\n${unknown.map(([id, value]) => `${design.projection.nodes[id]?.name ?? "Element"}: x=? y=? width=? height=? · partial (${value.reason})`).join("\n")}`;
+    return header + asciiWireframe({ ...design.tree, root: collapse(design.tree.root) })
+      .replace("view --as text lists exact sizes", "view --as spec lists native bounds and authored constraints");
+  }
   return asciiWireframe({ ...design.tree, root: collapse(design.tree.root) });
 }
 
@@ -747,6 +642,17 @@ export function platformHints(workspace, design) {
 }
 
 export async function validateDesign(workspace, design) {
+  design = await resolveDesignLayout(workspace, design);
+  if (design.layoutSnapshot.status !== "resolved") {
+    const issues = design.layoutSnapshot.diagnostics.map(issue => ({ ...issue, severity: "warning" }));
+    const visibleCount = node => node.visible ? 1 + node.children.reduce((sum, child) => sum + visibleCount(child), 0) : 0;
+    return {
+      issues, issueCount: issues.length,
+      coverage: { complete: false, nodeCount: Object.keys(design.projection.nodes).length,
+        visibleNodeCount: visibleCount(design.tree.root), checks: [], skipped: [{ check: "native-layout",
+          reason: "Actual geometry is incomplete; seed bounds are not checked" }] },
+    };
+  }
   const issues = (design.projection.diagnostics ?? []).map((diagnostic) => ({
       ...diagnostic,
       severity: "warning",
@@ -768,16 +674,10 @@ export async function validateDesign(workspace, design) {
       check: "visual",
       reason: "The selected node is hidden by itself or an ancestor",
     });
-  const metrics = await measureProjectionText(
-    workspace.product,
-    {
-      ...design.projection,
-      nodes: Object.fromEntries(
-        Object.entries(nodes).filter(([id]) => visibleIds.has(id)),
-      ),
-    },
-    workspace,
-  );
+  const metrics = {
+    items: design.render.textMetrics.filter(item => visibleIds.has(item.nodeId)),
+    diagnostics: design.layoutSnapshot.diagnostics,
+  };
   for (const item of metrics.items) {
     const node = nodes[item.nodeId];
     if (item.missingGlyphs.length) {

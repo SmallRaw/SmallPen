@@ -141,7 +141,12 @@ use instance overrides to change one placement's text or other supported fields.
 
 `view` names its target: nothing for the whole package, `--page`, `--component`,
 `--token`, `--canvas`, with `--platform`, `--variant` and `--element` to narrow
-it. `--as text` (default), `wireframe`, `png` or `issues` picks the form.
+it. `--as text` (default) navigates. Three design outputs serve different tasks:
+`spec` supplies implementation constraints, native geometry and field-level
+Token/component provenance; `wireframe` shows spatial structure; `png` shows
+high-fidelity appearance. `issues` checks layout, text and contrast. Expand an
+`--element` for font, color, border, instance override and declared interaction
+details. Preserve fill/hug constraints rather than hard-coding computed pixels.
 
 `validate` takes the same names. A page checks every version and a component
 every variant unless `--platform` or `--variant` names one; it never
@@ -150,14 +155,18 @@ enumerates theme combinations. Pagination limits findings, not checked scope. Re
 Unsupported layout modes and renderer limitations are reported explicitly.
 
 `export` defaults to a text wireframe, including with `--full`. Choose
-`--format text` or explicitly request `--format png`. For page PNGs,
-`--evidence` adds review evidence. Its targets are named as `view` names them. `--design-system`
+`--format spec` for a readable specification or `--format png` for an image.
+`--format png --evidence` writes PNG, specification, wireframe and JSON evidence
+from one native solve. Its targets are named as `view` names them. `--design-system`
 uses the generated Token/component page; do not draw a duplicate specimen page.
 
-Inspect PNGs only when text/wireframes are insufficient and the caller supports
-image input. Models without image input can export PNG deliverables but must
-review text/wireframes. The CLI returns real paths, dimensions, revisions and
-hashes. Always use the current response and verify its hash. Images are never
+Implement from specifications and diagnose by node; inspect PNG for appearance
+when the caller supports image input. Models without image input can export PNG
+but must not claim visual inspection. Compare `layout.hash`, revision and the
+selected size/themes/state across outputs; revision alone is insufficient.
+Unknown native geometry stays `?`/`partial` with a reason, never a seed rectangle.
+Undeclared business rules and unexposed line counts remain unknown. Coverage
+does not extend to untested sizes/states. Images are never
 included inline unless `--base64` is explicit.
 
 Text wireframes preserve LF newlines and spaces. Decode JSON strings before

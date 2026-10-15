@@ -58,7 +58,7 @@ test("validate checks every page in every version and every component variant", 
   assert.ok(!JSON.stringify(report).includes("node_"), "no ids in the reply");
 });
 
-test("full package validation retains the same layout limits as local issues and PNG diagnostics", async () => {
+test("native layout replaces projection limits consistently in issues, PNG and package validation", async () => {
   const { path, root, file } = await app();
   await run(["page", "draw", path, "--intent", await file("auto.json", {
     page: "Auto sizing", width: 720, height: 300, layout: "column", padding: 24, gap: 24,
@@ -69,20 +69,17 @@ test("full package validation retains the same layout limits as local issues and
   const png = await run(["view", path, "--page", "Auto sizing", "--as", "png", "--output", join(root, "auto.png"), "--json"]);
   const full = await run(["validate", path, "--json", "--full"]);
   const limits = local.issues.filter(issue => issue.code === "layout_projection_partial");
-  assert.equal(limits.length, 3);
-  assert.deepEqual(full.diagnostics.map(({ target, ...diagnostic }) => diagnostic), limits);
-  assert.ok(full.diagnostics.every(diagnostic => diagnostic.target === "Auto sizing (desktop)" && diagnostic.nodeId && diagnostic.where && diagnostic.unsupportedFields.length));
-  assert.equal(png.diagnostics.find(issue => issue.code === "layout_projection_partial").count, limits.length);
+  assert.equal(limits.length, 0, "native App layout solves the automatic sizes");
+  assert.ok(!(full.diagnostics ?? []).some(issue => issue.code === "layout_projection_partial"));
+  assert.ok(!png.diagnostics.some(issue => issue.code === "layout_projection_partial"));
+  assert.equal(png.layout.status, "resolved");
   const skipped = full.coverage.skipped.find(skip => skip.code === "layout_projection_partial");
-  assert.equal(skipped.check, "layout-reflow");
-  assert.equal(skipped.count, 3);
-  assert.equal(skipped.details.length, 3);
-  assert.ok(skipped.details.every(skip => skip.nodeId && skip.unsupportedFields.length));
-  assert.equal(full.coverage.complete, false);
+  assert.equal(skipped, undefined);
+  assert.equal(full.coverage.complete, true, "all requested mechanical checks ran; visual acceptance remains separate");
   const compact = await run(["validate", path, "--json"]);
-  assert.equal(compact.coverage.complete, false);
+  assert.equal(compact.coverage.complete, true);
   assert.equal(compact.coverage.skippedCount, full.coverage.skippedCount);
-  assert.match(compact.previewNote, /3 places/);
+  assert.equal(compact.previewNote, undefined);
   assert.ok(!JSON.stringify(compact).includes("node_"));
 });
 
@@ -310,10 +307,20 @@ test("view --as spec reads positions, sizes, layout and visual Token bindings", 
     ] },
   ] }), "--json"]);
   const spec = await run(["view", path, "--page", "Home", "--as", "spec", "--json"]);
-  assert.match(spec.text, /^Spec · px, x\/y from the top-left/);
-  assert.match(spec.text, /Card · frame · at 24,24 · 300×\d+ \(height hug\) · column · gap 8 · padding 12 \{space\.md\} · fill #f4f4ff \{color\.surface\} · radius 8/);
-  assert.match(spec.text, /Title · text · at 36,36 · .*font .*20 weight 600.*text \{text\.title\} "Tasks"/);
-  assert.match(spec.text, /Save · copy of Button · at \d+,\d+ · .*texts "Save" · changes Label text "Save"/);
+  assert.match(spec.text, /^SPEC · px · coordinates: page/);
+  assert.match(spec.text, /Card\n\s+x=24, y=24 · width=fixed → 300px · height=hug →/);
+  assert.match(spec.text, /padding T\/R\/B\/L: 12 \{space\.md\} ← demo/);
+  assert.match(spec.text, /Save → Button/);
+  assert.match(spec.text, /page overrides: Label.text=Save/);
+  const details = await run(["view", path, "--page", "Home", "--element", "Card", "--as", "spec", "--full", "--json", "--stdout"]);
+  assert.match(details.text, /fill: .*#f4f4ff.*\{color\.surface\}/);
+  assert.match(details.text, /fontSize: 20 · literal/);
+  assert.match(details.text, /text: Tasks \{text\.title\}/);
+  const title = details.inspection.nodes.find(node => node.name === "Title");
+  assert.equal(title.fields.text.token.package, "demo");
+  assert.equal(title.fields.text.token.path, "text.title");
+  const label = details.inspection.nodes.find(node => node.name === "Label");
+  assert.match(label.fields.text.source, /instance override/);
   assert.ok(!spec.text.includes("node_"), "no ids");
 });
 

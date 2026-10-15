@@ -18,6 +18,7 @@ export {
   renderProjection,
 } from "./render.mjs";
 export { renderAppProjection } from "./render-shared.mjs";
+export { inspectProjection } from "./layout-inspection.mjs";
 export {
   decodeFigmaClipboard,
   importDraft,

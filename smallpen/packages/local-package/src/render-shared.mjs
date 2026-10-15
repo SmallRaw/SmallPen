@@ -15,7 +15,7 @@ async function loadRenderer() {
     const manifest = JSON.parse(
       await readFile(join(runtime, "manifest.json"), "utf8"),
     );
-    const [renderer, factory, wasmBytes] = await Promise.all([
+    const [renderer, factory, wasmBytes, rendererBytes, wrapperBytes] = await Promise.all([
       import(
         pathToFileURL(join(runtime, "renderer.mjs")).href +
           "?version=" +
@@ -27,10 +27,14 @@ async function loadRenderer() {
           manifest.wrapperHash
       ),
       readFile(join(runtime, "render-wasm.wasm")),
+      readFile(join(runtime, "renderer.mjs")),
+      readFile(join(runtime, "render-wasm.js")),
     ]);
     if (
       createHash("sha256").update(wasmBytes).digest("hex") !==
-      manifest.kernelHash
+      manifest.kernelHash ||
+      createHash("sha256").update(rendererBytes).digest("hex") !== manifest.rendererHash ||
+      createHash("sha256").update(wrapperBytes).digest("hex") !== manifest.wrapperHash
     )
       throw new Error(
         "Rendering runtime changed during initialization; retry after the build finishes",
@@ -60,6 +64,7 @@ async function loadRenderer() {
       fonts,
       families,
       kernelHash: createHash("sha256").update(wasmBytes).digest("hex"),
+      runtimeHash: createHash("sha256").update(rendererBytes).update(wrapperBytes).digest("hex"),
     };
   } catch (cause) {
     throw new SmallPenError(
@@ -85,6 +90,7 @@ async function resources(engine, product, options) {
         const fontId = `custom-${snapshot.runtime.fonts[family.id]}`;
         fontFamilies.push({
           fontId,
+          names: [family.family],
           variants: family.variants.map((variant) => ({
             id: `${variant.style}-${variant.weight}`,
             weight: String(variant.weight),
@@ -151,9 +157,8 @@ export async function renderAppProjection(product, projection, options = {}) {
     !Number.isFinite(height) ||
     width < 1 ||
     height < 1 ||
-    width > 8192 ||
-    height > 8192 ||
-    width * height > 32 * 1024 * 1024
+    (!options.measureOnly && !options.cropNodeId &&
+      (width > 8192 || height > 8192 || width * height > 32 * 1024 * 1024))
   )
     throw new SmallPenError(
       "render_size_exceeded",
@@ -223,6 +228,7 @@ export async function renderAppProjection(product, projection, options = {}) {
         nodes,
         nodeIds,
         rootId,
+        cropNodeId: options.cropNodeId ? nodeIds[options.cropNodeId] : undefined,
         scale,
         measureOnly: options.measureOnly === true,
         forExport: options.forExport === true,
@@ -323,10 +329,27 @@ export async function renderAppProjection(product, projection, options = {}) {
         ],
         renderer: "app-wasm",
         kernelHash: engine.kernelHash,
+        runtimeHash: engine.runtimeHash,
+        resourcesHash: createHash("sha256").update(JSON.stringify({
+          fonts: fontResources.fonts.map(face => ({
+            id: face.fontId, weight: face.weight, style: face.style,
+            hash: createHash("sha256").update(face.bytes).digest("hex"),
+          })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+          images: request.images.map(image => ({
+            id: image.id,
+            hash: createHash("sha256").update(image.svg ?? image.bytes).digest("hex"),
+          })).sort((a, b) => a.id.localeCompare(b.id)),
+        })).digest("hex"),
         renderHash: createHash("sha256").update(bytes).digest("hex"),
         geometry: result.geometry,
+        layoutBoxes: Object.fromEntries(Object.entries(result.geometry).map(([uuid, value]) => [sourceIds[uuid], value])),
         bounds,
         textMetrics,
+        fontRequests: described.fonts.filter(face => sourceIds[face.nodeId]).map(face => {
+          const names = assets.fontFamilies.find(family => family.fontId === face.fontId)?.names;
+          return { nodeId: sourceIds[face.nodeId], family: names?.[1] ?? names?.[0] ?? face.fontId,
+            fontId: face.fontId, weight: face.weight, style: face.style };
+        }),
       };
     } catch (error) {
       if (error instanceof SmallPenError) throw error;

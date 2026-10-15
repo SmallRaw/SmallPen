@@ -540,7 +540,7 @@ function readingOrder(children) {
   return [...children].sort((a, b) => box(a).y - box(b).y || box(a).x - box(b).x);
 }
 
-function wireframeLayers(root) {
+export function wireframeLayers(root) {
   const result = [];
   const visit = (node, depth, parentIndex) => {
     const index = result.length + 1;
