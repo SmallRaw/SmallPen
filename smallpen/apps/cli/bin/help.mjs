@@ -63,7 +63,7 @@ No --theme uses project defaults; App current selection is independent.
 --theme overrides only named groups. No data or App state is written.
 Write: token theme add|rename|default|delete --theme Group/Option.`,
   view: `Usage:
-  smallpen view PACKAGE [what] [--as text|wireframe|png|issues] [--theme G/O]...
+  smallpen view PACKAGE [what] [--as text|spec|wireframe|png|issues] [--theme G/O]...
 
 Look at anything by name; no IDs. What:
   (nothing)                      the whole package: themes, Tokens, components, pages
@@ -74,9 +74,14 @@ Look at anything by name; no IDs. What:
   --pages [--platform mobile]    every page
   --page Board                   one page ("Board" or "Tasks / Board")
     [--platform mobile] [--element "Top bar"]          one version, one part of it
---as text (default) is a compact outline; wireframe is a text drawing of regions;
-png writes an image (inspect it only if you can see images); issues lists layout,
-text and contrast problems by element. Tokens have text, wireframe and png.
+Three design outputs: spec for implementation and provenance, wireframe for
+spatial orientation, PNG for high-fidelity appearance. --as spec reports actual
+bounds separately from fixed/fill/hug constraints, Token/component sources and
+node diagnostics. --element expands details. Compare layout.hash and selection
+across outputs. ?/partial means unresolved; never implement from seed geometry.
+--as text (default) is a compact navigation outline; issues lists layout, text
+and contrast problems. Tokens have text, wireframe and png. Specifications
+target one page/component; choose a target before requesting --as spec.
 --theme Group/Option shows values under that option for this call only.
 Large results go to a file. Unknown names fail with the names that exist;
 "Name [2]" picks one of a name stored twice.
@@ -105,15 +110,17 @@ for the caller.`,
   export: `Usage:
   smallpen export PACKAGE [--page P [--platform X] [--element E]]
                   [--component C [--variant V] [--element E]] [--design-system]
-                  [--format text|wireframe|png] [--output FILE] [--scale N] [--json]
+                  [--format text|spec|wireframe|png] [--output FILE] [--scale N] [--json]
 
-Save a page, component or region as a text wireframe (default) or a PNG file,
-named the way view names it. Nothing named is the main page. Request PNG with
---format png; read text and wireframes first, and inspect PNG only when the
-caller can see images. Text files contain LF newlines and alignment spaces.
+Save a specification (implementation), wireframe (structure, default) or PNG
+(appearance), named the way view names it. Nothing named is the main page.
+Read --format spec before implementation; inspect PNG only when the caller
+can see images. Text files contain LF newlines and alignment spaces.
 Missing --output uses a temporary file. Returns path, hash, bytes, target,
 themes and revisions. --design-system exports the generated Token/component
-page; do not draw a copy. --evidence adds review evidence to a page PNG.`,
+page; do not draw a copy. --format png --evidence writes PNG, .spec.txt,
+.wireframe.txt and JSON evidence from one native layout snapshot. Read skipped
+coverage; untested sizes/states and undeclared business rules remain unknown.`,
   version: `Usage:
   smallpen version [--json]
 
@@ -661,14 +668,16 @@ Separate actions:
               name; advanced apply runs an exact batch, such as an undo batch.
   definitions token theme list is a cheap settings query; search finds reusable Tokens
               and components.
-  view        Compact layout outline, or a page/component/region text wireframe.
+  view        Navigate with text; implement with spec; orient with wireframe;
+              inspect appearance with PNG. Choose one page/component/region.
   validate    Problems and coverage; data validity is separate from visual QA.
-  export      Actual text, wireframe or PNG files with size/hash/selection.
-  Read compact text/issues first, then text wireframes. Inspect PNG only when
-  useful and the caller supports image input; reuse an unchanged renderHash.
+  export      Specification, wireframe or PNG files with layout.hash/selection.
+  Three design outputs: spec for implementation and provenance; wireframe for
+  structure; PNG for appearance. --format png --evidence writes all three from
+  one native solve. Match layout.hash and selection; read unknowns and coverage.
   export defaults to a text wireframe; PNG requires --format png. The CLI does
   not detect model image capability. Text-only models may export PNG deliverables
-  but must review text/wireframes and must not claim visual inspection of a PNG.
+  but must review specifications/issues and must not claim visual inspection.
 
 Usage:
   smallpen <command> [arguments] [--json]

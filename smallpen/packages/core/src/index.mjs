@@ -180,6 +180,7 @@ export {
 } from "./draft.mjs";
 export {
   asciiWireframe,
+  wireframeLayers,
   createCompareView,
   createDiscoveryGuide,
   createSemanticTree,

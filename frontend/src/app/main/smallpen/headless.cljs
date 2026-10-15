@@ -176,6 +176,29 @@
   (let [{:keys [root-id objects]} (project-request request)]
     (upload-resources request)
     (let [objects (settle-layout objects {:for-export (boolean (unchecked-get request "forExport"))})
+          ;; Crop only after text and native layout settle. A seed text box
+          ;; may be 10px wide while its actual auto-width text is 120px.
+          crop-id (some-> (unchecked-get request "cropNodeId") uuid/parse)
+          crop-shape (get objects crop-id)
+          objects (if crop-shape
+                    (let [bounds (select-keys (rect/points->rect (:points crop-shape))
+                                              [:x :y :width :height])
+                          holder (get objects root-id)
+                          holder (shape/setup-shape
+                                  (merge (dissoc holder :points :selrect :transform :transform-inverse)
+                                         bounds))]
+                      (assoc objects root-id holder))
+                    objects)
+          _ (when crop-shape (upload-scene objects {:for-export (boolean (unchecked-get request "forExport"))}))
+          _limits (when-not (unchecked-get request "measureOnly")
+                    (let [bounds (rect/points->rect (:points (get objects root-id)))
+                          scale (unchecked-get request "scale")
+                          width (js/Math.ceil (* (:width bounds) scale))
+                          height (js/Math.ceil (* (:height bounds) scale))]
+                      (when (or (> width 8192) (> height 8192)
+                                (> (* width height) (* 32 1024 1024)))
+                        (throw (ex-info "Rendered image exceeds safety limits"
+                                        {:code :render-size-exceeded})))))
           bytes (when-not (unchecked-get request "measureOnly")
                   (engine/render-shape-raster root-id (unchecked-get request "scale") :png))]
       (engine/evict-images! engine/image-cache-size)

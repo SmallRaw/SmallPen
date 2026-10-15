@@ -268,9 +268,9 @@ test("root and every public command provide standalone help", async () => {
   );
   assert.match(root.stdout, /smallpen help rules/);
   assert.match(root.stdout, /project\s+Create, inspect/);
-  assert.match(root.stdout, /view\s+Look at anything by name/);
+  assert.match(root.stdout, /view\s+Look by name: spec for implementation/);
   assert.match(root.stdout, /validate\s+Validate canonical data/);
-  assert.match(root.stdout, /export\s+Export a page, component/);
+  assert.match(root.stdout, /export\s+Export specification, wireframe or PNG/);
   for (const command of [
     "help",
     "view",
@@ -338,14 +338,14 @@ test("root and every public command provide standalone help", async () => {
   const view = await runCli(["view", "--help", "--full"]);
   assert.equal(view.code, 0, view.stderr);
   assert.match(view.stdout, /Look at anything by name; no IDs/);
-  assert.match(view.stdout, /--as text\|wireframe\|png\|issues/);
-  assert.match(view.stdout, /wireframe is a text drawing of regions/);
-  assert.match(view.stdout, /issues lists layout,\s+text and contrast problems/);
+  assert.match(view.stdout, /--as text\|spec\|wireframe\|png\|issues/);
+  assert.match(view.stdout, /wireframe for\s+spatial orientation/);
+  assert.match(view.stdout, /issues lists layout, text\s+and contrast problems/);
 
   const exported = await runCli(["export", "--help", "--full"]);
   assert.equal(exported.code, 0, exported.stderr);
-  assert.match(exported.stdout, /--format text\|wireframe\|png/);
-  assert.match(exported.stdout, /--evidence adds review evidence/);
+  assert.match(exported.stdout, /--format text\|spec\|wireframe\|png/);
+  assert.match(exported.stdout, /--evidence.*specification|--evidence writes PNG/s);
 });
 
 test("view help names every name-based selector and no ID selector", async () => {
@@ -1023,7 +1023,7 @@ test("an external Agent can initialize, inspect, view and export by name using o
     "--json",
   ]);
   assert.equal(wireframe.code, 0, wireframe.stderr);
-  assert.match(JSON.parse(wireframe.stdout).wireframe, /^ASCII WIREFRAME\n/);
+  assert.match(JSON.parse(wireframe.stdout).wireframe, /\nASCII WIREFRAME\n/);
 
   const renderPath = join(initialized.parent, "home.png");
   const render = await runCli([

@@ -169,11 +169,13 @@ function contextualTokenValue(token, owner, context, axes, byPath, cache) {
   const visiting = new Set();
   let current = token;
   let value;
+  let trace = null;
   for (;;) {
     const memo = cache.values.get(memoKey(current));
     if (memo) {
       if (chain.length === 0) return copyResolution(memo);
       value = memo.value;
+      trace = memo.trace ?? null;
       break;
     }
     if (visiting.has(current.id)) {
@@ -228,10 +230,30 @@ function contextualTokenValue(token, owner, context, axes, byPath, cache) {
         },
       );
     }
-    result = { ...definition, value: structuredClone(value) };
+    if (cache.traceSources) trace = {
+      packageId: owner.productOverlay?.domain.tokens.get(link.id) === link
+        ? owner.productOverlay.manifest.packageId : owner.manifest.packageId,
+      tokenId: link.id, path: link.path, alias: tokenAliasPath(definition.value),
+      rule: definition.rule, next: trace,
+    };
+    result = { ...definition, value: structuredClone(value),
+      ...(cache.traceSources ? { trace } : {}) };
     cache.values.set(memoKey(link), result);
   }
   return copyResolution(result);
+}
+
+// Keep trace links shared in the resolver cache; copying an array for every
+// alias would turn long chains quadratic. Only explicit inspection flattens
+// the selected token's actual resolution path.
+function sourceTrace(contextual, options) {
+  if (!options.traceSources) return {};
+  const aliasChain = [];
+  for (let trace = contextual.trace; trace; trace = trace.next) {
+    const { next, ...source } = trace;
+    aliasChain.push(structuredClone(source));
+  }
+  return { aliasChain };
 }
 
 function overrideForReference(product, reference, cache) {
@@ -270,6 +292,7 @@ function resolveInternal(
   options = {},
   cache = createResolutionCache(),
 ) {
+  cache.traceSources = options.traceSources === true;
   if (
     !reference ||
     typeof reference.packageId !== "string" ||
@@ -337,6 +360,7 @@ function resolveInternal(
           candidates,
           context,
           resolution: {
+            ...sourceTrace(contextual, options),
             context,
             sourceChain: [
               {
@@ -405,6 +429,7 @@ function resolveInternal(
     candidates,
     context,
     resolution: {
+      ...sourceTrace(contextual, options),
       context,
       sourceChain: [
         {

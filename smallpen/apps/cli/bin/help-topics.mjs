@@ -55,7 +55,7 @@ const rules = {
     () => [CLI_RULES.modelling.packages, CLI_RULES.modelling.presentations],
   ],
   output: [
-    "Small replies, text, wireframes and explicit images",
+    "Specifications for implementation, wireframes for structure, PNG for appearance",
     () =>
       Object.values(CLI_RULES.output)
         .filter((value) => typeof value === "string")
@@ -80,7 +80,7 @@ const notes = {
     "Names the target: --page, --component, --token, --canvas or nothing for the whole package; --as text first.",
   ],
   export: [
-    "Defaults to a text wireframe. Request --format png explicitly; image inspection requires an image-capable caller.",
+    "Three outputs: --format spec for implementation, wireframe for structure, png for appearance. --format png --evidence writes all three from one native layout. Compare layout.hash; image inspection requires an image-capable caller.",
   ],
   validate: [
     "A page checks every version and a component every variant unless --platform or --variant names one; read coverage and skipped checks.",
