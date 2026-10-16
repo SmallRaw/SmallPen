@@ -13,9 +13,6 @@ jobs:
     needs: frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    outputs:
-      version: ${{ steps.release.outputs.version }}
-      channel: ${{ steps.release.outputs.channel }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -23,18 +20,12 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-      - name: Read and validate committed version
-        id: release
-        run: node smallpen/scripts/release.mjs info >> "$GITHUB_OUTPUT"
-      - name: Prepare package metadata
-        env:
-          VERSION: ${{ steps.release.outputs.version }}
-          CHANNEL: ${{ steps.release.outputs.channel }}
-        run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
       - run: npm ci --ignore-scripts
         working-directory: smallpen
       - run: npm audit --omit=dev --audit-level=high
         working-directory: smallpen
+      - name: Check locked desktop build tool advisories once
+        run: npm audit --package-lock-only --audit-level=high --workspaces=false --prefix smallpen/apps/desktop/tools
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
@@ -43,13 +34,9 @@ jobs:
         run: npm run test:ci
         working-directory: smallpen
   cli:
-    name: CLI (${{ matrix.os }})
-    needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14, windows-2025]
-    runs-on: ${{ matrix.os }}
+    name: CLI and Web
+    needs: [test, frontend]
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
@@ -61,11 +48,6 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-      - name: Prepare package metadata
-        env:
-          VERSION: ${{ needs.test.outputs.version }}
-          CHANNEL: ${{ needs.test.outputs.channel }}
-        run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
       - run: npm ci --ignore-scripts
         working-directory: smallpen
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -74,8 +56,8 @@ jobs:
           path: frontend/resources/public
       - name: Pack four public npm packages
         env:
-          VERSION: ${{ needs.test.outputs.version }}
-          CHANNEL: ${{ needs.test.outputs.channel }}
+          VERSION: ${{ needs.frontend.outputs.version }}
+          CHANNEL: ${{ needs.frontend.outputs.channel }}
         run: node smallpen/scripts/release.mjs pack smallpen/dist/npm "$VERSION" "$CHANNEL" "$GITHUB_SHA"
       - name: Verify clean global install and smallpen command
         run: node smallpen/scripts/release.mjs smoke smallpen/dist/npm "$GITHUB_SHA"
@@ -87,29 +69,48 @@ jobs:
           cp dist/npm/manifest.json dist/SmallPen-CLI/release.json
           tar -czf dist/SmallPen-CLI.tar.gz -C dist SmallPen-CLI
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: runner.os == 'Linux'
+        with:
+          name: SmallPen-CLI-${{ needs.frontend.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
+          path: smallpen/dist/SmallPen-CLI.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
+      - name: Build standalone browser editor
+        working-directory: smallpen
+        run: npm run build:web
+      - name: Pack and check the Web npm package once
+        env:
+          VERSION: ${{ needs.frontend.outputs.version }}
+          CHANNEL: ${{ needs.frontend.outputs.channel }}
+        run: |
+          node smallpen/scripts/release.mjs pack-web smallpen/dist/npm "$VERSION" "$CHANNEL" "$GITHUB_SHA"
+          node smallpen/scripts/release.mjs smoke-web smallpen/dist/npm "$GITHUB_SHA"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
           path: smallpen/dist/npm/
           if-no-files-found: error
           retention-days: 1
-          overwrite: true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: runner.os == 'Linux'
-        with:
-          name: SmallPen-CLI-${{ needs.test.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
-          path: smallpen/dist/SmallPen-CLI.tar.gz
-          if-no-files-found: error
-          retention-days: 1
+          compression-level: 0
           overwrite: true
   frontend:
     name: Frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      channel: ${{ steps.release.outputs.channel }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - name: Read and validate committed version before building
+        id: release
+        run: node smallpen/scripts/release.mjs info >> "$GITHUB_OUTPUT"
       - name: Build frontend and check translations once
         env:
           BUILD_WASM: "yes"
@@ -122,13 +123,9 @@ jobs:
           retention-days: 1
           overwrite: true
   render-parity:
-    name: Render parity (${{ matrix.os }})
+    name: Render parity
     needs: [test, frontend]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14, windows-2025]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
@@ -162,13 +159,13 @@ jobs:
           TEMP: ${{ runner.temp }}
         run: npm run test:render-parity
       - name: Upload render comparison evidence
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: SmallPen-render-parity-${{ matrix.os }}-${{ github.sha }}-${{ github.run_id }}
+          name: SmallPen-render-parity-${{ github.sha }}-${{ github.run_id }}
           path: ${{ runner.temp }}/smallpen-render-parity-*/
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 1
           overwrite: true
   desktop:
     name: Desktop (${{ matrix.platform }})
@@ -193,11 +190,6 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-      - name: Prepare package metadata
-        env:
-          VERSION: ${{ needs.test.outputs.version }}
-          CHANNEL: ${{ needs.test.outputs.channel }}
-        run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
       - run: npm ci --ignore-scripts
         working-directory: smallpen
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -206,8 +198,6 @@ jobs:
           path: frontend/resources/public
       - name: Install locked desktop build tools (no lifecycle scripts)
         run: npm ci --ignore-scripts --workspaces=false --prefix smallpen/apps/desktop/tools
-      - name: Check desktop build tool advisories
-        run: npm audit --audit-level=high --workspaces=false --prefix smallpen/apps/desktop/tools
       - name: Build Electron Desktop
         working-directory: smallpen
         run: npm run --workspace @smallpen/desktop build
@@ -221,13 +211,14 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: runner.os == 'macOS'
         with:
-          name: SmallPen-macOS-arm64-${{ needs.test.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
+          name: SmallPen-macOS-arm64-${{ needs.frontend.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
           path: |
             smallpen/apps/desktop/dist/SmallPen-macOS-arm64-unsigned.zip
             smallpen/apps/desktop/dist/SHA256SUMS
             smallpen/apps/desktop/dist/SOURCE_COMMIT
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0
           overwrite: true
       - name: Archive Windows
         if: runner.os == 'Windows'
@@ -241,13 +232,14 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: runner.os == 'Windows'
         with:
-          name: SmallPen-Windows-x64-${{ needs.test.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
+          name: SmallPen-Windows-x64-${{ needs.frontend.outputs.version }}-${{ github.sha }}-${{ github.run_id }}
           path: |
             smallpen/apps/desktop/dist/SmallPen-Windows-x64.zip
             smallpen/apps/desktop/dist/SHA256SUMS
             smallpen/apps/desktop/dist/SOURCE_COMMIT
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0
           overwrite: true
       - name: Test the packaged App
         id: smoke
@@ -263,53 +255,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
           overwrite: true
-  web:
-    name: Web
-    needs: [test, cli, frontend]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 24
-      - name: Prepare package metadata
-        env:
-          VERSION: ${{ needs.test.outputs.version }}
-          CHANNEL: ${{ needs.test.outputs.channel }}
-        run: node smallpen/scripts/release.mjs prepare "$VERSION" "$CHANNEL"
-      - run: npm ci --ignore-scripts
-        working-directory: smallpen
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
-          path: frontend/resources/public
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
-          path: smallpen/dist/npm
-      - name: Build standalone browser editor
-        working-directory: smallpen
-        run: npm run build:web
-      - name: Pack and test the Web npm package
-        env:
-          VERSION: ${{ needs.test.outputs.version }}
-          CHANNEL: ${{ needs.test.outputs.channel }}
-        run: |
-          node smallpen/scripts/release.mjs pack-web smallpen/dist/npm "$VERSION" "$CHANNEL" "$GITHUB_SHA"
-          node smallpen/scripts/release.mjs smoke-web smallpen/dist/npm "$GITHUB_SHA"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: smallpen-web-npm-${{ github.sha }}-${{ github.run_id }}
-          path: smallpen/dist/npm/
-          if-no-files-found: error
-          retention-days: 1
-          overwrite: true
   publish:
     name: Publish
-    needs: [test, cli, desktop, web, render-parity]
+    needs: [test, cli, desktop, render-parity]
     # Manual dispatch may run on any branch; only develop or a tag publishes.
     if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
@@ -327,32 +275,7 @@ jobs:
           node-version: 24
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: smallpen-web-npm-${{ github.sha }}-${{ github.run_id }}
+          name: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
           path: smallpen/dist/npm
       - name: Publish exact verified tarballs using npm trusted publishing
         run: node smallpen/scripts/release.mjs publish smallpen/dist/npm "$GITHUB_SHA"
-  cleanup:
-    name: Remove intermediate artifacts
-    needs: [cli, frontend, desktop, web, render-parity, publish]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      actions: write
-    steps:
-      - name: Delete only this run's frontend and npm transfer artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          NPM_ARTIFACT: smallpen-npm-${{ github.sha }}-${{ github.run_id }}
-          WEB_NPM_ARTIFACT: smallpen-web-npm-${{ github.sha }}-${{ github.run_id }}
-          FRONTEND_ARTIFACT: smallpen-frontend-${{ github.sha }}-${{ github.run_id }}
-          PUBLISH_RESULT: ${{ needs.publish.result }}
-        run: |
-          gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
-            --jq '.artifacts[] | select(.name == env.FRONTEND_ARTIFACT or ((.name == env.NPM_ARTIFACT or .name == env.WEB_NPM_ARTIFACT) and env.PUBLISH_RESULT == "success")) | .id' > artifact-ids.txt
-          while IFS= read -r artifact_id; do
-            [[ "$artifact_id" =~ ^[0-9]+$ ]] || exit 1
-            gh api --method DELETE "repos/$REPO/actions/artifacts/$artifact_id"
-          done < artifact-ids.txt
