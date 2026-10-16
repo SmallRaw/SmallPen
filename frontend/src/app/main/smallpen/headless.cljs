@@ -9,6 +9,7 @@
    [app.common.geom.matrix :as matrix]
    [app.common.geom.rect :as rect]
    [app.common.geom.shapes :as shapes]
+   [app.common.math :as mth]
    [app.common.render-wasm.api.geometry :as geometry]
    [app.common.render-wasm.api.layout :as layout]
    [app.common.render-wasm.api.props :as props]
@@ -83,6 +84,15 @@
                   (unchecked-get image "bytes"))]
       (engine/store-image! id bytes))))
 
+(defn- visible-shape?
+  [objects id]
+  (loop [id id]
+    (let [shape (get objects id)]
+      (cond
+        (:hidden shape) false
+        (or (nil? shape) (= id uuid/zero)) true
+        :else (recur (:parent-id shape))))))
+
 (defn- upload-scene
   [objects opts]
   (serialize/serialize-scene! objects (assoc opts :include-layout? true))
@@ -91,7 +101,7 @@
       (select/use-shape id)
       (layout/set-grid-layout shape)
       (layout/set-layout-data shape))
-    (when (= :text (:type shape))
+    (when (and (= :text (:type shape)) (visible-shape? objects id))
       (engine/update-text-layout! id))))
 
 (defn- layout-entries
@@ -99,17 +109,32 @@
   (into []
         (keep (fn [[id shape]]
                 (cond
+                  (not (visible-shape? objects id)) nil
                   (and (= :text (:type shape)) (not= :fixed (:grow-type shape)))
                   (let [size (text-layout/new-size shape (text-layout/get-dimensions id))]
                     (when (and size
-                               (or (> (abs (- (:width size) (:width shape))) 0.0001)
-                                   (> (abs (- (:height size) (:height shape))) 0.0001)))
+                               (or (not (mth/close? (:width size) (:width shape)))
+                                   (not (mth/close? (:height size) (:height shape)))))
                       [id {:transform (modifiers/modifiers->transform
                                        (text-layout/resize-modifiers shape size))
                            :kind :child}]))
                   (:layout shape)
                   [id {:transform (matrix/matrix) :kind :parent}])))
         objects))
+
+(defn- layout-change
+  [before after]
+  (let [delta (apply max
+                     (concat (map #(abs (- (get after %) (get before %))) [:x :y :width :height])
+                             (mapcat (fn [a b] [(abs (- (:x a) (:x b))) (abs (- (:y a) (:y b)))])
+                                     (:points before) (:points after))))]
+    (when (or (not (mth/close? delta 0))
+              (not= (boolean (:flip-x before)) (boolean (:flip-x after)))
+              (not= (boolean (:flip-y before)) (boolean (:flip-y after))))
+      {:nodeId (str (:id before)) :name (:name before) :delta delta
+       :constraints (select-keys before [:layout :layout-item-h-sizing :layout-item-v-sizing :grow-type])
+       :before (select-keys before [:x :y :width :height :flip-x :flip-y])
+       :after (select-keys after [:x :y :width :height :flip-x :flip-y])})))
 
 (defn- settle-layout
   [objects opts]
@@ -118,13 +143,13 @@
     (let [transforms (geometry/propagate-modifiers (layout-entries objects) false nil)
           next (reduce (fn [objects [id transform]]
                          (update objects id shapes/apply-transform transform)) objects transforms)
-          changed? (some (fn [[id shape]]
-                           (some #(> (abs (- (get shape %) (get-in objects [id %]))) 0.0001)
-                                 [:x :y :width :height])) next)]
+          changes (into [] (keep (fn [[id shape]] (layout-change (get objects id) shape))) next)]
       (cond
-        (not changed?) objects
+        (empty? changes) objects
         (< pass 8) (recur next (inc pass))
-        :else (throw (ex-info "Shared App layout did not settle" {:code :layout-not-settled}))))))
+        :else (throw (ex-info "Shared App layout did not settle"
+                              {:code :layout-not-settled :passes (inc pass) :tolerance 0.001
+                               :nodes (vec (take 20 (sort-by :delta > changes)))}))))))
 
 (defn- project-request
   [request]
@@ -150,7 +175,7 @@
   [request]
   (let [{:keys [objects]} (project-request request)
         spans (for [[id shape] objects
-                    :when (= :text (:type shape))
+                    :when (and (= :text (:type shape)) (visible-shape? objects id))
                     paragraph (get-in shape [:content :children 0 :children])
                     span (:children paragraph)]
                 {:nodeId (str id) :family (:font-family span (:font-family paragraph)) :fontId (:font-id span (:font-id paragraph "sourcesanspro"))
@@ -168,7 +193,8 @@
                                        (:weight span) (if (= "italic" (:style span)) 1 0))))
                    (concat spans fallbacks))
         images (into #{} (keep #(some-> (or (:fill-image %) (:stroke-image %) (when (= :image (:type %)) (:metadata %))) :id str))
-                     (mapcat #(tree-seq coll? seq %) (vals objects)))]
+                     (mapcat #(tree-seq coll? seq %)
+                             (keep (fn [[id shape]] (when (visible-shape? objects id) shape)) objects)))]
     (clj->js {:fonts faces :images images})))
 
 (defn render-request
@@ -207,8 +233,8 @@
                                             [(str id) (select-keys (rect/points->rect (:points shape))
                                                                    [:x :y :width :height])])) objects))
            :textMetrics (clj->js (into {} (keep (fn [[id shape]]
-                                                  (when (= :text (:type shape))
+                                                  (when (and (= :text (:type shape)) (visible-shape? objects id))
                                                     [(str id) (text-layout/get-dimensions id)]))) objects))
            :geometry (clj->js (into {} (map (fn [[id shape]]
-                                              [(str id) (select-keys shape [:x :y :width :height])]))
+                                              [(str id) (select-keys shape [:x :y :width :height :flip-x :flip-y])]))
                                     objects))})))

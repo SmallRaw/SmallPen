@@ -298,6 +298,11 @@ App and CLI share those rules. CLI reads never change App selection or save a
 combination. `token set` writes Tokens by name and `token theme add|rename|default|
 delete` edit options named `Group/Option`; no IDs or token Sets are needed.
 
+Dimensions have the same meaning in `draw` and `set`, including component
+copies: a number or `px` fixes the axis, a Token keeps a binding, `fill` needs
+a row/column parent, and `hug` follows content. A direct size edit replaces
+the old mode, binding and override on that axis; other fields stay.
+
 `view` looks at anything by name (`--page`, `--component`, `--token`,
 `--canvas`). Three design outputs serve different tasks:
 
@@ -321,7 +326,12 @@ shared solve, `export --format png --evidence --output REVIEW` writes
 The fingerprint includes native geometry, themes, dependency revisions,
 rendering runtime and font/media bytes. PNG scale is independent of layout.
 `validate` checks every version of a page or variant of a component unless one
-is named. Read skipped coverage.
+is named. It writes JSON progress lines to stderr (total, current target and
+completed count), keeping the final JSON result on stdout. Each target has a
+30-second limit; use `--target-timeout MILLISECONDS` to change it. A timeout
+names the target and lets later targets continue. Ctrl+C returns exit code
+130 with completed findings and the remaining targets in coverage. A partial
+or interrupted run does not certify the untested targets. Read skipped coverage.
 
 No command takes an ID except `advanced apply` (an exact batch, such as the
 undo batch a write returns; `schema operation TYPE` documents its operations)

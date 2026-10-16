@@ -765,8 +765,8 @@ function setTopic(command) {
     command,
     fields: {
       set: "FIELD=VALUE, repeatable; VALUE is JSON (320, [8,16], {\"Style\":\"ghost\"}, true) or plain text; {token.path} binds a Token",
-      element: "fields: width, height (number, fill, hug), fill, stroke, radius, opacity, shadow, visible, rotation, margin, min/max sizes; texts: text, color, font, fontFamily, fontSize, fontWeight, lineHeight, letterSpacing, textTransform, textDecoration, textAlign; containers: layout (row|column|none), gap, padding, align, justify",
-      copy: "a copy of a component: props, text {\"Element\": \"text\"}, set {\"Element.field\": value}, width, height (numbers), visible, opacity",
+      element: "fields: width, height (number, px, Token, fill, hug), fill, stroke, radius, opacity, shadow, visible, rotation, margin, min/max sizes; texts: text, color, font, fontFamily, fontSize, fontWeight, lineHeight, letterSpacing, textTransform, textDecoration, textAlign; containers: layout (row|column|none), gap, padding, align, justify",
+      copy: "a copy of a component: props, text {\"Element\": \"text\"}, set {\"Element.field\": value}, width/height (numbers, px, Tokens, hug, or fill in a row/column parent), visible, opacity. Sizes inside set (Element.width/height) take numbers or Tokens",
       itself: "without --element: the page version (or the variant) itself, for example its width and height",
     },
     example: [

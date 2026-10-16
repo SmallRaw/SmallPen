@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { projectDesignView, resolveDesignView } from "@smallpen/core";
 import { inspectProjection, openPackage } from "@smallpen/local-package";
 import { createSemanticTree } from "@smallpen/core";
@@ -9,6 +10,7 @@ import {
   validateDesign,
   selectedDesign,
   componentLookup,
+  outlineTree,
 } from "../apps/cli/bin/design-output.mjs";
 import {
   inspectionReport,
@@ -167,6 +169,7 @@ test("partial geometry stays unknown in both specification and wireframe", async
   );
   const report = inspectionReport({ product }, design);
   assert.match(inspectionText(report), /x=\?, y=\?.*partial/);
+  assert.match(outlineTree(design.tree, design.projection), /\?×\?/);
   const validation = await validateDesign({ product }, design);
   assert.equal(validation.coverage.visibleNodeCount, 4);
   assert.deepEqual(validation.coverage.checks, []);
@@ -277,3 +280,86 @@ test("expanded text distinguishes the authored weight from the primary font face
   assert.ok([400, 600].includes(label.text.primaryFaces[0].weight));
   assert.equal(label.text.primaryFaces[0].family, "Source Sans Pro");
 });
+
+test("a fill container smaller than its padding never reflects its descendants", async () => {
+  const { product, projection } = await example();
+  projection.nodes[projection.rootId].children = ["row"];
+  Object.assign(projection.nodes.row, {
+    x: 0, y: 0, width: 0, height: 60,
+    layout: "flex", "layout-flex-dir": "column",
+    "layout-padding": { p1: 8, p2: 16, p3: 8, p4: 16 },
+    "layout-item-h-sizing": "fill",
+    children: ["label"],
+  });
+  Object.assign(projection.nodes[projection.rootId], {
+    width: 390, height: 100, layout: "flex", "layout-flex-dir": "column",
+  });
+  Object.assign(projection.nodes.label, {
+    width: 0, height: 30, "layout-item-h-sizing": "fill", growType: "auto-height",
+  });
+  const result = await inspectProjection(product, projection, { raster: true });
+  assert.equal(result.snapshot.status, "resolved");
+  assert.ok(Math.abs(result.snapshot.nodes.label.bounds.width - 358) < 0.01);
+  for (const box of Object.values(result.render.layoutBoxes)) {
+    assert.notEqual(box["flip-x"], true, "fill allocation must retain text direction");
+    assert.notEqual(box["flip-y"], true);
+  }
+  assert.ok(result.render.bytes.length > 8);
+});
+
+test("native measurement ignores unrelated canonical pages and variants", async () => {
+  const { product, projection } = await example();
+  Object.defineProperty(product.entries, "unrelated-component.json", {
+    enumerable: true,
+    get() { throw new Error("unrelated component traversed while measuring one view"); },
+  });
+  const result = await inspectProjection(product, projection);
+  assert.equal(result.snapshot.status, "resolved");
+});
+
+test("a component root retains hug sizing when its children change after authoring", async () => {
+  const { componentDefineOperation } = await import("../packages/core/src/simple-design.mjs");
+  const product = await openPackage(fixture);
+  const { componentSet } = componentDefineOperation(product, {
+    name: "Actions",
+    base: { width: 326, height: "hug", layout: "column", gap: 8, children: [
+      { name: "Button", width: 326, height: 36 },
+      { name: "Hint", text: "Keep modified files", width: "fill", height: "hug", fontSize: 16, lineHeight: 1.25 },
+    ] },
+  });
+  const variant = componentSet.variants[0];
+  const root = variant.nodes[variant.rootId];
+  assert.equal(root.height, 64, "seed size before selecting a larger control Token");
+  Object.values(variant.nodes).find(node => node.name === "Button").height = 44;
+  const result = await inspectProjection(product, { nodes: variant.nodes, rootId: variant.rootId, context: {} });
+  assert.ok(Math.abs(result.snapshot.nodes[root.id].bounds.height - 72) < 0.01);
+  assert.equal(root["layout-item-v-sizing"], "auto");
+  assert.equal(root.height, 64, "measurement does not rewrite the authored seed");
+});
+
+test("nested hug layout settles despite subpixel WASM rounding", async () => {
+  // Reduced from the Medium failure to 15 generic boxes and a bundled font.
+  // At 0.0001px tolerance, f32 resize noise oscillates for all nine passes.
+  const product = await openPackage(fixture);
+  const projection = JSON.parse(await readFile(new URL("fixtures/layout-subpixel.json", import.meta.url), "utf8"));
+  const result = await inspectProjection(product, projection);
+  assert.equal(result.snapshot.status, "resolved");
+  assert.ok(result.snapshot.nodes[projection.rootId].bounds.height > 500);
+  assert.ok(result.snapshot.diagnostics.every(issue => issue.code !== "layout_not_settled"));
+});
+
+for (const hiddenAt of ["label", "row"]) {
+  test(`an unavailable font under hidden ${hiddenAt} cannot block the visible view`, async () => {
+    const { product, projection } = await example();
+    projection.nodes[hiddenAt].visible = false;
+    Object.assign(projection.nodes.label.textStyle, { fontId: "custom-unavailable", fontFamily: "Unavailable font" });
+    const result = await inspectProjection(product, projection, { raster: true });
+    assert.equal(result.snapshot.status, "resolved");
+    assert.ok(result.render.bytes.length > 8);
+    assert.equal(result.snapshot.nodes.label.visible, false);
+    assert.ok(result.render.fontRequests.every(face => face.nodeId !== "label"));
+    const visible = structuredClone(projection);
+    visible.nodes[hiddenAt].visible = true;
+    await assert.rejects(inspectProjection(product, visible, { raster: true }), error => error.code === "font_resource_unavailable");
+  });
+}

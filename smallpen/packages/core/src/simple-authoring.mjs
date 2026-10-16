@@ -54,8 +54,20 @@ function defaultOptionSet(library, group) {
 // Where a Token row lives: Sets every theme activates (no group) or one
 // group's option Sets. Agents never see this; it only decides where a write
 // lands.
-function rowHome(library, name) {
+function rowHome(library, name, group) {
   const sets = library?.sets ?? [];
+  if (group !== undefined) {
+    if (typeof group !== "string" || !group.trim())
+      fail("invalid_token_set", "Token group must be a nonempty string");
+    const selected = tokenGroupSets(library, group);
+    if (!selected.length)
+      fail("unknown_token_theme_group", `No theme group ${group}`, {
+        groups: [...new Set(sets.map(set => groupOf(set.name)).filter(Boolean))],
+      });
+    return selected.some(set => set.tokens.some(token => token.name === name))
+      ? { kind: "group", group: groupOf(selected[0].name) }
+      : null;
+  }
   const shared = sets.filter((set) => !set.name.includes("/") && set.tokens.some((token) => token.name === name));
   if (shared.length) return { kind: "shared", sets: shared };
   const grouped = sets.filter((set) => set.name.includes("/") && set.tokens.some((token) => token.name === name));
@@ -100,7 +112,10 @@ export function tokenSetOperations(snapshot, input, newTokenId) {
     if (!isRecord(values)) fail("invalid_token_set", `tokens[${index}].values must map "Group/Option" to a value`);
     if (token.value === undefined && Object.keys(values).length === 0)
       fail("invalid_token_set", `${token.name} needs value or values`);
-    const home = rowHome(library, token.name);
+    const home = rowHome(library, token.name, token.group);
+    if (token.group !== undefined && Object.keys(values).some(key =>
+      !sameName(key.split("/")[0], token.group)))
+      fail("token_group_mismatch", `${token.name} options must belong to group ${token.group}`);
     const template = (sets) => sets.flatMap((set) => set.tokens).find((item) => item.name === token.name);
     const write = (set, value, base) => {
       const { created: _created, ...edit } = writeTokenCell(

@@ -261,7 +261,7 @@ export function componentLookup(workspace) {
   }
   return (reference) =>
     reference
-      ? (sets.get(`${reference.packageId}\0${reference.assetId}`) ?? sets.get(reference.assetId))
+      ? (reference.packageId ? sets.get(`${reference.packageId}\0${reference.assetId}`) : sets.get(reference.assetId))
       : undefined;
 }
 
@@ -468,7 +468,8 @@ function variantPairs(selection, set) {
 // Node IDs show only with full: agents read and edit by name.
 export function outlineTree(tree, projection, { full = false, components, ids = full } = {}) {
   const lines = [];
-  const size = (node) => `${Math.round(node.bounds.width)}×${Math.round(node.bounds.height)}`;
+  const dimension = value => Number.isFinite(value) ? Math.round(value) : "?";
+  const size = (node) => `${dimension(node.bounds?.width)}×${dimension(node.bounds?.height)}`;
   const describe = (node) => {
     const raw = projection.nodes[node.id];
     const reference = instanceReference(node, projection);

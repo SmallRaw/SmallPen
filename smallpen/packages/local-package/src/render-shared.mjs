@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { provisionFonts } from "./render-fonts.mjs";
 import { inspectMedia } from "./media-inspect.mjs";
-import { SmallPenError, stableRuntimeUuid } from "@smallpen/core";
+import { SmallPenError, stableRuntimeUuid, elementPath } from "@smallpen/core";
 
 const runtime = join(dirname(fileURLToPath(import.meta.url)), "..", "runtime");
 let initialized;
@@ -121,6 +121,19 @@ async function resources(engine, product, options) {
   return { fonts, fontFamilies, images };
 }
 
+// Nodes have already resolved their components and Tokens. The App node
+// projector only needs asset metadata and resource identities here. Sending
+// every page and variant made each native measurement convert the entire
+// package to Clojure data twice, even for a single button.
+function renderSnapshot(snapshot) {
+  const assets = snapshot.manifest.entries.assets;
+  return {
+    manifest: { packageId: snapshot.manifest.packageId, entries: { assets } },
+    entries: Object.fromEntries(assets.map(entry => [entry, snapshot.entries[entry]])),
+    runtime: { file: snapshot.runtime.file, fonts: snapshot.runtime.fonts, media: snapshot.runtime.media },
+  };
+}
+
 export async function renderAppProjection(product, projection, options = {}) {
   if (projection.fallbackUsed)
     throw new SmallPenError(
@@ -169,6 +182,7 @@ export async function renderAppProjection(product, projection, options = {}) {
       initialized = undefined;
       throw error;
     }));
+    let sourceIds = {};
     try {
       const assets = await resources(engine, product, options);
       let nodes = projection.nodes,
@@ -214,16 +228,10 @@ export async function renderAppProjection(product, projection, options = {}) {
       );
       const request = {
         snapshot: {
-          manifest: product.manifest,
-          entries: product.entries,
-          runtime: product.runtime,
+          ...renderSnapshot(product),
           libraries: [options.foundation, ...(options.libraries ?? [])]
             .filter(Boolean)
-            .map((snapshot) => ({
-              manifest: snapshot.manifest,
-              entries: snapshot.entries,
-              runtime: snapshot.runtime,
-            })),
+            .map(renderSnapshot),
         },
         nodes,
         nodeIds,
@@ -234,7 +242,7 @@ export async function renderAppProjection(product, projection, options = {}) {
         forExport: options.forExport === true,
         fontFamilies: assets.fontFamilies,
       };
-      const sourceIds = Object.fromEntries(
+      sourceIds = Object.fromEntries(
         Object.entries(nodeIds).map(([id, uuid]) => [uuid, id]),
       );
       const described = engine.renderer.describe(request);
@@ -356,6 +364,10 @@ export async function renderAppProjection(product, projection, options = {}) {
       // A native panic invalidates the module. A later request can reload it.
       if (error instanceof WebAssembly.RuntimeError) initialized = undefined;
       const details = engine.renderer.errorDetails(error) ?? {};
+      if (details.nodes) details.nodes = details.nodes.map(node => {
+        const nodeId = sourceIds[node.nodeId] ?? node.nodeId;
+        return { ...node, nodeId, path: elementPath(projection.nodes, projection.rootId, nodeId) };
+      });
       throw new SmallPenError(
         details.code?.replaceAll("-", "_") ?? "shared_render_failed",
         error.message ?? "Shared App renderer failed",

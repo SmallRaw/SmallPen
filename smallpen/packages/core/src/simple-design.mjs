@@ -97,15 +97,20 @@ function componentIndex(snapshot, options) {
   for (const owner of [snapshot, options.foundation, ...(options.libraries ?? [])]) {
     if (!owner) continue;
     for (const set of owner.domain.componentSets.values())
-      sets.push({ owner, set });
+      if (!sets.some(item => item.set.id === set.id && item.owner.manifest.packageId === owner.manifest.packageId))
+        sets.push({ owner, set });
   }
   return (name) => {
-    const matches = sets.filter(({ set }) => set.id === name || sameName(set.name, name));
+    const qualified = isRecord(name);
+    const matches = sets.filter(({ owner, set }) => qualified
+      ? set.id === name.assetId && owner.manifest.packageId === name.packageId
+      : set.id === name);
+    if (!qualified && !matches.length) return findComponent(snapshot, name, options);
     if (matches.length === 0)
-      fail("unknown_component", `No component named ${name}`, { components: sets.map(({ set }) => set.name) });
-    if (matches.length > 1 && !matches.every(({ set }) => set.id === matches[0].set.id))
-      fail("ambiguous_component", `Several components are named ${name}; use its id`, {
-        candidates: matches.map(({ owner, set }) => ({ id: set.id, packageId: owner.manifest.packageId })),
+      fail("unknown_component", "The referenced component is unavailable", { reference: name });
+    if (matches.length > 1)
+      fail("ambiguous_component", "This component ID exists in several packages; select it by name", {
+        candidates: matches.map(({ owner, set }) => ({ name: set.name, id: set.id, packageId: owner.manifest.packageId })),
       });
     return matches[0];
   };
@@ -190,6 +195,8 @@ function paintOf(value) {
   }
   return { color: String(value), type: "solid" };
 }
+
+const SIZE_FIELDS = { width: "layout-item-h-sizing", height: "layout-item-v-sizing" };
 
 function sizeSpec(value) {
   if (value === undefined || value === null) return { mode: "auto" };
@@ -281,20 +288,22 @@ class TreeBuilder {
     // a longer label in a widened instance still fits. Several texts in a
     // row hug, so one never squeezes the other into extra lines.
     const isText = !spec.use && (typeof spec.text === "string" || spec.type === "text");
-    const width = sizeSpec(spec.width ?? (parentFlex === "row" && isText && textFills ? "fill" : undefined));
-    const height = sizeSpec(spec.height);
+    let width, height;
+    bind("width", spec.width ?? (parentFlex === "row" && isText && textFills ? "fill" : undefined), value => { width = sizeSpec(value); });
+    bind("height", spec.height, value => { height = sizeSpec(value); });
     node._size = { width, height };
     // Where the element goes in a container without auto layout: its own
     // x/y, a place next to a sibling, or the next free spot (CLI decides).
     node._place = spec.x !== undefined || spec.y !== undefined ? { fixed: true } : placeOf(spec.place, where);
     if (width.mode === "fix") node.width = width.value;
     if (height.mode === "fix") node.height = height.value;
-    if (parentFlex) {
-      node["layout-item-h-sizing"] = width.mode;
-      node["layout-item-v-sizing"] = height.mode;
+    for (const [axis, size] of [["width", width], ["height", height]]) {
+      if (size.mode === "fill" && !parentFlex)
+        fail("invalid_size", `fill needs a parent with a row or column layout (at ${where})`);
+      if (parentFlex || root || spec[axis] !== undefined) node[SIZE_FIELDS[axis]] = size.mode;
     }
     if (spec.use) {
-      this.instance(spec, node, where);
+      this.instance(spec, node, where, bindings);
     } else if (spec.text !== undefined || spec.type === "text") {
       node.type = "TEXT";
       // "{text.path}" binds a string Token: the text follows its language,
@@ -361,6 +370,10 @@ class TreeBuilder {
       // so the elements read in the order they were written.
       node.children = flex ? [...ids].reverse() : ids;
     }
+    if (node.layout === "flex") {
+      node[SIZE_FIELDS.width] ??= width.mode;
+      node[SIZE_FIELDS.height] ??= height.mode;
+    }
     if (spec.stroke !== undefined) {
       const stroke = isRecord(spec.stroke) ? spec.stroke : { color: spec.stroke };
       const paint = { alignment: stroke.align ?? "inner", type: "solid", width: 1 };
@@ -411,7 +424,7 @@ class TreeBuilder {
     return id;
   }
 
-  instance(spec, node, where) {
+  instance(spec, node, where, dimensionBindings) {
     const { owner, set } = this.components(spec.use);
     const selection = {};
     for (const [property, value] of Object.entries(spec.props ?? {})) {
@@ -484,7 +497,7 @@ class TreeBuilder {
         // Switches a nested copy's variant: {"Icon.props": {"Size": "sm"}}.
         if (!target.instance)
           fail("unsupported_instance_override", `${parts.join(".")} is not a nested component (at ${where})`);
-        const nested = this.components(target.instance.component.assetId);
+        const nested = this.components(target.instance.component);
         const selection = {};
         for (const [property, choice] of Object.entries(raw ?? {})) {
           const axis = (nested.set.axes ?? []).find((candidate) => sameName(candidate.name, property));
@@ -538,6 +551,11 @@ class TreeBuilder {
         this.widen.push({ id: node.id, probe, slot: target.width, grow });
       }
     }
+    for (const field of Object.keys(SIZE_FIELDS))
+      if (spec[field] !== undefined && !dimensionBindings[field] && !Object.hasOwn(settings, field) && source.tokenBindings?.[field]) {
+        if (!own.has(source.id)) own.set(source.id, {});
+        own.get(source.id)[field] = null;
+      }
     for (const [id, bindings] of own) node.instance.overrides[`${id}:tokenBindings`] = bindings;
     if (!Object.keys(node.instance.overrides).length) delete node.instance.overrides;
   }
@@ -946,7 +964,7 @@ export function pageDrawOperation(snapshot, spec, options = {}) {
     if (!previous || !node.instance ||
       previous.component.assetId !== node.instance.component.assetId ||
       previous.component.packageId !== node.instance.component.packageId) continue;
-    const { set } = components(node.instance.component.assetId);
+    const { set } = components(node.instance.component);
     const variant = set.variants.find((candidate) =>
       Object.entries(node.instance.variant ?? {}).every(([axis, value]) => candidate.selection?.[axis] === value)) ?? set.variants[0];
     for (const [key, links] of Object.entries(previous.overrides ?? {})) {
@@ -1019,7 +1037,7 @@ function parentOf(nodes, id) {
 
 // Applies set to nodes[id] in place. builder holds the stored nodes, so a
 // longer text in a copy widens it as page draw does.
-function setElementFields(builder, nodes, id, set, where, root) {
+function setElementFields(builder, nodes, id, set, where) {
   const node = nodes[id];
   if (!isRecord(set) || !Object.keys(set).length) fail("invalid_set", "Give at least one field to set, for example --set width=320", { allowedFields: SET_FIELDS });
   for (const key of Object.keys(set))
@@ -1031,12 +1049,13 @@ function setElementFields(builder, nodes, id, set, where, root) {
     const unsupported = Object.keys(set).filter((key) => !COPY_FIELDS.has(key));
     if (unsupported.length)
       fail("unknown_set_field", `A copy of a component takes ${[...COPY_FIELDS].join(", ")}; change ${unsupported.join(", ")} in the component (at ${where})`, { allowedFields: [...COPY_FIELDS] });
-    const { set: component } = builder.components(node.instance.component.assetId);
+    const { set: component } = builder.components(node.instance.component);
     const props = Object.fromEntries((component.axes ?? []).map((axis) => [axis.name, node.instance.variant?.[axis.id]]).filter(([, value]) => value !== undefined));
     const sizing = node["layout-item-h-sizing"];
     const spec = {
-      name: node.name, use: component.id, props: { ...props, ...(set.props ?? {}) },
+      name: node.name, use: node.instance.component, props: { ...props, ...(set.props ?? {}) },
       ...(set.width !== undefined ? { width: set.width } : sizing === "fill" ? { width: "fill" } : sizing === "fix" || parentFlex && sizing !== "auto" ? { width: node.width } : {}),
+      ...(set.height !== undefined ? { height: set.height } : {}),
     };
     if (set.text !== undefined) {
       if (!isRecord(set.text)) fail("invalid_set", `A copy's text takes {"Element": "text"} (at ${where})`);
@@ -1067,8 +1086,6 @@ function setElementFields(builder, nodes, id, set, where, root) {
     }
     for (const [key, value] of Object.entries(fresh))
       if (key.endsWith(":tokenBindings")) overrides[key] = { ...(overrides[key] ?? {}), ...value };
-    node.instance.overrides = overrides;
-    if (!Object.keys(node.instance.overrides).length) delete node.instance.overrides;
     Object.assign(builder.probes, scratch.probes);
     for (const entry of scratch.widen) {
       const targetId = entry.probe.slice(scratchId.length + 2);
@@ -1087,11 +1104,28 @@ function setElementFields(builder, nodes, id, set, where, root) {
     }
     for (const field of ["width", "height"])
       if (set[field] !== undefined) {
-        const value = Number(set[field]);
-        if (!Number.isFinite(value)) fail("invalid_instance_size", `A copy's ${field} takes a number (at ${where})`);
-        node[field] = value;
-        node[field === "width" ? "layout-item-h-sizing" : "layout-item-v-sizing"] = "fix";
+        node[field] = built[field];
+        node[SIZE_FIELDS[field]] = built._size[field].mode;
+        if (built.tokenBindings?.[field]) {
+          node.tokenBindings = { ...node.tokenBindings, [field]: built.tokenBindings[field] };
+        } else if (node.tokenBindings) {
+          delete node.tokenBindings[field];
+          if (!Object.keys(node.tokenBindings).length) delete node.tokenBindings;
+        }
+        const variant = component.variants.find(candidate =>
+          Object.entries(node.instance.variant ?? {}).every(([axis, value]) => candidate.selection?.[axis] === value)) ?? component.variants[0];
+        const root = variant.nodes[variant.rootId];
+        if (!Object.hasOwn(fresh, `${root.id}:${field}`)) {
+          delete overrides[`${root.id}:${field}`];
+          const key = `${root.id}:tokenBindings`, bound = { ...overrides[key] };
+          delete bound[field];
+          if (root.tokenBindings?.[field] && !built.tokenBindings?.[field]) bound[field] = null;
+          if (Object.keys(bound).length) overrides[key] = bound;
+          else delete overrides[key];
+        }
       }
+    node.instance.overrides = overrides;
+    if (!Object.keys(overrides).length) delete node.instance.overrides;
     if (set.visible !== undefined) {
       if (set.visible === false || set.visible === "false") node.visible = false;
       else delete node.visible;
@@ -1104,8 +1138,6 @@ function setElementFields(builder, nodes, id, set, where, root) {
   const isText = node.type === "TEXT";
   if (!isText && (set.text !== undefined || Object.keys(TEXT_STYLE_CONTROLS).some((key) => set[key] !== undefined)))
     fail("unknown_set_field", `${node.name} is not a text (at ${where})`);
-  if (root && ["fill", "100%", "hug"].includes(String(set.width ?? set.height ?? "").toLowerCase()))
-    fail("invalid_size", `The page or variant itself takes a number for its size (at ${where})`);
   const flexDir = node.layout === "flex" ? node["layout-flex-dir"] : undefined;
   const layout = set.layout ?? (flexDir ? (flexDir.startsWith("column") ? "column" : "row") : undefined);
   const spec = {
@@ -1171,12 +1203,13 @@ function setElementFields(builder, nodes, id, set, where, root) {
       }
     } else fail("invalid_layout", `layout is row, column or none (at ${where})`, { values: ["row", "column", "none"] });
   }
-  for (const [field, sizing] of [["width", "layout-item-h-sizing"], ["height", "layout-item-v-sizing"]]) {
+  for (const [field, sizing] of Object.entries(SIZE_FIELDS)) {
     if (set[field] === undefined) continue;
-    const size = sizeSpec(set[field]);
+    const size = built._size[field];
     if (size.mode === "fill" && !parentFlex) fail("invalid_size", `fill needs a parent with a row or column layout (at ${where})`);
-    if (parentFlex) node[sizing] = size.mode;
+    node[sizing] = size.mode;
     if (size.mode === "fix") node[field] = size.value;
+    takeBindings([field]);
     if (isText && field === "width") node.growType = size.mode === "auto" ? "auto-width" : "auto-height";
     if (!parentFlex && size.mode === "auto" && !isText && node.layout !== "flex") fail("invalid_size", `hug needs a row or column layout inside ${node.name} (at ${where})`);
     if (!parentFlex && size.mode === "auto") node[`_${field}Hug`] = true;
@@ -1187,10 +1220,10 @@ function setElementFields(builder, nodes, id, set, where, root) {
 
 // Stored sizes as sizing modes again, so sizeDesignTree measures texts and
 // regrows hugging containers after an edit.
-function storedSizing(nodes, rootId) {
-  for (const [id, node] of Object.entries(nodes)) {
+function storedSizing(nodes) {
+  for (const node of Object.values(nodes)) {
     const fixed = { width: { mode: "fix" }, height: { mode: "fix" } };
-    if (id === rootId || node.instance) {
+    if (node.instance) {
       node._size = fixed;
       continue;
     }
@@ -1238,7 +1271,7 @@ function editTargets(list, element, label, { all = false, one, kind }) {
 }
 
 function sizeAgain(builder, nodes, rootId, options) {
-  storedSizing(nodes, rootId);
+  storedSizing(nodes);
   const measure = options.measure?.({ nodes, probes: builder.probes, rootId, measureTexts: builder.measureTexts });
   widenInstances(builder, measure);
   sizeDesignTree(nodes, rootId, measure);
@@ -1258,7 +1291,7 @@ export function pageSetOperation(snapshot, { page, platform, element, all, set }
   for (const { item: presentation, id } of editTargets(versions, element, label, { all, one: "--platform", kind })) {
     const builder = new TreeBuilder(slug(`${screen.id}_${presentation.platform ?? presentation.name}`), tokens, components);
     builder.nodes = presentation.nodes;
-    setElementFields(builder, presentation.nodes, id, set, label(presentation) + (element ? ` › ${element}` : ""), id === presentation.rootId);
+    setElementFields(builder, presentation.nodes, id, set, label(presentation) + (element ? ` › ${element}` : ""));
     sizeAgain(builder, presentation.nodes, presentation.rootId, options);
     const rootNode = presentation.nodes[presentation.rootId];
     presentation.viewport = { width: rootNode.width, height: rootNode.height };
@@ -1285,7 +1318,7 @@ export function componentSetOperation(snapshot, { component, variant, element, a
   for (const { item: target, id } of editTargets(variants, element, labelOf, { all, one: "--variant", kind })) {
     const builder = new TreeBuilder(slug(`${componentSet.id}_${target.id}`), tokens, components);
     builder.nodes = target.nodes;
-    setElementFields(builder, target.nodes, id, set, labelOf(target) + (element ? ` › ${element}` : ""), id === target.rootId);
+    setElementFields(builder, target.nodes, id, set, labelOf(target) + (element ? ` › ${element}` : ""));
     sizeAgain(builder, target.nodes, target.rootId, options);
   }
   return { type: "put-component-set", componentSet };

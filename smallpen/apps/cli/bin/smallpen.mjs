@@ -169,6 +169,8 @@ import {
   viewSummary,
 } from "./read-output.mjs";
 
+import { runValidationJobs } from "./validation-runner.mjs";
+
 let writeState = "not-applied";
 async function trackedWrite(action) {
   writeState = "unknown";
@@ -1973,8 +1975,11 @@ async function designCommand(packagePath, args, override) {
   };
 }
 
-async function validationDesigns(workspace, args) {
-  if (!flag(args, "--all")) return [await designForCommand(workspace, args)];
+async function validationJobs(workspace, args) {
+  if (!flag(args, "--all")) {
+    const design = await designForCommand(workspace, args);
+    return [{ design, selection: design.selection }];
+  }
   const componentId = option(args, "--component-id"),
     screenId = option(args, "--screen-id");
   if (!componentId && !screenId)
@@ -1992,11 +1997,9 @@ async function validationDesigns(workspace, args) {
       (snapshot) => snapshot?.manifest.packageId === first.selection.packageId,
     );
     return owner.domain.componentSets.get(componentId).variants.map((variant) =>
-      selectedDesign(workspace, designSelector(args), {
-        componentId,
-        packageId: first.selection.packageId,
-        variantId: variant.id,
-      }),
+      ({ selector: designSelector(args),
+        target: { componentId, packageId: first.selection.packageId, variantId: variant.id },
+        selection: { componentId, packageId: first.selection.packageId, variantId: variant.id } }),
     );
   }
   const screen = workspace.product.manifest.entries.screens
@@ -2005,11 +2008,8 @@ async function validationDesigns(workspace, args) {
   if (!screen)
     throw new SmallPenError("missing_screen", `No Screen ${screenId}`);
   return screen.presentations.map((presentation) =>
-    selectedDesign(workspace, {
-      ...designSelector(args),
-      screenId,
-      presentationId: presentation.id,
-    }),
+    ({ selector: { ...designSelector(args), screenId, presentationId: presentation.id },
+      selection: { screenId, presentationId: presentation.id } }),
   );
 }
 
@@ -3570,29 +3570,26 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
   };
   const issues = [], checked = [], skipped = [], hints = [];
   let unreadable = 0;
+  const jobs = [];
   for (const target of targets) {
     try {
-      const report = await validateTargets(workspace, ["validate", packagePath, ...target.ids, ...pass]);
-      for (const issue of report.issues ?? []) {
-        const named = selectionNames(workspace, issue.target ?? {});
-        const at = [named.page ?? named.component ?? target.where, named.platform ?? named.variant].filter(Boolean);
-        const { target: _target, ...rest } = issue;
-        issues.push({ target: at.length > 1 ? `${at[0]} (${at[1]})` : at[0], ...rest });
-      }
-      checked.push(...(report.coverage?.targets ?? []));
-      skipped.push(...(report.coverage?.skipped ?? []).map((skip) => ({ ...skip, label: targetLabel(skip.target) })));
-      for (const hint of report.hints ?? [])
-        if (!hints.some((other) => JSON.stringify(other) === JSON.stringify(hint))) hints.push(hint);
+      jobs.push(...await validationJobs(workspace, ["validate", packagePath, ...target.ids, ...pass]));
     } catch (error) {
       unreadable += 1;
-      issues.push({
-        target: target.where,
-        code: error?.code ?? "unreadable_target",
-        severity: "error",
-        check: "read",
-        message: `${target.where} cannot be drawn: ${error?.message ?? error}`,
-      });
+      issues.push({ target: target.where, code: error.code ?? "unreadable_target", severity: "error", check: "read", message: error.message });
     }
+  }
+  const outcome = await runChecks(workspace, jobs, args);
+  for (const result of outcome.results) {
+    const report = validationResult(result);
+    for (const issue of report.issues ?? []) {
+      const { target: _target, ...rest } = issue;
+      issues.push({ target: validationLabel(workspace, report.selection), ...rest });
+    }
+    if (result.report) checked.push(report.selection);
+    skipped.push(...(report.coverage?.skipped ?? []).map(skip => ({ ...skip, target: report.selection, label: validationLabel(workspace, report.selection) })));
+    for (const hint of report.hints ?? [])
+      if (!hints.some(other => JSON.stringify(other) === JSON.stringify(hint))) hints.push(hint);
   }
   // Layout limits belong to the tool, with full diagnostics kept separately
   // from design issues and every skipped layout check counted in coverage.
@@ -3604,9 +3601,9 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
   return {
     packageId: product.manifest.packageId,
     ...workspaceRevisions(product, workspace.foundation, workspace.libraries),
-    status: unreadable ? "invalid" : "valid",
+    status: outcome.interrupted ? "interrupted" : outcome.results.some(result => result.error) ? "partial" : unreadable ? "invalid" : "valid",
     dataStatus: unreadable ? "invalid" : "valid",
-    visualStatus: design.length ? "issues" : "no-issues-found",
+    visualStatus: design.length ? "issues" : outcome.interrupted ? "partial" : "no-issues-found",
     issueCount: design.length,
     issues: full ? design : page.items,
     ...(full ? {} : { page: page.page }),
@@ -3618,7 +3615,8 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
     selection: { themes: themeSettings(workspace).selection.themes },
     coverage: {
       // Every target drawn and every check run on it.
-      complete: unreadable === 0 && notChecked.length === 0,
+      complete: unreadable === 0 && notChecked.length === 0 && !outcome.interrupted,
+      ...executionCoverage(outcome),
       targetCount: checked.length,
       // By name, short: "Home (desktop)", "Button (Style=primary)".
       // Pages by version; components as one line each unless --full.
@@ -3763,48 +3761,63 @@ function projectSummary(snapshot) {
   };
 }
 
+function validationLabel(workspace, selection) {
+  const named = selectionNames(workspace, selection);
+  const parts = [named.page ?? named.component, named.platform ?? named.variant].filter(Boolean);
+  return parts.length > 1 ? `${parts[0]} (${parts[1]})` : parts[0] ?? "design";
+}
+
+async function runChecks(workspace, jobs, args) {
+  const controller = new AbortController();
+  const interrupt = () => controller.abort();
+  process.once("SIGINT", interrupt);
+  process.once("SIGTERM", interrupt);
+  try {
+    const outcome = await runValidationJobs(workspace, jobs.map(job => ({
+      ...job, label: validationLabel(workspace, job.selection),
+    })), {
+      timeoutMs: Number(option(args, "--target-timeout") ?? 30_000),
+      signal: controller.signal,
+      progress: event => process.stderr.write(JSON.stringify(event) + "\n"),
+    });
+    if (outcome.interrupted) process.exitCode = 130;
+    return outcome;
+  } finally {
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", interrupt);
+  }
+}
+
+function executionCoverage(outcome) {
+  return {
+    totalTargetCount: outcome.total,
+    completedTargetCount: outcome.results.length,
+    failedTargetCount: outcome.results.filter(result => result.error).length,
+    remainingCount: outcome.remaining.length,
+    remaining: outcome.remaining,
+    interrupted: outcome.interrupted,
+  };
+}
+
+function validationResult({ job, report, error }) {
+  return report ?? {
+    selection: job.selection,
+    issues: [{ ...error, severity: "error", check: "execution" }],
+    coverage: { complete: false, nodeCount: 0, visibleNodeCount: 0, checks: [],
+      skipped: [{ check: "native-layout", reason: error.message, code: error.code, target: job.selection }] },
+  };
+}
+
 // Every check of the selected targets, untruncated.
 async function validateTargets(workspace, args) {
-  const designs = await validationDesigns(workspace, args);
-  const reports = [];
-  for (const design of designs) {
-    const report = {
-      ...(await validateDesign(workspace, design)),
-      selection: design.selection,
-    };
-    // A skipped check names its element; its path is a projected node id.
-    const nodes = design.projection?.nodes ?? {};
-    report.coverage.skipped = (report.coverage.skipped ?? []).map((skip) => {
-      const at = typeof skip.path === "string" && Object.hasOwn(nodes, skip.path) ? skip.path
-        : typeof skip.nodeId === "string" && Object.hasOwn(nodes, skip.nodeId) ? skip.nodeId : undefined;
-      if (at === undefined) return skip;
-      const { path: _path, ...rest } = skip;
-      return { ...rest, element: elementPath(nodes, design.projection.rootId, at) || nodes[at].name };
-    });
-    if (design.selection.screenId) {
-      const flow = prototypeConnections(
-        workspace.product,
-        design.selection,
-        {
-          ...workspace,
-          context: design.projection.context,
-          initialProjection: design.projection,
-        },
-      );
-      report.issues.push(
-        ...flow.issues.map((issue) => ({
-          ...issue,
-          check: "prototype-connections",
-        })),
-      );
-      report.coverage.checks.push("prototype-connections");
-      report.coverage.connectionCount = flow.connections.length;
-    }
-    reports.push(report);
-  }
+  const outcome = await runChecks(workspace, await validationJobs(workspace, args), args);
+  const reports = outcome.results.map(validationResult);
+  const empty = { issues: [], coverage: { complete: false, checks: [], skipped: [], nodeCount: 0, visibleNodeCount: 0 } };
   const all = flag(args, "--all");
   const visual = {
-    ...reports[0],
+    ...(reports[0] ?? empty),
+    ...(outcome.interrupted ? { status: "interrupted", visualStatus: "partial" }
+      : outcome.results.some(result => result.error) ? { status: "partial", visualStatus: "partial" } : {}),
     ...(reports.some((report) => report.hints?.length) ? { hints: reports.flatMap((report) => report.hints ?? []) } : {}),
     issues: reports.flatMap((report) =>
       report.issues.map((issue) =>
@@ -3812,7 +3825,9 @@ async function validateTargets(workspace, args) {
       ),
     ),
     coverage: {
-      ...reports[0].coverage,
+      ...(reports[0]?.coverage ?? empty.coverage),
+      ...executionCoverage(outcome),
+      complete: !outcome.interrupted && reports.every(report => report.coverage.complete),
       targets: reports.map((report) => ({ ...selectionNames(workspace, report.selection), ...report.selection })),
       targetCount: reports.length,
       nodeCount: reports.reduce(
@@ -3859,7 +3874,7 @@ async function validateTargets(workspace, args) {
       ...(option(args, "--component-id")
         ? {
             componentId: option(args, "--component-id"),
-            packageId: reports[0].selection.packageId,
+            packageId: reports[0]?.selection.packageId,
           }
         : { screenId: option(args, "--screen-id") }),
     };
