@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/web",
-  "version": "0.1.0-alpha.12",
+  "version": "0.1.0-alpha.13",
   "private": true,
   "type": "module",
   "exports": "./src/index.mjs",
@@ -12,6 +12,6 @@
     "src"
   ],
   "dependencies": {
-    "@smallpen/background": "0.1.0-alpha.12"
+    "@smallpen/background": "0.1.0-alpha.13"
   }
 }

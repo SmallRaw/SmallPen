@@ -185,23 +185,20 @@ test("desktop artifacts are uploaded before smoke tests without bypassing public
   assert.ok(testStep > workflow.indexOf("name: SmallPen-macOS-arm64-"));
   assert.ok(testStep > workflow.indexOf("name: SmallPen-Windows-x64-"));
   assert.match(workflow, /failure\(\) && steps\.smoke\.outcome == 'failure'/);
-  assert.match(workflow, /publish:[\s\S]*needs: \[test, cli, desktop, web, render-parity\]/);
+  assert.match(workflow, /publish:[\s\S]*needs: \[test, cli, desktop, render-parity\]/);
   assert.doesNotMatch(workflow, /continue-on-error/);
 });
 
-test("intermediate artifacts are removed after all consumers finish", async () => {
+test("release artifacts expire after one day and remain available for failed job retries", async () => {
   const workflow = await readFile(
     new URL("../../.github/workflows/smallpen.yml", import.meta.url),
     "utf8",
   );
-  const cleanup = workflow.slice(workflow.indexOf("  cleanup:"));
-  assert.match(cleanup, /needs: \[cli, frontend, desktop, web, render-parity, publish\]/);
-  assert.match(cleanup, /if: always\(\)/);
-  assert.match(
-    cleanup,
-    /select\(\.name == env.FRONTEND_ARTIFACT or \(\(\.name == env.NPM_ARTIFACT or \.name == env.WEB_NPM_ARTIFACT\) and env.PUBLISH_RESULT == "success"\)\)/,
-  );
-  assert.match(cleanup, /PUBLISH_RESULT: \$\{\{ needs.publish.result \}\}/);
-  assert.match(cleanup, /actions\/runs\/\$RUN_ID\/artifacts/);
-  assert.match(cleanup, /gh api --method DELETE/);
+  assert.doesNotMatch(workflow, /\n  cleanup:|actions: write|gh api/);
+  const uploads = [...workflow.matchAll(
+    /uses: actions\/upload-artifact@[^\n]+\n([\s\S]*?)(?=\n      - |\n  \S|$)/g,
+  )];
+  assert.ok(uploads.length > 0);
+  for (const [, step] of uploads)
+    assert.match(step, /retention-days: 1\b/);
 });

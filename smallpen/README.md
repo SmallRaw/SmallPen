@@ -165,8 +165,9 @@ Build the frontend once, including `smallpen-render`, then run
 `pnpm run build:app:assets` and `pnpm run build:app:renderer` in `frontend/`
 before packaging the CLI. The package includes the runtime. Packaging checks
 that its kernel matches the App bundle. Tests use at most four parallel files
-to bound the memory used by native rendering modules. Clean package installation
-and startup checks run once in their CLI, Web and Desktop release jobs.
+to bound the memory used by native rendering modules. CLI and Web share one
+Linux packaging job, with one install/startup check for each product. Each
+Desktop platform checks its own packaged App.
 CI uses `npm run test:ci` for data, layout, text and rendering regressions plus
 one complete CLI workflow. `npm test` keeps the full CLI command and help
 matrix for local checks. New non-CLI regression files enter CI automatically.
@@ -193,14 +194,17 @@ from the repository root, review and commit the manifest and lock changes,
 then run CI on that commit. CI never chooses a new version. Use a new version
 when publishing changed package contents; npm versions cannot be overwritten.
 
-The workflow runs shared checks, then CLI packaging and the shared frontend
-build in parallel. Desktop consumes that frontend artifact and builds on its
-own platform runners (macOS arm64 and Windows x64). CLI install verification
-runs on Linux, macOS and Windows; npm tarballs are uploaded and published only
-once, from Linux. Only after every selected platform passes can npm publication
-start. Web bundles the same frontend and verifies an offline tarball install
-and service startup before publication. Linux Desktop is not enabled yet.
-There is one workflow, with Test, CLI, Frontend, Desktop, Web and Publish jobs.
+The workflow validates committed versions before building the shared frontend
+once. Test runs the data/rendering regressions and one CLI workflow. CLI and
+Web share one Linux job: pack and install the CLI once, build its standalone
+archive, then pack Web and check its offline install and service startup.
+All five npm tarballs travel together in one artifact to Publish. Render
+parity compares CLI, SVG and WebGL once on Linux. Desktop builds and checks
+the actual macOS arm64 and Windows x64 Apps on their own runners. Every check
+must pass before npm publication; Linux Desktop is not enabled yet.
+There are seven runner jobs: Frontend, Test, CLI and Web, Render parity,
+Desktop on two platforms, and Publish. Shared checks are not repeated for
+each operating system. The full local test command remains available.
 The old Alpha entry and nested product workflows have been removed.
 Do not rerun a historical old-workflow run to test the new pipeline: start a
 new run from a branch that contains these files. GitHub's manual entry also
@@ -208,9 +212,11 @@ needs the workflow file on the repository's default branch.
 
 Downloadable artifacts are retained for **1 day**: a standalone CLI archive
 and macOS/Windows archives with SHA-256 checksums and source commit.
-Frontend transfer artifacts are deleted after all consumers finish.
-Npm transfer artifacts are deleted only after publication succeeds; failed
-or skipped publication keeps them for 1 day so the same packages can be retried.
+Transfer artifacts expire after 1 day without a separate deletion job. Until
+then, failed jobs can reuse the same frontend and npm packages without a full
+rebuild. Render comparison images and App startup logs are uploaded only on
+failure and also expire after 1 day. Already-compressed release archives use
+no extra upload compression.
 macOS is only ad-hoc signed; no Apple
 Developer account, signing secrets, notarization or GitHub Release is required.
 Desktop archives are uploaded before smoke tests, so a failed test does not
