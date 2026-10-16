@@ -28,6 +28,11 @@ const integer = (option, description, extra = {}) =>
   });
 
 const PARAMETERS = {
+  targetTimeout: integer(
+    "--target-timeout",
+    "Maximum milliseconds per validation target, including native layout; progress uses JSON lines on stderr and interruption returns partial coverage",
+    { minimum: 1, maximum: 600_000, default: 30_000 },
+  ),
   stdout: flag(
     "--stdout",
     "Print large results to stdout instead of saving a temporary result file",
@@ -488,7 +493,7 @@ export const COMMAND_CONTRACTS = {
   ),
   validate: command(
     "Validate canonical data and report text/layout/contrast issues and coverage; a page checks every version and a component every variant unless one is named",
-    [...TARGET, ...VIEW, "designSystem", "limit", "offset"],
+    [...TARGET, ...VIEW, "designSystem", "limit", "offset", "targetTimeout"],
     { conflicts: { designSystem: ["page", "component"] } },
   ),
   inspect: command("Read package identity, revision and counts"),

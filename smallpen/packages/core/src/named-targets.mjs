@@ -73,7 +73,7 @@ export function findComponent(snapshot, name, { foundation, libraries = [] } = {
   for (const owner of [snapshot, foundation, ...libraries]) {
     if (!owner) continue;
     for (const set of owner.domain.componentSets.values())
-      if (!sets.some((item) => item.set.id === set.id)) sets.push({ owner, set });
+      if (!sets.some((item) => item.set.id === set.id && item.owner.manifest.packageId === owner.manifest.packageId)) sets.push({ owner, set });
   }
   const { matches, one } = pickOne((text) => sets.filter(({ set }) => same(set.name, text)), name);
   if (one) return one;
@@ -208,8 +208,9 @@ function findInsideCopy(snapshot, presentation, rest, where, { foundation, libra
     }
     const copy = presentation.nodes[copyId];
     if (!copy.instance) continue;
-    const set = [snapshot, foundation, ...libraries].filter(Boolean)
-      .map((owner) => owner.domain.componentSets.get(copy.instance.component.assetId)).find(Boolean);
+    const owner = [snapshot, foundation, ...libraries].find(candidate =>
+      candidate?.manifest.packageId === copy.instance.component.packageId);
+    const set = owner?.domain.componentSets.get(copy.instance.component.assetId);
     if (!set) continue;
     const variant = set.variants.find((candidate) =>
       Object.entries(copy.instance.variant ?? {}).every(([axis, value]) => candidate.selection?.[axis] === value)) ?? set.variants[0];

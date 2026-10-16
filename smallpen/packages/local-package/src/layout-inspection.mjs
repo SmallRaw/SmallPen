@@ -39,7 +39,7 @@ export async function inspectProjection(product, projection, options = {}) {
       ].includes(error.code)
     )
       throw error;
-    failure = { code: error.code, message: error.message };
+    failure = { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) };
   }
   const origin = {
     x: (root?.x ?? 0) + (options.crop?.x ?? 0),
@@ -84,7 +84,9 @@ export async function inspectProjection(product, projection, options = {}) {
   };
   update(tree.root);
   const diagnostics = failure
-    ? [failure]
+    ? [failure, ...(failure.details?.nodes ?? []).map(({ nodeId, path, ...details }) => ({
+        code: failure.code, message: failure.message, nodeId, path, details,
+      }))]
     : (render?.diagnostics ?? []).filter(
         (item) => item.code !== "layout_projection_partial",
       );
