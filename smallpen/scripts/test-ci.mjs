@@ -27,7 +27,7 @@ console.log(
 );
 const result = spawnSync(
   process.execPath,
-  ["--test", "--test-concurrency=4", "--test-timeout=120000", ...files],
+  ["--import", join(root, "scripts/test-environment.mjs"), "--test", "--test-concurrency=4", "--test-timeout=120000", ...files],
   { cwd: root, stdio: "inherit" },
 );
 if (result.error) throw result.error;

@@ -19,6 +19,7 @@ export {
 } from "./render.mjs";
 export { renderAppProjection } from "./render-shared.mjs";
 export { inspectProjection } from "./layout-inspection.mjs";
+export { batchHistoryPath, defaultHistoryCacheRoot } from "./history-cache.mjs";
 export {
   decodeFigmaClipboard,
   importDraft,
@@ -31,6 +32,7 @@ export {
 } from "./initialize.mjs";
 export { migrateThemesByCopy } from "./migrate-themes.mjs";
 export {
+  BATCH_HISTORY_LIMITS,
   applyOperationBatch,
   deleteFontFamily,
   deleteFontVariant,

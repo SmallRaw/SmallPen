@@ -99,7 +99,9 @@ import {
   staleInstanceDiagnostics,
 } from "@smallpen/core";
 import {
+  BATCH_HISTORY_LIMITS,
   applyOperationBatch,
+  batchHistoryPath,
   defaultLibraryCacheRoot,
   fontVariantName,
   importDraft,
@@ -440,6 +442,8 @@ function printJson(value) {
       "libraryRevisions",
       "batchId",
       "alreadyApplied",
+      "history",
+      "historyWindow",
       "changed",
       "dryRun",
       "noChange",
@@ -1183,7 +1187,7 @@ async function writeReply(result, args) {
               ],
             }
           : {
-              ledgerPath: `${resolve(args[1])}.batches.json`,
+              ledgerPath: await batchHistoryPath(resolve(args[1])),
               batchId: result.batchId,
             }),
       };
@@ -3235,6 +3239,13 @@ async function changesCommand(packagePath, args) {
   const revisions = {
     revision: product.revision,
     ...(foundation ? { foundationRevision: foundation.revision } : {}),
+    historyWindow: packages.map((snapshot, index) => ({
+      packageId: snapshot.manifest.packageId,
+      ...BATCH_HISTORY_LIMITS,
+      retainedBatches: histories[index].length,
+      oldestRevision: histories[index][0]?.baseRevision,
+      newestRevision: histories[index].at(-1)?.revision,
+    })),
   };
   if (since === undefined) {
     const limit = integerOption(args, "--limit") || 10;
@@ -3265,6 +3276,7 @@ async function changesCommand(packagePath, args) {
       "unknown_revision",
       "This revision is not in the recorded history; read the current design with view instead",
       {
+        historyWindow: revisions.historyWindow,
         nextOperations: [
           { argv: ["changes", packagePath, "--json"], operation: "smallpen.changes" },
           { argv: ["view", packagePath, "--as", "text", "--json"], operation: "smallpen.view" },

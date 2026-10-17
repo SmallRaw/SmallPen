@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
 import {
   copyFile,
   link,
@@ -39,6 +40,7 @@ import {
   syncDirectory,
   writeFileDurable,
 } from "./fs-utils.mjs";
+import { batchHistoryPath, HISTORY_CACHE_IDLE_MS } from "./history-cache.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -49,10 +51,16 @@ const execFileAsync = promisify(execFile);
 const CLAIM_HEARTBEAT_MS = 2000;
 const UNVERIFIED_CLAIM_STALE_MS = 10000;
 const MAX_BATCH_LEDGER_ENTRIES = 500;
-// Side files next to a Package are read whole; a huge or endless file planted
-// there must fail fast instead of exhausting memory. The ledger keeps at most
-// MAX_BATCH_LEDGER_ENTRIES small records; journals and claims are a few paths.
+// Control files and cached histories are read whole; a huge or endless file
+// must fail fast instead of exhausting memory. Undo records can be
+// large, so the ledger enforces both byte and record limits on every write.
 const MAX_BATCH_LEDGER_BYTES = 32 * 1024 * 1024;
+const UNREADABLE_BATCH_LEDGER = Symbol("unreadableBatchLedger");
+export const BATCH_HISTORY_LIMITS = Object.freeze({
+  maxBytes: MAX_BATCH_LEDGER_BYTES,
+  maxBatches: MAX_BATCH_LEDGER_ENTRIES,
+  maxIdleMs: HISTORY_CACHE_IDLE_MS,
+});
 const MAX_CONTROL_FILE_BYTES = 64 * 1024;
 // Errors that mean this process cannot create the lock next to the Package.
 const UNWRITABLE_LOCATION_CODES = new Set(["EACCES", "EPERM", "EROFS"]);
@@ -521,14 +529,22 @@ export async function openPackage(locator) {
   }
   try {
     await recoverInterruptedCommit(target);
-    return await openPackageUnlocked(target);
+    const snapshot = await openPackageUnlocked(target);
+    if (await pathExists(`${target}.batches.json`)) {
+      try { await readBatchLedger(target); }
+      catch (error) {
+        // Auxiliary history migration must not prevent opening a valid design.
+        process.emitWarning(`Legacy history migration deferred: ${error.message}`, { code: "SMALLPEN_HISTORY_CACHE_UNAVAILABLE" });
+      }
+    }
+    return snapshot;
   } finally {
     await release();
   }
 }
 
-async function copyFileDurable(source, target) {
-  await copyFile(source, target);
+async function copyFileDurable(source, target, flags = 0) {
+  await copyFile(source, target, flags);
   const handle = await open(target, "r+");
   try {
     await handle.sync();
@@ -715,7 +731,7 @@ async function themeSelectionDependencies(locator, before, batch, dependencies) 
   }
 }
 
-async function applyOperationBatchLocked(locator, batch, dependencies = {}) {
+async function applyOperationBatchLocked(locator, batch, dependencies = {}, beforeCommit = () => {}) {
   const before = await openPackageUnlocked(locator);
   const blobWrites = batch.blobs ?? new Map();
   if (!(blobWrites instanceof Map)) {
@@ -749,11 +765,18 @@ async function applyOperationBatchLocked(locator, batch, dependencies = {}) {
       );
     }
   }
+  const result = {
+    ...prepared.result,
+    changedFiles: [...new Set([...prepared.result.changedFiles, ...blobWrites.keys()])].sort(),
+  };
+  // Capacity checks must run before changing the design, including no-op
+  // batches: a single undo record larger than the window cannot be replayed.
+  await beforeCommit(result);
   if (
     prepared.result.changedFiles.length === 0 &&
     prepared.result.deletedFiles.length === 0
   ) {
-    return prepared.result;
+    return result;
   }
 
   const transaction = await writeCandidate(
@@ -780,20 +803,11 @@ async function applyOperationBatchLocked(locator, batch, dependencies = {}) {
       transaction.candidatePath,
       transaction.transactionPath,
     );
-    return {
-      ...prepared.result,
-      changedFiles: [
-        ...new Set([...prepared.result.changedFiles, ...blobWrites.keys()]),
-      ].sort(),
-    };
+    return result;
   } catch (error) {
     await cleanup([transaction.transactionPath]);
     throw error;
   }
-}
-
-function batchLedgerPath(packagePath) {
-  return `${packagePath}.batches.json`;
 }
 
 // The ledger is a null-prototype map so batch IDs such as "__proto__" stay
@@ -802,46 +816,180 @@ function emptyBatchLedger() {
   return Object.create(null);
 }
 
-async function readBatchLedger(packagePath) {
+async function readLedgerFile(path, { expire = true } = {}) {
   let parsed;
   try {
+    const info = await lstat(path);
+    if (expire && Date.now() - info.mtimeMs > HISTORY_CACHE_IDLE_MS) return emptyBatchLedger();
     parsed = JSON.parse(
-      await readRegularFile(batchLedgerPath(packagePath), "utf8", {
+      await readRegularFile(path, "utf8", {
         maxBytes: MAX_BATCH_LEDGER_BYTES,
       }),
     );
   } catch (error) {
-    if (error?.code === "ENOENT") return emptyBatchLedger();
-    // The ledger only provides replay idempotency. An unreadable ledger must
-    // not block every write; it is replaced on the next recorded commit.
+    if (error?.code === "ENOENT") return undefined;
+    // Reads never erase evidence. A writer archives this exact file before
+    // installing a fresh ledger; history reads report the unavailable window.
     process.emitWarning(
-      `Ignoring unreadable SmallPen batch ledger: ${error?.message ?? error}`,
+      `Unreadable SmallPen batch ledger retained at ${path}: ${error?.message ?? error}`,
       { code: "SMALLPEN_BATCH_LEDGER_UNREADABLE" },
     );
-    return emptyBatchLedger();
+    return Object.assign(emptyBatchLedger(), { [UNREADABLE_BATCH_LEDGER]: { error, path } });
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    process.emitWarning("Ignoring malformed SmallPen batch ledger", {
+    process.emitWarning(`Malformed SmallPen batch ledger retained at ${path}`, {
       code: "SMALLPEN_BATCH_LEDGER_UNREADABLE",
     });
-    return emptyBatchLedger();
+    return Object.assign(emptyBatchLedger(), { [UNREADABLE_BATCH_LEDGER]: { error: new Error("Invalid batch ledger object"), path } });
   }
   return Object.assign(emptyBatchLedger(), parsed);
 }
 
-async function writeBatchLedger(packagePath, ledger) {
-  const entries = Object.entries(ledger).sort(([, left], [, right]) =>
+// Called while the Package write lock is held. A read-only owner can read
+// legacy history but never tries to move it or prune cache files.
+async function readBatchLedger(packagePath, { migrate = true } = {}) {
+  const path = await batchHistoryPath(packagePath);
+  if (migrate) {
+    try { await pruneHistoryCache(path); }
+    catch (error) {
+      process.emitWarning(`History cache cleanup failed: ${error.message}`, { code: "SMALLPEN_HISTORY_CACHE_UNAVAILABLE" });
+    }
+  }
+  const cached = await readLedgerFile(path);
+  const legacy = `${packagePath}.batches.json`;
+  if (!await pathExists(legacy)) return cached ?? emptyBatchLedger();
+  if (!migrate) return cached ?? await readLedgerFile(legacy, { expire: false }) ?? emptyBatchLedger();
+  try {
+    return await migrateBatchLedger(packagePath, path, legacy, cached);
+  } catch (error) {
+    if (error instanceof SmallPenError) throw error;
+    if (!["EACCES", "EPERM", "EROFS", "ENOSPC", "ENOTDIR", "EEXIST"].includes(error.code)) throw error;
+    // A cache failure must not prevent saving a valid design. Preserve the
+    // old sidecar; the write reports unavailable history if caching also fails.
+    process.emitWarning(`Legacy history migration deferred: ${error.message}`, { code: "SMALLPEN_HISTORY_CACHE_UNAVAILABLE" });
+    const present = await readLedgerFile(path);
+    if (present && !present[UNREADABLE_BATCH_LEDGER]) return present;
+    return await readLedgerFile(legacy, { expire: false }) ?? present ?? emptyBatchLedger();
+  }
+}
+
+async function migrateBatchLedger(packagePath, path, legacy, cached) {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  if (!cached) {
+    await moveHistoryFile(legacy, path);
+    await utimes(path, new Date(), new Date());
+    return await readLedgerFile(path) ?? emptyBatchLedger();
+  }
+  const older = await readLedgerFile(legacy, { expire: false });
+  if (older?.[UNREADABLE_BATCH_LEDGER]) {
+    const recoveryPath = `${path}.unreadable-${randomUUID()}.bak`;
+    await moveHistoryFile(legacy, recoveryPath);
+    process.emitWarning(`Unreadable legacy history preserved at ${recoveryPath}`, { code: "SMALLPEN_BATCH_LEDGER_RECOVERED" });
+    return cached;
+  }
+  if (cached[UNREADABLE_BATCH_LEDGER]) {
+    await moveHistoryFile(path, `${path}.unreadable-${randomUUID()}.bak`);
+    await moveHistoryFile(legacy, path);
+    await utimes(path, new Date(), new Date());
+    return await readLedgerFile(path) ?? emptyBatchLedger();
+  }
+  // During an upgrade an older App can recreate its adjacent ledger. Merge
+  // it under the same Package lock, preserving the newer version's records.
+  for (const [id, entry] of Object.entries(older ?? {})) {
+    if (cached[id] && cached[id].identityHash !== entry?.identityHash)
+      fail("batch_id_conflict", "Legacy and cached histories contain different batches with the same ID", { batchId: id, legacyPath: legacy, cachePath: path });
+    if (!cached[id] || String(entry?.committedAt) > String(cached[id]?.committedAt)) cached[id] = entry;
+  }
+  const newest = Object.entries(cached).sort(([, a], [, b]) => String(a?.committedAt ?? "").localeCompare(String(b?.committedAt ?? ""))).at(-1)?.[0];
+  await writeBatchLedger(packagePath, newest ? serializeBatchLedger(cached, newest) : "{}\n");
+  await rm(legacy);
+  await syncDirectory(dirname(legacy));
+  return await readLedgerFile(path) ?? emptyBatchLedger();
+}
+
+async function moveHistoryFile(source, target) {
+  const info = await lstat(source);
+  if (!info.isFile() || info.isSymbolicLink())
+    fail("invalid_batch_history", "Legacy history must be a regular file", { path: source });
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  try {
+    await rename(source, target);
+  } catch (error) {
+    if (error.code !== "EXDEV") throw error;
+    // A malicious sparse legacy file must not fill another filesystem.
+    if (info.size > 8 * MAX_BATCH_LEDGER_BYTES)
+      fail("batch_history_migration_too_large", "Legacy history is too large to copy to the cache; move it out of the project and retry", { path: source });
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    try {
+      await copyFileDurable(source, temporary, fsConstants.COPYFILE_EXCL);
+      await rename(temporary, target);
+      await syncDirectory(dirname(target));
+      await rm(source);
+    } finally {
+      await cleanup([temporary]);
+    }
+  }
+  await syncDirectory(dirname(target));
+  await syncDirectory(dirname(source));
+}
+
+async function pruneHistoryCache(path) {
+  let names;
+  try { names = await readdir(dirname(path)); }
+  catch (error) { if (error.code === "ENOENT") return; throw error; }
+  for (const name of names) {
+    if (!/^batches\.json(?:\.unreadable-[0-9a-f-]+\.bak)?(?:\.[0-9a-f-]+\.tmp)?$/.test(name)) continue;
+    const candidate = join(dirname(path), name);
+    const info = await lstat(candidate).catch(error => { if (error.code === "ENOENT") return; throw error; });
+    if (info?.isFile() && Date.now() - info.mtimeMs > HISTORY_CACHE_IDLE_MS) await rm(candidate);
+  }
+}
+
+function serializeBatchLedger(ledger, newestBatchId) {
+  const entries = Object.entries(ledger).filter(([id]) => id !== newestBatchId).sort(([, left], [, right]) =>
     String(left?.committedAt ?? "").localeCompare(
       String(right?.committedAt ?? ""),
     ),
   );
-  const retained = Object.assign(
-    emptyBatchLedger(),
-    Object.fromEntries(entries.slice(-MAX_BATCH_LEDGER_ENTRIES)),
-  );
-  const temporary = `${batchLedgerPath(packagePath)}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(retained, null, 2)}\n`);
-  await rename(temporary, batchLedgerPath(packagePath));
+  // Even a clock adjustment or a future-dated imported record must not evict
+  // the write being committed now.
+  entries.push([newestBatchId, ledger[newestBatchId]]);
+  // Keep a contiguous suffix of complete records. Count UTF-8 bytes of the
+  // exact compact JSON that the bounded reader will open, including framing.
+  const parts = [];
+  let bytes = 3; // braces and final newline
+  for (const [id, entry] of entries.reverse()) {
+    const part = `${JSON.stringify(id)}:${JSON.stringify(entry)}`;
+    const size = Buffer.byteLength(part, "utf8");
+    if (id === newestBatchId && size + 3 > MAX_BATCH_LEDGER_BYTES)
+      fail("batch_history_entry_too_large", "This batch's undo record exceeds the history capacity; split the change into smaller batches", {
+        maxBytes: MAX_BATCH_LEDGER_BYTES, requiredBytes: size + 3,
+      });
+    if (parts.length >= MAX_BATCH_LEDGER_ENTRIES || bytes + size + (parts.length ? 1 : 0) > MAX_BATCH_LEDGER_BYTES) break;
+    bytes += size + (parts.length ? 1 : 0);
+    parts.unshift(part);
+  }
+  return `{${parts.join(",")}}\n`;
+}
+
+async function writeBatchLedger(packagePath, serialized, unreadable) {
+  const path = await batchHistoryPath(packagePath);
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFileDurable(temporary, serialized, "utf8");
+    if (unreadable) {
+      const recoveryPath = `${path}.unreadable-${randomUUID()}.bak`;
+      await moveHistoryFile(unreadable.path, recoveryPath);
+      process.emitWarning(`Previous SmallPen batch ledger preserved at ${recoveryPath}`, {
+        code: "SMALLPEN_BATCH_LEDGER_RECOVERED", detail: recoveryPath,
+      });
+    }
+    await rename(temporary, path);
+    await syncDirectory(dirname(path));
+  } finally {
+    await cleanup([temporary]);
+  }
 }
 
 function hashCanonical(value) {
@@ -862,7 +1010,7 @@ function batchOperationsHash(batch) {
   return hashCanonical({ operations: batch.operations });
 }
 
-// SP-039/040: a batch ledger beside the Package gives the public CLI stable
+// SP-039/040: a machine-local cached ledger gives the public CLI stable
 // idempotency. A recorded batch ID replays only while its effect is the
 // current state, so a replay never writes twice and never reports a
 // revision other than the current one as success:
@@ -929,11 +1077,21 @@ function currentRevisionReader(packagePath) {
 
 // The committed batches, oldest first: what each changed, when, from which
 // revision, and the inverse that restores the revision before it. Read
-// only; `smallpen changes` rebuilds an earlier revision from it.
+// The design stays unchanged; caches can migrate or expire on access.
+// `smallpen changes` rebuilds an earlier revision from the retained records.
 export async function readBatchHistory(locator) {
   const resolvedPackagePath = await resolvePackageRoot(await lockTarget(locator));
-  const ledger = await readBatchLedger(resolvedPackagePath);
-  return Object.entries(ledger)
+  let release;
+  try { release = await acquireWriteLock(resolvedPackagePath); }
+  catch (error) { if (error.code !== "package_not_writable") throw error; }
+  try {
+    if (release) await recoverInterruptedCommit(resolvedPackagePath);
+    const ledger = await readBatchLedger(resolvedPackagePath, { migrate: Boolean(release) });
+    if (ledger[UNREADABLE_BATCH_LEDGER])
+      fail("batch_history_unavailable", "The history cannot be read; its original file is preserved", {
+        ledgerPath: ledger[UNREADABLE_BATCH_LEDGER].path, ...BATCH_HISTORY_LIMITS,
+      });
+    return Object.entries(ledger)
     .map(([batchId, entry]) => ({
       affectedIds: entry?.result?.affectedIds ?? [],
       baseRevision: entry?.baseRevision,
@@ -944,7 +1102,10 @@ export async function readBatchHistory(locator) {
       // CLI writes carry the intent that produced them; App edits do not.
       source: entry?.cliIntentHash ? "cli" : "app",
     }))
-    .sort((left, right) => String(left.committedAt ?? "").localeCompare(String(right.committedAt ?? "")));
+      .sort((left, right) => String(left.committedAt ?? "").localeCompare(String(right.committedAt ?? "")));
+  } finally {
+    await release?.();
+  }
 }
 
 // Public replay check used by the CLI before stale-revision validation and
@@ -960,7 +1121,7 @@ export async function replayRecordedBatch(locator, batch, options = {}) {
     if (error?.code !== "package_not_writable") throw error;
     const resolvedPackagePath = await resolvePackageRoot(packagePath);
     return recordedBatchReplay(
-      await readBatchLedger(resolvedPackagePath),
+      await readBatchLedger(resolvedPackagePath, { migrate: false }),
       batch,
       currentRevisionReader(resolvedPackagePath),
       options,
@@ -997,25 +1158,35 @@ export async function applyOperationBatch(locator, batch, options = {}) {
       currentRevisionReader(resolvedPackagePath),
     );
     if (!result) {
+      let serialized;
       result = await applyOperationBatchLocked(
         resolvedPackagePath,
         batch,
         options.dependencies,
-      );
-      if (Array.isArray(batch?.operations)) {
-        try {
+        async prepared => {
           ledger[batch.batchId] = {
             baseRevision: batch.baseRevision,
             committedAt: new Date().toISOString(),
             identityHash: await batchIdentityHash(batch),
             operationsHash: await batchOperationsHash(batch),
             ...(batch.cliIntent ? { cliIntentHash: await hashCanonical(batch.cliIntent) } : {}),
-            result,
-            revision: result.revision,
+            result: prepared,
+            revision: prepared.revision,
           };
-          await writeBatchLedger(resolvedPackagePath, ledger);
-        } catch {
-          // Ledger persistence is best-effort; the canonical commit stands.
+          serialized = serializeBatchLedger(ledger, batch.batchId);
+        },
+      );
+      if (Array.isArray(batch?.operations)) {
+        try {
+          await writeBatchLedger(resolvedPackagePath, serialized, ledger[UNREADABLE_BATCH_LEDGER]);
+        } catch (error) {
+          // The canonical commit stands, but callers must know replay and
+          // changes tracking were not recorded instead of assuming success.
+          result = { ...result, history: { status: "unavailable", message: error.message,
+            ledgerPath: await batchHistoryPath(resolvedPackagePath) } };
+          process.emitWarning(`Design saved but batch history was not recorded: ${error.message}`, {
+            code: "SMALLPEN_BATCH_LEDGER_WRITE_FAILED",
+          });
         }
       }
     }
