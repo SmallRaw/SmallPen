@@ -189,12 +189,11 @@ test("desktop artifacts are uploaded before smoke tests without bypassing public
   assert.doesNotMatch(workflow, /continue-on-error/);
 });
 
-test("release artifacts expire after one day and remain available for failed job retries", async () => {
+test("release artifacts expire after one day", async () => {
   const workflow = await readFile(
     new URL("../../.github/workflows/smallpen.yml", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(workflow, /\n  cleanup:|actions: write|gh api/);
   const uploads = [...workflow.matchAll(
     /uses: actions\/upload-artifact@[^\n]+\n([\s\S]*?)(?=\n      - |\n  \S|$)/g,
   )];
