@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/cli",
-  "version": "0.1.0-alpha.15",
+  "version": "0.1.0-alpha.16",
   "publishConfig": {
     "access": "public"
   },
@@ -15,8 +15,8 @@
     "bin"
   ],
   "dependencies": {
-    "@smallpen/core": "0.1.0-alpha.15",
-    "@smallpen/local-package": "0.1.0-alpha.15"
+    "@smallpen/core": "0.1.0-alpha.16",
+    "@smallpen/local-package": "0.1.0-alpha.16"
   },
   "repository": {
     "type": "git",
