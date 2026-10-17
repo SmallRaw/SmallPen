@@ -340,9 +340,9 @@ Choose `--batch-id` before retryable writes; reverse edits are explicit new
 writes, not history rollback.
 
 `changes` reports `historyWindow`: the oldest retained revision, newest
-revision and record count. History and batch replay retain the newest complete
-records within both 500 batches and 32 MiB of UTF-8 JSON; older records leave
-that window. These are temporary local caches, separate from the App's
+revision, record count and `incompleteBatches`. History and batch replay retain
+the newest records within both 500 batches and 32 MiB of UTF-8 JSON; older
+records leave that window. These are temporary local caches, separate from the App's
 in-memory Undo/Redo stack. Cache files and recovery backups stay outside
 the project, so no Git ignore configuration is needed:
 
@@ -360,7 +360,18 @@ its adjacent `.batches.json` file into the cache; its design revision stays
 unchanged. If an older App recreates that file, the next access merges it
 with cached history under the project write lock.
 
-A single undo record exceeding 32 MiB is refused before saving the design.
+The cache stores each inverse once and reconstructs its duplicate guidance
+when replaying a confirmation. The next write also compacts older records.
+A single inverse exceeding 32 MiB does not block saving the design: the caller
+still receives the full inverse, and the cache retains the retry receipt
+without it. The write reports `history.status=partial`,
+`reason=inverse_exceeds_capacity` and `replayRetained=true`. Retrying the batch
+replays that receipt without writing again; it cannot recover the uncached
+inverse. `changes --since` returns `batch_history_unavailable` if rebuilding
+that revision would cross this gap. Read the current design instead of
+treating unavailable history as no changes. App Undo/Redo still uses the
+inverse received by its current session.
+
 Unreadable history stays recoverable as `batches.json.unreadable-UUID.bak`
 inside its cache directory; reading it returns `batch_history_unavailable`.
 If a design saves but history storage fails, the write reports

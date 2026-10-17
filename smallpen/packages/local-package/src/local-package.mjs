@@ -731,7 +731,7 @@ async function themeSelectionDependencies(locator, before, batch, dependencies) 
   }
 }
 
-async function applyOperationBatchLocked(locator, batch, dependencies = {}, beforeCommit = () => {}) {
+async function applyOperationBatchLocked(locator, batch, dependencies = {}) {
   const before = await openPackageUnlocked(locator);
   const blobWrites = batch.blobs ?? new Map();
   if (!(blobWrites instanceof Map)) {
@@ -769,9 +769,6 @@ async function applyOperationBatchLocked(locator, batch, dependencies = {}, befo
     ...prepared.result,
     changedFiles: [...new Set([...prepared.result.changedFiles, ...blobWrites.keys()])].sort(),
   };
-  // Capacity checks must run before changing the design, including no-op
-  // batches: a single undo record larger than the window cannot be replayed.
-  await beforeCommit(result);
   if (
     prepared.result.changedFiles.length === 0 &&
     prepared.result.deletedFiles.length === 0
@@ -945,6 +942,32 @@ async function pruneHistoryCache(path) {
   }
 }
 
+// Guidance carries the same inverse as inverseBatch. Store it once and
+// restore the public reply when replaying, including records from older Apps.
+function cachedBatchResult(result, includeInverse = true) {
+  const cached = { ...result };
+  if (cached.inverseBatch && cached.guidance?.undo) {
+    const { batch: _batch, ...args } = cached.guidance.undo.args ?? {};
+    cached.guidance = { ...cached.guidance, undo: { ...cached.guidance.undo, args } };
+  }
+  if (!includeInverse) {
+    delete cached.inverseBatch;
+    if (cached.guidance) {
+      const { undo: _undo, ...guidance } = cached.guidance;
+      cached.guidance = guidance;
+    }
+  }
+  return cached;
+}
+
+function replayBatchResult(result) {
+  if (!result?.inverseBatch || !result.guidance?.undo) return result;
+  return { ...result, guidance: { ...result.guidance, undo: {
+    ...result.guidance.undo,
+    args: { ...result.guidance.undo.args, batch: result.inverseBatch },
+  } } };
+}
+
 function serializeBatchLedger(ledger, newestBatchId) {
   const entries = Object.entries(ledger).filter(([id]) => id !== newestBatchId).sort(([, left], [, right]) =>
     String(left?.committedAt ?? "").localeCompare(
@@ -959,10 +982,11 @@ function serializeBatchLedger(ledger, newestBatchId) {
   const parts = [];
   let bytes = 3; // braces and final newline
   for (const [id, entry] of entries.reverse()) {
-    const part = `${JSON.stringify(id)}:${JSON.stringify(entry)}`;
+    const record = entry?.result ? { ...entry, result: cachedBatchResult(entry.result) } : entry;
+    const part = `${JSON.stringify(id)}:${JSON.stringify(record)}`;
     const size = Buffer.byteLength(part, "utf8");
     if (id === newestBatchId && size + 3 > MAX_BATCH_LEDGER_BYTES)
-      fail("batch_history_entry_too_large", "This batch's undo record exceeds the history capacity; split the change into smaller batches", {
+      fail("batch_history_entry_too_large", "This batch's inverse exceeds the history cache capacity", {
         maxBytes: MAX_BATCH_LEDGER_BYTES, requiredBytes: size + 3,
       });
     if (parts.length >= MAX_BATCH_LEDGER_ENTRIES || bytes + size + (parts.length ? 1 : 0) > MAX_BATCH_LEDGER_BYTES) break;
@@ -1052,7 +1076,7 @@ async function recordedBatchReplay(ledger, batch, readRevision, options = {}) {
   const currentRevision = await readRevision();
   if (currentRevision === recorded.revision) {
     batch.operations.forEach(checkOperationShape);
-    return { ...recorded.result, alreadyApplied: true };
+    return { ...replayBatchResult(recorded.result), alreadyApplied: true };
   }
   if (
     (sameBatch && currentRevision === batch.baseRevision) ||
@@ -1076,7 +1100,7 @@ function currentRevisionReader(packagePath) {
 }
 
 // The committed batches, oldest first: what each changed, when, from which
-// revision, and the inverse that restores the revision before it. Read
+// revision, and the inverse that restores the revision before it, when cached.
 // The design stays unchanged; caches can migrate or expire on access.
 // `smallpen changes` rebuilds an earlier revision from the retained records.
 export async function readBatchHistory(locator) {
@@ -1098,6 +1122,7 @@ export async function readBatchHistory(locator) {
       batchId,
       committedAt: entry?.committedAt,
       inverseBatch: entry?.result?.inverseBatch,
+      ...(entry?.result?.history ? { history: entry.result.history } : {}),
       revision: entry?.revision ?? entry?.result?.revision,
       // CLI writes carry the intent that produced them; App edits do not.
       source: entry?.cliIntentHash ? "cli" : "app",
@@ -1158,26 +1183,37 @@ export async function applyOperationBatch(locator, batch, options = {}) {
       currentRevisionReader(resolvedPackagePath),
     );
     if (!result) {
-      let serialized;
       result = await applyOperationBatchLocked(
         resolvedPackagePath,
         batch,
         options.dependencies,
-        async prepared => {
+      );
+      if (Array.isArray(batch?.operations)) {
+        try {
           ledger[batch.batchId] = {
             baseRevision: batch.baseRevision,
             committedAt: new Date().toISOString(),
             identityHash: await batchIdentityHash(batch),
             operationsHash: await batchOperationsHash(batch),
             ...(batch.cliIntent ? { cliIntentHash: await hashCanonical(batch.cliIntent) } : {}),
-            result: prepared,
-            revision: prepared.revision,
+            result,
+            revision: result.revision,
           };
-          serialized = serializeBatchLedger(ledger, batch.batchId);
-        },
-      );
-      if (Array.isArray(batch?.operations)) {
-        try {
+          let serialized;
+          try {
+            serialized = serializeBatchLedger(ledger, batch.batchId);
+          } catch (error) {
+            if (error.code !== "batch_history_entry_too_large") throw error;
+            // Saving the design does not depend on auxiliary cache capacity.
+            // Keep the small confirmation so a timeout retry cannot write twice.
+            result = { ...result, history: {
+              status: "partial", reason: "inverse_exceeds_capacity", replayRetained: true,
+              ...error.details,
+              message: "Design saved and retry receipt retained; the inverse exceeds the history cache capacity. Read the current design when an older revision cannot be reconstructed.",
+            } };
+            ledger[batch.batchId].result = cachedBatchResult(result, false);
+            serialized = serializeBatchLedger(ledger, batch.batchId);
+          }
           await writeBatchLedger(resolvedPackagePath, serialized, ledger[UNREADABLE_BATCH_LEDGER]);
         } catch (error) {
           // The canonical commit stands, but callers must know replay and

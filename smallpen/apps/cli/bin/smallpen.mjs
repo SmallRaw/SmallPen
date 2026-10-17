@@ -3190,6 +3190,11 @@ async function rebuildBefore(snapshot, history, cut) {
   let complete = true;
   for (const entry of [...newer].reverse()) {
     if (!entry.inverseBatch) {
+      if (entry.history?.status === "partial")
+        throw new SmallPenError("batch_history_unavailable", "The design was saved, but this earlier revision cannot be reconstructed from the bounded history cache", {
+          batchId: entry.batchId, revision: snapshot.revision, history: entry.history,
+          nextOperations: [{ argv: ["view", snapshot.locator, "--as", "spec", "--json"], operation: "smallpen.view" }],
+        });
       complete = false;
       break;
     }
@@ -3243,6 +3248,7 @@ async function changesCommand(packagePath, args) {
       packageId: snapshot.manifest.packageId,
       ...BATCH_HISTORY_LIMITS,
       retainedBatches: histories[index].length,
+      incompleteBatches: histories[index].filter((entry) => entry.history?.status === "partial").length,
       oldestRevision: histories[index][0]?.baseRevision,
       newestRevision: histories[index].at(-1)?.revision,
     })),

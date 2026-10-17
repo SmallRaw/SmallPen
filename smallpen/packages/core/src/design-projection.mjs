@@ -8,6 +8,7 @@ import { resolveContext } from "./contexts.mjs";
 import { fail } from "./errors.mjs";
 import {
   OVERRIDE_FIELDS,
+  bindingTargetField,
   overrideTouchedGroups,
   ownValue,
 } from "./internal.mjs";
@@ -16,6 +17,7 @@ import {
   resolveOverrideBindings,
   normalizedLayoutGap,
 } from "./projection-values.mjs";
+import { appliedTokenFields } from "./token-attributes.mjs";
 
 function screenById(snapshot, screenId) {
   const entry = snapshot.manifest.entries.screens.find(
@@ -149,6 +151,30 @@ function textBlocksText(blocks) {
     .join("\n");
 }
 
+// The actual Canonical value a binding writes. The touched-group helper
+// groups min/max sizes with width/height; here they are separate values.
+function bindingValueField(field) {
+  if (["itemSpacing", "rowGap", "columnGap"].includes(field)) return "layout-gap";
+  if (field.startsWith("padding")) return "layout-padding";
+  if (field.startsWith("margin")) return "layout-item-margin";
+  const limit = { minWidth: "min-w", maxWidth: "max-w", minHeight: "min-h", maxHeight: "max-h" }[field];
+  return limit ? `layout-item-${limit}` : bindingTargetField(field);
+}
+
+// Keep binding metadata only for values that still come from those bindings.
+// Work on copies: projection must never rewrite the shared definition.
+function removeBindingMetadata(node, remove) {
+  if (node.tokenBindings)
+    node.tokenBindings = Object.fromEntries(Object.entries(node.tokenBindings).filter(([field]) => !remove(field)));
+  if (node.appliedTokens)
+    node.appliedTokens = Object.fromEntries(Object.entries(node.appliedTokens).filter(([attribute, name]) =>
+      !Object.keys(appliedTokenFields({ [attribute]: name })).some(remove)));
+}
+
+function removeOverriddenBindings(node, overrides) {
+  removeBindingMetadata(node, (field) => Object.hasOwn(overrides, bindingValueField(field)));
+}
+
 // Applies one Instance override field to a projected node, in place. A text
 // override replaces the plain text; rich blocks that no longer spell it fold
 // into the style of their first run, since the override carries no runs.
@@ -174,7 +200,10 @@ function applyOverrideField(node, field, value) {
     // source's binding.
     const bindings = { ...(node.tokenBindings ?? {}) };
     for (const [binding, reference] of Object.entries(value ?? {}))
-      if (reference === null) delete bindings[binding];
+      if (reference === null) {
+        delete bindings[binding];
+        removeBindingMetadata(node, (field) => field === binding);
+      }
       else bindings[binding] = structuredClone(reference);
     if (Object.keys(bindings).length) node.tokenBindings = bindings;
     else delete node.tokenBindings;
@@ -196,6 +225,7 @@ export function applyNodeOverrides(node, overrides) {
     left === "text" ? -1 : right === "text" ? 1 : left < right ? -1 : 1,
   );
   if (fields.length === 0) return node;
+  removeOverriddenBindings(node, overrides);
   const touched = new Set(node.touched ?? []);
   for (const field of fields) {
     // A text override with another paragraph count changes the structure.
@@ -479,6 +509,17 @@ function instantiateComponent(instanceValue, product, options, stack) {
           }
         : {}),
     };
+    if (sourceId === match.variant.rootId) {
+      // An empty binding table is not a cancellation of every inherited
+      // field. Literal instance values replace only their own bindings;
+      // explicit per-field binding overrides are applied below.
+      const inherited = { tokenBindings: source.tokenBindings, appliedTokens: source.appliedTokens };
+      removeOverriddenBindings(inherited, instance);
+      if (source.tokenBindings || instance.tokenBindings)
+        result[derivedId].tokenBindings = { ...inherited.tokenBindings, ...instance.tokenBindings };
+      if (source.appliedTokens || instance.appliedTokens)
+        result[derivedId].appliedTokens = { ...inherited.appliedTokens, ...instance.appliedTokens };
+    }
     if (
       sourceId === match.variant.rootId &&
       Object.keys(instance.tokenBindings ?? {}).length > 0
@@ -506,7 +547,10 @@ function instantiateComponent(instanceValue, product, options, stack) {
           ...instance["layout-padding"],
         };
       }
-      result[derivedId] = applyEffectiveTokenBindings(root, product, {
+      // The source values were resolved before merging the instance. Only
+      // resolve the instance's own bindings again, so inherited metadata
+      // cannot overwrite literal values or change the existing layout.
+      resolveOverrideBindings(root, instance.tokenBindings, product, {
         context: options.context,
         foundation: options.foundation,
         libraries: options.libraries,
