@@ -153,21 +153,24 @@ export function inspectionReport(
     const copies = [...ancestry(node), raw].filter(
       (candidate) => (stored[candidate.id] ?? candidate).instance,
     );
-    const overrides = copies.flatMap((copy) =>
-      Object.entries((stored[copy.id] ?? copy).instance?.overrides ?? {})
-        .filter(
-          ([key]) =>
-            copy.id === node.id ||
-            key.slice(0, key.lastIndexOf(":")) === raw.sourceNodeId,
-        )
-        .map(([key, value]) => ({
-          element:
-            variant?.nodes?.[key.slice(0, key.lastIndexOf(":"))]?.name ??
-            "component element",
+    const overrides = [];
+    const fieldOverrides = [];
+    for (const copy of copies) {
+      for (const [key, value] of Object.entries((stored[copy.id] ?? copy).instance?.overrides ?? {})) {
+        const path = key.slice(0, key.lastIndexOf(":"));
+        const target = path === copy.sourceNodeId ? copy.id : `${copy.id}__${path}`;
+        const item = {
+          element: target === raw.id ? source?.name ?? "component element"
+            : variant?.nodes?.[path]?.name ?? projection.nodes[target]?.name ?? "component element",
           field: key.slice(key.lastIndexOf(":") + 1),
           value,
-        })),
-    );
+        };
+        // The instance summary includes edits inside it. A field's source
+        // depends only on overrides that target that exact projected node.
+        if (copy.id === raw.id || target === raw.id) overrides.push(item);
+        if (target === raw.id) fieldOverrides.push(item);
+      }
+    }
     const placed = stored[raw.id];
     if (placed?.instance && source) {
       for (const name of [
@@ -177,16 +180,25 @@ export function inspectionReport(
         "visible",
         "textStyle",
         "tokenBindings",
+        "layout-gap",
+        "layout-padding",
+        "layout-item-margin",
+        "cornerRadius",
+        "shadow",
       ])
         if (
           Object.hasOwn(placed, name) &&
+          (name !== "tokenBindings" || Object.keys(placed[name] ?? {}).length > 0) &&
           JSON.stringify(placed[name]) !== JSON.stringify(source[name])
-        )
-          overrides.push({
+        ) {
+          const item = {
             element: source.name,
             field: name,
             value: placed[name],
-          });
+          };
+          overrides.push(item);
+          fieldOverrides.push(item);
+        }
     }
     return {
       name: set?.name ?? "unknown component",
@@ -196,6 +208,7 @@ export function inspectionReport(
         .filter((axis) => selection[axis.id] !== undefined)
         .map((axis) => `${axis.name}=${selection[axis.id]}`),
       overrides,
+      fieldOverrides,
       // A located App copy may lack its full source chain. Absence of
       // metadata is not proof that no overrides exist.
       overridesKnown:
@@ -293,12 +306,16 @@ export function inspectionReport(
           };
       }
     }
-    const overridden = component?.overrides.some(
+    const overridden = (component?.fieldOverrides ?? component?.overrides)?.some(
       (item) =>
         item.element === component.element &&
         (keys.includes(item.field) ||
           (name === "fill" && item.field === "fills") ||
           (name === "stroke" && item.field === "strokes") ||
+          (name === "gap" && item.field === "layout-gap") ||
+          (name.startsWith("padding") && item.field === "layout-padding") ||
+          (name.startsWith("margin") && item.field === "layout-item-margin") ||
+          (name.startsWith("radius") && item.field === "cornerRadius") ||
           (item.field === "textStyle" &&
             Object.hasOwn(item.value ?? {}, name)) ||
           (item.field === "tokenBindings" &&
@@ -357,6 +374,7 @@ export function inspectionReport(
   const nodes = layers.map(({ node, depth, index }) => {
     const raw = projection.nodes[node.id];
     const component = componentInfo(node);
+    const { fieldOverrides: _fieldOverrides, ...componentSource } = component ?? {};
     const actual = snapshot.nodes[node.id];
     const parent = parents.get(node.id);
     const parentBounds =
@@ -406,7 +424,7 @@ export function inspectionReport(
       add(
         "gap",
         raw["layout-gap"]?.[column ? "row-gap" : "column-gap"],
-        ["itemSpacing", column ? "rowGap" : "columnGap"],
+        [column ? "rowGap" : "columnGap", "itemSpacing"],
         0,
       );
       for (const [side, key] of [
@@ -557,7 +575,7 @@ export function inspectionReport(
       ...(layout ? { layout } : {}),
       fields,
       source: component
-        ? { kind: "component", ...component }
+        ? { kind: "component", ...componentSource }
         : { kind: "page" },
       visibility: {
         value: node.visible,
