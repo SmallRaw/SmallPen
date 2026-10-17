@@ -18,6 +18,7 @@
    [app.common.render-wasm.api.text-layout :as text-layout]
    [app.common.render-wasm.helpers :as h]
    [app.common.render-wasm.node :as engine]
+   [app.common.render-wasm.precision :as precision]
    [app.common.render-wasm.wasm :as wasm]
    [app.common.types.modifiers :as modifiers]
    [app.common.types.shape :as shape]
@@ -124,14 +125,25 @@
 
 (defn- layout-change
   [before after]
-  (let [delta (apply max
-                     (concat (map #(abs (- (get after %) (get before %))) [:x :y :width :height])
-                             (mapcat (fn [a b] [(abs (- (:x a) (:x b))) (abs (- (:y a) (:y b)))])
-                                     (:points before) (:points after))))]
-    (when (or (not (mth/close? delta 0))
+  (let [tolerance (into {} (map (fn [axis]
+                                  [axis (precision/coordinate-tolerance
+                                         (map axis (concat (:points before) (:points after))))]))
+                        [:x :y])
+        deltas (concat (map (fn [[field axis]]
+                              [axis (abs (- (get after field) (get before field)))])
+                            [[:x :x] [:y :y] [:width :x] [:height :y]])
+                       (mapcat (fn [a b] [[:x (abs (- (:x a) (:x b)))]
+                                          [:y (abs (- (:y a) (:y b)))]])
+                               (:points before) (:points after)))
+        changed? (some (fn [[axis delta]]
+                         (or (not (js/Number.isFinite delta))
+                             (not (mth/close? delta 0 (get tolerance axis)))))
+                       deltas)]
+    (when (or changed?
               (not= (boolean (:flip-x before)) (boolean (:flip-x after)))
               (not= (boolean (:flip-y before)) (boolean (:flip-y after))))
-      {:nodeId (str (:id before)) :name (:name before) :delta delta
+      {:nodeId (str (:id before)) :name (:name before) :delta (apply max (map second deltas))
+       :tolerance tolerance
        :constraints (select-keys before [:layout :layout-item-h-sizing :layout-item-v-sizing :grow-type])
        :before (select-keys before [:x :y :width :height :flip-x :flip-y])
        :after (select-keys after [:x :y :width :height :flip-x :flip-y])})))
@@ -224,7 +236,9 @@
                       (when (or (> width 8192) (> height 8192)
                                 (> (* width height) (* 32 1024 1024)))
                         (throw (ex-info "Rendered image exceeds safety limits"
-                                        {:code :render-size-exceeded})))))
+                                        {:code :render-size-exceeded :width width :height height
+                                         :maxDimension 8192 :maxPixels (* 32 1024 1024)
+                                         :correction "Reduce --scale or export a selected --element; layout dimensions stay unchanged"})))))
           bytes (when-not (unchecked-get request "measureOnly")
                   (engine/render-shape-raster root-id (unchecked-get request "scale") :png))]
       (engine/evict-images! engine/image-cache-size)

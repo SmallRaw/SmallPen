@@ -176,6 +176,8 @@ export async function renderAppProjection(product, projection, options = {}) {
     throw new SmallPenError(
       "render_size_exceeded",
       "Rendered image exceeds safety limits",
+      { width, height, maxDimension: 8192, maxPixels: 32 * 1024 * 1024,
+        correction: "Reduce --scale or export a selected --element; layout dimensions stay unchanged" },
     );
   const perform = async () => {
     const engine = await (initialized ??= loadRenderer().catch((error) => {

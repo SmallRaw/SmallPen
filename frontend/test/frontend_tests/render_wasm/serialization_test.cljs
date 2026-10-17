@@ -35,6 +35,21 @@
   (t/is (= [0 0] (precision/size-preserving-range 0 0)))
   (t/is (= [20 76] (precision/size-preserving-range 20 76))))
 
+(t/deftest coordinate-error-budget-follows-native-precision
+  (t/is (= 0.001 (precision/coordinate-tolerance [0 390 -390])))
+  (doseq [coordinate [9754 -13502 32742]]
+    (let [tolerance (precision/coordinate-tolerance [coordinate])]
+      (t/is (< 0.0015 tolerance))
+      (t/is (< tolerance 0.02))))
+  (t/is (< (precision/coordinate-tolerance [0 108]) 0.002)
+        "a large coordinate on another axis must not hide a real size change"))
+
+(t/deftest double-only-size-noise-does-not-expand-a-native-bound
+  (t/is (= [9754 9862]
+           (precision/size-preserving-range 9754 (+ 9754 108.00000187188925))))
+  (t/is (= [13502 13610]
+           (precision/size-preserving-range 13502 (+ 13502 108.00000187188925)))))
+
 (t/deftest batch-and-incremental-bounds-preserve-the-same-size
   (let [shape (cts/setup-shape {:type :text :x 2014.16 :y 4070.16 :width 56 :height 21})
         data  (js/DataView. (js/ArrayBuffer. 256))

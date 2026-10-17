@@ -210,7 +210,9 @@ test("long pages remain inspectable and a selected small element can be exported
   assert.ok(crop.render.width < 200);
   await assert.rejects(
     inspectProjection(product, projection, { raster: true }),
-    (error) => error.code === "render_size_exceeded",
+    (error) => error.code === "render_size_exceeded"
+      && error.details.maxDimension === 8192
+      && error.details.correction.includes("--scale"),
   );
 });
 
@@ -363,3 +365,33 @@ for (const hiddenAt of ["label", "row"]) {
     await assert.rejects(inspectProjection(product, visible, { raster: true }), error => error.code === "font_resource_unavailable");
   });
 }
+
+test("a hundred hugging rows settle at large native coordinates", async () => {
+  const product = await openPackage(fixture);
+  const nodes = { root: {
+    id: "root", name: "List", type: "FRAME", x: 0, y: 0, width: 390, height: 100,
+    layout: "flex", "layout-flex-dir": "column", "layout-item-v-sizing": "auto",
+    "layout-padding": { p1: 0, p2: 16, p3: 0, p4: 16 }, children: [],
+  } };
+  for (let index = 0; index < 100; index++) {
+    const id = `item${index}`;
+    nodes.root.children.unshift(id);
+    nodes[id] = {
+      id, name: id, type: "FRAME", x: 16, y: index * 108, width: 358, height: 107.99902341088819,
+      layout: "flex", "layout-flex-dir": "column", "layout-item-h-sizing": "fill", "layout-item-v-sizing": "auto",
+      "layout-gap": { "row-gap": 8, "column-gap": 8 },
+      "layout-padding": { p1: 8, p2: 16, p3: 8, p4: 16 }, children: [`${id}b`, `${id}a`],
+    };
+    for (const [suffix, height] of [["a", 40.0000007], ["b", 44.0000012]])
+      nodes[id + suffix] = { id: id + suffix, name: suffix, type: "RECTANGLE", x: 0, y: 0,
+        width: 326, height, children: [], "layout-item-h-sizing": "fill" };
+  }
+  const result = await inspectProjection(product, { rootId: "root", nodes, context: {} });
+  assert.equal(result.snapshot.status, "resolved");
+  assert.ok(Math.abs(result.snapshot.nodes.root.bounds.height - 10800) < 0.01);
+  for (let index = 0; index < 100; index++) {
+    const bounds = result.snapshot.nodes[`item${index}`].bounds;
+    assert.ok(Math.abs(bounds.y - index * 108) < 0.01);
+    assert.ok(Math.abs(bounds.height - 108) < 0.01);
+  }
+});

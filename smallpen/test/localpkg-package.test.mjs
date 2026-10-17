@@ -7,6 +7,7 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
   symlink,
   truncate,
   utimes,
@@ -20,10 +21,12 @@ import test from "node:test";
 
 import {
   applyOperationBatch,
+  batchHistoryPath,
   importFontVariant,
   importMedia,
   openPackage,
   removeMedia,
+  readBatchHistory,
   updateFontFamily,
 } from "@smallpen/local-package";
 
@@ -129,7 +132,8 @@ test("the batch ledger keys identities by base revision and operations (H1)", as
 
 test("an unreadable batch ledger does not block writes and the ledger stays bounded", async (context) => {
   const packagePath = await copyFixture(context);
-  const ledgerPath = `${packagePath}.batches.json`;
+  const ledgerPath = await batchHistoryPath(packagePath);
+  await mkdir(dirname(ledgerPath), { recursive: true });
   await writeFile(ledgerPath, "{ not json");
   const warnings = [];
   const onWarning = (warning) => warnings.push(warning.code);
@@ -141,6 +145,9 @@ test("an unreadable batch ledger does not block writes and the ledger stays boun
     packagePath,
     opacityBatch(base, 0.3, "batch_after_corrupt_ledger"),
   );
+  const recovery = (await readdir(dirname(ledgerPath)))
+    .find(name => name.startsWith("batches.json.unreadable-"));
+  assert.equal(await readFile(join(dirname(ledgerPath), recovery), "utf8"), "{ not json");
   assert.notEqual(written.revision, base);
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(warnings.includes("SMALLPEN_BATCH_LEDGER_UNREADABLE"));
@@ -167,7 +174,8 @@ test("an unreadable batch ledger does not block writes and the ledger stays boun
 
 test("an oversized batch ledger is skipped without being buffered", async (context) => {
   const packagePath = await copyFixture(context);
-  const ledgerPath = `${packagePath}.batches.json`;
+  const ledgerPath = await batchHistoryPath(packagePath);
+  await mkdir(dirname(ledgerPath), { recursive: true });
   // A sparse 1 GiB file: reading it whole would allocate the full gigabyte.
   await writeFile(ledgerPath, "");
   await truncate(ledgerPath, 1024 * 1024 * 1024);
@@ -177,6 +185,7 @@ test("an oversized batch ledger is skipped without being buffered", async (conte
   context.after(() => process.off("warning", onWarning));
 
   const base = (await openPackage(packagePath)).revision;
+  await assert.rejects(readBatchHistory(packagePath), error => error.code === "batch_history_unavailable");
   const before = process.memoryUsage().arrayBuffers;
   const written = await applyOperationBatch(
     packagePath,
@@ -187,7 +196,10 @@ test("an oversized batch ledger is skipped without being buffered", async (conte
   await new Promise((resolve) => setImmediate(resolve));
   const warning = warnings.find(({ code }) => code === "SMALLPEN_BATCH_LEDGER_UNREADABLE");
   assert.match(warning?.message ?? "", /exceeds/);
-  // The next recorded commit replaced the ledger with a bounded one.
+  // The original sparse file remains recoverable; the active ledger is bounded.
+  const recovery = (await readdir(dirname(ledgerPath)))
+    .find(name => name.startsWith("batches.json.unreadable-"));
+  assert.equal((await stat(join(dirname(ledgerPath), recovery))).size, 1024 * 1024 * 1024);
   const ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
   assert.ok(ledger.batch_after_oversized_ledger);
 });

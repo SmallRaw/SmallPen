@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { canonicalJSON } from "@smallpen/core";
-import { replayRecordedBatch } from "@smallpen/local-package";
+import { batchHistoryPath, replayRecordedBatch } from "@smallpen/local-package";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "../apps/cli/bin/smallpen.mjs");
@@ -245,7 +245,7 @@ test("canonical component batches retry idempotently and return canonical undo",
   ).value;
   assert.equal(first.changed, true);
   const ledger = JSON.parse(
-    await readFile(`${packagePath}.batches.json`, "utf8"),
+    await readFile(await batchHistoryPath(packagePath), "utf8"),
   );
   const hash = createHash("sha256")
     .update(canonicalJSON({ baseRevision: revision, operations: [operation] }))
@@ -361,7 +361,7 @@ test("retry identity uses the current contract without legacy ledger fallback", 
   };
   await writeFile(batchPath, JSON.stringify(batch));
   await run(["advanced", "apply", packagePath, "--batch", batchPath, "--json"]);
-  const ledgerPath = `${packagePath}.batches.json`;
+  const ledgerPath = await batchHistoryPath(packagePath);
   const ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
   delete ledger[batch.batchId].identityHash;
   await writeFile(ledgerPath, JSON.stringify(ledger));
@@ -388,8 +388,10 @@ test("recorded confirmations still enforce the current operation fields", async 
   };
   const hash = (value) =>
     createHash("sha256").update(canonicalJSON(value)).digest("hex");
+  const ledgerPath = await batchHistoryPath(packagePath);
+  await mkdir(dirname(ledgerPath), { recursive: true });
   await writeFile(
-    `${packagePath}.batches.json`,
+    ledgerPath,
     JSON.stringify({
       [batch.batchId]: {
         identityHash: hash({

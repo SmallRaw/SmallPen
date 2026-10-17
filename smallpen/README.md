@@ -339,6 +339,33 @@ and `project repair`. Writes use the same atomic engine and revision checks.
 Choose `--batch-id` before retryable writes; reverse edits are explicit new
 writes, not history rollback.
 
+`changes` reports `historyWindow`: the oldest retained revision, newest
+revision and record count. History and batch replay retain the newest complete
+records within both 500 batches and 32 MiB of UTF-8 JSON; older records leave
+that window. These are temporary local caches, separate from the App's
+in-memory Undo/Redo stack. Cache files and recovery backups stay outside
+the project, so no Git ignore configuration is needed:
+
+- macOS: `~/Library/Caches/SmallPen/history/`
+- Windows: `%LOCALAPPDATA%/SmallPen/Cache/history/`
+- Linux: `$XDG_CACHE_HOME/smallpen/history/` (default `~/.cache/smallpen/history/`)
+
+The real project path and Package ID select a private cache directory shared
+by App and CLI. Copies and moved projects start separate histories. After
+7 days without writes, the next cache access clears its old files. OS cache
+cleanup can also discard them; read the current design when a revision has
+left the window. `SMALLPEN_HISTORY_CACHE_DIR` overrides the cache root for
+test environments. Opening an older writable project automatically migrates
+its adjacent `.batches.json` file into the cache; its design revision stays
+unchanged. If an older App recreates that file, the next access merges it
+with cached history under the project write lock.
+
+A single undo record exceeding 32 MiB is refused before saving the design.
+Unreadable history stays recoverable as `batches.json.unreadable-UUID.bak`
+inside its cache directory; reading it returns `batch_history_unavailable`.
+If a design saves but history storage fails, the write reports
+`history.status=unavailable` and a warning instead of silently losing tracking.
+
 JSON is compact, with an 8 KiB stdout budget. `--full` expands data; large
 results use searchable temporary files with hashes. `--stdout` permits large
 stdout. Random names in one OS temporary folder prevent concurrent calls from
