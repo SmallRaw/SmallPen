@@ -202,9 +202,10 @@ All five npm tarballs travel together in one artifact to Publish. Render
 parity compares CLI, SVG and WebGL once on Linux. Desktop builds and checks
 the actual macOS arm64 and Windows x64 Apps on their own runners. Every check
 must pass before npm publication; Linux Desktop is not enabled yet.
-There are seven runner jobs: Frontend, Test, CLI and Web, Render parity,
-Desktop on two platforms, and Publish. Shared checks are not repeated for
-each operating system. The full local test command remains available.
+Frontend, Test, CLI and Web, Render parity, Desktop on two platforms, and
+Publish handle the builds and checks; a final cleanup job removes transfer
+artifacts. Shared checks are not repeated for each operating system. The full
+local test command remains available.
 The old Alpha entry and nested product workflows have been removed.
 Do not rerun a historical old-workflow run to test the new pipeline: start a
 new run from a branch that contains these files. GitHub's manual entry also
@@ -212,9 +213,12 @@ needs the workflow file on the repository's default branch.
 
 Downloadable artifacts are retained for **1 day**: a standalone CLI archive
 and macOS/Windows archives with SHA-256 checksums and source commit.
-Transfer artifacts expire after 1 day without a separate deletion job. Until
-then, failed jobs can reuse the same frontend and npm packages without a full
-rebuild. Render comparison images and App startup logs are uploaded only on
+After all checks and npm publication succeed, cleanup removes the internal
+frontend and npm transfer artifacts, leaving only the three user downloads.
+On branches where publication is skipped, cleanup follows the checks. Failed
+or cancelled runs keep transfer artifacts for 1 day so failed jobs can reuse
+the same frontend and npm packages without a full rebuild.
+Render comparison images and App startup logs are uploaded only on
 failure and also expire after 1 day. Already-compressed release archives use
 no extra upload compression.
 macOS is only ad-hoc signed; no Apple

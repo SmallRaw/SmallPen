@@ -279,3 +279,37 @@ jobs:
           path: smallpen/dist/npm
       - name: Publish exact verified tarballs using npm trusted publishing
         run: node smallpen/scripts/release.mjs publish smallpen/dist/npm "$GITHUB_SHA"
+  cleanup:
+    name: Clean build intermediates
+    needs: [cli, desktop, render-parity, publish]
+    # Failed jobs need these inputs for a retry; remove them only after success.
+    if: >-
+      !cancelled() &&
+      needs.cli.result == 'success' &&
+      needs.desktop.result == 'success' &&
+      needs.render-parity.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Keep only downloadable CLI and Desktop builds
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const temporary = new Set([
+              `smallpen-frontend-${context.sha}-${context.runId}`,
+              `smallpen-npm-${context.sha}-${context.runId}`,
+            ]);
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              { ...context.repo, run_id: context.runId, per_page: 100 },
+            );
+            for (const artifact of artifacts) {
+              if (!temporary.has(artifact.name)) continue;
+              await github.rest.actions.deleteArtifact({
+                ...context.repo, artifact_id: artifact.id,
+              });
+              core.info(`Removed build intermediate: ${artifact.name}`);
+            }
