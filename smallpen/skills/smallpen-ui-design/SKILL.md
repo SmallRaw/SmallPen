@@ -2,7 +2,7 @@
 name: smallpen-ui-design
 description: "Design application interfaces and prototypes in SmallPen. Clarify requirements, build shared Tokens and components, adapt platforms through reuse, and verify explicit combinations. Deliver design artifacts; use for application UI design rather than production code or character/animation materials."
 metadata:
-  cli-version: "0.1.0-alpha.16"
+  cli-version: "0.1.0-alpha.17"
   cli-contract-revision: "bc0dd5b91865d8d92f326f74b2c6ffe20705a2cb0d374d0de28cc5452a5237d9"
 ---
 
@@ -20,7 +20,7 @@ These are tool rules. The scene below defines how to use the tool for this task.
 
 ## CLI rules from source
 
-- CLI version: 0.1.0-alpha.16. Use the installed CLI's help/schema when its version differs.
+- CLI version: 0.1.0-alpha.17. Use the installed CLI's help/schema when its version differs.
 - Replies are compact JSON with a 8 KiB budget. Large complete results use resultFile paths; --full expands data, while --stdout explicitly requests large stdout.
 - Temporary results have unique names in one system temporary directory. Each invocation cleans managed files older than 30 minutes. Read them promptly; --output keeps requested deliverables.
 - When the project uses Tokens: No --theme: use each project's group defaults, never the App's active selection. Libraries without stored defaults use the real Default option, else the first option in library order.
