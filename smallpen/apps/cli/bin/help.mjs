@@ -429,7 +429,7 @@ Purpose:
 
 Batch contract:
   {"baseRevision":"...","batchId":"unique-id","operations":[...]}
-  baseRevision is package.revision from smallpen inspect PACKAGE --json.
+  baseRevision is the revision from the last write reply or smallpen inspect PACKAGE --json.
   The whole candidate validates and commits atomically. Success returns revision,
   affected stable IDs/files, a revision-guarded reverse edit, and changed
   (false, with noChange, when the batch leaves the Package as it was).
@@ -553,6 +553,8 @@ Actions:
   remove-dependent-usage  no additional arguments
   choose-foundation        --foundation PATH
   recreate-product-asset  --asset-kind token|component --asset FILE
+  text-sizing              no conflicts needed: store texts written as hug the
+                           App's way (fixed, sized by their grow type); nothing moves
 
 Without --action, returns all typed conflicts and choices. Each action is checked
 against the selected conflict and committed through one atomic Operation Batch.

@@ -17,7 +17,7 @@ export {
   measureProjectionText,
   renderProjection,
 } from "./render.mjs";
-export { renderAppProjection } from "./render-shared.mjs";
+export { layoutSizingRules, renderAppProjection } from "./render-shared.mjs";
 export { inspectProjection } from "./layout-inspection.mjs";
 export { batchHistoryPath, defaultHistoryCacheRoot } from "./history-cache.mjs";
 export {

@@ -179,7 +179,8 @@
                                   initialize app.main.smallpen.headless/initialize
                                   builtinFonts app.main.smallpen.headless/builtin-fonts
                                   describe app.main.smallpen.headless/describe-request
-                                  errorDetails app.main.smallpen.headless/error-details}}}
+                                  errorDetails app.main.smallpen.headless/error-details
+                                  fixSizing app.main.smallpen.headless/fix-sizing}}}
    :compiler-options {:output-feature-set :es2020
                       :warnings {:fn-deprecated false}}
    :release {:compiler-options {:optimizations :simple}}}

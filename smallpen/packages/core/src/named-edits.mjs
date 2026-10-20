@@ -13,7 +13,7 @@ import {
   findPage,
   findPageElement,
   findPresentation,
-  findVariant,
+  findVariants,
   variantLabel,
 } from "./named-targets.mjs";
 import { freeId, slug } from "./simple-design.mjs";
@@ -108,7 +108,7 @@ export function componentRenameOperation(snapshot, { component, element, variant
     // Only in the named variant, or in every variant that has an element at
     // that path: variants drawn separately give one element different node
     // ids, so the path decides.
-    const candidates = variant !== undefined ? [findVariant(set, variant)] : set.variants;
+    const candidates = findVariants(set, variant);
     const found = [], candidatesWithIt = [];
     let firstError;
     for (const candidate of candidates) {
@@ -149,7 +149,10 @@ export function componentRenameOperation(snapshot, { component, element, variant
 export function componentDeleteOperation(snapshot, { component, variant }, lookups = {}) {
   const set = ownComponent(snapshot, component, lookups);
   if (variant === undefined) return { type: "delete-component-set", componentId: set.id };
-  const chosen = findVariant(set, variant);
+  const matching = findVariants(set, variant);
+  if (matching.length > 1)
+    fail("ambiguous_variant", `${variant} names ${matching.length} variants of ${set.name}; give every property to delete one`, { variants: matching.map((item) => variantLabel(set, item)) });
+  const chosen = matching[0];
   if (set.variants.length === 1)
     fail("last_variant", `${set.name} has only ${variantLabel(set, chosen) || "one variant"}; delete the component instead`);
   return { type: "delete-variant", componentId: set.id, variantId: chosen.id };

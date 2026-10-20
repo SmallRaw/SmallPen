@@ -34,7 +34,7 @@ const PARENT_ID = required(
   "string|null",
   "Parent node id, or null for a Presentation root",
 );
-const INDEX = field("integer|null", "Position among siblings; default: last");
+const INDEX = field("integer|null", "Position in the parent's stored children (Penpot layer order: a row or column lays out the last stored child first, so index 0 is the last one read); default: last");
 const NODE_CHANGES = required(
   "object",
   "Mutable node fields to set; null clears an optional field. id, type and children are structural and cannot be changed here. See: smallpen schema node",

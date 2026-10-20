@@ -39,7 +39,7 @@ const FORMAT = SMALLPEN_FORMAT_CAPABILITIES;
 const OPERATION_TYPES = FORMAT.canonicalWrite.operationTypes;
 // The default `smallpen init` layout: one self-contained Package.
 const PACKAGE = "acme/acme.smallpen";
-const REVISION = "<package.revision from smallpen inspect PACKAGE --json>";
+const REVISION = "<revision from the last write reply or smallpen project show PACKAGE --json>";
 
 export const PACKAGE_ROLES = Object.freeze({
   foundation:
@@ -157,7 +157,7 @@ export const WORKED_EXAMPLE = Object.freeze([
         "canvas-v1",
       ),
     },
-    note: "Copy the revision from the previous reply (or inspect PACKAGE) into baseRevision before applying the batch. Existing IDs replace whole definitions; use update for partial edits.",
+    note: "Copy the revision from the previous reply (or project show PACKAGE --json) into baseRevision before applying the batch. Existing IDs replace whole definitions; use update for partial edits.",
   },
   {
     title: "Add text to that canvas",
@@ -272,7 +272,7 @@ function operationDetail(type) {
     ...(schema.oneOf ? { requiresOneOf: schema.oneOf } : {}),
     unknownFields: "rejected with unknown_operation_field",
     example: batchFor([schema.example], `example-${type}`),
-    run: `smallpen apply <${schema.package === "foundation" ? "foundation" : "product"}.smallpen> --batch BATCH.json --dry-run --json`,
+    run: `smallpen advanced apply <${schema.package === "foundation" ? "foundation" : "product"}.smallpen> --batch BATCH.json --dry-run --json`,
   };
 }
 
@@ -720,18 +720,16 @@ function batchTopic() {
       "Every write is one atomic Operation Batch. Nothing is written unless every operation is valid.",
     batch: {
       baseRevision:
-        "package.revision from smallpen inspect PACKAGE --json; a stale value is rejected",
-      batchId: "1-192 characters [A-Za-z0-9_.-], new for every write",
+        "revision from the last write reply or smallpen project show PACKAGE --json; a stale value is rejected",
+      batchId: "1-192 characters [A-Za-z0-9_.-], new for every write. Batch IDs are remembered per package path: a fresh copy put at the same path keeps that path's IDs, so rehearse in a copy at a new path to reuse them on the real package",
       operations: "array; see: smallpen schema operations",
     },
     packages: PACKAGE_ROLES,
     commands: {
       apply:
-        "smallpen apply PACKAGE --batch BATCH.json [--dry-run] [--explain] [--diff]",
-      token:
-        "smallpen token PACKAGE --intent {operations:[...]}: like apply, with baseRevision and batchId filled in",
-      page: "smallpen page PRODUCT --intent {screenId, presentationId?, parentId?, index?, nodes:[node, ...]}: one add-presentation-node per node, all siblings under parentId (default: the root); overrides on an INSTANCE node become set-instance-override operations",
-      flow: "smallpen flow PRODUCT --intent: same as page, for flowchart nodes",
+        "smallpen advanced apply PACKAGE --batch BATCH.json [--dry-run] [--explain] [--diff]",
+      named:
+        "page, component, token, theme, flow, asset and canvas commands build the batch from names, with baseRevision and batchId filled in",
     },
     result:
       "batchId, revision, changedFiles, affectedIds, changed (false for no-op or replay), alreadyApplied, dryRun and summary. changeReportPath records exact before/after values. reverseEdit/inverseBatchPath describe an explicit new apply write with its own identity and a fixed baseRevision, not history rollback. After later edits, read current fields and construct a new scoped edit; do not force an old snapshot by changing its baseRevision. --inverse-out FILE chooses a durable file. --full includes exact details. Reuse batchId only for identical retries; ledger retains at most 500 identities.",
@@ -779,7 +777,11 @@ function setTopic(command) {
     notes: [
       "Only the named fields change; everything else, links included, stays. Texts are measured again and containers that hug grow or shrink, as page draw does.",
       "Versions and variants often differ on purpose: an element (or the page or component itself) in several of them needs --platform (--variant) to name one, or --all to change every one; the refusal lists where it is.",
-      "A value written over a Token binding replaces the binding.",
+      "A value written over a Token binding replaces the binding, on an element and on a copy (visible, opacity) alike.",
+      "fill=none or stroke=none removes the paint; a color is \"#RRGGBB\", \"#RRGGBBAA\" (the last two digits are its opacity), rgb() or a CSS color name.",
+      "--variant names some or all properties (\"State=default\"); every variant it names is changed, and several need --all like an element in several variants.",
+      "Sizes follow the App: hug only on a row/column container or a text, min and max sizes only on an axis that fills; a container that hugs what a child fills becomes fixed, as the App makes it. Anything else is refused with what to write instead, and validate reports stored sizes the App cannot set (layout_not_in_app).",
+      "An element path lists parents in order (\"Content / Heading\"); when several elements match, the one directly inside those parents wins.",
     ],
   };
 }
@@ -805,10 +807,10 @@ const TOPICS = {
         layout: "row | column | none; in none the CLI places children so they do not overlap: give place (\"below Header\", {rightOf: \"Sidebar\", gap: 24}) or nothing, x/y only to pin one",
         "gap / padding": "number or {token}; padding takes 1, 2 or 4 values",
         "align / justify": "start | center | end (align also stretch; justify also space-between)",
-        "width / height": 'number, "fill" (or "100%") or "hug"; the only text in a row fills by default, several texts in a row hug',
+        "width / height": 'number, "fill" (or "100%") or "hug", as the App offers them: fill only inside a row/column parent; hug only on a row/column container, a copy of one, or a text (stored as the App\'s auto width / auto height; a text that hugs its width also hugs its height). Texts hug by default; the only text in a row with a set width fills it',
         "fill / stroke / radius / opacity / shadow": 'value or {token}; stroke is a color or {color, width, style}, width one value or four sides [top, right, bottom, left]; radius is one value or four corners [top-left, top-right, bottom-right, bottom-left]',
         margin: "number or {token}; 1, 2 or 4 values, like padding",
-        "minWidth / maxWidth / minHeight / maxHeight": "number or {token}",
+        "minWidth / maxWidth / minHeight / maxHeight": "number or {token}; only on an axis that is fill, as in the App (invalid_size_limit otherwise)",
         "letterSpacing / lineHeight / textTransform / textDecoration": "text only; value or {token} (textTransform: uppercase|lowercase|capitalize|none, textDecoration: underline|line-through|none)",
         rotation: "degrees or {token}",
         visible: "false hides it (for example per platform in a variant), or {flag} for a boolean Token",
@@ -856,7 +858,7 @@ const TOPICS = {
         ],
       },
       notes: [
-        "Drawing a page again redraws it; elements drawn again under the same names keep their ids and interactions.",
+        "Drawing a page again redraws it; elements drawn again under the same names keep their ids and interactions. A copy of the same component drawn again also keeps a Token-bound or fill width and height unless the element gives width or height (\"hug\" lets it follow its content again).",
         "An instance whose new text is longer than its slot grows by the measured difference.",
         "Link elements with flow link --from \"Page / Element\" --to Page.",
         "Move an element later with page move --page Page --element Name --direction up|down|left|right [--steps N]; the CLI picks the coordinates.",

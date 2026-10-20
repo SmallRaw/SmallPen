@@ -147,7 +147,8 @@ test("page draw binds corners, margins, size limits and text style by name", asy
   ] }), "--json"]);
   await run(["page", "draw", path, "--intent", await file("page.json", {
     page: "Card", children: [{
-      name: "Card", radius: ["{radius.lg}", 0, 0, "{radius.lg}"], margin: [0, "{space.4}"], minWidth: "{size.min}",
+      // A min width applies to an axis that fills, as in the App.
+      name: "Card", radius: ["{radius.lg}", 0, 0, "{radius.lg}"], margin: [0, "{space.4}"], width: "fill", minWidth: "{size.min}",
       layout: "column", children: [{ name: "Tag", text: "new", letterSpacing: "{tracking.wide}", textTransform: "{case.upper}" }],
     }],
   }), "--json"]);

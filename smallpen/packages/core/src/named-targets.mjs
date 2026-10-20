@@ -84,8 +84,9 @@ export function findComponent(snapshot, name, { foundation, libraries = [] } = {
 
 // "Style=secondary, Size=sm", or bare values "secondary sm". Unnamed
 // properties keep the first variant's value.
-export function findVariant(set, text) {
-  if (text === undefined) return set.variants[0];
+// Every variant the text names: unnamed properties match any value.
+export function findVariants(set, text) {
+  if (text === undefined) return set.variants;
   const wanted = String(text)
     .split(/[,;]|\s+(?=[^=\s]+=)/)
     .map((item) => item.trim())
@@ -94,8 +95,7 @@ export function findVariant(set, text) {
       const [left, right] = item.includes("=") ? item.split("=") : [undefined, item];
       return { axis: left?.trim(), value: right.trim() };
     });
-  const labels = set.variants.map((variant) =>
-    set.axes.map((axis) => `${axis.name}=${variant.selection?.[axis.id]}`).join(", "));
+  const labels = set.variants.map((variant) => variantLabel(set, variant));
   const resolved = wanted.map(({ axis, value }) => {
     const candidates = set.axes.filter((candidate) =>
       axis === undefined
@@ -108,24 +108,30 @@ export function findVariant(set, text) {
       fail("unknown_variant", `${set.name} has no ${candidates[0].name}=${value}`, { variants: labels });
     return [candidates[0].id, option];
   });
-  const scored = set.variants
-    .filter((variant) => resolved.every(([axis, value]) => variant.selection?.[axis] === value))
-    .map((variant) => ({
-      variant,
-      // Prefer the variant that differs least from the first one.
-      distance: set.axes.filter((axis) =>
-        variant.selection?.[axis.id] !== set.variants[0].selection?.[axis.id]).length,
-    }))
-    .sort((left, right) => left.distance - right.distance);
-  if (!scored.length) fail("unknown_variant", `${set.name} has no variant ${text}`, { variants: labels });
-  return scored[0].variant;
+  const found = set.variants.filter((variant) => resolved.every(([axis, value]) => variant.selection?.[axis] === value));
+  if (!found.length) fail("unknown_variant", `${set.name} has no variant ${text}`, { variants: labels });
+  return found;
+}
+
+// The one variant to read: of several matches, the one that differs least
+// from the first variant. Edits use findVariants.
+export function findVariant(set, text) {
+  if (text === undefined) return set.variants[0];
+  const distance = (variant) => set.axes.filter((axis) =>
+    variant.selection?.[axis.id] !== set.variants[0].selection?.[axis.id]).length;
+  return findVariants(set, text)
+    .map((variant) => ({ variant, distance: distance(variant) }))
+    .sort((left, right) => left.distance - right.distance)[0].variant;
 }
 
 export function variantLabel(set, variant) {
   return set.axes.map((axis) => `${axis.name}=${variant.selection?.[axis.id]}`).join(", ");
 }
 
-// "Top bar", or a path "Content / Top bar" when the name repeats.
+// "Top bar", or a path "Content / Top bar" when the name repeats. Path
+// parts are ancestors in order; when several elements match, the one whose
+// path ends with exactly those parents ("Content / Heading" is Heading
+// directly in Content) wins, then the one whose whole path it is.
 export function findElement(nodes, rootId, text, where) {
   const parent = new Map();
   for (const [id, node] of Object.entries(nodes))
@@ -135,16 +141,32 @@ export function findElement(nodes, rootId, text, where) {
     for (let at = id; at !== undefined && at !== rootId; at = parent.get(at)) names.unshift(nodes[at]?.name);
     return names;
   };
+  const endsWith = (names, path) =>
+    names.length >= path.length && path.every((name, index) => same(names[names.length - path.length + index], name));
   const find = (wanted) => {
     const path = parts(wanted);
-    return Object.keys(nodes).filter((id) => {
+    const all = Object.keys(nodes).filter((id) => {
       if (id === rootId || !same(nodes[id].name, path.at(-1))) return false;
-      // Earlier path parts must be ancestors, in order.
       const names = chain(id).slice(0, -1);
       let index = 0;
       for (const name of names) if (index < path.length - 1 && same(name, path[index])) index += 1;
       return index === path.length - 1;
     });
+    if (all.length < 2) return all;
+    const direct = all.filter((id) => endsWith(chain(id), path));
+    if (direct.length === 1) return direct;
+    const whole = direct.filter((id) => chain(id).length === path.length);
+    return whole.length === 1 ? whole : direct.length ? direct : all;
+  };
+  // The shortest path that finds this element alone.
+  const uniquePath = (id) => {
+    const names = chain(id);
+    for (let size = 1; size <= names.length; size += 1) {
+      const path = names.slice(-size).join(" / ");
+      const found = find(path);
+      if (found.length === 1 && found[0] === id) return path;
+    }
+    return names.join(" / ");
   };
   const { matches, one } = pickOne(find, text);
   if (one) return one;
@@ -154,14 +176,14 @@ export function findElement(nodes, rootId, text, where) {
     matches.length
       ? siblings
         ? `${matches.length} elements in ${where} are named ${nodes[matches[0]].name}; pick one as "${text} [1]" and rename it`
-        : `Several elements match ${text} in ${where}; name a parent too, for example "${chain(matches[0]).slice(-2).join(" / ")}"`
+        : `Several elements match ${text} in ${where}; name one by its path, for example "${uniquePath(matches[0])}"`
       : `No element ${text} in ${where}`,
     {
       elements: siblings
         ? numberedNames(matches.map((id) => chain(id).join(" / ")))
-        : (matches.length ? matches : Object.keys(nodes).filter((id) => id !== rootId))
-          .slice(0, 40)
-          .map((id) => chain(id).join(" / ")),
+        : matches.length
+          ? matches.slice(0, 40).map(uniquePath)
+          : Object.keys(nodes).filter((id) => id !== rootId).slice(0, 40).map((id) => chain(id).join(" / ")),
     });
 }
 

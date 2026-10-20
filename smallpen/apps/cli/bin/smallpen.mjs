@@ -25,6 +25,7 @@ import {
   flowStartIntent,
   pageDrawOperation,
   componentSetOperation,
+  textSizingRepairOperations,
   pageSetOperation,
   themeAddIntents,
   themeDefaultIntent,
@@ -115,6 +116,7 @@ import {
   openPackage,
   readBatchHistory,
   openRemoteLibrary,
+  layoutSizingRules,
   measureProjectionText,
   replayRecordedBatch,
   resolveWorkspace,
@@ -613,6 +615,8 @@ function printJson(value) {
       omitted: true,
       bytes: Buffer.byteLength(json) + 1,
       limitBytes,
+      // Callers that always want one path can ask for the whole reply.
+      inline: "--stdout prints the whole result instead",
     };
     json = encode(brief);
     if (brief.matrixPath && Buffer.byteLength(json) + 1 > limitBytes) {
@@ -2419,13 +2423,45 @@ function repairChoiceCommand(locator, productPackageId, conflictIndex, choice) {
   return { argv: base };
 }
 
+// Stored settings the App cannot make, rewritten the App's way without a
+// visible change: texts stored as hug (text-sizing).
+const STORAGE_REPAIRS = ["text-sizing"];
+
 async function repairCommand(packagePath, args) {
   const resolution = await resolveCliWorkspace(packagePath);
+  const action = option(args, "--action");
+  if (STORAGE_REPAIRS.includes(action) && resolution.status !== "ready")
+    throw new SmallPenError("repair_conflicts_first", `Resolve the package's conflicts before ${action}; run project repair without --action to list them`);
   if (resolution.status === "ready") {
+    const product = resolution.workspace.product;
+    const textSizing = textSizingRepairOperations(product);
+    if (action === "text-sizing") {
+      if (!textSizing.count) return { action, changed: false, count: 0, revision: product.revision, status: "ready" };
+      const result = await trackedWrite(() =>
+        applyOperationBatch(product.locator, {
+          baseRevision: product.revision,
+          batchId: option(args, "--batch-id") ?? `repair_${randomUUID()}`,
+          operations: textSizing.operations,
+        }),
+      );
+      return {
+        action, count: textSizing.count, places: textSizing.places.length,
+        done: `${textSizing.count} text sizes in ${textSizing.places.length} pages and variants stored the App's way (hug is a text's grow type); the design looks the same`,
+        batchId: result.batchId, revision: result.revision, changed: result.changed,
+        inverseBatchPath: result.inverseBatchPath, status: "ready",
+      };
+    }
+    if (action !== undefined)
+      throw new SmallPenError("unknown_repair_action", `The package has no conflicts; the repairs it can take are ${STORAGE_REPAIRS.join(", ")}`, { actions: STORAGE_REPAIRS });
     return {
-      packageId: resolution.workspace.product.manifest.packageId,
-      revision: resolution.workspace.product.revision,
+      packageId: product.manifest.packageId,
+      revision: product.revision,
       status: "ready",
+      ...(textSizing.count ? { repairs: [{
+        action: "text-sizing", count: textSizing.count, places: textSizing.places.length,
+        message: `${textSizing.count} text sizes are stored as hug, which the App does not offer for a text; this stores them the App's way without a visible change`,
+        command: ["project", "repair", resolve(packagePath), "--action", "text-sizing", "--json"],
+      }] } : {}),
     };
   }
   if (!option(args, "--action")) {
@@ -2451,7 +2487,6 @@ async function repairCommand(packagePath, args) {
     };
   }
   const { index, selected } = selectedRepairConflict(resolution, args);
-  const action = option(args, "--action");
   const operations = await repairOperations(resolution, selected, action, args);
   const result = await trackedWrite(() =>
     applyOperationBatch(resolution.product.locator, {
@@ -4386,6 +4421,8 @@ async function main(args) {
       const wraps = [];
       const asked = [];
       let calls = 0;
+      // The App's flex sizing rules, so the CLI stores what the App would.
+      const fixSizing = await layoutSizingRules();
       const plan = () => {
         calls = 0;
         return ({ "component-define": componentDefineOperation, "page-draw": pageDrawOperation, "page-set": pageSetOperation, "component-set": componentSetOperation })[command](
@@ -4393,6 +4430,7 @@ async function main(args) {
           intent,
           {
             ...lookups,
+            fixSizing,
             measure: (tree) => {
               const index = calls++;
               trees[index] ??= tree;

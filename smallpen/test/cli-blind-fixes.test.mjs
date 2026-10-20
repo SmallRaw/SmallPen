@@ -63,7 +63,8 @@ test("native layout replaces projection limits consistently in issues, PNG and p
   await run(["page", "draw", path, "--intent", await file("auto.json", {
     page: "Auto sizing", width: 720, height: 300, layout: "column", padding: 24, gap: 24,
     children: ["First", "Second"].map(name => ({ name, layout: "row", width: "fill", height: "hug",
-      children: [{ name: "Box", width: "hug", height: 24, fill: "#3957d7" }] })),
+      // Hug is a container's: the box hugs a fixed swatch.
+      children: [{ name: "Box", layout: "row", width: "hug", height: 24, fill: "#3957d7", children: [{ name: "Swatch", width: 80, height: 24 }] }] })),
   }), "--json"]);
   const local = await run(["view", path, "--page", "Auto sizing", "--as", "issues", "--json", "--full"]);
   const png = await run(["view", path, "--page", "Auto sizing", "--as", "png", "--output", join(root, "auto.png"), "--json"]);
@@ -192,7 +193,7 @@ test("texts in a row hug unless one is alone, a filling text wraps and its conta
     ] },
   ] }), "--json"]);
   const title = await nodeNamed(path, "Rows", "Title");
-  assert.equal(title["layout-item-h-sizing"], "auto", "two texts in a row hug");
+  assert.deepEqual([title["layout-item-h-sizing"], title.growType], ["fix", "auto-width"], "two texts in a row hug (the App's auto width)");
   const body = await nodeNamed(path, "Rows", "Body");
   const card = await nodeNamed(path, "Rows", "Card");
   assert.ok(body.height > 40, `body wraps: ${body.height}`);

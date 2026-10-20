@@ -10,6 +10,17 @@ const runtime = join(dirname(fileURLToPath(import.meta.url)), "..", "runtime");
 let initialized;
 let pending = Promise.resolve();
 
+// The App's flex sizing rules (a hugging container cannot keep a child that
+// fills it), for writers that build trees outside the App. Synchronous once
+// loaded, so planners can call it.
+export async function layoutSizingRules() {
+  const engine = await (initialized ??= loadRenderer().catch((error) => {
+    initialized = undefined;
+    throw error;
+  }));
+  return (request) => engine.renderer.fixSizing(request);
+}
+
 async function loadRenderer() {
   try {
     const manifest = JSON.parse(
@@ -252,6 +263,7 @@ export async function renderAppProjection(product, projection, options = {}) {
         described.fonts,
         assets.fonts,
         sourceIds,
+        (id) => projection.nodes[id]?.textStyle,
       );
       request.fonts = fontResources.fonts;
       request.images = assets.images
@@ -326,6 +338,7 @@ export async function renderAppProjection(product, projection, options = {}) {
           missingGlyphs: [
             ...(fontResources.missingGlyphs.get(sourceIds[uuid]) ?? []),
           ],
+          longestPiece: fontResources.longest.get(sourceIds[uuid]),
         }),
       );
       return {
@@ -366,6 +379,7 @@ export async function renderAppProjection(product, projection, options = {}) {
       // A native panic invalidates the module. A later request can reload it.
       if (error instanceof WebAssembly.RuntimeError) initialized = undefined;
       const details = engine.renderer.errorDetails(error) ?? {};
+      if (/panic|wasm/.test(details.code ?? "")) initialized = undefined;
       if (details.nodes) details.nodes = details.nodes.map(node => {
         const nodeId = sourceIds[node.nodeId] ?? node.nodeId;
         return { ...node, nodeId, path: elementPath(projection.nodes, projection.rootId, nodeId) };

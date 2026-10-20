@@ -22,6 +22,7 @@
    [app.common.render-wasm.wasm :as wasm]
    [app.common.types.modifiers :as modifiers]
    [app.common.types.shape :as shape]
+   [app.common.types.shape.layout :as ctl]
    [app.common.uuid :as uuid]
    [app.main.smallpen.projection :as projection]
    [app.render-wasm.api.enums]))
@@ -252,3 +253,61 @@
            :geometry (clj->js (into {} (map (fn [[id shape]]
                                               [(str id) (select-keys shape [:x :y :width :height :flip-x :flip-y])]))
                                     objects))})))
+
+(defn- sizing-shape
+  "The layout fields of a SmallPen node, as the App's sizing rules read them."
+  [id node]
+  (let [value (fn [key] (some-> (unchecked-get node key) keyword))]
+    {:id id
+     :layout (value "layout")
+     :layout-flex-dir (value "layout-flex-dir")
+     :layout-item-h-sizing (value "layout-item-h-sizing")
+     :layout-item-v-sizing (value "layout-item-v-sizing")
+     :layout-item-absolute (true? (unchecked-get node "layout-item-absolute"))
+     :hidden (false? (unchecked-get node "visible"))
+     :shapes (vec (or (some-> (unchecked-get node "children") array-seq) []))}))
+
+(defn fix-sizing
+  "Applies the App's flex sizing rules to SmallPen nodes, as the App does
+  after a layout edit: `children` lists containers whose children it checks
+  (ctl/fix-child-sizing), then `parents` lists containers it checks against
+  their children (ctl/fix-parent-sizing). Hidden and absolutely placed
+  children take no room in the layout, so a parent is checked against the
+  others only, as when shapes are put into a container in the App
+  (ctl/change-v-sizing?). Returns {nodeId: {field: value}} for the sizings
+  it changed."
+  [request]
+  (let [nodes   (unchecked-get request "nodes")
+        objects (into {} (map (fn [id] [id (sizing-shape id (unchecked-get nodes id))]))
+                      (js/Object.keys nodes))
+        flex?   (fn [shape] (= :flex (:layout shape)))
+        objects (reduce (fn [objects id]
+                          (let [parent (get objects id)]
+                            (if (flex? parent)
+                              (let [children (map objects (:shapes parent))]
+                                (reduce (fn [objects child]
+                                          (update objects (:id child) #(ctl/fix-child-sizing parent children %)))
+                                        objects (filter some? children)))
+                              objects)))
+                        objects
+                        (some-> (unchecked-get request "children") array-seq))
+        objects (reduce (fn [objects id]
+                          (let [parent (get objects id)]
+                            (if (flex? parent)
+                              (update objects id ctl/fix-parent-sizing
+                                      (->> (:shapes parent) (keep objects) (remove ctl/position-absolute?)))
+                              objects)))
+                        objects
+                        (some-> (unchecked-get request "parents") array-seq))
+        before  (fn [id key] (some-> (unchecked-get (unchecked-get nodes id) key) keyword))]
+    (clj->js
+     (into {}
+           (keep (fn [[id shape]]
+                   (let [changed (into {}
+                                       (keep (fn [key]
+                                               (let [value (get shape key)]
+                                                 (when (and value (not= value (before id (name key))))
+                                                   [(name key) (name value)]))))
+                                       [:layout-item-h-sizing :layout-item-v-sizing])]
+                     (when (seq changed) [id changed]))))
+           objects))))

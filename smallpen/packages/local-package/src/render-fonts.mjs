@@ -64,7 +64,7 @@ async function catalogFont(url) {
 
 // Host resource loading only. Family/weight/style and fallback selection come
 // from App's shared font catalog; Skia owns shaping, metrics and drawing.
-export async function provisionFonts(requests, available, sourceIds) {
+export async function provisionFonts(requests, available, sourceIds, styleOf = () => ({})) {
   const faces = new Map(available.map((face) => [faceKey(face), face]));
   const selected = new Map();
   const diagnostics = [];
@@ -160,6 +160,7 @@ export async function provisionFonts(requests, available, sourceIds) {
     }
     missingGlyphs.set(nodeId, missing);
   }
+  const longest = longestPieces(requests, (request) => coverage(selected.get(faceKey(request))), sourceIds, styleOf);
   for (const [nodeId, missing] of missingGlyphs)
     if (missing.size)
       diagnostics.push({
@@ -168,5 +169,76 @@ export async function provisionFonts(requests, available, sourceIds) {
         path: nodeId,
         message: `No shared font covers ${[...missing].map((c) => "U+" + c.codePointAt(0).toString(16).toUpperCase()).join(", ")}`,
       });
-  return { fonts, diagnostics, missingGlyphs };
+  return { fonts, diagnostics, missingGlyphs, longest };
+}
+
+// Lines break at spaces, after - / and dashes, and around CJK characters;
+// anything else is one piece a line cannot split without breaking a word.
+const BREAK_AFTER = /[-/\u2010-\u2014]/u;
+const ANYWHERE = /[\u2E80-\u303F\u3040-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/u;
+
+// Each text's widest unbreakable piece, measured with its primary face:
+// a box narrower than it makes the renderer split the word.
+function longestPieces(requests, fontOf, sourceIds, styleOf) {
+  const widest = new Map();
+  let nodeId, piece = "", width = 0, missing = false;
+  const close = () => {
+    // One character cannot be split; a fallback face draws what the
+    // primary one lacks, so such pieces are not measured here.
+    if ([...piece].length > 1 && !missing && width > (widest.get(nodeId)?.width ?? 0)) widest.set(nodeId, { text: piece, width: Math.round(width * 10) / 10 });
+    missing = false;
+    piece = "";
+    width = 0;
+  };
+  for (const request of requests) {
+    if (!request.nodeId || request.isFallback || !request.text) continue;
+    const id = sourceIds[request.nodeId];
+    if (id !== nodeId) close();
+    nodeId = id;
+    const font = fontOf(request);
+    const style = styleOf(id) ?? {};
+    const size = Number(style.fontSize) || 14;
+    const spacing = Number(style.letterSpacing) || 0;
+    let text = String(request.text);
+    if (style.textTransform === "uppercase") text = text.toUpperCase();
+    let chunk = "";
+    // Plain glyph advances: shaping some fonts' substitution tables throws
+    // in opentype.js, and a missing glyph counts as nothing.
+    const scale = size / (font.unitsPerEm || 1000);
+    const measure = () => {
+      for (const character of chunk) {
+        let advance = 0;
+        try {
+          if (font.charToGlyphIndex(character)) advance = font.charToGlyph(character).advanceWidth ?? 0;
+          else missing = true;
+        } catch {
+          missing = true;
+        }
+        width += advance * scale + spacing;
+      }
+      chunk = "";
+    };
+    for (const character of text) {
+      if (/\s/u.test(character)) {
+        measure();
+        close();
+      } else if (ANYWHERE.test(character)) {
+        measure();
+        close();
+        piece = chunk = character;
+        measure();
+        close();
+      } else {
+        piece += character;
+        chunk += character;
+        if (BREAK_AFTER.test(character)) {
+          measure();
+          close();
+        }
+      }
+    }
+    measure();
+  }
+  close();
+  return widest;
 }

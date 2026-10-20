@@ -104,6 +104,7 @@ export {
   pageDrawOperation,
   pageSetOperation,
   componentSetOperation,
+  textSizingRepairOperations,
   elementMoveOperation,
   MOVE_DIRECTIONS,
 } from "./simple-design.mjs";
@@ -137,6 +138,7 @@ export {
   findPageElement,
   findPresentation,
   findVariant,
+  findVariants,
   variantLabel,
 } from "./named-targets.mjs";
 export {

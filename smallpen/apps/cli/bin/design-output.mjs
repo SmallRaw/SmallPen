@@ -3,6 +3,7 @@ import {
   asciiWireframe,
   createSemanticTree,
   defaultTokenThemeIds,
+  elementPath,
   listTokenThemes,
   layoutProjectionDiagnostics,
   projectComponentVariant,
@@ -13,7 +14,7 @@ import {
   SmallPenError,
   tokenLibraryOf,
 } from "@smallpen/core";
-import { inspectProjection } from "@smallpen/local-package";
+import { inspectProjection, layoutSizingRules } from "@smallpen/local-package";
 
 export async function resolveDesignLayout(workspace, design, options = {}) {
   if (design.layoutSnapshot && (!options.raster || design.render?.bytes?.length)) return design;
@@ -642,6 +643,52 @@ export function platformHints(workspace, design) {
   return hints;
 }
 
+const SIZING = { width: "layout-item-h-sizing", height: "layout-item-v-sizing" };
+const LIMITS = { minWidth: "layout-item-min-w", maxWidth: "layout-item-max-w", minHeight: "layout-item-min-h", maxHeight: "layout-item-max-h" };
+const layoutContainer = (node) => node?.layout === "flex" || node?.layout === "grid";
+
+// Stored sizes the App cannot set: hug on an element without a row or
+// column layout, fill without a layout parent, min / max on an axis that
+// does not fill, and a container that hugs what a child fills (the App's
+// own rule, fixSizing, would make it fixed). Hidden elements and elements
+// inside copies count too: a copy may show what its component hides, and
+// repeats inside copies are reported once, against the component.
+export function appLayoutIssues(nodes, fixSizing) {
+  const issues = [];
+  const own = Object.keys(nodes);
+  const parentOf = new Map();
+  for (const [id, node] of Object.entries(nodes)) for (const child of node.children ?? []) parentOf.set(child, id);
+  const add = (nodeId, message, detail) => issues.push({ code: "layout_not_in_app", severity: "error", check: "app-layout", nodeId, message, ...detail });
+  for (const id of own) {
+    const node = nodes[id], parent = nodes[parentOf.get(id)];
+    for (const [axis, field] of Object.entries(SIZING)) {
+      if (node[field] === "auto" && !layoutContainer(node))
+        add(id, node.type === "TEXT"
+          ? `${node.name}: a text cannot hug its ${axis} in the App; it hugs by ${axis === "width" ? "auto width" : "auto height"}. Run project repair --action text-sizing to store every such text the App's way (nothing moves)`
+          : `${node.name} hugs its ${axis} without a row or column layout; the App offers hug only to such containers. Give it a ${axis} or a layout`, { field: axis });
+      if (node[field] === "fill" && parent && !layoutContainer(parent))
+        add(id, `${node.name} fills its ${axis} but ${parent.name} has no row or column layout; the App offers fill only inside one. Give it a ${axis} or give ${parent.name} a layout`, { field: axis });
+    }
+    for (const [name, field] of Object.entries(LIMITS)) {
+      const axis = name.endsWith("Width") ? "width" : "height";
+      if (node[field] !== undefined && node[field] !== null && node[SIZING[axis]] !== "fill")
+        add(id, `${node.name} has ${name} ${node[field]} but its ${axis} does not fill; the App sets min and max sizes only on an axis that fills. Set ${axis} to fill or ${name}=null`, { field: name });
+    }
+  }
+  const containers = own.filter((id) => nodes[id].layout === "flex");
+  const changes = containers.length ? fixSizing({ nodes, parents: containers, children: [] }) : {};
+  for (const [id, fields] of Object.entries(changes)) {
+    if (!own.includes(id)) continue;
+    for (const [field, axis] of [["layout-item-h-sizing", "width"], ["layout-item-v-sizing", "height"]]) {
+      if (!fields[field]) continue;
+      const fillers = (nodes[id].children ?? []).filter((child) => nodes[child]?.[field] === "fill");
+      const filling = fillers.map((child) => nodes[child].name);
+      add(id, `${nodes[id].name} hugs its ${axis} while ${filling.join(", ")} fill${filling.length === 1 ? "s" : ""} it; the App makes such a container fixed, and the filling element shrinks to nothing when drawn. Give ${nodes[id].name} a ${axis}, or let ${filling.join(", ")} hug`, { field: axis });
+    }
+  }
+  return issues;
+}
+
 export async function validateDesign(workspace, design) {
   design = await resolveDesignLayout(workspace, design);
   if (design.layoutSnapshot.status !== "resolved") {
@@ -712,6 +759,19 @@ export async function validateDesign(workspace, design) {
         nodeId: node.id,
         message: "Measured text exceeds its fixed box",
         measured: { width: item.width, height: item.height },
+        box: { width: node.width, height: node.height },
+      });
+    } else if (
+      // A wrapping box narrower than one word splits the word itself.
+      item.growType !== "auto-width" && item.longestPiece &&
+      item.longestPiece.width > node.width + Math.max(1, node.width * 0.02)
+    ) {
+      issues.push({
+        code: "text_word_split",
+        severity: "warning",
+        nodeId: node.id,
+        message: `"${item.longestPiece.text}" is ${Math.ceil(item.longestPiece.width)}px wide but its box is ${Math.round(node.width)}px, so the word breaks across lines; give the text a width or min width, or let it hug its content (width=hug)`,
+        measured: { width: item.longestPiece.width, text: item.longestPiece.text },
         box: { width: node.width, height: node.height },
       });
     }
@@ -880,8 +940,11 @@ export async function validateDesign(workspace, design) {
     for (const child of children) walk(child, [...ancestors, node], semantic);
   };
   walk(design.tree.root, design.ancestors);
+  issues.push(...appLayoutIssues(design.authoredProjection?.nodes ?? nodes, await layoutSizingRules()));
   for (const issue of issues) {
     if (issue.nodeId && places.has(issue.nodeId)) issue.where = where(issue.nodeId);
+    // A hidden element is not drawn, so it is named by its path.
+    else if (issue.nodeId && nodes[issue.nodeId]) issue.where = elementPath(nodes, design.projection.rootId, issue.nodeId).replaceAll(" / ", " › ");
     if (issue.otherNodeId && places.has(issue.otherNodeId)) issue.otherWhere = where(issue.otherNodeId);
     const text = nodes[issue.nodeId]?.type === "TEXT" ? nodes[issue.nodeId].text : undefined;
     if (text) issue.text = text.length > 40 ? `${text.slice(0, 39)}…` : text;
@@ -902,7 +965,7 @@ export async function validateDesign(workspace, design) {
       continue;
     }
     // Copies differ in their text overrides, not in the definition at fault.
-    const key = [issue.code, segments.at(-1), issue.ratio ?? ""].join("\0");
+    const key = [issue.code, segments.at(-1), issue.ratio ?? "", issue.field ?? ""].join("\0");
     const first = byDefinition.get(key);
     if (!first) {
       const entry = { ...issue, occurrences: 1 };

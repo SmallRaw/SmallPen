@@ -186,7 +186,10 @@ test("component define builds every variant from a base tree, binds Tokens by pa
   assert.equal(root.tokenBindings.fill.assetId.startsWith("tok_"), true);
   assert.equal(root.tokenBindings.paddingTop.assetId, root.tokenBindings.paddingBottom.assetId);
   assert.equal(root.width, Math.ceil(label.width) + 32, "the row hugs its measured label and padding");
-  assert.equal(label["layout-item-h-sizing"], "fill", "a text in a row grows with it");
+  // A row that hugs gives its text nothing to fill: the App never keeps a
+  // fill child in a hugging row, so the text hugs too.
+  assert.deepEqual([label["layout-item-h-sizing"], label.growType], ["fix", "auto-width"], "the text hugs (the App's auto width) inside a hugging row");
+  assert.equal(root["layout-item-h-sizing"], "auto", "the button hugs its label");
   assert.deepEqual(Object.keys(secondary.nodes).sort(), Object.keys(primary.nodes).sort(), "one element, one id in every variant");
   assert.equal(secondary.nodes[secondary.rootId].fills[0].color, "#ffffff");
   assert.ok(Object.values(secondary.nodes).find(({ name }) => name === "Label").tokenBindings.fill);

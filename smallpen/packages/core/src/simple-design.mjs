@@ -3,7 +3,7 @@
 // planners build the canonical node tables, IDs, child order, flex layout
 // fields and Token bindings, and return one whole put-component-set or
 // put-screen operation, or an interaction intent.
-import { findComponent, findElement, findPage, findPageElement, findPresentation, findVariant } from "./named-targets.mjs";
+import { findComponent, findElement, findPage, findPageElement, findPresentation, findVariants, variantLabel } from "./named-targets.mjs";
 import { fail } from "./errors.mjs";
 import { listEffectiveTokens } from "./effective-tokens.mjs";
 import { defaultTokenWorkspace, listTokenThemes, selectTokenThemes } from "./token-themes.mjs";
@@ -151,15 +151,17 @@ const INSTANCE_SETTINGS = {
   text: { binding: "text", field: "text", value: (value) => String(value) },
   visible: { binding: "visible", field: "visible", value: (value) => value === true || value === "true" },
   opacity: { binding: "opacity", field: "opacity", value: Number },
-  fill: { binding: "fill", field: "fills", value: (value) => [paintOf(value)] },
-  color: { binding: "fill", field: "fills", value: (value) => [paintOf(value)] },
+  fill: { binding: "fill", field: "fills", value: (value) => isNoPaint(value) ? [] : [paintOf(value)] },
+  color: { binding: "fill", field: "fills", value: (value) => isNoPaint(value) ? [] : [paintOf(value)] },
   name: { binding: "name", field: "name", value: String },
   stroke: {
     binding: "stroke",
     field: "strokes",
     value: (value, target, current) => {
-      const strokes = structuredClone(current ?? target.strokes ?? [{ alignment: "inner", type: "solid", width: 1 }]);
-      strokes[0] = { ...strokes[0], color: paintOf(value).color, type: "solid" };
+      if (isNoPaint(value)) return [];
+      const strokes = structuredClone(current?.length ? current : target.strokes?.length ? target.strokes : [{ alignment: "inner", type: "solid", width: 1 }]);
+      const { opacity: _opacity, ...rest } = strokes[0];
+      strokes[0] = { ...rest, ...strokePaint(value), type: "solid" };
       return strokes;
     },
   },
@@ -175,6 +177,13 @@ const INSTANCE_SETTINGS = {
   props: {},
 };
 
+// The App sets min and max sizes only on an axis the element fills.
+function checkLimitFills(field, mode, where) {
+  if (mode === "fill") return;
+  const axis = field.endsWith("Width") ? "width" : "height";
+  fail("invalid_size_limit", `${field} works only on an element whose ${axis} is fill, as in the App; set ${axis}: "fill" or drop ${field} (at ${where})`, { field, [axis]: mode === "auto" ? "hug" : "fixed" });
+}
+
 // Text takes a string Token and visibility a boolean one.
 const VALUE_TOKEN_TYPES = { text: "string", visible: "boolean" };
 function checkValueToken(field, raw, tokens, where) {
@@ -185,15 +194,60 @@ function checkValueToken(field, raw, tokens, where) {
     fail("binding_type_mismatch", `${field} needs a ${expected} Token; ${path} is ${type} (at ${where})`);
 }
 
-function paintOf(value) {
+// The colors the App's renderer draws: hex, rgb()/rgba(), transparent and
+// CSS color names.
+const COLOR_NAMES = new Set(`
+  aliceblue antiquewhite aqua aquamarine azure beige bisque black
+  blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse
+  chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan
+  darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta
+  darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen
+  darkslateblue darkslategray darkslategrey darkturquoise darkviolet
+  deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite
+  forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green
+  greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender
+  lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan
+  lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon
+  lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue
+  lightyellow lime limegreen linen magenta maroon mediumaquamarine
+  mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue
+  mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream
+  mistyrose moccasin navajowhite navy oldlace olive olivedrab orange
+  orangered orchid palegoldenrod palegreen paleturquoise palevioletred
+  papayawhip peachpuff peru pink plum powderblue purple red rosybrown
+  royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver
+  skyblue slateblue slategray slategrey snow springgreen steelblue tan teal
+  thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen
+`.trim().split(/\s+/));
+const RGB = /^rgba?\(\s*[0-9.]+\s*,\s*[0-9.]+\s*,\s*[0-9.]+\s*(?:,\s*[0-9.]+\s*)?\)$/i;
+function checkColor(color, where) {
+  const text = String(color).trim();
+  if (/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(text) || RGB.test(text) || COLOR_NAMES.has(text.toLowerCase()) || text.toLowerCase() === "transparent")
+    return;
+  fail("invalid_color", `${JSON.stringify(color)} is not a color${where ? ` (at ${where})` : ""}: use "#RRGGBB", "#RRGGBBAA", rgb(), a CSS color name or a {Token}; none removes the paint`);
+}
+
+// none, null, false or []: no paint at all (an empty fills or strokes).
+export function isNoPaint(value) {
+  return value === null || value === false || (Array.isArray(value) && !value.length) ||
+    (typeof value === "string" && value.trim().toLowerCase() === "none");
+}
+
+function paintOf(value, where) {
   if (typeof value === "string" && /^#[0-9a-f]{8}$/i.test(value))
     return { color: value.slice(0, 7), opacity: parseInt(value.slice(7, 9), 16) / 255, type: "solid" };
-  if (typeof value === "string") return { color: value, type: "solid" };
   if (isRecord(value) && value.colorSpace) {
     const byte = (channel) => Math.round(channel * 255).toString(16).padStart(2, "0");
     return { color: `#${value.components.map(byte).join("")}`, ...(value.alpha < 1 ? { opacity: value.alpha } : {}), type: "solid" };
   }
-  return { color: String(value), type: "solid" };
+  checkColor(value, where);
+  return { color: String(value).trim(), type: "solid" };
+}
+
+// A stroke's color and its alpha: "#FFFFFF00" keeps opacity 0.
+function strokePaint(value, where) {
+  const { color, opacity } = paintOf(value, where);
+  return opacity === undefined ? { color } : { color, opacity };
 }
 
 const SIZE_FIELDS = { width: "layout-item-h-sizing", height: "layout-item-v-sizing" };
@@ -300,8 +354,12 @@ class TreeBuilder {
     for (const [axis, size] of [["width", width], ["height", height]]) {
       if (size.mode === "fill" && !parentFlex)
         fail("invalid_size", `fill needs a parent with a row or column layout (at ${where})`);
-      if (parentFlex || root || spec[axis] !== undefined) node[SIZE_FIELDS[axis]] = size.mode;
+      // The App offers hug only to containers; a text hugs by its grow
+      // type (auto width / auto height) and stays fixed as a layout item.
+      if (parentFlex || root || spec[axis] !== undefined) node[SIZE_FIELDS[axis]] = isText && size.mode === "auto" ? "fix" : size.mode;
     }
+    if (isText && width.mode === "auto" && height.mode === "fix" && !this.partial)
+      fail("invalid_size", `A text whose width hugs its words also hugs its height, as auto width does in the App; give it a width to fix its height (at ${where})`);
     if (spec.use) {
       this.instance(spec, node, where, bindings);
     } else if (spec.text !== undefined || spec.type === "text") {
@@ -313,7 +371,9 @@ class TreeBuilder {
         const translations = [...this.tokens.values()].find((item) => item.token.id === bindings.text.assetId)?.translations;
         if (translations?.size > 1) node._measureText = this.measureTexts[id] = widestText(translations);
       }
-      node.growType = width.mode === "auto" ? "auto-width" : "auto-height";
+      // The App's grow types: auto width, auto height, or fixed (a fixed
+      // height is kept only by a fixed text).
+      node.growType = width.mode === "auto" ? "auto-width" : height.mode === "fix" ? "fixed" : "auto-height";
       const textStyle = {};
       if (spec.font !== undefined)
         bind("typography", spec.font, (value) => Object.assign(textStyle, isRecord(value) ? value : {}));
@@ -332,13 +392,15 @@ class TreeBuilder {
       else if (spec.width === undefined && textFills && parentJustify === "center") textStyle.textAlign = "center";
       if (Object.keys(textStyle).length) node.textStyle = textStyle;
       const color = spec.color ?? spec.fill;
-      if (color !== undefined) bind("fill", color, (value) => { node.fills = [paintOf(value)]; });
+      if (isNoPaint(color)) node.fills = [];
+      else if (color !== undefined) bind("fill", color, (value) => { node.fills = [paintOf(value, `${where}.color`)]; });
     } else {
       const children = spec.children ?? [];
       node.type = root ? (spec.type === "component" ? "COMPONENT" : "FRAME")
         : spec.ellipse || spec.type === "ellipse" ? "ELLIPSE"
           : children.length || spec.layout || spec.type === "frame" ? "FRAME" : "RECTANGLE";
-      if (spec.fill !== undefined) bind("fill", spec.fill, (value) => { node.fills = [paintOf(value)]; });
+      if (isNoPaint(spec.fill)) node.fills = [];
+      else if (spec.fill !== undefined) bind("fill", spec.fill, (value) => { node.fills = [paintOf(value, `${where}.fill`)]; });
       else if (node.type === "FRAME" || node.type === "COMPONENT") node.fills = [];
       const layout = spec.layout ?? (children.length ? "column" : undefined);
       if (layout && layout !== "none") {
@@ -363,7 +425,9 @@ class TreeBuilder {
       const isTextSpec = (child) => isRecord(child) && !child.use && (typeof child.text === "string" || child.type === "text");
       const sized = (child) => isRecord(child) && child.width !== undefined;
       const fills = (child) => isRecord(child) && ["fill", "100%"].includes(String(child.width).trim().toLowerCase());
-      const loneText = flex === "row" && !named.some(fills) && named.filter((child) => isTextSpec(child) && !sized(child)).length === 1
+      // A row that hugs has no width for its text to fill: the App would
+      // shrink the text to nothing.
+      const loneText = flex === "row" && width.mode !== "auto" && !named.some(fills) && named.filter((child) => isTextSpec(child) && !sized(child)).length === 1
         && named.filter(isTextSpec).length === 1;
       const ids = named.map((child) => this.build(child, here, flex, false, spec.justify, loneText && isTextSpec(child) && !sized(child)));
       // Penpot lays a flex line out from the last child: store the reverse
@@ -373,11 +437,17 @@ class TreeBuilder {
     if (node.layout === "flex") {
       node[SIZE_FIELDS.width] ??= width.mode;
       node[SIZE_FIELDS.height] ??= height.mode;
-    }
-    if (spec.stroke !== undefined) {
+    } else if (!spec.use && node.type !== "TEXT" && !this.partial)
+      for (const axis of ["width", "height"])
+        if (node[SIZE_FIELDS[axis]] === "auto")
+          fail("invalid_size", `${node.name} has no row or column layout to hug, and the App offers hug only to such containers; give it a ${axis} (a number, a Token or fill) or a layout (at ${where})`, { field: axis });
+    if (isNoPaint(spec.stroke)) node.strokes = [];
+    else if (spec.stroke !== undefined) {
       const stroke = isRecord(spec.stroke) ? spec.stroke : { color: spec.stroke };
       const paint = { alignment: stroke.align ?? "inner", type: "solid", width: 1 };
-      if (stroke.color !== undefined) bind("stroke", stroke.color, (value) => { paint.color = paintOf(value).color; });
+      if (stroke.color === undefined || isNoPaint(stroke.color))
+        fail("invalid_stroke", `A stroke at ${where} needs a color, for example {"color": "#D0D5DD", "width": 1}; stroke=none removes it`);
+      bind("stroke", stroke.color, (value) => Object.assign(paint, strokePaint(value, `${where}.stroke`)));
       if (Array.isArray(stroke.width)) {
         // [top, right, bottom, left], each a width or a Token.
         if (stroke.width.length !== 4) fail("invalid_stroke", `stroke width at ${where} takes one value or four sides`);
@@ -410,7 +480,11 @@ class TreeBuilder {
       });
     }
     for (const [field, key] of [["minWidth", "layout-item-min-w"], ["maxWidth", "layout-item-max-w"], ["minHeight", "layout-item-min-h"], ["maxHeight", "layout-item-max-h"]])
-      if (spec[field] !== undefined) bind(field, spec[field], (value) => { node[key] = Number(value); });
+      // null leaves no limit (page set removes one with null).
+      if (spec[field] !== undefined && spec[field] !== null) {
+        if (!this.partial) checkLimitFills(field, (field.endsWith("Width") ? width : height).mode, where);
+        bind(field, spec[field], (value) => { node[key] = Number(value); });
+      }
     if (spec.opacity !== undefined) bind("opacity", spec.opacity, (value) => { node.opacity = Number(value); });
     if (spec.shadow !== undefined) bind("shadow", spec.shadow, (value) => { node.shadow = value; });
     // "{flag.path}" binds a boolean Token: shown or hidden per theme option.
@@ -450,6 +524,16 @@ class TreeBuilder {
     };
     if (node.width === undefined) node.width = source.width;
     if (node.height === undefined) node.height = source.height;
+    // A copy hugs only when its component lays its content out in a row or
+    // column, as in the App; otherwise it keeps the component's size.
+    if (source.layout !== "flex")
+      for (const axis of ["width", "height"]) {
+        if (node[SIZE_FIELDS[axis]] !== "auto") continue;
+        if (spec[axis] !== undefined && !this.partial)
+          fail("invalid_size", `${set.name} has no row or column layout to hug, and the App offers hug only to such containers; give the copy a ${axis} (a number, a Token or fill) or leave it out (at ${where})`, { field: axis });
+        // Stored fixed; an unset width may still widen for a longer text.
+        node[SIZE_FIELDS[axis]] = "fix";
+      }
     // text: {"Label": "Save"}; set: {"Icon.visible": false} -> overrides by
     // the component's own node names.
     // An element of the component: by its whole name (a name may hold a
@@ -815,6 +899,7 @@ export function componentDefineOperation(snapshot, spec, options = {}) {
     const measure = options.measure?.(tree);
     widenInstances(tree.builder, measure);
     sizeDesignTree(tree.nodes, tree.rootId, measure);
+    appSizing(options, tree.nodes, { parents: Object.keys(tree.nodes) });
     return {
       id: `var_${idBase}_${variantSlug}`,
       nodes: existing ? keepNodeIds(tree.nodes, tree.rootId, existing.variants) : tree.nodes,
@@ -878,6 +963,44 @@ function keepNodeIds(nodes, rootId, previous) {
   ]));
 }
 
+// A copy drawn again under its old path and component keeps the size it
+// followed a Token for, or filled, unless the spec gives width / height.
+function keepCopySizes(children, previous, components, tokens, trail = []) {
+  const byPath = new Map([...elementPaths(previous.nodes, previous.rootId)].map(([id, path]) => [path, previous.nodes[id]]));
+  const tokenPath = (binding) => [...tokens.values()].find((item) =>
+    item.target.assetId === binding.assetId && item.target.packageId === binding.packageId)?.token.path;
+  const named = (specs) => {
+    try {
+      return nameSiblings(specs, "");
+    } catch {
+      return specs; // the build itself names the repeat
+    }
+  };
+  const walk = (specs, path) => named(specs).map((spec) => {
+    if (!isRecord(spec)) return spec;
+    const here = [...path, String(spec.name ?? "").trim().toLowerCase()];
+    const next = { ...spec };
+    if (Array.isArray(spec.children)) next.children = walk(spec.children, here);
+    const old = byPath.get(here.join(" / "));
+    if (!spec.use || !old?.instance) return next;
+    let set;
+    try {
+      set = components(spec.use).set;
+    } catch {
+      return next;
+    }
+    if (old.instance.component.assetId !== set.id) return next;
+    for (const field of ["width", "height"]) {
+      if (spec[field] !== undefined) continue;
+      const bound = old.tokenBindings?.[field] && tokenPath(old.tokenBindings[field]);
+      if (bound) next[field] = `{${bound}}`;
+      else if (old[SIZE_FIELDS[field]] === "fill") next[field] = "fill";
+    }
+    return next;
+  });
+  return walk(children, trail);
+}
+
 // The page a draw redraws: with a module, the page of that full name; else
 // the page of that name, or the one page whose last name part it is.
 function pageForDraw(snapshot, spec) {
@@ -925,7 +1048,7 @@ export function pageDrawOperation(snapshot, spec, options = {}) {
   }
   const builder = new TreeBuilder(prefix, tokens, components);
   if (presentation.rootId) builder.rootId = presentation.rootId;
-  let nodes;
+  let nodes, redrawn;
   let rootId = presentation.rootId;
   if (spec.into) {
     // Rebuild one container's content in place.
@@ -938,12 +1061,16 @@ export function pageDrawOperation(snapshot, spec, options = {}) {
     nodes = Object.fromEntries(Object.entries(presentation.nodes).filter(([id]) => !drop.has(id)));
     for (const id of Object.keys(nodes)) builder.used.add(id);
     const flex = container.layout === "flex" ? container["layout-flex-dir"] ?? "row" : false;
-    const ids = nameSiblings(spec.children, container.name).map((child) => builder.build(child, [container.name], flex));
+    const trail = (elementPaths(presentation.nodes, presentation.rootId).get(container.id) ?? "").split(" / ").filter(Boolean);
+    const children = keepCopySizes(spec.children, presentation, components, tokens, trail);
+    const ids = nameSiblings(children, container.name).map((child) => builder.build(child, [container.name], flex));
     nodes[container.id] = { ...container, children: flex ? [...ids].reverse() : ids };
     Object.assign(nodes, builder.nodes);
+    redrawn = [container.id, ...Object.keys(builder.nodes)];
   } else {
+    const children = presentation.rootId ? keepCopySizes(spec.children, presentation, components, tokens) : spec.children;
     rootId = builder.build({
-      align: spec.align, children: spec.children, fill: spec.fill ?? "#ffffff", gap: spec.gap,
+      align: spec.align, children, fill: spec.fill ?? "#ffffff", gap: spec.gap,
       height: spec.height ?? size.height, justify: spec.justify, layout: spec.layout ?? "column",
       // "List · mobile": a page's versions sit side by side on the canvas.
       name: `${spec.page} · ${platform}`, padding: spec.padding, width: spec.width ?? size.width,
@@ -953,6 +1080,8 @@ export function pageDrawOperation(snapshot, spec, options = {}) {
   const measure = options.measure?.({ nodes, probes: builder.probes, rootId, measureTexts: builder.measureTexts });
   widenInstances(builder, measure);
   sizeDesignTree(nodes, rootId, measure);
+  // As when shapes are put into a container in the App.
+  appSizing(options, nodes, { parents: redrawn ?? Object.keys(nodes) });
   if (presentation.rootId && Object.keys(presentation.nodes ?? {}).length)
     nodes = keepNodeIds(nodes, rootId, [{ nodes: presentation.nodes, rootId: presentation.rootId }]);
   // Elements drawn again keep their interactions, including surviving
@@ -980,6 +1109,45 @@ export function pageDrawOperation(snapshot, spec, options = {}) {
   presentation.interactions = (presentation.interactions ?? []).filter((interaction) =>
     !interaction.sourceNodeId || nodes[interaction.sourceNodeId]);
   return { type: "put-screen", screen, ...(found ? { entry: found.entry } : {}) };
+}
+
+// --- repair -----------------------------------------------------------------
+
+// Texts written as "hug" (auto) before the CLI stored what the App does: the
+// App sizes a text by its grow type and offers hug only to containers. auto
+// becomes fix and the grow type stays, so nothing moves. One put per page or
+// component set that has such texts; places names them.
+export function textSizingRepairOperations(snapshot) {
+  const operations = [], places = [];
+  let count = 0;
+  const fix = (nodes, where) => {
+    let changed = 0;
+    for (const node of Object.values(nodes))
+      if (node.type === "TEXT")
+        for (const field of Object.values(SIZE_FIELDS))
+          if (node[field] === "auto") {
+            node[field] = "fix";
+            changed += 1;
+          }
+    if (changed) places.push(where);
+    count += changed;
+    return changed;
+  };
+  for (const entry of snapshot.manifest.entries.screens) {
+    const screen = structuredClone(snapshot.entries[entry]);
+    let changed = 0;
+    for (const presentation of screen.presentations)
+      changed += fix(presentation.nodes, `${screen.name} (${presentation.platform ?? presentation.name})`);
+    if (changed) operations.push({ type: "put-screen", screen, entry });
+  }
+  for (const found of snapshot.domain.componentSets.values()) {
+    const componentSet = structuredClone(found);
+    let changed = 0;
+    for (const variant of componentSet.variants)
+      changed += fix(variant.nodes, componentSet.variants.length > 1 ? `${componentSet.name} (${variantLabel(componentSet, variant)})` : componentSet.name);
+    if (changed) operations.push({ type: "put-component-set", componentSet });
+  }
+  return { operations, count, places };
 }
 
 // --- partial edits ----------------------------------------------------------
@@ -1045,6 +1213,8 @@ function setElementFields(builder, nodes, id, set, where) {
   const parent = parentOf(nodes, id);
   const parentFlex = parent?.layout === "flex" ? parent["layout-flex-dir"] ?? "row" : false;
   const scratch = new TreeBuilder(`${builder.prefix}_set`, builder.tokens, builder.components);
+  // Only the written fields: the element's whole sizing is checked below.
+  scratch.partial = true;
   if (node.instance) {
     const unsupported = Object.keys(set).filter((key) => !COPY_FIELDS.has(key));
     if (unsupported.length)
@@ -1064,6 +1234,11 @@ function setElementFields(builder, nodes, id, set, where) {
     if (set.set !== undefined) spec.set = set.set;
     const scratchId = scratch.build(spec, [where.split(" › ")[0]], parentFlex);
     const built = scratch.nodes[scratchId];
+    const shown = component.variants.find((candidate) =>
+      Object.entries(built.instance.variant ?? {}).every(([axis, value]) => candidate.selection?.[axis] === value)) ?? component.variants[0];
+    for (const field of ["width", "height"])
+      if (set[field] !== undefined && (set[field] === null || ["hug", "auto"].includes(String(set[field]).trim().toLowerCase())) && shown.nodes[shown.rootId].layout !== "flex")
+        fail("invalid_size", `${component.name} has no row or column layout to hug, and the App offers hug only to such containers; give the copy a ${field} (a number, a Token or fill) (at ${where})`, { field });
     if (set.props !== undefined) node.instance.variant = built.instance.variant;
     // A value written now replaces the Token its field followed: the
     // copy's own binding for it goes, and the builder drops the
@@ -1126,11 +1301,21 @@ function setElementFields(builder, nodes, id, set, where) {
       }
     node.instance.overrides = overrides;
     if (!Object.keys(overrides).length) delete node.instance.overrides;
-    if (set.visible !== undefined) {
-      if (set.visible === false || set.visible === "false") node.visible = false;
+    // A value replaces the copy's own visible / opacity binding, which would
+    // win over it; a Token becomes the binding.
+    for (const field of ["visible", "opacity"]) {
+      if (set[field] === undefined) continue;
+      checkValueToken(field, set[field], builder.tokens, where);
+      const [value, reference] = resolveValue(set[field], builder.tokens, `${where}.${field}`);
+      if (field === "opacity") node.opacity = Number(value);
+      else if (value === false || value === "false") node.visible = false;
       else delete node.visible;
+      const bindings = { ...node.tokenBindings };
+      if (reference) bindings[field] = reference;
+      else delete bindings[field];
+      if (Object.keys(bindings).length) node.tokenBindings = bindings;
+      else delete node.tokenBindings;
     }
-    if (set.opacity !== undefined) node.opacity = Number(set.opacity);
     return;
   }
   if (set.props !== undefined || set.set !== undefined)
@@ -1207,13 +1392,34 @@ function setElementFields(builder, nodes, id, set, where) {
     if (set[field] === undefined) continue;
     const size = built._size[field];
     if (size.mode === "fill" && !parentFlex) fail("invalid_size", `fill needs a parent with a row or column layout (at ${where})`);
-    node[sizing] = size.mode;
+    node[sizing] = isText && size.mode === "auto" ? "fix" : size.mode;
     if (size.mode === "fix") node[field] = size.value;
     takeBindings([field]);
-    if (isText && field === "width") node.growType = size.mode === "auto" ? "auto-width" : "auto-height";
-    if (!parentFlex && size.mode === "auto" && !isText && node.layout !== "flex") fail("invalid_size", `hug needs a row or column layout inside ${node.name} (at ${where})`);
     if (!parentFlex && size.mode === "auto") node[`_${field}Hug`] = true;
   }
+  if (isText && (set.width !== undefined || set.height !== undefined)) {
+    // The App's grow type from the text's width and height.
+    const mode = (field) => set[field] !== undefined ? built._size[field].mode
+      : node[SIZE_FIELDS[field]] === "fill" ? "fill"
+        : node.growType === "auto-width" || (field === "height" && node.growType === "auto-height") ? "auto" : "fix";
+    const width = mode("width"), height = mode("height");
+    if (width === "auto" && height === "fix")
+      fail("invalid_size", `A text whose width hugs its words also hugs its height, as auto width does in the App; give it a width to fix its height (at ${where})`);
+    node.growType = width === "auto" ? "auto-width" : height === "fix" ? "fixed" : "auto-height";
+    // Both sizes as the App stores a text's: hug is its grow type.
+    for (const field of ["width", "height"])
+      if (node[SIZE_FIELDS[field]] === "auto") node[SIZE_FIELDS[field]] = "fix";
+  }
+  // What the App offers: hug only on a container with a row or column
+  // layout, min and max sizes only on an axis the element fills.
+  const resized = ["width", "height", "layout"].some((field) => set[field] !== undefined);
+  if (resized && !isText && node.layout !== "flex")
+    for (const field of ["width", "height"])
+      if (node[SIZE_FIELDS[field]] === "auto" || node[`_${field}Hug`])
+        fail("invalid_size", `${node.name} has no row or column layout to hug, and the App offers hug only to such containers; give it a ${field} (a number, a Token or fill)${set.layout === "none" ? " with layout none" : " or a layout"} (at ${where})`, { field });
+  for (const field of ["minWidth", "maxWidth", "minHeight", "maxHeight"])
+    if (set[field] !== undefined && set[field] !== null)
+      checkLimitFills(field, node[SIZE_FIELDS[field.endsWith("Width") ? "width" : "height"]], where);
   if (Object.keys(bindings).length) node.tokenBindings = bindings;
   else delete node.tokenBindings;
 }
@@ -1270,6 +1476,51 @@ function editTargets(list, element, label, { all = false, one, kind }) {
   return found;
 }
 
+// The App's flex sizing rules, from its renderer (options.fixSizing): a
+// container that hugs an axis its children fill becomes fixed (parents), and
+// the children of a container that now hugs stop filling it (children).
+// Without the renderer (the App's own writers) nothing changes here.
+function appSizing(options, nodes, { parents = [], children = [] }) {
+  if (!options.fixSizing) return;
+  const flex = (ids) => ids.filter((id) => nodes[id]?.layout === "flex");
+  const changes = options.fixSizing({ nodes, parents: flex(parents), children: flex(children) });
+  // A child that stops filling keeps the size it filled, as in the App.
+  const slots = Object.fromEntries(Object.entries(changes).map(([id, fields]) => [id, {
+    width: fields["layout-item-h-sizing"] && nodes[id]["layout-item-h-sizing"] === "fill" ? slotSize(nodes, id, "width") : undefined,
+    height: fields["layout-item-v-sizing"] && nodes[id]["layout-item-v-sizing"] === "fill" ? slotSize(nodes, id, "height") : undefined,
+  }]));
+  for (const [id, fields] of Object.entries(changes)) {
+    Object.assign(nodes[id], fields);
+    for (const [field, size] of Object.entries(slots[id])) if (size !== undefined) nodes[id][field] = size;
+  }
+}
+
+// The size a filling child gets along one axis of its flex parent: the
+// parent's inner size, less its other children and gaps on the main axis,
+// shared among the children that fill.
+function slotSize(nodes, id, field) {
+  const parent = parentOf(nodes, id);
+  if (!parent || parent.layout !== "flex" || parent[field] === undefined) return undefined;
+  const pad = parent["layout-padding"] ?? { p1: 0, p2: 0, p3: 0, p4: 0 };
+  const inner = parent[field] - (field === "width" ? (pad.p2 ?? 0) + (pad.p4 ?? 0) : (pad.p1 ?? 0) + (pad.p3 ?? 0));
+  const main = (parent["layout-flex-dir"] ?? "row").startsWith("row") === (field === "width");
+  if (!main) return Math.max(0, inner);
+  const sizing = field === "width" ? "layout-item-h-sizing" : "layout-item-v-sizing";
+  const kids = parent.children.map((child) => nodes[child]).filter((child) => child && child.visible !== false && child["layout-item-absolute"] !== true);
+  const fills = kids.filter((child) => child[sizing] === "fill");
+  const fixed = kids.filter((child) => child[sizing] !== "fill").reduce((sum, child) => sum + (child[field] ?? 0), 0);
+  const gap = (field === "width" ? parent["layout-gap"]?.["column-gap"] : parent["layout-gap"]?.["row-gap"]) ?? 0;
+  return Math.max(0, Math.floor((inner - fixed - gap * Math.max(0, kids.length - 1)) / Math.max(1, fills.length)));
+}
+
+// As after a size or layout edit in the App (update-layout-child): the
+// element's children, then its parent.
+function appSizingAfterSet(options, nodes, id, set) {
+  if (!["width", "height", "layout"].some((field) => set[field] !== undefined)) return;
+  const parent = parentOf(nodes, id);
+  appSizing(options, nodes, { children: [id], parents: parent ? [parent.id] : [] });
+}
+
 function sizeAgain(builder, nodes, rootId, options) {
   storedSizing(nodes);
   const measure = options.measure?.({ nodes, probes: builder.probes, rootId, measureTexts: builder.measureTexts });
@@ -1292,6 +1543,7 @@ export function pageSetOperation(snapshot, { page, platform, element, all, set }
     const builder = new TreeBuilder(slug(`${screen.id}_${presentation.platform ?? presentation.name}`), tokens, components);
     builder.nodes = presentation.nodes;
     setElementFields(builder, presentation.nodes, id, set, label(presentation) + (element ? ` › ${element}` : ""));
+    appSizingAfterSet(options, presentation.nodes, id, set);
     sizeAgain(builder, presentation.nodes, presentation.rootId, options);
     const rootNode = presentation.nodes[presentation.rootId];
     presentation.viewport = { width: rootNode.width, height: rootNode.height };
@@ -1307,7 +1559,9 @@ export function componentSetOperation(snapshot, { component, variant, element, a
   if (owner !== snapshot)
     fail("component_not_here", `${found.name} belongs to ${owner.manifest.name ?? "another package"}; edit it there`, { package: owner.manifest.name, path: owner.locator });
   const componentSet = structuredClone(found);
-  const variants = variant !== undefined ? [componentSet.variants.find(({ id }) => id === findVariant(found, variant).id)] : componentSet.variants;
+  // A variant named by some of its properties is every one that has them.
+  const chosen = new Set(findVariants(found, variant).map(({ id }) => id));
+  const variants = componentSet.variants.filter(({ id }) => chosen.has(id));
   const labelOf = (item) => {
     const text = (componentSet.axes ?? []).map((axis) => `${axis.name}=${item.selection?.[axis.id]}`).join(", ");
     return text ? `${componentSet.name} (${text})` : componentSet.name;
@@ -1319,6 +1573,7 @@ export function componentSetOperation(snapshot, { component, variant, element, a
     const builder = new TreeBuilder(slug(`${componentSet.id}_${target.id}`), tokens, components);
     builder.nodes = target.nodes;
     setElementFields(builder, target.nodes, id, set, labelOf(target) + (element ? ` › ${element}` : ""));
+    appSizingAfterSet(options, target.nodes, id, set);
     sizeAgain(builder, target.nodes, target.rootId, options);
   }
   return { type: "put-component-set", componentSet };

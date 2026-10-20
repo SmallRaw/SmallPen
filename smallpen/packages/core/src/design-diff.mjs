@@ -143,12 +143,14 @@ const IGNORED = new Set(["id", "children", "interactions"]);
 // What auto layout decides for a node: its place in a flex parent (unless
 // it is absolute), and a size that fills or hugs. The App writes back what
 // the layout computed; that is not a design change.
+// A text that grows (auto width, auto height) takes its size from its words.
 function layoutDecided(node, parent) {
   const flexChild = parent?.layout === "flex" && node["layout-item-absolute"] !== true;
+  const grows = node.type === "TEXT" ? node.growType : undefined;
   return {
     position: flexChild,
-    width: flexChild && ["fill", "auto"].includes(node["layout-item-h-sizing"]),
-    height: flexChild && ["fill", "auto"].includes(node["layout-item-v-sizing"]),
+    width: (flexChild && ["fill", "auto"].includes(node["layout-item-h-sizing"])) || grows === "auto-width",
+    height: (flexChild && ["fill", "auto"].includes(node["layout-item-v-sizing"])) || grows === "auto-width" || grows === "auto-height",
   };
 }
 
@@ -208,6 +210,20 @@ function nodeFieldChanges(old, now, names, decided = {}) {
     if (!same(from.component, to.component))
       details.push(`component ${names.component(from.component)} → ${names.component(to.component)}`);
   }
+  // A text hugs by its grow type, as in the App: its sizes read as one
+  // word each (hug, fill or fixed), whichever fields hold them.
+  if (old.type === "TEXT" || now.type === "TEXT") {
+    const taken = ["growType", "layout-item-h-sizing", "layout-item-v-sizing"].map(take);
+    const mode = (node, axis) => {
+      const sizing = node[axis === "width" ? "layout-item-h-sizing" : "layout-item-v-sizing"];
+      if (sizing === "fill") return "fill";
+      if (sizing === "auto" || node.growType === "auto-width" || (axis === "height" && node.growType === "auto-height")) return "hug";
+      return "fixed";
+    };
+    if (taken.some(Boolean))
+      for (const axis of ["width", "height"])
+        if (mode(old, axis) !== mode(now, axis)) details.push(`${axis} ${mode(old, axis)} → ${mode(now, axis)}`);
+  }
   for (const key of changed) {
     const word = FIELD_WORDS[key];
     if (word === null) continue;
@@ -239,6 +255,10 @@ const FIELD_WORDS = {
   "layout-item-absolute": "placed freely",
   "layout-wrap-type": "wrap",
   "layout-item-margin": "margin",
+  "layout-item-min-w": "min width",
+  "layout-item-max-w": "max width",
+  "layout-item-min-h": "min height",
+  "layout-item-max-h": "max height",
   cornerRadius: "radius",
   textStyle: "text style",
   layout: "layout",
