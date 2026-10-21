@@ -30,7 +30,7 @@ export const SMALLPEN_FORMAT_CAPABILITIES = deepFreeze({
     ],
     assetLibraryModel: "local-colors-fonts-typographies-media",
     binaryBlobModel: "sha256-addressed",
-    customFontModel: "families-variants-woff",
+    customFontModel: "families-variants-single-source",
     componentCanonicalModel: "component-sets-sparse-variants",
     dependencyModel:
       "one-foundation-plus-multiple-local-or-url-library-sources",
@@ -40,7 +40,7 @@ export const SMALLPEN_FORMAT_CAPABILITIES = deepFreeze({
     // Themes are Penpot token sets + themes; a Product selects its
     // Foundation's themes on its dependency (docs/TOKEN-THEMES.md).
     tokenThemeModel: "penpot-token-sets-and-themes",
-    fontImportConversion: "sfnt-to-woff",
+    fontImportConversion: "runtime-sfnt-woff",
     fontImportTypes: ["font/otf", "font/ttf", "font/woff"],
     repairChoices: [
       "choose-foundation",

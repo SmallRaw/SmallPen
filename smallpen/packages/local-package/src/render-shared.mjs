@@ -4,6 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { provisionFonts } from "./render-fonts.mjs";
 import { inspectMedia } from "./media-inspect.mjs";
+import { resolveFontResource } from "./font-resources.mjs";
 import { SmallPenError, stableRuntimeUuid, elementPath } from "@smallpen/core";
 
 const runtime = join(dirname(fileURLToPath(import.meta.url)), "..", "runtime");
@@ -109,14 +110,12 @@ async function resources(engine, product, options) {
           })),
         });
         for (const variant of family.variants) {
-          const file = variant.files.ttf ?? variant.files.otf;
-          if (file)
-            fonts.push({
-              fontId,
-              weight: variant.weight,
-              style: variant.style,
-              bytes: snapshot.blobs.get(file.blob),
-            });
+          fonts.push({
+            fontId,
+            weight: variant.weight,
+            style: variant.style,
+            load: async () => (await resolveFontResource(snapshot, variant, "sfnt")).bytes,
+          });
         }
       }
       for (const media of library.media)

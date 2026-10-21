@@ -9,3 +9,8 @@ if (!process.env.SMALLPEN_HISTORY_CACHE_DIR) {
   process.env.SMALLPEN_HISTORY_CACHE_DIR = directory;
   process.once("exit", () => rmSync(directory, { recursive: true, force: true }));
 }
+if (!process.env.SMALLPEN_FONT_CACHE_DIR) {
+  const directory = mkdtempSync(join(tmpdir(), "smallpen-test-fonts-"));
+  process.env.SMALLPEN_FONT_CACHE_DIR = directory;
+  process.once("exit", () => rmSync(directory, { recursive: true, force: true }));
+}

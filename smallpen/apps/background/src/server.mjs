@@ -26,6 +26,7 @@ import {
   LocalWorkspaceSession,
   openPackage,
   openRemoteLibrary,
+  resolveFontResource,
 } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 import { inspectImage } from "./media.mjs";
@@ -300,7 +301,7 @@ function fontDescriptor(snapshot, runtimeId) {
   const variant = font?.variants.find(
     ({ id }) => id === reference.fontVariantId,
   );
-  return variant?.files[reference.format];
+  return variant ? { variant, format: reference.format } : undefined;
 }
 
 function workspaceAssetDescriptor(description, runtimeId, descriptorFor) {
@@ -1508,7 +1509,16 @@ export async function serveLocalPackage({
           });
           return;
         }
-        writeBinary(response, resolved.snapshot, resolved.descriptor, "Font");
+        const font = await resolveFontResource(resolved.snapshot, resolved.descriptor.variant, resolved.descriptor.format);
+        response.writeHead(200, {
+          "cache-control": "private, max-age=0, must-revalidate",
+          "content-length": font.bytes.byteLength,
+          "content-type": font.mimeType,
+          "cross-origin-resource-policy": "cross-origin",
+          etag: `"sha256-${font.sha256}"`,
+          "x-content-type-options": "nosniff",
+        });
+        response.end(font.bytes);
         return;
       }
       if (request.method === "POST" && route === "/v1/upload/session") {
@@ -1727,7 +1737,8 @@ export async function serveLocalPackage({
           "variant-name": name,
           "woff1-file-id": fileIds.woff,
           ...(fileIds.woff2 ? { "woff2-file-id": fileIds.woff2 } : {}),
-          ...(fileIds.ttf ? { "ttf-file-id": fileIds.ttf } : {}),
+          // The App's legacy TTF slot carries its native SFNT resource (TTF/OTF).
+          "ttf-file-id": fileIds.sfnt,
           ...(fileIds.otf ? { "otf-file-id": fileIds.otf } : {}),
           revision: imported.result.revision,
         });

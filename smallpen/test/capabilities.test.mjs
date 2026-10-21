@@ -125,7 +125,7 @@ test("the format capability contract advertises only implemented Web behavior", 
       ],
       assetLibraryModel: "local-colors-fonts-typographies-media",
       binaryBlobModel: "sha256-addressed",
-      customFontModel: "families-variants-woff",
+      customFontModel: "families-variants-single-source",
       componentCanonicalModel: "component-sets-sparse-variants",
       dependencyModel:
         "one-foundation-plus-multiple-local-or-url-library-sources",
@@ -133,7 +133,7 @@ test("the format capability contract advertises only implemented Web behavior", 
       effectiveTokenResolution:
         "product-first-specificity-then-foundation-fallback",
       tokenThemeModel: "penpot-token-sets-and-themes",
-      fontImportConversion: "sfnt-to-woff",
+      fontImportConversion: "runtime-sfnt-woff",
       fontImportTypes: ["font/otf", "font/ttf", "font/woff"],
       repairChoices: [
         "choose-foundation",

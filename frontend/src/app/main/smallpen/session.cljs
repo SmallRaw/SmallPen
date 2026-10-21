@@ -69,24 +69,27 @@
           (fn [{font-id :id :keys [family variants]}]
             (map
              (fn [{variant-id :id :keys [files name style weight]}]
-               (cond-> {:id (runtime-id snapshot :fontVariants variant-id)
-                        :team-id team-id
-                        :font-id (runtime-id snapshot :fonts font-id)
-                        :font-family family
-                        :font-weight weight
-                        :font-style style
-                        :variant-name (display-variant-name name)
-                        :woff1-file-id
-                        (runtime-id snapshot :fontFiles variant-id "woff")}
-                 (:woff2 files)
-                 (assoc :woff2-file-id
-                        (runtime-id snapshot :fontFiles variant-id "woff2"))
-                 (:ttf files)
-                 (assoc :ttf-file-id
-                        (runtime-id snapshot :fontFiles variant-id "ttf"))
-                 (:otf files)
-                 (assoc :otf-file-id
-                        (runtime-id snapshot :fontFiles variant-id "otf"))))
+               (let [native-id (some-> (lookup (lookup (get-in snapshot [:runtime :fontFiles]) variant-id) "sfnt")
+                                       (uuid/parse))]
+                 (cond-> {:id (runtime-id snapshot :fontVariants variant-id)
+                          :team-id team-id
+                          :font-id (runtime-id snapshot :fonts font-id)
+                          :font-family family
+                          :font-weight weight
+                          :font-style style
+                          :variant-name (display-variant-name name)
+                          :woff1-file-id
+                          (runtime-id snapshot :fontFiles variant-id "woff")}
+                   (:woff2 files)
+                   (assoc :woff2-file-id
+                          (runtime-id snapshot :fontFiles variant-id "woff2"))
+                   (or native-id (:ttf files))
+                   (assoc :ttf-file-id
+                          ;; The legacy App slot serves native SFNT bytes, TTF or OTF.
+                          (or native-id (runtime-id snapshot :fontFiles variant-id "ttf")))
+                   (:otf files)
+                   (assoc :otf-file-id
+                          (runtime-id snapshot :fontFiles variant-id "otf")))))
              variants)))
          (vec))))
 

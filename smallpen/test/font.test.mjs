@@ -34,8 +34,7 @@ test("the local Font converter wraps valid SFNT tables as WOFF without dependenc
 
   const files = prepareFontFiles({ "font/ttf": ttf });
   assert.deepEqual(files.ttf, { bytes: ttf, mimeType: "font/ttf" });
-  assert.equal(files.woff.mimeType, "font/woff");
-  assert.deepEqual(files.woff.bytes, woff);
+  assert.deepEqual(Object.keys(files), ["ttf"], "derived formats belong to the runtime cache");
 });
 
 test("Font inspection rejects mismatched bytes and WOFF2-only conversion", () => {

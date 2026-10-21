@@ -1579,7 +1579,7 @@ function validateAssetLibrary(value, entry) {
         !FONT_WEIGHTS.has(variant.weight) ||
         !new Set(["italic", "normal"]).has(variant.style) ||
         !isRecord(variant.files) ||
-        !Object.hasOwn(variant.files, "woff")
+        !["ttf", "otf", "woff"].some((format) => Object.hasOwn(variant.files, format))
       ) {
         fail("invalid_font_variant", `${variantPath} is invalid`);
       }
@@ -3449,7 +3449,9 @@ async function createRuntime(manifest, entries, domain, locator, options = {}) {
           fontVariantId: variant.id,
         };
         runtime.fontFiles[variant.id] = {};
-        for (const format of Object.keys(variant.files).sort()) {
+        // Runtime resources can be derived without adding blobs to the Package.
+        // sfnt is the native renderer's TTF/OTF container; woff serves browser text.
+        for (const format of [...new Set([...Object.keys(variant.files), "sfnt", "woff"])].sort()) {
           const fileRuntimeId = await stableRuntimeUuid(
             manifest.packageId,
             "font-file",

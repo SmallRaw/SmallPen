@@ -120,7 +120,6 @@ import {
   measureProjectionText,
   replayRecordedBatch,
   resolveWorkspace,
-  sfntToWoff,
 } from "@smallpen/local-package";
 
 import { COMMAND_NAMES, commandGuidance, printHelp } from "./help.mjs";
@@ -5247,17 +5246,9 @@ async function main(args) {
     if (signatureTtf) {
       inspectFont(bytes, "font/ttf");
       files.ttf = { bytes, mimeType: "font/ttf" };
-      files.woff = {
-        bytes: sfntToWoff(bytes, "font/ttf"),
-        mimeType: "font/woff",
-      };
     } else if (signatureOtf) {
       inspectFont(bytes, "font/otf");
       files.otf = { bytes, mimeType: "font/otf" };
-      files.woff = {
-        bytes: sfntToWoff(bytes, "font/otf"),
-        mimeType: "font/woff",
-      };
     } else if (signatureWoff2) {
       inspectFont(bytes, "font/woff2");
       files.woff2 = { bytes, mimeType: "font/woff2" };

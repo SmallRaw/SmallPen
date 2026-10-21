@@ -202,6 +202,25 @@
     (t/is (= [nil nil nil nil "Condensed" nil]
              (mapv :variant-name (session/font-variants snapshot))))))
 
+(t/deftest native-font-resource-is-independent-of-the-stored-format
+  (doseq [format [:ttf :otf :woff]]
+    (let [native-id (uuid/next)
+          browser-id (uuid/next)
+          snapshot {:manifest {:entries {:assets ["assets.json"]}}
+                    :entries {"assets.json"
+                              {:fonts [{:id "font_probe" :family "Probe"
+                                        :variants [{:id "fvar_probe" :name "Regular"
+                                                    :style "normal" :weight 400
+                                                    :files {format {}}}]}]}}
+                    :runtime {:fonts {:font_probe (str (uuid/next))}
+                              :fontVariants {:fvar_probe (str (uuid/next))}
+                              :fontFiles {:fvar_probe (merge {format (str (uuid/next))}
+                                                             {:sfnt (str native-id)
+                                                              :woff (str browser-id)})}}}
+          variant (first (session/font-variants snapshot))]
+      (t/is (= native-id (:ttf-file-id variant)))
+      (t/is (= browser-id (:woff1-file-id variant))))))
+
 (t/deftest smallpen-runtime-capabilities-default-local-only-features-off
   ;; Without a SmallPen backend, upstream Penpot/OpenPencil behavior is unchanged.
   (t/is (true? (smallpen/capability-enabled? :mcp)))

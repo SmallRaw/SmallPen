@@ -270,7 +270,7 @@ test("import-media sniffs JPEG, GIF, and WebP dimensions from bytes (SP-029/030/
   assert.equal(JSON.parse(rejected.stdout).error.code, "invalid_media_file");
 });
 
-test("import-font converts SFNT to WOFF and bounds WOFF2 support (SP-033/034/035/036)", async () => {
+test("import-font preserves one source format and bounds WOFF2 support (SP-033/034/035/036)", async () => {
   const { packagePath, root } = await cloneFixture("fonts.smallpen");
 
   const ttfImport = JSON.parse(
@@ -288,7 +288,7 @@ test("import-font converts SFNT to WOFF and bounds WOFF2 support (SP-033/034/035
   );
   assert.equal(ttfImport.fontId, undefined, "the reply leaves out ids");
   assert.ok(ttfImport.files.ttf, "original TTF bytes are preserved");
-  assert.ok(ttfImport.files.woff, "SFNT is converted to WOFF");
+  assert.equal(ttfImport.files.woff, undefined, "derived WOFF belongs to the runtime cache");
   const imported = await openPackage(packagePath);
   const fonts = Object.values(imported.entries).flatMap((entry) => entry.fonts ?? []);
   const family = fonts.find((font) => font.family === "Source Sans Pro");

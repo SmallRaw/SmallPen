@@ -72,6 +72,10 @@ export async function provisionFonts(requests, available, sourceIds, styleOf = (
     const key = faceKey(request);
     if (selected.has(key)) continue;
     let face = faces.get(key);
+    if (face?.load) {
+      const { load, ...metadata } = face;
+      face = { ...metadata, bytes: await load() };
+    }
     if (!face && request.url) {
       let download = downloads.get(request.url);
       if (!download) {

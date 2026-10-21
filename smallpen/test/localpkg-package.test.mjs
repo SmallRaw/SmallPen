@@ -92,7 +92,7 @@ test("a Font family renamed A to B and back to A writes every step (H1)", async 
   const packagePath = await copyFixture(context);
   await importFontVariant(packagePath, {
     family: "Alpha",
-    files: { woff: { bytes: new Uint8Array([119, 79, 70, 70]), mimeType: "font/woff" } },
+    files: { ttf: { bytes: new Uint8Array(await readFile(new URL("../packages/local-package/assets/fonts/SourceSansPro-Regular.ttf", import.meta.url))), mimeType: "font/ttf" } },
     fontId: "font_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa",
     id: "fvar_bbbbbbbbbbbb4bbb8bbbbbbbbbbbbbbb",
     name: "Alpha Regular",

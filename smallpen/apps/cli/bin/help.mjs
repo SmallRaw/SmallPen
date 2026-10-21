@@ -325,9 +325,12 @@ Output:
   smallpen asset font import <package.smallpen> --file FONT_FILE --family NAME
                       [--weight 400] [--style normal] [--name NAME] [--json]
 
-Public Font entry for an existing Product. TTF and OTF are validated by SFNT
-signature and converted to WOFF (the renderer loads ttf/otf/woff). WOFF imports
-as-is after table validation. A valid WOFF2 reaches an explicit
+Public Font entry for an existing Product. TTF, OTF and WOFF are validated
+and stored as one original file per weight/style. App and CLI share native
+font loading; browser WOFF and native SFNT are derived on demand in a bounded
+system cache outside the Package. Reading or rendering does not change the
+Package revision or add derived blobs. Existing multi-format fonts still open.
+A valid WOFF2 reaches an explicit
 unsupported_font_conversion boundary (no WOFF2 decoder is bundled); corrupt
 fonts fail invalid_font_blob. Either way nothing is written. Success returns
 the family, files, revision, batchId, and the exact inverseBatch. Use the

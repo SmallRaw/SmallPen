@@ -41,6 +41,7 @@ import {
   writeFileDurable,
 } from "./fs-utils.mjs";
 import { batchHistoryPath, HISTORY_CACHE_IDLE_MS } from "./history-cache.mjs";
+import { prepareFontFiles } from "./font-convert.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -1347,6 +1348,7 @@ export async function importFontVariant(
   { family, files, fontId, id, name, style, weight },
   options = {},
 ) {
+  files = prepareFontFiles(Object.fromEntries(Object.values(files).map(file => [file.mimeType, file.bytes])));
   const before = await openPackage(locator);
   const { entry, library } = assetLibraryForWrite(before);
   let font = library.fonts.find((candidate) => candidate.id === fontId);
@@ -1385,8 +1387,8 @@ export async function importFontVariant(
       sha256,
     };
   }
-  if (!descriptors.woff) {
-    fail("missing_font_woff", "Imported Font Variant must include a WOFF file");
+  if (!["ttf", "otf", "woff"].some((format) => descriptors[format])) {
+    fail("unsupported_font_conversion", "Imported Font Variant must include TTF, OTF or WOFF");
   }
   const variant = { files: descriptors, id, name, style, weight };
   font.variants.push(variant);

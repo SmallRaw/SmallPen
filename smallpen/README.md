@@ -288,6 +288,15 @@ under `asset media` and `asset font`. `view`, `export` and
 drafts, remote libraries and the App's separate color/typography styles are
 under `advanced`. Previous flat commands return the corresponding grouped path.
 
+Font imports store one original TTF, OTF or WOFF per weight/style. Each format
+works alone; old multi-format variants remain readable. App and CLI use the
+same native font resource loader. Browser WOFF and native SFNT are derived
+without rebuilding glyphs, in a content-keyed system cache outside the Package,
+beside the history cache. The cache retains at most 128 MiB;
+damaged or missing entries are rebuilt, and a cache write failure does not
+prevent rendering. Opening and rendering add no font blobs and leave the design
+revision unchanged. WOFF2-only imports report `unsupported_font_conversion`.
+
 The CLI's help/schema explains its operations without a Skill. The independently
 installable [application design Skill](skills/README.md) supplies requirements,
 design-system reuse and review rules. Run `npm run build:skills` to generate it

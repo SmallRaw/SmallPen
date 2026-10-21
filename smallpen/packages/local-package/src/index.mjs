@@ -50,4 +50,6 @@ export {
   inspectFont,
   prepareFontFiles,
   sfntToWoff,
+  woffToSfnt,
 } from "./font-convert.mjs";
+export { defaultFontCacheRoot, resolveFontResource } from "./font-resources.mjs";
