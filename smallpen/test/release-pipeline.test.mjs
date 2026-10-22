@@ -285,7 +285,7 @@ test("prepare keeps every workspace version and lock entry synchronized", async 
   await assert.rejects(readRelease(root), /version mismatch/);
 });
 
-test("CI reads the committed version without dispatch version overrides", async () => {
+test("CI publishes the committed version after package verification", async () => {
   const release = await readRelease();
   const pkg = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url)),
@@ -300,7 +300,7 @@ test("CI reads the committed version without dispatch version overrides", async 
   assert.match(workflow, /release\.mjs info/);
   assert.match(workflow, /workflow_dispatch: \{\}/);
   assert.doesNotMatch(workflow, /inputs[.:]/);
-  assert.match(workflow, /needs: \[test, cli, desktop, render-parity\]/);
+  assert.match(workflow, /publish:[\s\S]*needs: cli\n/);
 });
 
 test("the release smoke renders text and a WebP image with the CLI", async (t) => {

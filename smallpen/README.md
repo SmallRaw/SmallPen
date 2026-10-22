@@ -181,7 +181,8 @@ SmallPen JavaScript modules; it requires Node.js 24 or newer on `PATH`.
 
 Use **CI** (`.github/workflows/smallpen.yml`) in GitHub
 Actions. Click **Run workflow**; there are no custom inputs. Every run builds
-CLI, Web and Desktop, then publishes npm packages after all checks pass.
+CLI, Web and Desktop. npm publication follows the CLI/Web package checks
+without waiting for Desktop or Render parity.
 CI reads the version from
 `smallpen/package.json` and derives the npm channel: `alpha`, `beta`, `rc`,
 or `latest` for a stable version. There are no version or channel inputs.
@@ -198,12 +199,14 @@ The workflow validates committed versions before building the shared frontend
 once. Test runs the data/rendering regressions and one CLI workflow. CLI and
 Web share one Linux job: pack and install the CLI once, build its standalone
 archive, then pack Web and check its offline install and service startup.
-All five npm tarballs travel together in one artifact to Publish. Render
+All five npm tarballs travel together in one artifact to Publish npm. Render
 parity compares CLI, SVG and WebGL once on Linux. Desktop builds and checks
-the actual macOS arm64 and Windows x64 Apps on their own runners. Every check
-must pass before npm publication; Linux Desktop is not enabled yet.
+the actual macOS arm64 and Windows x64 Apps on their own runners. npm
+publication depends on the CLI/Web job, which follows Frontend and Test.
+Desktop and Render parity report their results independently; CI finishes
+after all jobs end. Linux Desktop is not enabled yet.
 Frontend, Test, CLI and Web, Render parity, Desktop on two platforms, and
-Publish handle the builds and checks; a final cleanup job removes transfer
+Publish npm handle the builds and checks; a final cleanup job removes transfer
 artifacts. Shared checks are not repeated for each operating system. The full
 local test command remains available.
 The old Alpha entry and nested product workflows have been removed.
@@ -229,7 +232,8 @@ that the App works: check the Desktop job result before using it.
 The smoke tests launch those applications, check Home and the editor, then
 verify that their local service has stopped. Startup stages, process output
 and test results are uploaded only on failure and retained for 1 day; test profiles and documents
-stay on the runner. A failed desktop test still blocks npm publication.
+stay on the runner. A failed desktop test fails CI but does not block npm
+publication.
 
 ### Enable npm publication
 

@@ -176,7 +176,7 @@ test("desktop test distinguishes timeouts, failed exits and successful exits", a
   assert.match(await readFile(log, "utf8"), /Timed out after 100 ms/);
 });
 
-test("desktop artifacts are uploaded before smoke tests without bypassing publication gates", async () => {
+test("desktop artifacts are uploaded before smoke tests and failures remain visible", async () => {
   const workflow = await readFile(
     new URL("../../.github/workflows/smallpen.yml", import.meta.url),
     "utf8",
@@ -185,7 +185,6 @@ test("desktop artifacts are uploaded before smoke tests without bypassing public
   assert.ok(testStep > workflow.indexOf("name: SmallPen-macOS-arm64-"));
   assert.ok(testStep > workflow.indexOf("name: SmallPen-Windows-x64-"));
   assert.match(workflow, /failure\(\) && steps\.smoke\.outcome == 'failure'/);
-  assert.match(workflow, /publish:[\s\S]*needs: \[test, cli, desktop, render-parity\]/);
   assert.doesNotMatch(workflow, /continue-on-error/);
 });
 
