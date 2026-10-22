@@ -7393,6 +7393,28 @@ export async function prepareOperationBatch(before, batch, options = {}) {
     for (const nodeId of applied.affectedIds) affectedIds.add(nodeId);
   }
 
+  const renamed = batch.repeatedNames === "number" ? numberNewRepeats(before, candidate, changedFiles) : [];
+  const values = new Map([["manifest.json", candidate.manifest]]);
+  for (const [entry, value] of Object.entries(candidate.entries)) {
+    values.set(entry, value);
+  }
+  for (const [entry, value] of candidate.blobs) {
+    values.set(entry, value);
+  }
+  const validated = await loadPackageFromValues(before.locator, values);
+  validateComponentAcyclicity(validated);
+  validateNoNewStaleInstances(before, validated, options);
+  validateNoNewDuplicateNames(before, validated, batch.operations);
+  // Operations report the files they touched. A receipt and an atomic
+  // write need only files whose final canonical content actually changed.
+  for (const entry of changedFiles) {
+    const previous = entry === "manifest.json" ? before.manifest : before.entries[entry];
+    const next = entry === "manifest.json" ? validated.manifest : validated.entries[entry];
+    if (canonicalJSON(previous) === canonicalJSON(next)) changedFiles.delete(entry);
+  }
+  for (const entry of deletedFiles)
+    if (!Object.hasOwn(before.entries, entry)) deletedFiles.delete(entry);
+
   if (changedFiles.size === 0 && deletedFiles.size === 0) {
     const inverseBatch = {
       baseRevision: before.revision,
@@ -7422,18 +7444,6 @@ export async function prepareOperationBatch(before, batch, options = {}) {
     };
   }
 
-  const renamed = batch.repeatedNames === "number" ? numberNewRepeats(before, candidate, changedFiles) : [];
-  const values = new Map([["manifest.json", candidate.manifest]]);
-  for (const [entry, value] of Object.entries(candidate.entries)) {
-    values.set(entry, value);
-  }
-  for (const [entry, value] of candidate.blobs) {
-    values.set(entry, value);
-  }
-  const validated = await loadPackageFromValues(before.locator, values);
-  validateComponentAcyclicity(validated);
-  validateNoNewStaleInstances(before, validated, options);
-  validateNoNewDuplicateNames(before, validated, batch.operations);
   const normalizedAffectedIds = [...affectedIds].sort();
   const inverseBatch = {
     baseRevision: validated.revision,

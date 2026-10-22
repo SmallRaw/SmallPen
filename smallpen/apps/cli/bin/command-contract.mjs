@@ -165,7 +165,7 @@ const PARAMETERS = {
   setField: parameter(
     "--set",
     "assignment",
-    'FIELD=VALUE as in page draw: width=320, fill={color.surface}, padding=[8,16], text="Save", props={"Style":"ghost"}; a JSON value or plain text',
+    'FIELD=VALUE as in page draw: width=320, fill={color.surface}, padding=[8,16], text="Save", props={"Style":"ghost"}; a JSON value or plain text. Conflicting values for one field, including --intent values, are rejected',
     { repeatable: true },
   ),
   variant: parameter("--variant", "string", 'One variant, as "Style=secondary" (or just "secondary")'),

@@ -762,8 +762,8 @@ function setTopic(command) {
   return {
     command,
     fields: {
-      set: "FIELD=VALUE, repeatable; VALUE is JSON (320, [8,16], {\"Style\":\"ghost\"}, true) or plain text; {token.path} binds a Token",
-      element: "fields: width, height (number, px, Token, fill, hug), fill, stroke, radius, opacity, shadow, visible, rotation, margin, min/max sizes; texts: text, color, font, fontFamily, fontSize, fontWeight, lineHeight, letterSpacing, textTransform, textDecoration, textAlign; containers: layout (row|column|none), gap, padding, align, justify",
+      set: "FIELD=VALUE, repeatable; VALUE is JSON (320, [8,16], {\"Style\":\"ghost\"}, true) or plain text; {token.path} binds a Token. Conflicting values for one field, including --intent values, are rejected",
+      element: "fields: width, height (number, px, Token, fill, hug), fill, stroke, radius, opacity, shadow, visible, rotation, margin, min/max sizes; texts: text, color, font, fontFamily, fontSize, fontWeight, lineHeight, letterSpacing, textTransform, textDecoration, textAlign; containers: layout (row|column|none), gap, padding, align (start|center|end|stretch), justify (start|center|end|space-between). gap, padding, align and justify need a row or column on the target",
       copy: "a copy of a component: props, text {\"Element\": \"text\"}, set {\"Element.field\": value}, width/height (numbers, px, Tokens, hug, or fill in a row/column parent), visible, opacity. Sizes inside set (Element.width/height) take numbers or Tokens",
       itself: "without --element: the page version (or the variant) itself, for example its width and height",
     },

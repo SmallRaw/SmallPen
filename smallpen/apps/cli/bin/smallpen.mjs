@@ -1258,11 +1258,11 @@ async function writeReply(result, args) {
   const files =
     (result.changedFiles?.length ?? 0) + (result.deletedFiles?.length ?? 0);
   const warnings = result.warningSummary?.total ?? result.warnings?.length ?? 0;
-  const verb = result.dryRun
-    ? "Previewed"
-    : result.alreadyApplied
-      ? "Already applied"
-      : "Applied";
+  const verb = result.alreadyApplied
+    ? "Already applied"
+    : result.changed === false
+      ? result.dryRun ? "No changes (preview)" : "No changes"
+      : result.dryRun ? "Previewed" : "Applied";
   // Empty advice says nothing: leave it out of the short reply.
   if (!rest.reuseReminders?.length) delete rest.reuseReminders;
   if (!rest.reuseSummary?.total) delete rest.reuseSummary;
@@ -3734,12 +3734,12 @@ async function namedContextArgs(packagePath, args) {
 }
 
 // page set / component set: the target by name, the fields from --set
-// FIELD=VALUE (a JSON value, else text) on top of an --intent {"set": {...}}.
+// FIELD=VALUE (a JSON value, else text) alongside --intent {"set": {...}}.
 async function setIntent(command, args) {
   const file = option(args, "--intent");
   const base = file ? parseJson(await readInputFile(file, "--intent", "utf8"), `invalid_${command.replace("-", "_")}_json`) : {};
   if (!isRecord(base)) throw new SmallPenError("invalid_set", "--intent holds {\"set\": {...}}");
-  const set = { ...(isRecord(base.set) ? base.set : {}) };
+  const set = Object.assign(Object.create(null), isRecord(base.set) ? base.set : {});
   for (const assignment of options(args, "--set")) {
     const at = assignment.indexOf("=");
     if (at <= 0) throw new SmallPenError("invalid_set", `--set takes FIELD=VALUE, not ${assignment}`);
@@ -3752,7 +3752,12 @@ async function setIntent(command, args) {
       } catch {
         value = raw;
       }
-    set[assignment.slice(0, at).trim()] = value;
+    const field = assignment.slice(0, at).trim();
+    if (Object.hasOwn(set, field) && canonicalJSON(set[field]) !== canonicalJSON(value))
+      throw new SmallPenError("conflicting_set_field", `Conflicting values for ${field}; give this field one value`, {
+        field, previous: set[field], received: value,
+      });
+    set[field] = value;
   }
   const target = command === "page-set"
     ? { page: option(args, "--page") ?? base.page, platform: option(args, "--platform") ?? base.platform }

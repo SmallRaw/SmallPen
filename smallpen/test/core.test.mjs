@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   listPackageEntries,
   loadPackageFromValues,
+  pageDrawOperation,
   prepareOperationBatch,
 } from "@smallpen/core";
 
@@ -91,6 +92,37 @@ test("Core rejects non-canonical IDs and platform path traversal", async () => {
     loadPackageFromValues("memory://invalid-path.smallpen", invalidPath),
     (error) => error?.code === "invalid_entry_path",
   );
+});
+
+test("a batch that leaves the same state reports no changed files or undo work", async () => {
+  const before = await loadPackageFromValues("memory://roundtrip.smallpen", await fixtureValues());
+  for (const values of [[1], [0.5, 1]]) {
+    const prepared = await prepareOperationBatch(before, {
+      baseRevision: before.revision, batchId: "same-state",
+      operations: values.map((opacity) => ({
+        type: "update-presentation-node", screenId: "scr_roundtrip",
+        presentationId: "pres_desktop", nodeId: "node_rectangle", changes: { opacity },
+      })),
+    });
+    assert.equal(prepared.result.revision, before.revision);
+    assert.deepEqual(prepared.result.changedFiles, []);
+    assert.deepEqual(prepared.result.deletedFiles, []);
+    assert.deepEqual(prepared.result.affectedIds, []);
+    assert.deepEqual(prepared.result.inverseBatch.operations, []);
+  }
+});
+
+test("a mixed batch lists only files whose final content changes", async () => {
+  const before = await loadPackageFromValues("memory://roundtrip.smallpen", await fixtureValues());
+  const added = pageDrawOperation(before, { page: "Added", children: [] });
+  const prepared = await prepareOperationBatch(before, {
+    baseRevision: before.revision, batchId: "mixed-changes",
+    operations: [
+      { type: "put-screen", entry: "screens/roundtrip.json", screen: before.entries["screens/roundtrip.json"] },
+      added,
+    ],
+  });
+  assert.deepEqual(prepared.result.changedFiles, ["manifest.json", "screens/added.json"]);
 });
 
 test("Core enforces the Foundation and Product dependency contract", async () => {

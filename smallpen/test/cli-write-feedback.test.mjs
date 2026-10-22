@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -47,6 +47,86 @@ async function item(path, file) {
 const variantsOf = async (path, name) =>
   [...(await openPackage(path)).domain.componentSets.values()].find((set) => set.name === name).variants;
 const named = (variant, name) => Object.values(variant.nodes).find((node) => node.name === name);
+
+async function packageBytes(path) {
+  const files = (await readdir(path, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile());
+  return Object.fromEntries(await Promise.all(files.map(async (entry) => {
+    const at = join(entry.parentPath, entry.name);
+    return [at, (await readFile(at)).toString("base64")];
+  })));
+}
+
+test("invalid layout input fails explicitly and leaves all package files unchanged", async (context) => {
+  const { root, path, file } = await app();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await run(["page", "draw", path, "--intent", await file("page.json", {
+    page: "Actions", layout: "row", align: "center", justify: "center", children: [{ name: "Label", text: "Save" }],
+  }), "--json"]);
+  const before = await packageBytes(path);
+  for (const [args, code, field] of [
+    [["--set", "align=middle"], "invalid_alignment", "align"],
+    [["--element", "Label", "--set", "align=center"], "inapplicable_field", "align"],
+    [["--set", "justify=center", "--set", "justify=end"], "conflicting_set_field", "justify"],
+  ]) {
+    const reply = await run(["page", "set", path, "--page", "Actions", ...args, "--json"], 1);
+    assert.equal(reply.error.code, code);
+    assert.equal(reply.error.details.field, field);
+    assert.equal(reply.error.writeState, "not-applied");
+    assert.deepEqual(await packageBytes(path), before);
+  }
+});
+
+test("a repeated value reports zero changed files in previews, compact and full receipts", async (context) => {
+  const { root, path, file } = await app();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await run(["page", "draw", path, "--intent", await file("page.json", {
+    page: "Actions", layout: "row", justify: "center", children: [{ name: "Label", text: "Save" }],
+  }), "--json"]);
+  const before = await packageBytes(path);
+  for (const flags of [[], ["--dry-run"], ["--diff"], ["--full", "--stdout"]]) {
+    const reply = await run(["page", "set", path, "--page", "Actions", "--set", "justify=center", "--set", 'justify="center"', ...flags, "--json"]);
+    assert.equal(reply.changed, false);
+    assert.deepEqual(reply.changedFiles, []);
+    assert.equal(reply.noChange.code, "no_change");
+    if (!flags.includes("--full")) {
+      assert.match(reply.summary, /No changes.*0 changed file\(s\)/);
+    } else assert.deepEqual(reply.inverseBatch.operations, []);
+    assert.deepEqual(await packageBytes(path), before);
+  }
+});
+
+test("conflicting fields from an intent and --set are rejected before writing", async (context) => {
+  const { root, path, file } = await app();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await run(["component", "define", path, "--intent", await file("component.json", {
+    name: "Action", base: { layout: "row", width: 240, height: 48 },
+  }), "--json"]);
+  const before = await packageBytes(path);
+  const intent = await file("set.json", { set: { justify: "center" } });
+  const reply = await run(["component", "set", path, "--component", "Action", "--intent", intent, "--set", "justify=end", "--json"], 1);
+  assert.equal(reply.error.code, "conflicting_set_field");
+  assert.equal(reply.error.details.field, "justify");
+  assert.equal(reply.error.writeState, "not-applied");
+  assert.deepEqual(await packageBytes(path), before);
+});
+
+test("a field invalid in one page version rejects the whole --all edit", async (context) => {
+  const { root, path, file } = await app();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  for (const [platform, target] of [
+    ["desktop", { name: "Target", layout: "row", width: 120, height: 40 }],
+    ["mobile", { name: "Target", text: "Save" }],
+  ]) {
+    await run(["page", "draw", path, "--intent", await file(`${platform}.json`, {
+      page: "Actions", platform, children: [target],
+    }), "--json"]);
+  }
+  const before = await packageBytes(path);
+  const reply = await run(["page", "set", path, "--page", "Actions", "--element", "Target", "--all", "--set", "align=center", "--json"], 1);
+  assert.equal(reply.error.code, "inapplicable_field");
+  assert.equal(reply.error.writeState, "not-applied");
+  assert.deepEqual(await packageBytes(path), before);
+});
 
 test("a value written over a copy's Token binding replaces the binding", async () => {
   const { path, file } = await app();

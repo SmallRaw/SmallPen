@@ -251,6 +251,34 @@ function strokePaint(value, where) {
 }
 
 const SIZE_FIELDS = { width: "layout-item-h-sizing", height: "layout-item-v-sizing" };
+const LAYOUT_VALUES = {
+  layout: ["row", "column", "none"],
+  align: ["start", "center", "end", "stretch"],
+  justify: ["start", "center", "end", "space-between"],
+};
+
+function checkLayoutFields(spec, where, partial) {
+  for (const [field, allowedValues] of Object.entries(LAYOUT_VALUES)) {
+    if (spec[field] !== undefined && !allowedValues.includes(spec[field]))
+      fail(field === "layout" ? "invalid_layout" : "invalid_alignment",
+        `${field} must be ${allowedValues.join(", ")}; received ${JSON.stringify(spec[field])} (at ${where})`,
+        { field, received: spec[field], allowedValues, where });
+  }
+  const fields = ["layout", "gap", "padding", "align", "justify"];
+  const field = fields.find((key) => spec[key] !== undefined);
+  if (field && (spec.use || spec.text !== undefined || spec.type === "text"))
+    fail("inapplicable_field", spec.use
+      ? `${field} belongs to the component's layout; edit the component definition (at ${where})`
+      : `${field} is a container setting, but ${where} is text; edit its parent container${field === "align" || field === "justify" ? " or use textAlign to align the text" : ""}`,
+    { field, received: spec[field], where });
+  const layout = spec.layout ?? (spec.children?.length ? "column" : undefined);
+  // In a new free-positioned tree, gap spaces the new children. A partial
+  // edit cannot apply that placement rule to existing children.
+  for (const key of ["align", "justify", "padding", ...(partial ? ["gap"] : [])])
+    if (spec[key] !== undefined && !["row", "column"].includes(layout))
+      fail("inapplicable_field", `${key} needs a row or column layout on ${where}; set layout=row or layout=column on the same container`,
+        { field: key, received: spec[key], where });
+}
 
 function sizeSpec(value) {
   if (value === undefined || value === null) return { mode: "auto" };
@@ -324,6 +352,7 @@ class TreeBuilder {
     const name = defaultName(spec);
     const here = [...path, name];
     const where = here.join(" › ");
+    checkLayoutFields(spec, where, this.partial);
     // A redrawn page keeps its root board, so links, starts and Scenarios
     // that point at it stay valid.
     const id = root && this.rootId ? this.rootId : this.id(root ? ["root"] : here);
@@ -1326,7 +1355,7 @@ function setElementFields(builder, nodes, id, set, where) {
   const flexDir = node.layout === "flex" ? node["layout-flex-dir"] : undefined;
   const layout = set.layout ?? (flexDir ? (flexDir.startsWith("column") ? "column" : "row") : undefined);
   const spec = {
-    ...Object.fromEntries(Object.entries(set).filter(([key]) => !["layout"].includes(key))),
+    ...set,
     name: node.name,
     ...(isText ? { text: set.text ?? node.text ?? "" } : { type: "frame", ...(layout ? { layout } : {}) }),
   };
