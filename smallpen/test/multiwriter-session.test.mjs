@@ -7,6 +7,7 @@ import {
   open,
   readdir,
   readFile,
+  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -324,16 +325,25 @@ test("the next write removes files left by a writer killed mid-commit", async (c
 });
 
 test("watch reports an invalid Package once and its recovery again", async (context) => {
-  const { root } = await tempRoot(context);
+  const { closeLater, root } = await tempRoot(context);
   const packagePath = await copyPackage(root, "watched.smallpen");
   const manifestPath = join(packagePath, "manifest.json");
   const manifest = await readFile(manifestPath, "utf8");
+  const replaceManifest = async (contents) => {
+    const replacement = join(root, "manifest-replacement.json");
+    await writeFile(replacement, contents);
+    await rename(replacement, manifestPath);
+  };
   const child = spawn(
     process.execPath,
     [cli, "project", "watch", packagePath, "--interval", "100", "--json"],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
-  context.after(() => child.kill("SIGKILL"));
+  const stopped = new Promise((resolve) => child.once("close", resolve));
+  closeLater(async () => {
+    child.kill("SIGKILL");
+    await stopped;
+  });
   const lines = [];
   let buffered = "";
   child.stdout.setEncoding("utf8");
@@ -348,11 +358,13 @@ test("watch reports an invalid Package once and its recovery again", async (cont
   const initial = lines[0];
   assert.equal(initial.event, "revision");
 
-  await writeFile(manifestPath, manifest.slice(0, 20));
+  // Each replacement is one state. An in-place write can also expose an
+  // empty file, which correctly produces a different invalid diagnostic.
+  await replaceManifest(manifest.slice(0, 20));
   await waitFor(() => lines.some(({ event }) => event === "invalid"));
   // Several more polls observe the same invalid state.
   await delay(500);
-  await writeFile(manifestPath, manifest);
+  await replaceManifest(manifest);
   await waitFor(() => lines.at(-1).event === "revision");
 
   assert.deepEqual(
@@ -360,4 +372,57 @@ test("watch reports an invalid Package once and its recovery again", async (cont
     ["revision", "invalid", "revision"],
   );
   assert.equal(lines.at(-1).revision, initial.revision);
+});
+
+test("watch reports distinct invalid states during an in-place write before recovery", async (context) => {
+  const { closeLater, root } = await tempRoot(context);
+  const packagePath = await copyPackage(root, "partial-write.smallpen");
+  const manifestPath = join(packagePath, "manifest.json");
+  const manifest = await readFile(manifestPath, "utf8");
+  const child = spawn(
+    process.execPath,
+    [cli, "project", "watch", packagePath, "--interval", "100", "--json"],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const stopped = new Promise((resolve) => child.once("close", resolve));
+  closeLater(async () => {
+    child.kill("SIGKILL");
+    await stopped;
+  });
+  const lines = [];
+  let buffered = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    buffered += chunk;
+    const complete = buffered.split("\n");
+    buffered = complete.pop();
+    lines.push(...complete.filter(Boolean).map((line) => JSON.parse(line)));
+  });
+
+  await waitFor(() => lines.length === 1, 10000);
+  // Hold each phase until the watcher observes it; this reproduces the
+  // truncate/write race without depending on the host's disk timing.
+  const handle = await open(manifestPath, "w");
+  try {
+    await waitFor(() => lines.length === 2);
+    await handle.writeFile(manifest.slice(0, 20));
+    await waitFor(() => lines.length === 3);
+  } finally {
+    await handle.close();
+  }
+  assert.equal(lines[1].code, "invalid_manifest_json");
+  assert.equal(lines[2].code, "invalid_manifest_json");
+  assert.notEqual(lines[1].message, lines[2].message);
+  await delay(500);
+  assert.equal(lines.length, 3, "the unchanged invalid state is not repeated");
+
+  const replacement = join(root, "recovered-manifest.json");
+  await writeFile(replacement, manifest);
+  await rename(replacement, manifestPath);
+  await waitFor(() => lines.at(-1).event === "revision");
+  assert.deepEqual(
+    lines.map(({ event }) => event),
+    ["revision", "invalid", "invalid", "revision"],
+  );
+  assert.equal(lines.at(-1).revision, lines[0].revision);
 });
