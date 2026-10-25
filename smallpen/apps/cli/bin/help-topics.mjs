@@ -2,6 +2,9 @@ import { printText } from "./result-files.mjs";
 import { SmallPenError } from "@smallpen/core";
 import { commandContract } from "./command-contract.mjs";
 import { CLI_RULES } from "./workflow.mjs";
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   COMMAND_GROUPS,
   PUBLIC_COMMANDS,
@@ -138,6 +141,7 @@ export function helpTopic(topic, section, { full = false } = {}) {
       usage: "smallpen COMMAND [arguments] [options]",
       notes: [
         "Use help OBJECT to list actions, help OBJECT ACTION for usage, and schema command OBJECT ACTION for parameters and input queries. Common rules: help rules.",
+        "Scene guidance for complete designs and component/content previews: help skills.",
         "One .smallpen directory is one Canonical Package. Each call is independent; there is no current selection, current page, or cross-call session state.",
         "Reads start small. --full expands data; large results use a temporary resultFile with SHA-256. --stdout explicitly allows large stdout. Random names share one temporary folder; files older than 30 minutes are cleaned each invocation. --output retains exports.",
       ],
@@ -187,6 +191,23 @@ export function helpTopic(topic, section, { full = false } = {}) {
             intentActions: contract.intentActions,
           }
         : {}),
+    };
+  }
+  if (topic === "skills") {
+    if (section) return unknown(topic, section);
+    const locations = [
+      new URL("../../../skills/smallpen-ui-design/SKILL.md", import.meta.url),
+      new URL("../skills/smallpen-ui-design/SKILL.md", import.meta.url),
+    ];
+    const path = fileURLToPath(locations.find(existsSync) ?? locations[1]);
+    return {
+      topic,
+      purpose: "Skill guidance for complete screens and flows, reusable UI systems and content previews",
+      skills: [{ name: "smallpen-ui-design", path, directory: dirname(path), available: existsSync(path) }],
+      notes: [
+        `Read ${path}, or install its directory with your AI host's Skill installer.`,
+        "Load the Skill for the task; bundled files alone do not mean the AI loaded them. The Skill reads project specifications and uses CLI checks and native previews.",
+      ],
     };
   }
   if (topic === "workflow") return helpTopic("rules", section, { full });

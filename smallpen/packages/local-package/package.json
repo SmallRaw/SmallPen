@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/local-package",
-  "version": "0.1.0-alpha.20",
+  "version": "0.1.0-alpha.21",
   "publishConfig": {
     "access": "public"
   },
@@ -12,7 +12,7 @@
     "runtime"
   ],
   "dependencies": {
-    "@smallpen/core": "0.1.0-alpha.20",
+    "@smallpen/core": "0.1.0-alpha.21",
     "opentype.js": "2.0.0"
   },
   "repository": {

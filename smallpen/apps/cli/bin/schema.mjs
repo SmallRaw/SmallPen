@@ -803,7 +803,7 @@ const TOPICS = {
       element: {
         name: "element name; children are found by name in set paths and instance text",
         text: "makes a text element; color, font ({typography token}), fontFamily (a family imported with asset font import, or {font-family token}), fontSize, fontWeight, lineHeight, textAlign",
-        children: "child elements; a container lays them out as a column unless layout says row or none",
+        children: "child elements of a container; text and component copies cannot take children. A container lays them out as a column unless layout says row or none",
         layout: "row | column | none; in none the CLI places children so they do not overlap: give place (\"below Header\", {rightOf: \"Sidebar\", gap: 24}) or nothing, x/y only to pin one",
         "gap / padding": "number or {token}; padding takes 1, 2 or 4 values",
         "align / justify": "start | center | end (align also stretch; justify also space-between)",
@@ -858,6 +858,7 @@ const TOPICS = {
         ],
       },
       notes: [
+        "page draw --preview renders the candidate as PNG, specification, wireframe and evidence without writing. Its preview.apply.argv submits that exact batch and refuses a changed Package; temporary artifacts expire after 30 minutes.",
         "Drawing a page again redraws it; elements drawn again under the same names keep their ids and interactions. A copy of the same component drawn again also keeps a Token-bound or fill width and height unless the element gives width or height (\"hug\" lets it follow its content again).",
         "An instance whose new text is longer than its slot grows by the measured difference.",
         "Link elements with flow link --from \"Page / Element\" --to Page.",

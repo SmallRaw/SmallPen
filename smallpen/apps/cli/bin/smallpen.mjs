@@ -1305,9 +1305,9 @@ async function writeReply(result, args) {
 
 // A write by name says what it did in the words changes uses, from the
 // same comparison.
-async function applyBatch(packagePath, batch, args) {
+async function applyBatch(packagePath, batch, args, preview) {
   const before = publicSurface ? await openPackage(packagePath).catch(() => undefined) : undefined;
-  const reply = await writeReply(await prepareAndApplyBatch(packagePath, batch, args), args);
+  const reply = await writeReply(await prepareAndApplyBatch(packagePath, batch, args, preview), args);
   if (before && reply.changed && !reply.dryRun && !reply.alreadyApplied) {
     const text = designChangesText(designChanges(before, await openPackage(packagePath)));
     if (text !== "No design changes.") reply.done = text;
@@ -1315,7 +1315,7 @@ async function applyBatch(packagePath, batch, args) {
   return reply;
 }
 
-async function prepareAndApplyBatch(packagePath, batch, args) {
+async function prepareAndApplyBatch(packagePath, batch, args, preview) {
   const detail = option(args, "--warning-detail") ?? "compact";
   if (!["compact", "full"].includes(detail)) {
     throw new SmallPenError(
@@ -1341,7 +1341,8 @@ async function prepareAndApplyBatch(packagePath, batch, args) {
     option(args, "--batch-id") !== undefined &&
     !flag(args, "--dry-run") &&
     !flag(args, "--explain") &&
-    !flag(args, "--diff")
+    !flag(args, "--diff") &&
+    !flag(args, "--preview")
   ) {
     const replayed = await replayRecordedBatch(packagePath, batch, {
       rebuilt: true,
@@ -1360,7 +1361,7 @@ async function prepareAndApplyBatch(packagePath, batch, args) {
       libraries,
     });
   } catch (error) {
-    if (error?.code === "stale_revision") {
+    if (error?.code === "stale_revision" && !preview) {
       const replayed = await replayRecordedBatch(packagePath, batch);
       if (replayed) return replayed;
     }
@@ -1416,6 +1417,13 @@ async function prepareAndApplyBatch(packagePath, batch, args) {
     }
   }
   const change = changeSummary(product, prepared, batch);
+  if (preview) {
+    return {
+      ...prepared.result, ...change, dryRun: true, ...advice,
+      ...((flag(args, "--explain") || flag(args, "--diff")) ? explainBatch(product, prepared, batch) : {}),
+      preview: await preview(prepared.snapshot, { foundation, libraries }, batch),
+    };
+  }
   if (flag(args, "--explain") || flag(args, "--diff")) {
     // explain/diff are read-only previews in any combination; neither flag
     // writes, with or without --dry-run (CLI-AI-TOPIC: "explain and diff
@@ -1751,8 +1759,8 @@ async function designForCommand(workspace, args) {
   });
 }
 
-async function designCommand(packagePath, args, override) {
-  const workspace = await tokenWorkspace(packagePath, args);
+async function designCommand(packagePath, args, override, suppliedWorkspace) {
+  const workspace = suppliedWorkspace ?? await tokenWorkspace(packagePath, args);
   let design = override ?? (await designForCommand(workspace, args));
   const format =
     option(args, "--format") ?? (args[0] === "view" ? "outline" : "wireframe");
@@ -4108,7 +4116,7 @@ async function main(args) {
     const value = helpTopic(topic, section, { full });
     // A grouped action's full help is its engine's text, under its path.
     const route = topic && section && COMMAND_GROUPS[topic] && !groupDefinition(topic, section) ? groupRoute(topic, section) : undefined;
-    const fullTopic = route ? route.engine : !COMMAND_GROUPS[topic] && !["workflow", "rules"].includes(topic) ? topic : undefined;
+    const fullTopic = route ? route.engine : !COMMAND_GROUPS[topic] && !["workflow", "rules", "skills"].includes(topic) ? topic : undefined;
     if (flag(args, "--json"))
       printJson(
         full && fullTopic
@@ -4384,7 +4392,7 @@ async function main(args) {
     const cliIntent = { command, intent };
     if (
       option(args, "--batch-id") &&
-      !["--dry-run", "--explain", "--diff"].some((arg) => flag(args, arg))
+      !["--dry-run", "--explain", "--diff", "--preview"].some((arg) => flag(args, arg))
     ) {
       const recorded = await replayRecordedBatch(
         packagePath,
@@ -4516,10 +4524,28 @@ async function main(args) {
       // Say which page version the link or start went to.
       flowTarget = versionName(snapshot, flowIntent.screenId, flowIntent.presentationId);
     }
+    const preview = flag(args, "--preview") ? async (candidate, dependencies, batch) => {
+      const workspace = { ...selectTokenThemes(defaultTokenWorkspace({ product: candidate, foundation: dependencies.foundation }), options(args, "--theme")), libraries: dependencies.libraries ?? [] };
+      const screen = findPage(workspace.product, intent.page);
+      const presentation = findPresentation(screen, intent.platform ?? "desktop");
+      const rendered = await designCommand(packagePath, [
+        "export", packagePath, "--screen-id", screen.id, "--presentation-id", presentation.id,
+        "--format", "png", "--evidence",
+        ...options(args, "--context").flatMap(value => ["--context", value]),
+        ...(option(args, "--scale") !== undefined ? ["--scale", option(args, "--scale")] : []),
+      ], undefined, workspace);
+      const batchPath = await writeAtomic(artifactPath("preview-batch", "json"), canonicalJSON(batch));
+      return {
+        ...rendered, baseRevision: batch.baseRevision, candidateRevision: candidate.revision, batchPath,
+        apply: { argv: ["advanced", "apply", packagePath, "--batch", batchPath, "--json"],
+          note: "Applies this exact candidate; refuses if the Package changed after preview. Temporary artifacts expire after 30 minutes." },
+      };
+    } : undefined;
     const written = await applyBatch(
       packagePath,
       { baseRevision: snapshot.revision, batchId, operations, cliIntent, ...renameNumbering(command) },
       args,
+      preview,
     );
     printJson(flowTarget ? { target: flowTarget, ...written } : written);
     return;

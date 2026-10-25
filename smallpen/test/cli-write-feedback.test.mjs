@@ -76,6 +76,28 @@ test("invalid layout input fails explicitly and leaves all package files unchang
   }
 });
 
+test("unsupported children fail before page or component files can be written", async (context) => {
+  const { root, path, file } = await app();
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await run(["component", "define", path, "--intent", await file("action.json", {
+    name: "Action", base: { layout: "row", children: [{ name: "Label", text: "Save" }] },
+  }), "--json"]);
+  const before = await packageBytes(path);
+  for (const element of [{ name: "Copy", use: "Action" }, { name: "Label", text: "Save" }]) {
+    const invalid = { ...element, children: [{ name: "Missing", text: "Do not drop this content" }] };
+    for (const [command, intent] of [
+      [["page", "draw"], { page: "Invalid", children: [invalid] }],
+      [["component", "define"], { name: "Invalid", base: { children: [invalid] } }],
+    ]) {
+      const reply = await run([...command, path, "--intent", await file("invalid.json", intent), "--json"], 1);
+      assert.equal(reply.error.code, "inapplicable_field");
+      assert.equal(reply.error.details.field, "children");
+      assert.equal(reply.error.writeState, "not-applied");
+      assert.deepEqual(await packageBytes(path), before);
+    }
+  }
+});
+
 test("a repeated value reports zero changed files in previews, compact and full receipts", async (context) => {
   const { root, path, file } = await app();
   context.after(() => rm(root, { recursive: true, force: true }));

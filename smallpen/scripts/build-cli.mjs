@@ -71,7 +71,7 @@ async function build(output) {
   const candidate = join(transaction, basename(output));
   try {
     const appRoot = join(candidate, "app");
-    await copyModule(appRoot, "apps/cli", "apps/cli", ["package.json", "bin"]);
+    await copyModule(appRoot, "apps/cli", "apps/cli", ["package.json", "bin", "skills"]);
     await copyModule(
       join(appRoot, "node_modules", "@smallpen"),
       "packages/core",

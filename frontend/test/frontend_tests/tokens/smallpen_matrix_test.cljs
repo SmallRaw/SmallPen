@@ -681,6 +681,28 @@
                  (t/is (not (theme-active? redone-state "Light")))
                  (t/is (= "#000000" (shape-fill redone-state)))))))))))))
 
+(t/deftest smallpen-theme-switch-keeps-projected-shapes-until-canonical-refresh
+  (t/async
+    done
+    (let [file  (activate-light-matrix-theme (setup-file-with-matrix-row))
+          file  (-> file
+                    (assoc-in [:data :plugin-data :smallpen] {})
+                    (assoc-in [:data :pages-index (cthf/current-page-id file)
+                               :objects (cthi/id :matrix-rect) :fills]
+                              [{:fill-color "#ffffff" :fill-opacity 1}]))
+          store (ths/setup-store file)]
+      (tohs/run-store-async
+       store done
+       [(sptm/activate-token-matrix-variant "Mode" (cthi/id :matrix-dark-set))]
+       (fn [state]
+         (let [saved-file (ths/get-file-from-state state)
+               library    (current-tokens-library saved-file)
+               theme      (ctob/get-theme-by-name library "Mode" "Dark")]
+           (t/is (spts/theme-active? library (ctob/get-id theme)))
+           (t/is (= [{:fill-color "#ffffff" :fill-opacity 1}]
+                    (:fills (cths/get-shape saved-file :matrix-rect)))
+                 "SmallPen refreshes bound shapes from its confirmed canonical projection")))))))
+
 (t/deftest deleting-a-domain-keeps-individually-enabled-sets
   (t/async
     done

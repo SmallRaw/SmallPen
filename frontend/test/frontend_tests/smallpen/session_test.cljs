@@ -938,6 +938,15 @@
       (finally
         (restore)))))
 
+(t/deftest replacing-a-projection-invalidates-the-native-render-model
+  (let [file    {:id fixture/file-id :vern 0 :data {:new-projection true}}
+        state   {:files {fixture/file-id {:id fixture/file-id :vern 7}}
+                 :workspace-local {:selected #{uuid/zero}}}
+        swapped (ptk/update (#'smallpen/replace-projected-file file) state)]
+    (t/is (= 8 (get-in swapped [:files fixture/file-id :vern])))
+    (t/is (= (:data file) (get-in swapped [:files fixture/file-id :data])))
+    (t/is (= (:workspace-local state) (:workspace-local swapped)))))
+
 (t/deftest reprojection-results-apply-only-to-the-current-revision
   (let [restore (enter-smallpen! {:file-id (str fixture/file-id)
                                   :revision "rev-2"})]

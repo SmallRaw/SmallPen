@@ -264,11 +264,13 @@ function checkLayoutFields(spec, where, partial) {
         `${field} must be ${allowedValues.join(", ")}; received ${JSON.stringify(spec[field])} (at ${where})`,
         { field, received: spec[field], allowedValues, where });
   }
-  const fields = ["layout", "gap", "padding", "align", "justify"];
+  const fields = ["layout", "gap", "padding", "align", "justify", "children"];
   const field = fields.find((key) => spec[key] !== undefined);
   if (field && (spec.use || spec.text !== undefined || spec.type === "text"))
     fail("inapplicable_field", spec.use
-      ? `${field} belongs to the component's layout; edit the component definition (at ${where})`
+      ? field === "children"
+        ? `A component copy cannot accept children; place it inside a container or edit the component definition (at ${where})`
+        : `${field} belongs to the component's layout; edit the component definition (at ${where})`
       : `${field} is a container setting, but ${where} is text; edit its parent container${field === "align" || field === "justify" ? " or use textAlign to align the text" : ""}`,
     { field, received: spec[field], where });
   const layout = spec.layout ?? (spec.children?.length ? "column" : undefined);
@@ -631,7 +633,7 @@ class TreeBuilder {
         own.get(target.id)[setting.binding] = reference;
       }
       const path = `${target.id}:${setting.field}`;
-      node.instance.overrides[path] = setting.value(value, target, node.instance.overrides[path]);
+      node.instance.overrides[path] = setting.value(value, target, node.instance.overrides[path] ?? this.previousOverrides?.[path]);
       // A value written over a field the component binds to a Token stops
       // following it (null drops the source's binding).
       if (!reference && target.tokenBindings?.[setting.binding]) {
@@ -1245,6 +1247,7 @@ function setElementFields(builder, nodes, id, set, where) {
   // Only the written fields: the element's whole sizing is checked below.
   scratch.partial = true;
   if (node.instance) {
+    scratch.previousOverrides = node.instance.overrides;
     const unsupported = Object.keys(set).filter((key) => !COPY_FIELDS.has(key));
     if (unsupported.length)
       fail("unknown_set_field", `A copy of a component takes ${[...COPY_FIELDS].join(", ")}; change ${unsupported.join(", ")} in the component (at ${where})`, { allowedFields: [...COPY_FIELDS] });
@@ -1279,7 +1282,7 @@ function setElementFields(builder, nodes, id, set, where) {
       const at = key.lastIndexOf(":");
       const target = key.slice(0, at), field = key.slice(at + 1);
       if (field === "tokenBindings") continue;
-      overrides[key] = value;
+      overrides[key] = field === "variant" ? { ...overrides[key], ...value } : value;
       const binding = field === "textStyle" ? undefined : Object.values(INSTANCE_SETTINGS).find((setting) => setting.field === field)?.binding;
       const bound = overrides[`${target}:tokenBindings`];
       if (binding && bound && binding in bound) {

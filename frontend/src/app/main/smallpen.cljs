@@ -756,7 +756,11 @@
   (ptk/reify ::replace-projected-file
     ptk/UpdateEvent
     (update [_ state]
-      (update state :files assoc (:id file) file))))
+      ;; WebGL rebuilds its native model when vern changes. Replacing only
+      ;; :data updates SVG but leaves WebGL drawing the previous projection.
+      (let [vern (inc (max (or (:vern file) 0)
+                           (get-in state [:files (:id file) :vern] 0)))]
+        (update state :files assoc (:id file) (assoc file :vern vern))))))
 
 (defn- center-viewport-on-selection
   []

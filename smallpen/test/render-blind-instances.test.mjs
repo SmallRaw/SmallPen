@@ -207,6 +207,25 @@ test("a resized Instance of a flex Component lays its children out again", async
   assert.deepEqual(box(nodes.node_row_copy__node_fixed), [0, 0, 20, 20]);
 });
 
+for (const [feature, parentFields, childFields] of [
+  ["wrapping", { "layout-wrap-type": "wrap" }, {}],
+  ["margins", {}, { "layout-item-margin": { m1: 12, m2: 12, m3: 12, m4: 12 } }],
+  ["size limits", { "layout-item-min-w": 260, "layout-item-min-h": 80 }, {}],
+])
+  test(`a hugging container preserves its stored dimensions when ${feature} cannot be projected`, async () => {
+    const snapshot = await snapshotWith([], {
+      node_parent: rect("node_parent", { x: 0, y: 0, width: 260, height: 80 }, {
+        type: "FRAME", children: ["node_child_b", "node_child_a"],
+        layout: "flex", "layout-flex-dir": "row",
+        "layout-item-h-sizing": "auto", "layout-item-v-sizing": "auto", ...parentFields,
+      }),
+      node_child_a: rect("node_child_a", { x: 0, y: 0, width: 100, height: 20 }, childFields),
+      node_child_b: rect("node_child_b", { x: 100, y: 0, width: 100, height: 20 }),
+    });
+    const { nodes } = projectScreen(snapshot, "scr_roundtrip");
+    assert.deepEqual([nodes.node_parent.width, nodes.node_parent.height], [260, 80]);
+  });
+
 for (const direction of ["row", "column"])
   for (const component of ["cmp_row", "cmp_nested"])
     test(`a ${direction} fill ${component} resizes its absolute focus frame without accumulating changes`, async () => {

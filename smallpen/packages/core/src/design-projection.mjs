@@ -765,6 +765,19 @@ function reflowFlexLayout(nodes, nodeId) {
   const column = isColumnLayout(node);
   const padding = layoutPaddingOf(node);
   const gap = layoutMainGapOf(node);
+  // A nested variant can grow after its parent was authored. Keep hugging
+  // containers around the expanded content instead of clipping it to the
+  // source variant's old dimensions. A fill child cannot size its parent.
+  // Preserve stored extents when wrapping, margins or size limits are not computed.
+  const canHug = (node["layout-wrap-type"] ?? "nowrap") === "nowrap" &&
+    ["layout-item-min-h", "layout-item-max-h", "layout-item-min-w", "layout-item-max-w"].every(field => node[field] === undefined) &&
+    items.every(child => Object.values(child["layout-item-margin"] ?? {}).every(value => Number(value) === 0));
+  if (canHug && node["layout-item-h-sizing"] === "auto" && items.every((child) => child["layout-item-h-sizing"] !== "fill"))
+    node.width = (column ? Math.max(...items.map((child) => child.width))
+      : items.reduce((sum, child) => sum + child.width, 0) + gap * (items.length - 1)) + padding.left + padding.right;
+  if (canHug && node["layout-item-v-sizing"] === "auto" && items.every((child) => child["layout-item-v-sizing"] !== "fill"))
+    node.height = (column ? items.reduce((sum, child) => sum + child.height, 0) + gap * (items.length - 1)
+      : Math.max(...items.map((child) => child.height))) + padding.top + padding.bottom;
   const innerWidth = Math.max(0, node.width - padding.left - padding.right);
   const innerHeight = Math.max(0, node.height - padding.top - padding.bottom);
   const mainSize = (child) => (column ? child.height : child.width);

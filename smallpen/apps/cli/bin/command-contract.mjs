@@ -177,6 +177,7 @@ const PARAMETERS = {
   allPages: flag("--pages", "Every page"),
   draft: path("--draft", "Source Draft package"),
   dryRun: flag("--dry-run", "Validate without committing a batch"),
+  preview: flag("--preview", "Render the candidate page as PNG, specification and evidence without writing; returns the exact batch to apply after review"),
   explain: flag(
     "--explain",
     "Preview affected targets and fields without writing",
@@ -664,8 +665,13 @@ export const COMMAND_CONTRACTS = {
   ),
   "page-draw": command(
     "Draw a page (or one container) from a tree of named elements and component instances",
-    ["intent", "batchId", ...WRITE],
-    { required: [required("intent", "missing_intent")] },
+    ["intent", "batchId", "preview", "theme", "context", "scale", ...WRITE],
+    { required: [required("intent", "missing_intent")],
+      requires: [
+        { field: "preview", when: ["theme"], code: "preview_required" },
+        { field: "preview", when: ["context"], code: "preview_required" },
+        { field: "preview", when: ["scale"], code: "preview_required" },
+      ] },
   ),
   "page-move": command(
     "Move an element up, down, left or right among its siblings, or (without --element) a page left or right in its row on the canvas; the CLI picks the coordinates and keeps things from overlapping",

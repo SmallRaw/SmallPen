@@ -79,3 +79,19 @@ test("drawing a component copy rejects container fields that belong to its defin
   assert.throws(() => pageDrawOperation(snapshot, { page: "Copies", children: [{ name: "Copy", use: "Action", align: "center" }] }),
     (error) => error.code === "inapplicable_field" && error.details.field === "align" && /component/.test(error.message));
 });
+
+test("children on a component copy or a text are rejected instead of disappearing", async () => {
+  const snapshot = await example();
+  const before = canonicalJSON(snapshot.entries);
+  for (const element of [{ name: "Copy", use: "Action" }, { name: "Label", text: "Save" }]) {
+    const tree = { ...element, children: [{ name: "Missing", text: "Do not drop this content" }] };
+    for (const operation of [
+      () => pageDrawOperation(snapshot, { page: "Invalid", children: [tree] }),
+      () => componentDefineOperation(snapshot, { name: "Invalid", base: { children: [tree] } }),
+    ]) {
+      assert.throws(operation, (error) => error.code === "inapplicable_field"
+        && error.details.field === "children" && error.message.includes(element.name));
+    }
+  }
+  assert.equal(canonicalJSON(snapshot.entries), before);
+});

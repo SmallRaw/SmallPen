@@ -1,6 +1,7 @@
 # Reproducible build and browser/audit outputs, not product sources.
 /audits/
 /dist/
+/apps/cli/skills/
 /examples/*.smallpen.batches.json
 
 # Local debugging scripts.

@@ -1,6 +1,7 @@
 import {
   applyEffectiveTokenBindings,
   applyNodeOverrides,
+  activeTokenSetIds,
   componentCombinationSnapshot,
   defaultTokenThemeIds,
   fail,
@@ -3691,18 +3692,26 @@ function compileTokenLibraryChanges(snapshot, changes) {
             return stableId;
           },
         );
-      state.library.activeThemeIds = resolveIds(
+      const themeIds = resolveIds(
         "theme-ids",
         state.runtimeThemes,
         state.library.themes,
         "missing_token_theme",
       );
-      state.library.activeSetIds = resolveIds(
+      const setIds = resolveIds(
         "set-ids",
         state.runtimeSets,
         state.library.sets,
         "missing_token_set",
       );
+      // TokensStatus includes sets derived from its themes. Selecting the
+      // current combination must not store those as a new explicit selection.
+      const sameIds = (ids, current) => ids.length === current.size &&
+        new Set(ids).size === ids.length && ids.every((id) => current.has(id));
+      if (sameIds(themeIds, new Set(state.library.activeThemeIds)) &&
+          sameIds(setIds, activeTokenSetIds(state.library))) continue;
+      state.library.activeThemeIds = themeIds;
+      state.library.activeSetIds = setIds;
     }
     else if (type === "move-token-set") applyMoveTokenSet(state, change);
     else if (type === "move-token-set-group")

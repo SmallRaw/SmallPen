@@ -301,6 +301,24 @@ test("native TokensStatus updates round-trip and reject unknown identities", asy
   );
 });
 
+test("selecting the current native theme preserves implicit themed sets without a write", async () => {
+  const values = await fixtureValues();
+  const snapshot = await loadPackageFromValues("memory://same-theme.smallpen", values);
+  const entry = snapshot.manifest.entries.tokens[0];
+  const library = snapshot.entries[entry];
+  assert.deepEqual(library.activeSetIds, []);
+  const themeIds = library.activeThemeIds;
+  const setIds = library.themes.filter((theme) => themeIds.includes(theme.id)).flatMap((theme) => theme.setIds);
+  const batch = compilePenpotChanges(snapshot, { commitId: "same-native-theme", changes: [{
+    type: "set-tokens-status", "theme-ids": themeIds.map((id) => snapshot.runtime.tokenThemes[id]),
+    "set-ids": setIds.map((id) => snapshot.runtime.tokenSets[id]),
+  }] });
+  const prepared = await prepareOperationBatch(snapshot, batch);
+  assert.equal(prepared.snapshot.revision, snapshot.revision);
+  assert.deepEqual(prepared.result.changedFiles, []);
+  assert.deepEqual(prepared.snapshot.entries[entry], library);
+});
+
 test("DTCG Tokens receive one synthetic runtime Set for read-only projection", async () => {
   const snapshot = await loadPackageFromValues(
     "memory://dtcg-tokens.smallpen",

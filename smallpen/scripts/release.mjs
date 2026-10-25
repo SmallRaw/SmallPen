@@ -164,6 +164,8 @@ async function pack(dir, version, channel, commit) {
   assert.match(commit, /^[a-f0-9]{40}$/);
   const { prepareRenderer } = await import("./prepare-renderer.mjs");
   await prepareRenderer();
+  const { buildSkills } = await import("./build-skills.mjs");
+  await buildSkills();
   await mkdir(dir, { recursive: true });
   const packages = [];
   for (const path of publicPackages) {

@@ -5,7 +5,8 @@
 (ns app.main.smallpen.token-matrix
   "SmallPen token matrix events: a top-level Set Group is a domain, each Set
   in it is a variant paired with a Theme of the same group. Every event is a
-  single undoable commit followed by token propagation."
+  single undoable commit. SmallPen theme switches refresh from their
+  confirmed Package; other edits use token propagation."
   (:require
    [app.common.files.changes :as cpc]
    [app.common.files.changes-builder :as pcb]
@@ -192,9 +193,16 @@
 
                           true
                           (pcb/set-undo-group undo-group))]
-            (rx/of (dwtl/set-selected-token-set-id set-id)
-                   (dch/commit-changes changes)
-                   (dwtp/propagate-workspace-tokens undo-group))))))))
+            (rx/concat
+             (rx/of (dwtl/set-selected-token-set-id set-id)
+                    (dch/commit-changes changes))
+             ;; Native propagation also synchronizes component copies. Those
+             ;; derived edits discard SmallPen overrides and include expanded
+             ;; nodes with no canonical target. The save acknowledgement
+             ;; already refreshes the Package with its selected themes.
+             (if (some? (get-in data [:plugin-data :smallpen]))
+               (rx/empty)
+               (rx/of (dwtp/propagate-workspace-tokens undo-group))))))))))
 
 (defn rename-token-matrix-domain
   "Renames a matrix Set Group and keeps Theme groups and Set references aligned."

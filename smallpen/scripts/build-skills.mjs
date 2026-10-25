@@ -14,17 +14,18 @@ import {
 } from "../apps/cli/bin/result-files.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const skillsRoot = join(root, "skills");
 const scenes = [
   {
     name: "smallpen-ui-design",
     source: "ui-design.md",
     description:
-      "Design application interfaces and prototypes in SmallPen. Clarify requirements, build shared Tokens and components, adapt platforms through reuse, and verify explicit combinations. Deliver design artifacts; use for application UI design rather than production code or character/animation materials.",
+      "Design complete application screens and prototype flows, or reusable UI components, variants and page parts in SmallPen. Compose business content with those definitions into native previews, inspect and maintain the design. Use for application UI design and preview, rather than production code or character/animation materials.",
   },
 ];
 
 export async function buildSkills({
-  output = join(root, "skills"),
+  output = skillsRoot,
   check = false,
 } = {}) {
   const { stdout } = await promisify(execFile)(process.execPath, [
@@ -55,6 +56,11 @@ export async function buildSkills({
       .map((line) => `- ${line}`)
       .join("\n");
   const stale = [];
+  const destinations = [resolve(output)];
+  // The canonical directory installs independently; npm needs a copy inside
+  // its package boundary. Check mode verifies the tracked canonical output.
+  if (!check && resolve(output) === skillsRoot)
+    destinations.push(join(root, "apps", "cli", "skills"));
   for (const scene of scenes) {
     const body = (
       await readFile(join(root, "skill-src", scene.source), "utf8")
@@ -75,24 +81,26 @@ export async function buildSkills({
       body,
       "",
     ].join("\n");
-    const target = join(resolve(output), scene.name, "SKILL.md");
-    if (check) {
-      let actual;
-      try {
-        actual = await readFile(target, "utf8");
-      } catch (error) {
-        if (error.code !== "ENOENT") throw error;
+    for (const destination of destinations) {
+      const target = join(destination, scene.name, "SKILL.md");
+      if (check) {
+        let actual;
+        try {
+          actual = await readFile(target, "utf8");
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+        if (actual !== content) stale.push(target);
+        continue;
       }
-      if (actual !== content) stale.push(target);
-      continue;
-    }
-    await mkdir(dirname(target), { recursive: true });
-    const temporary = `${target}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(temporary, content, "utf8");
-      await rename(temporary, target);
-    } finally {
-      await rm(temporary, { force: true });
+      await mkdir(dirname(target), { recursive: true });
+      const temporary = `${target}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporary, content, "utf8");
+        await rename(temporary, target);
+      } finally {
+        await rm(temporary, { force: true });
+      }
     }
   }
   if (stale.length)

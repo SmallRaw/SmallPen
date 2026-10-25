@@ -302,9 +302,12 @@ prevent rendering. Opening and rendering add no font blobs and leave the design
 revision unchanged. WOFF2-only imports report `unsupported_font_conversion`.
 
 The CLI's help/schema explains its operations without a Skill. The independently
-installable [application design Skill](skills/README.md) supplies requirements,
-design-system reuse and review rules. Run `npm run build:skills` to generate it
-from `skill-src` and the CLI contract; `build:cli` also includes it. Animation
+installable [application design Skill](skills/README.md) guides complete screens
+and prototype flows, or reusable components and content previews. It reads the
+project's specifications and supplies design-system reuse and review rules.
+Find the delivered Skill with `smallpen help skills --json`. Run
+`npm run build:skills` to generate it from `skill-src` and the CLI contract;
+standalone and npm CLI builds include it. Animation
 materials and character boards remain drafts for later work. See
 [CLI and Skill responsibilities](docs/CLI-SKILLS.md).
 

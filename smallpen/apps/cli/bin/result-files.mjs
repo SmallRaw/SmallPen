@@ -17,7 +17,7 @@ export const OUTPUT_LIMIT_BYTES = 8192;
 export const RESULT_RETENTION_MS = 30 * 60 * 1000;
 const uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
 const role =
-  "(?:result|render(?:-matrix-\\d{2})?|outline|spec|wireframe|text|undo|changes|evidence|matrix|validation|flow-connections|flow-verification)";
+  "(?:result|render(?:-matrix-\\d{2})?|outline|spec|wireframe|text|undo|changes|evidence|matrix|validation|flow-connections|flow-verification|preview-batch)";
 const managedName = new RegExp(
   `^(smallpen-\\d{13}-${uuid})-(${role}|owner-(\\d+))\\.(?:png|json|txt)(?:\\.smallpen-(\\d+)-${uuid}\\.tmp)?$`,
 );
