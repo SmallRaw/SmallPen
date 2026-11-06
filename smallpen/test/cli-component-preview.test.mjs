@@ -212,6 +212,30 @@ test("component sheet PNGs preserve alpha in margins, component gaps and annotat
   assert.equal((await openPackage(path)).revision, before);
 });
 
+test("native component sheets label every property and wrap complete long captions", async (t) => {
+  const { root, path } = await designed(t);
+  const button = await run(["view", path, "--component", "Button", "--as", "png", "--locale", "en", "--full", "--stdout", "--json"]);
+  const labels = button.inspection.nodes.map((node) => node.fields?.text?.value).filter(Boolean);
+  for (const label of ["Primary · md", "Primary · sm", "Secondary · md", "Secondary · sm"])
+    assert.ok(labels.includes(label), `the native sheet labels ${label} without a position-dependent abbreviation`);
+  assert.equal(button.issueCount, 0);
+  assert.ok(button.width < 600);
+  const intent = join(root, "long-caption.json");
+  const styles = ["ready with helpful details", "busy with helpful details"];
+  const size = "compact with supporting text";
+  await writeFile(intent, JSON.stringify({
+    name: "LongCaptions", properties: { Style: styles, Size: [size] },
+    base: { width: 200, height: 40, fill: "#2563eb" },
+  }));
+  await run(["component", "define", path, "--intent", intent, "--json"]);
+  const long = await run(["view", path, "--component", "LongCaptions", "--as", "png", "--full", "--stdout", "--json"]);
+  const texts = long.inspection.nodes.map((node) => node.fields?.text?.value).filter(Boolean);
+  for (const style of styles)
+    assert.ok(texts.some((text) => text.includes("\n") && text.replaceAll("\n", "") === `${style} · ${size}`));
+  assert.equal(long.issueCount, 0, "native text fitting has no clipping or overlap after wrapping full captions");
+  assert.ok(long.width < 700, "complete captions keep a compact canvas");
+});
+
 test("compact component headings keep wide-letter names clear of the scope note", async (t) => {
   const { root, path } = await designed(t);
   const name = "WWWWWWWWWWWWWW";

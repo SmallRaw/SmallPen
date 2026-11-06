@@ -304,6 +304,60 @@ test("a family card captions its axes once and each sample by what differs", () 
   assert.ok(placeholders.every((node) => node.children.length === 0));
 });
 
+test("transparent component captions name every property without relying on sample order", () => {
+  const axes = [
+    { id: "style", name: "Style", domain: ["primary", "secondary"] },
+    { id: "size", name: "Size", domain: ["md", "sm"] },
+  ];
+  const choices = [{ style: "primary", size: "md" }, { style: "secondary", size: "sm" },
+    { style: "primary", size: "sm" }, { style: "secondary", size: "md" }];
+  const componentSamples = samples(axes, choices, () => ({ width: 74, height: 33 }));
+  for (const [locale, styles] of [["en", ["Primary", "Secondary"]], ["zh_cn", ["主要", "次要"]], ["zh_hant", ["主要", "次要"]]]) {
+    const options = { only: "components", transparentComponents: true, locale };
+    const complete = buildDesignSystemPage({ componentSamples }, {}, { ...options, allVariantsOf: new Set(["cmp_test"]) });
+    assert.deepEqual(roleNodes(complete, "caption").map((node) => node.text),
+      choices.map(({ style, size }) => `${styles[style === "primary" ? 0 : 1]} · ${size}`));
+    assert.ok(complete.width < 600);
+    assert.equal(new Set(roleNodes(complete, "component-sample").map((node) => node.x)).size, 2);
+    assertComponentNotesClear(complete, "component-sample");
+    const representative = buildDesignSystemPage({ componentSamples }, {}, options);
+    for (const caption of roleNodes(representative, "caption")) {
+      const sample = componentSamples.find((sample) => sample.caption === representative.runtimeIds[caption.id]);
+      assert.equal(caption.text, `${styles[sample.selection.style === "primary" ? 0 : 1]} · ${sample.selection.size}`);
+    }
+  }
+  const normal = buildDesignSystemPage({ componentSamples }, {}, { allVariantsOf: new Set(["cmp_test"]) });
+  assert.deepEqual(roleNodes(normal, "caption").map((node) => node.text),
+    ["Primary · md", "Secondary · sm", "sm", "Secondary"], "normal App captions keep their existing format");
+});
+
+test("transparent captions include the theme on baseline and changed samples", () => {
+  const componentSamples = samples([{ id: "size", name: "Size", domain: ["md", "sm"] }],
+    [{ size: "md", theme: "Light" }, { size: "sm", theme: "Light" }, { size: "md", theme: "Dark" }],
+    ({ size, theme }) => ({ width: size === "md" ? 74 : 60, height: 33,
+      fills: [{ type: "solid", color: theme === "Light" ? "#ffffff" : "#000000" }] }));
+  const page = buildDesignSystemPage({ componentSamples }, {}, { only: "components", transparentComponents: true });
+  assert.deepEqual(roleNodes(page, "caption").map((node) => node.text), ["md · Light", "sm · Light", "md · Dark"]);
+  assertComponentNotesClear(page, "component-sample");
+});
+
+test("complete long captions wrap without widening or resizing the components", () => {
+  const choices = [{ state: "ready with helpful details", size: "compact with supporting text" },
+    { state: "busy with helpful details", size: "compact with supporting text" }];
+  const axes = [{ id: "state", name: "State", domain: choices.map(({ state }) => state) },
+    { id: "size", name: "Size", domain: [choices[0].size] }];
+  const componentSamples = samples(axes, choices, () => ({ width: 200, height: 40 }));
+  const page = buildDesignSystemPage({ componentSamples }, {}, {
+    only: "components", transparentComponents: true, allVariantsOf: new Set(["cmp_test"]),
+  });
+  assert.ok(page.width < 700, "long annotations do not restore a desktop-width canvas");
+  assert.deepEqual(roleNodes(page, "caption").map((node) => node.text.replaceAll("\n", "")),
+    choices.map(({ state, size }) => `${state} · ${size}`));
+  assert.ok(roleNodes(page, "caption").every((node) => node.text.includes("\n")));
+  assert.deepEqual(roleNodes(page, "component-sample").map((node) => [node.width, node.height]), [[200, 40], [200, 40]]);
+  assertComponentNotesClear(page, "component-sample");
+});
+
 test("catalogs report the variants they display and the combinations they omit", () => {
   const axes = [
     { id: "style", name: "Style", domain: ["primary", "secondary"] },

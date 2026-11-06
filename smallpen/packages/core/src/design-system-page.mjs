@@ -20,7 +20,7 @@ import {
   designSystemLabelLocale,
 } from "./design-system-labels.mjs";
 
-export const DESIGN_SYSTEM_PAGE_VERSION = 6;
+export const DESIGN_SYSTEM_PAGE_VERSION = 7;
 
 const FONT = "Source Sans Pro";
 const INK = "#111827";
@@ -147,7 +147,7 @@ function lineWidth(line, size) {
   );
 }
 
-function compactTitleWidth(line, size) {
+function compactTextWidth(line, size) {
   return size * [...line].reduce((sum, character) => {
     const em = character.charCodeAt(0) > 255 || /[MWmw@#%&]/.test(character)
       ? 1 : /[A-Z]/.test(character) ? 0.8 : 0.62;
@@ -1089,6 +1089,12 @@ function axisValueLabel(builder, axis, value) {
 }
 
 function sampleCaption(builder, baseline, sample) {
+  const own = (sample.axes ?? []).filter((axis) => sampleAxisValue(sample, axis) !== undefined)
+    .map((axis) => axisValueLabel(builder, axis, sampleAxisValue(sample, axis)));
+  if (builder.transparentComponents) {
+    if (sample.combinationLabel) own.push(builder.axisLabel(sample.combinationLabel));
+    return own.length > 0 ? own.join(" · ") : builder.label("axis.default");
+  }
   const axes = [...(sample.axes ?? []), THEME_AXIS];
   const changes = axes.flatMap((axis) => {
     const value = sampleAxisValue(sample, axis);
@@ -1098,8 +1104,6 @@ function sampleCaption(builder, baseline, sample) {
   if (changes.length > 0) return changes.join(" · ");
   // The first sample names its own values ("todo"), not "Default": a reader
   // looks for the variant by the names the component uses.
-  const own = (sample.axes ?? []).filter((axis) => sampleAxisValue(sample, axis) !== undefined)
-    .map((axis) => axisValueLabel(builder, axis, sampleAxisValue(sample, axis)));
   return own.length > 0 ? own.join(" · ") : builder.label("axis.default");
 }
 
@@ -1161,9 +1165,13 @@ function sampleBackdrop(sample) {
 function sampleItem(builder, sampleIndex, baseline, sample, showCaption = true) {
   const [w, h] = sampleSize(sample);
   const backing = builder.transparentComponents ? null : sampleBackdrop(sample);
-  const caption = [sampleCaption(builder, baseline, sample), ...(backing ? [builder.label("preview.background", backing)] : [])].join("\n");
   const captionSize = builder.transparentComponents ? 14 : 12;
+  const rawCaption = [sampleCaption(builder, baseline, sample), ...(backing ? [builder.label("preview.background", backing)] : [])].join("\n");
+  const caption = builder.compactComponents
+    ? wrapText(rawCaption, captionSize, Math.max(240, w), compactTextWidth) : rawCaption;
   const metrics = designSystemTextMetrics(caption, captionSize);
+  if (builder.compactComponents)
+    metrics.width = Math.max(metrics.width, ...caption.split("\n").map((line) => compactTextWidth(line, captionSize)));
   const captionHeight = metrics.height + (builder.transparentComponents ? 6 : 0);
   const width = Math.max(120, w, metrics.width);
   const top = !showCaption ? 0 : builder.transparentComponents ? captionHeight + NOTE_GAP : Math.max(28, metrics.height + 8);
@@ -1197,7 +1205,7 @@ function familyCard(builder, title, summary, items, innerWidth) {
   const titleSize = 18;
   const titleText = title && builder.transparentComponents
     ? wrapText(`${builder.label("preview.annotation")} · ${title}`, titleSize, innerWidth,
-      builder.compactComponents ? compactTitleWidth : lineWidth) : title;
+      builder.compactComponents ? compactTextWidth : lineWidth) : title;
   const titleHeight = title ? designSystemTextMetrics(titleText, titleSize).height + (builder.transparentComponents ? 6 : 0) : 0;
   const titleSpace = title ? builder.transparentComponents ? titleHeight + 8 : 30 : 0;
   const summarySize = builder.transparentComponents ? 14 : 12;
