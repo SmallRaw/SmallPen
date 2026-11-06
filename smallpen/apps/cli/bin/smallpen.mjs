@@ -1721,10 +1721,11 @@ async function designSystemProjection(workspace, args, part) {
   }
   const page = buildDesignSystemPage(refs, runtime.designSystem ?? {}, {
     ...designSystemPageOptions(product, sources),
+    transparentComponents: part?.only !== "tokens",
     ...(part
       ? {
           only: part.only,
-          minWidth: part.only === "tokens" ? 1400 : 960,
+          minWidth: part.only === "tokens" ? 1400 : 0,
           minColumns: 1,
           ...(part.allVariants
             ? { allVariantsOf: new Set(part.componentSetIds) }
@@ -1779,6 +1780,7 @@ async function designCommand(packagePath, args, override, suppliedWorkspace) {
   }
   const receipt = {
     packageId: workspace.product.manifest.packageId,
+    ...(design.projection.preview ? { preview: design.projection.preview } : {}),
     ...workspaceRevisions(
       workspace.product,
       workspace.foundation,
@@ -1830,6 +1832,7 @@ async function designCommand(packagePath, args, override, suppliedWorkspace) {
     regionsOf(design.tree.root);
     const evidencePath = await writeAtomic(prefix ? `${prefix}.json` : artifactPath("evidence", "json"), canonicalJSON({
       ...report, semanticTree: { ...design.tree, selection: design.selection }, renderHash: design.render.renderHash,
+      ...(design.projection.preview ? { preview: design.projection.preview } : {}),
       packageId: workspace.product.manifest.packageId,
       packageHash: workspace.foundation
         ? createHash("sha256").update(`${workspace.product.revision}\0${workspace.foundation.revision}`).digest("hex")
@@ -2655,19 +2658,62 @@ async function lookAt(packagePath, args, ids, target) {
 
 // A design-system style sheet (Tokens, components, variants) as a
 // wireframe or PNG.
-async function lookSheet(packagePath, args, workspace, part, target) {
-  const as = option(args, "--as") ?? "text";
-  const projection = await designSystemProjection(workspace, args, part);
-  const design = {
+async function sheetDesign(args, workspace, part, target) {
+  let projection;
+  if (part?.allVariants) {
+    // Named component previews use the same owner, themes and context as
+    // individual definition reads, including unused dependency components.
+    const { owner, set } = findComponent(workspace.product, option(args, "--component") ?? target.component, workspace);
+    const selector = designSelector(options(args, "--context").length
+      ? await namedContextArgs(workspace.product.locator, args) : args);
+    const classification = set.variants.some((variant) => Object.values(variant.nodes).some((node) => node.instance))
+      ? "Composite" : "Primitive";
+    let context;
+    const componentSamples = set.variants.map((variant, variantIndex) => {
+      const design = selectedDesign(workspace, selector, {
+        componentId: set.id, packageId: owner.manifest.packageId, variantId: variant.id,
+      });
+      context ??= design.projection.context;
+      return {
+        componentSetId: set.id, familyName: set.name, axes: set.axes, classification,
+        variantId: variant.id, variantIndex, selection: variant.selection,
+        rootId: design.projection.rootId, nodes: design.projection.nodes,
+        combinationIndex: 0,
+      };
+    });
+    const refs = { componentSamples };
+    const page = buildDesignSystemPage(refs, {}, {
+      locale: option(args, "--locale") ?? "en", only: "components", minColumns: 1,
+      transparentComponents: true,
+      allVariantsOf: new Set([set.id]),
+    });
+    projection = { ...expandDesignSystemPage(page, refs), context };
+  } else projection = await designSystemProjection(workspace, args, part);
+  return {
     projection,
     tree: createSemanticTree(workspace.product, projection),
-    selection: { ...target, ...themeSettings(workspace).selection },
+    selection: { ...target, ...themeSettings(workspace).selection, ...(projection.context ? { context: projection.context } : {}) },
   };
+}
+
+async function lookSheet(packagePath, args, workspace, part, target) {
+  const as = option(args, "--as") ?? "text";
+  const design = await sheetDesign(args, workspace, part, target);
   const argv =
     as === "png"
       ? ["export", packagePath, "--format", "png", ...lookPass(args)]
       : ["view", packagePath, "--format", "wireframe", ...lookPass(args)];
-  return lookResult(target, await designCommand(packagePath, argv, design), args, as);
+  const result = lookResult(target, await designCommand(packagePath, argv, design), args, as);
+  const missing = design.projection.preview?.components.filter((component) => component.shownVariants < component.totalVariants) ?? [];
+  const retained = ["--theme", "--context", "--locale", "--scale"].flatMap((name) =>
+    options(args, name).flatMap((value) => [name, value]),
+  );
+  if (flag(args, "--full")) retained.push("--full");
+  result.nextOperations = [...missing.map(({ component }) => ({
+    operation: "smallpen.view",
+    argv: ["view", packagePath, "--component", component, "--as", as, ...retained, "--json"],
+  })), ...result.nextOperations];
+  return result;
 }
 
 // Issues read by name: where says the element, IDs need --full. Preview
@@ -4279,8 +4325,34 @@ async function main(args) {
   if (publicSurface && options(args, "--context").length) args = await namedContextArgs(packagePath, args);
   // export and validate name their target as view does; the engines below
   // take the IDs those names stand for.
+  const namedTargets = command === "export" || command === "validate"
+    ? await nameTargetArgs(packagePath, args, { every: command === "validate" })
+    : [];
+  // A whole component has the same visual scope as view. Explicit variants,
+  // elements and low-level ID targets keep their native definition exports.
+  if (publicSurface && command === "export" && option(args, "--component") !== undefined &&
+      option(args, "--variant") === undefined && option(args, "--element") === undefined &&
+      ["png", "wireframe"].includes(option(args, "--format") ?? "wireframe")) {
+    const workspace = await tokenWorkspace(packagePath, args);
+    if (!findLocatedComponent(workspace, option(args, "--component"))) {
+      const { set } = findComponent(workspace.product, option(args, "--component"), workspace);
+      if (set.variants.length > 1) {
+        const design = await sheetDesign(args, workspace, {
+          only: "components", componentSetIds: [set.id], allVariants: true,
+        }, {
+          component: set.name, variants: set.variants.length,
+          ...(set.visibility && set.visibility !== "public" ? { visibility: set.visibility } : {}),
+          ...(set.deprecated ? { deprecated: set.deprecated } : {}),
+        });
+        if (flag(args, "--evidence") && option(args, "--format") !== "png")
+          throw new SmallPenError("missing_png_format", "--evidence requires --format png");
+        printJson(await designCommand(packagePath, args, design, workspace));
+        return;
+      }
+    }
+  }
   if (command === "export" || command === "validate")
-    args = [...args, ...(await nameTargetArgs(packagePath, args, { every: command === "validate" }))];
+    args = [...args, ...namedTargets];
   if (command === "export" && flag(args, "--evidence")) {
     if (option(args, "--format") !== "png")
       throw new SmallPenError("missing_png_format", "--evidence requires --format png");

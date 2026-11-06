@@ -490,6 +490,9 @@ export const COMMAND_CONTRACTS = {
           code: "missing_png_format",
         },
       ],
+      overrides: {
+        component: { description: "Component name; PNG/wireframe show all variants as view does unless --variant or --element selects one; spec reads the main variant unless --variant selects another" },
+      },
     },
   ),
   validate: command(

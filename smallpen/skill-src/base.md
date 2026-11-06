@@ -6,4 +6,6 @@ Start with one target and compact text for navigation, then use the installed CL
 
 Supply a stable batch ID before retryable edits, reuse it only with identical input, and read the write receipt. Follow scoped error recovery and current schemas. An explicit reverse edit is a new guarded write; it is not history rollback. Read check issues, skipped coverage and rendering limits before describing a result as verified.
 
+The `--components` catalog shows representative samples: read `preview.components` for displayed and omitted variants. A named component's PNG/wireframe includes every variant in both view and export; `--variant` or `--element` narrows the target. Sheet evidence describes a catalog layout; select a variant for its definition geometry and sources. Component regions retain authored fills and alpha with no added page, card or sample background; component notes use larger bold text on transparent space, with no background or frame and clear separation from samples.
+
 These are tool rules. The scene below defines how to use the tool for this task.

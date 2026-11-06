@@ -39,7 +39,7 @@ export const CLI_RULES = Object.freeze({
     packages:
       "project init creates a blank self-contained package with one canvas and no pages, Tokens or components (page draw makes the first page); --name names the package and its file. In foundation-product layout write shared Tokens/themes/components to Foundation, pages/instances/Scenarios to Product. Read Product to resolve both; Product cannot edit Foundation components.",
     designSystem:
-      "Generated from canonical token and component data; do not draw a duplicate design-system Screen. view/export --design-system inspects it. Representative samples do not prove every variant/combination was checked.",
+      "Generated from canonical token and component data; do not draw a duplicate design-system Screen. view/export --design-system inspects it. preview.components reports displayed and omitted variants; view PACKAGE --component NAME --as png displays all variants of that component. Component regions keep authored alpha without added backgrounds; component notes use larger bold text on transparent space, with no background or frame and clear separation from samples. Displayed samples do not prove every theme/context combination was checked.",
   },
   output: {
     budgetBytes: 8192,

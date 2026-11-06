@@ -82,6 +82,16 @@ function samples(axes, selections, build) {
 const roleNodes = (page, role) =>
   Object.values(page.nodes).filter((node) => node.designSystem.role === role);
 
+function assertComponentNotesClear(page, sampleRole) {
+  const notes = Object.values(page.nodes).filter((node) => node.type === "TEXT");
+  for (const note of notes)
+    for (const sample of roleNodes(page, sampleRole)) {
+      const gapX = Math.max(sample.x - note.x - note.width, note.x - sample.x - sample.width, 0);
+      const gapY = Math.max(sample.y - note.y - note.height, note.y - sample.y - sample.height, 0);
+      assert.ok(Math.max(gapX, gapY) >= 23.99, `${note.name} leaves clear space around ${sample.name}`);
+    }
+}
+
 test("every Token Cell shows once, and Cells sharing a path carry their theme", () => {
   const specimens = {
     "a@cb-light": cell({ combinationId: "cb-light", combinationIds: ["cb-light", "cb-dark"], path: "radius.md", tokenId: "a", type: "border-radius", attribute: "radius", raw: 8, value: 8 }),
@@ -286,12 +296,173 @@ test("a family card captions its axes once and each sample by what differs", () 
   };
   const page = buildDesignSystemPage(refs, {}, { locale: "en" });
   const texts = Object.values(page.nodes).filter((node) => node.type === "TEXT").map((node) => node.text);
-  assert.ok(texts.includes("Style: Primary / Secondary"));
+  assert.ok(texts.some((text) => text.startsWith("Style: Primary / Secondary\n")));
   assert.ok(texts.includes("Primary") && texts.includes("Secondary"), "the first sample names its own values");
   assert.ok(texts.includes("Composite · 1"));
   const placeholders = roleNodes(page, "component-sample");
   assert.deepEqual(placeholders.map((node) => node.designSystem.sample).sort(), [0, 1]);
   assert.ok(placeholders.every((node) => node.children.length === 0));
+});
+
+test("catalogs report the variants they display and the combinations they omit", () => {
+  const axes = [
+    { id: "style", name: "Style", domain: ["primary", "secondary"] },
+    { id: "size", name: "Size", domain: ["md", "sm"] },
+  ];
+  const refs = { componentSamples: samples(axes, [
+    { style: "primary", size: "md" }, { style: "primary", size: "sm" },
+    { style: "secondary", size: "md" }, { style: "secondary", size: "sm" },
+  ], ({ style, size }) => ({
+    fills: [{ color: style === "primary" ? "#2563eb" : "#e5e7eb", type: "solid" }],
+    height: size === "md" ? 40 : 32,
+  })) };
+  const page = buildDesignSystemPage(refs, {}, { only: "components", locale: "en" });
+  const [coverage] = page.preview.components;
+  assert.equal(coverage.mode, "representative");
+  assert.equal(coverage.shownVariants, 3);
+  assert.equal(coverage.totalVariants, 4);
+  assert.equal(coverage.shownSamples, roleNodes(page, "component-sample").length);
+  assert.equal(coverage.omittedVariants.length, 1);
+  const displayed = roleNodes(page, "component-sample").map((node) => refs.componentSamples[node.designSystem.sample].selection);
+  assert.ok(!displayed.some((selection) => selection.style === coverage.omittedVariants[0].Style && selection.size === coverage.omittedVariants[0].Size));
+  assert.ok(Object.values(page.nodes).some((node) => node.text?.includes("3 / 4 variants shown")));
+  assert.deepEqual(expandDesignSystemPage(page, refs).preview, page.preview);
+
+  const complete = buildDesignSystemPage(refs, {}, { only: "components", allVariantsOf: new Set(["cmp_test"]) });
+  assert.equal(complete.preview.components[0].shownVariants, 4);
+  assert.equal(complete.preview.components[0].mode, "all-variants");
+  assert.deepEqual(complete.preview.components[0].omittedVariants, []);
+});
+
+test("variant coverage counts a variant once across multiple theme samples", () => {
+  const refs = { componentSamples: samples([{ id: "style", name: "Style" }], [
+    { style: "primary", theme: "Light" }, { style: "primary", theme: "Dark" },
+  ], ({ theme }) => ({ fills: [{ color: theme === "Light" ? "#ffffff" : "#000000", type: "solid" }] })) };
+  refs.componentSamples.forEach((sample, index) => Object.assign(sample, { variantId: "same-variant", variantIndex: 0, combinationIndex: index }));
+  const page = buildDesignSystemPage(refs, {}, { only: "components" });
+  assert.equal(page.preview.components[0].totalVariants, 1);
+  assert.equal(page.preview.components[0].shownVariants, 1);
+  assert.equal(page.preview.components[0].shownSamples, 2);
+  const complete = buildDesignSystemPage(refs, {}, { only: "components", allVariantsOf: new Set(["cmp_test"]) });
+  assert.equal(complete.preview.components[0].shownVariants, 1);
+  assert.equal(complete.preview.components[0].shownSamples, 1, "all variants is still one theme combination");
+});
+
+test("a transparent compound does not get a dark backdrop for white text inside its opaque button", () => {
+  const [sample] = samples([], [{}], () => ({ fills: [], children: ["input", "button"] }));
+  Object.assign(sample.nodes, {
+    input: { id: "input", type: "FRAME", fills: [{ color: "#ffffff", type: "solid" }], children: [] },
+    button: { id: "button", type: "FRAME", fills: [{ color: "#2563eb", type: "solid" }], children: ["label"] },
+    label: { id: "label", type: "TEXT", text: "Search", fills: [{ color: "#ffffff", type: "solid" }], children: [] },
+  });
+  const before = structuredClone(sample);
+  const page = buildDesignSystemPage({ componentSamples: [sample] }, {}, { only: "components" });
+  assert.deepEqual(page.preview.components[0].backdrops, [{ variant: {}, color: "#f1f5f9" }]);
+  assert.ok(!Object.values(page.nodes).some((node) => node.type !== "TEXT" && node.fills?.some((fill) => fill.color === "#111827")));
+  assert.ok(Object.values(page.nodes).some((node) => node.text?.includes("Preview background: #f1f5f9")));
+  assert.deepEqual(sample, before, "a preview never changes the authored component");
+});
+
+test("an exposed light label keeps a dark preview backdrop while hidden labels do not request one", () => {
+  for (const hidden of [false, true, "transparent"]) {
+    const [sample] = samples([], [{}], () => ({ fills: [], children: ["group"] }));
+    Object.assign(sample.nodes, {
+      group: { id: "group", type: "FRAME", children: ["label"], ...(hidden === true ? { visible: false } : hidden === "transparent" ? { opacity: 0 } : {}) },
+      label: { id: "label", type: "TEXT", text: "Light", fills: [{ color: "#ffffff", type: "solid" }], children: [] },
+    });
+    const page = buildDesignSystemPage({ componentSamples: [sample] }, {}, { only: "components" });
+    assert.deepEqual(page.preview.components[0].backdrops, hidden ? [] : [{ variant: {}, color: "#111827" }]);
+  }
+});
+
+test("transparent component sheets keep unbacked notes clear of authored sample regions", () => {
+  const [sample] = samples([], [{}], () => ({ fills: [], children: ["label"] }));
+  sample.nodes.label = { id: "label", type: "TEXT", text: "White label", fills: [{ color: "#ffffff", type: "solid" }], children: [] };
+  const before = structuredClone(sample);
+  const page = buildDesignSystemPage({ componentSamples: [sample] }, {}, { only: "components", transparentComponents: true });
+  assert.deepEqual(page.nodes[page.rootId].fills, []);
+  assert.deepEqual(page.preview.components[0].backdrops, []);
+  assert.equal(page.preview.componentBackground, "transparent");
+  assert.equal(page.preview.annotationBackground, "transparent");
+  assert.equal(page.preview.annotationBorder, "none");
+  assert.ok(!Object.values(page.nodes).some((node) => node.name.startsWith("Component card")));
+  assert.equal(roleNodes(page, "annotation-background").length, 0, "component notes add no opaque panels or frames");
+  assertComponentNotesClear(page, "component-sample");
+  const text = Object.values(page.nodes).filter((node) => node.type === "TEXT");
+  assert.equal(text.filter((node) => node.text.startsWith("Note · ")).length, 1, "one note heading names the component");
+  assert.equal(roleNodes(page, "annotation-label").length, 0, "notes have no repeated side badges");
+  assert.ok(!text.some((node) => node.text === "Components" || node.text === "Composite · 1"), "component notes do not repeat generic section headings");
+  const title = text.find((node) => node.name === "Card");
+  const scope = text.find((node) => node.text.includes("variants"));
+  assert.ok(title && scope, "unbacked notes retain both the title and variant scope");
+  assert.deepEqual(sample, before);
+});
+
+test("long annotation titles wrap inside masonry columns and never cover another component", () => {
+  const componentSamples = [40, 200, 40, 40, 40].map((height, index) => {
+    const [sample] = samples([], [{}], () => ({ height, fills: [{ color: "#2563eb", type: "solid" }] }));
+    return { ...sample, componentSetId: `cmp_${index}`, familyName: index === 4
+      ? "Administration navigation / Expanded desktop menu / With active item and notifications"
+      : `Button ${index}` };
+  });
+  const page = buildDesignSystemPage({ componentSamples }, {}, { only: "components", transparentComponents: true });
+  const title = Object.values(page.nodes).find((node) => node.name === componentSamples[4].familyName && node.type === "TEXT");
+  assert.ok(title.text.includes("\n"), "long titles wrap before annotation panels are placed");
+  assertComponentNotesClear(page, "component-sample");
+});
+
+test("multiline variant notes reserve their gutters even beside wider component samples", () => {
+  const values = ["on", "off\nwith details\non another line"];
+  const componentSamples = samples([{ id: "state", name: "State", domain: values }], values.map((state) => ({ state })), () => ({
+    width: 200, height: 80, fills: [{ color: "#2563eb", type: "solid" }],
+  }));
+  const page = buildDesignSystemPage({ componentSamples }, {}, { only: "components", transparentComponents: true });
+  assertComponentNotesClear(page, "component-sample");
+});
+
+test("located component notes reserve multiline height and a separate annotation gutter", () => {
+  const families = ["Located short", "Located\nwith details\non another line"].map((label) => ({ kind: "located", label }));
+  const page = buildDesignSystemPage({ families }, {}, {
+    only: "components", transparentComponents: true, locatedSize: () => [200, 80],
+  });
+  assertComponentNotesClear(page, "located-family");
+});
+
+test("compact component sheets fit four small variants in a content-sized grid", () => {
+  const values = ["a", "b", "c", "d"];
+  const componentSamples = samples([{ id: "kind", name: "Kind", domain: values }],
+    values.map((kind) => ({ kind })), () => ({ width: 74, height: 33, fills: [{ type: "solid", color: "#2563eb" }] }));
+  const page = buildDesignSystemPage({ componentSamples }, {}, {
+    only: "components", transparentComponents: true, allVariantsOf: new Set(["cmp_test"]),
+  });
+  const shown = roleNodes(page, "component-sample");
+  assert.equal(shown.length, 4);
+  assert.ok(page.width < 600, "a small component sheet does not reserve a desktop-width canvas");
+  assert.equal(new Set(shown.map((node) => node.x)).size, 2);
+  assert.equal(new Set(shown.map((node) => node.y)).size, 2);
+  for (const node of shown) {
+    assert.deepEqual([node.width, node.height], [74, 33], "compacting the sheet never scales authored components");
+    assert.ok(node.x >= 24 && node.y >= 24 && node.x + node.width <= page.width - 24 && node.y + node.height <= page.height - 24);
+  }
+  assertComponentNotesClear(page, "component-sample");
+});
+
+test("a compact single-variant sheet drops only the redundant default caption", () => {
+  const componentSamples = samples([], [{}], () => ({ width: 366, height: 33 }));
+  const options = { only: "components", transparentComponents: true };
+  const page = buildDesignSystemPage({ componentSamples }, {}, options);
+  assert.ok(page.width < 500, "the canvas follows the component and note width");
+  assert.equal(roleNodes(page, "caption").length, 0);
+  assert.equal(page.preview.components[0].shownVariants, 1);
+  assert.deepEqual(roleNodes(page, "component-sample").map((node) => [node.width, node.height]), [[366, 33]]);
+  assertComponentNotesClear(page, "component-sample");
+  const named = samples([{ id: "density", name: "Density", domain: ["compact"] }], [{ density: "compact" }], () => ({ width: 366, height: 33 }));
+  const namedPage = buildDesignSystemPage({ componentSamples: named }, {}, options);
+  assert.equal(roleNodes(namedPage, "caption").length, 1, "an authored property label is retained");
+  const themed = componentSamples.map((sample) => ({ ...sample, combinationLabel: "Dark" }));
+  assert.equal(roleNodes(buildDesignSystemPage({ componentSamples: themed }, {}, options), "caption").length, 1, "a selected combination retains its caption");
+  const minimum = buildDesignSystemPage({ componentSamples }, {}, { ...options, minWidth: 800 });
+  assert.ok(minimum.width >= 848, "an explicitly requested minimum content width is respected");
 });
 
 test("expanding the page inserts each sample's own nodes at its placeholder", () => {

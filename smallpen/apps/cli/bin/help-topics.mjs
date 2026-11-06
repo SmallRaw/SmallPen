@@ -80,9 +80,11 @@ const notes = {
     "Read available groups/options/defaults. This call resolves only its arguments; no selection is remembered.",
   ],
   view: [
+    "Component catalogs show representative samples; preview.components reports shownVariants, totalVariants and omittedVariants for each component. view PACKAGE --component NAME --as png shows all its variants. Component regions keep authored alpha without added backgrounds; component notes use larger bold text on transparent space, with no background or frame and clear separation from samples.",
     "Names the target: --page, --component, --token, --canvas or nothing for the whole package; --as text first.",
   ],
   export: [
+    "Whole-component PNG/wireframe exports show every variant, matching view. --variant or --element selects one definition target. Whole-component sheet evidence describes a catalog layout; select a variant for its authored geometry and sources.",
     "Three outputs: --format spec for implementation, wireframe for structure, png for appearance. --format png --evidence writes all three from one native layout. Compare layout.hash; image inspection requires an image-capable caller.",
   ],
   validate: [

@@ -20,10 +20,13 @@ import {
   designSystemLabelLocale,
 } from "./design-system-labels.mjs";
 
-export const DESIGN_SYSTEM_PAGE_VERSION = 1;
+export const DESIGN_SYSTEM_PAGE_VERSION = 6;
 
 const FONT = "Source Sans Pro";
 const INK = "#111827";
+// Unbacked notes stay readable on both light and dark preview mattes.
+const NOTE_COLOR = "#757575";
+const NOTE_GAP = 24;
 const PAGE_FILL = "#f8fafc";
 const BRAND = "#4f46e5";
 const CARD_STROKE = "#e5e7eb";
@@ -144,15 +147,23 @@ function lineWidth(line, size) {
   );
 }
 
+function compactTitleWidth(line, size) {
+  return size * [...line].reduce((sum, character) => {
+    const em = character.charCodeAt(0) > 255 || /[MWmw@#%&]/.test(character)
+      ? 1 : /[A-Z]/.test(character) ? 0.8 : 0.62;
+    return sum + em;
+  }, 0);
+}
+
 // Wrap inside `width`, breaking after a dot, dash, slash or space when one
 // is in the line, so token names break between their segments.
-function wrapText(text, size, width) {
+function wrapText(text, size, width, measure = lineWidth) {
   const lines = [];
   for (const paragraph of String(text).split("\n")) {
     let line = "";
     for (const character of [...paragraph]) {
       const next = line + character;
-      if (line && lineWidth(next, size) > width) {
+      if (line && measure(next, size) > width) {
         const cut = Math.max(
           line.lastIndexOf("."),
           line.lastIndexOf("-"),
@@ -253,6 +264,8 @@ class PageBuilder {
     this.nodes = {};
     this.runtimeIds = {};
     this.seed = options.seed ?? "design-system";
+    this.transparentComponents = options.transparentComponents === true;
+    this.compactComponents = options.compactComponents === true;
     this.count = 0;
   }
 
@@ -1090,9 +1103,8 @@ function sampleCaption(builder, baseline, sample) {
   return own.length > 0 ? own.join(" · ") : builder.label("axis.default");
 }
 
-// One line naming every axis and its values, the way a designer captions a
-// component sheet: "Style: primary / secondary · Size: md / sm".
-function familySummary(builder, samples) {
+// Name each axis and its values; compact sheets put each axis on its own line.
+function familySummary(builder, samples, separator = " · ") {
   const axes = samples[0].axes ?? [];
   const parts = axes.map((axis) => {
     const used = [];
@@ -1112,43 +1124,60 @@ function familySummary(builder, samples) {
   if (themes.length > 1) {
     parts.push(`${builder.axisLabel("Theme")}: ${themes.map((theme) => builder.axisLabel(theme)).join(" / ")}`);
   }
-  return parts.join(" · ");
+  return parts.join(separator);
 }
 
-function lightText(sample) {
-  return Object.values(sample.nodes ?? {}).some(
-    (node) =>
-      node.visible !== false &&
-      node.type === "TEXT" &&
+function opaqueBackground(node) {
+  return node && node.type !== "TEXT" && (node.opacity ?? 1) === 1 &&
+    (node.fills ?? []).some((fill) => {
+      const hex = hexColor(fill.color);
+      return hex && (fill.opacity ?? 1) * colorAlpha(hex) === 1;
+    });
+}
+
+function sampleBackdrop(sample) {
+  if (opaqueBackground(sample.nodes?.[sample.rootId])) return null;
+  let white = false;
+  let light = false;
+  const visit = (id, covered = false) => {
+    const node = sample.nodes?.[id];
+    if (!node || node.visible === false || node.opacity === 0) return;
+    const background = covered || opaqueBackground(node);
+    white ||= (node.fills ?? []).some((fill) =>
+      isWhite(fill.color) && (fill.opacity ?? 1) * colorAlpha(hexColor(fill.color)) > 0,
+    );
+    if (!background && node.type === "TEXT" &&
       [...(node.fills ?? []), ...(node.textBlocks ?? []).flatMap((block) => (block.runs ?? []).flatMap((run) => run.fills ?? []))]
         .some((fill) => {
           const hex = hexColor(fill.color);
-          return hex && luminance(hex) > 160;
-        }),
-  );
+          return hex && (fill.opacity ?? 1) * colorAlpha(hex) > 0 && luminance(hex) > 160;
+        })) light = true;
+    for (const child of node.children ?? []) visit(child, background);
+  };
+  visit(sample.rootId);
+  return light ? INK : white ? "#f1f5f9" : null;
 }
 
-function sampleItem(builder, sampleIndex, baseline, sample) {
+function sampleItem(builder, sampleIndex, baseline, sample, showCaption = true) {
   const [w, h] = sampleSize(sample);
-  const caption = sampleCaption(builder, baseline, sample);
-  const width = Math.max(120, w, designSystemTextMetrics(caption, 12).width);
-  const root = sample.nodes?.[sample.rootId];
-  const opaque =
-    root &&
-    root.type !== "TEXT" &&
-    (root.opacity ?? 1) === 1 &&
-    (root.fills ?? []).some((fill) => (fill.opacity ?? 1) * colorAlpha(hexColor(fill.color)) === 1);
-  const white = Object.values(sample.nodes ?? {}).some((node) => (node.fills ?? []).some((fill) => isWhite(fill.color)));
-  const backing = !opaque && lightText(sample) ? INK : white ? "#f1f5f9" : null;
+  const backing = builder.transparentComponents ? null : sampleBackdrop(sample);
+  const caption = [sampleCaption(builder, baseline, sample), ...(backing ? [builder.label("preview.background", backing)] : [])].join("\n");
+  const captionSize = builder.transparentComponents ? 14 : 12;
+  const metrics = designSystemTextMetrics(caption, captionSize);
+  const captionHeight = metrics.height + (builder.transparentComponents ? 6 : 0);
+  const width = Math.max(120, w, metrics.width);
+  const top = !showCaption ? 0 : builder.transparentComponents ? captionHeight + NOTE_GAP : Math.max(28, metrics.height + 8);
   return {
-    height: h + 36,
+    backing,
+    height: h + top + 8,
     width,
     draw(x, y) {
-      const ids = [
-        builder.text(x, y, caption, { fontSize: 12, opacity: 0.6 },
-          { role: "caption", runtimeId: sample.caption }, { name: caption }),
-      ];
-      if (backing) ids.push(builder.rect(x, y + 28, w, h, backing, { cornerRadius: 4 }));
+      const ids = showCaption ? [
+        builder.text(x, y, caption, { fontSize: captionSize, ...(builder.transparentComponents ? { color: NOTE_COLOR, fontWeight: 600 } : { opacity: 0.6 }) },
+          { role: "caption", runtimeId: sample.caption, ...(builder.transparentComponents ? { componentNote: true } : {}) },
+          { name: caption, height: captionHeight }),
+      ] : [];
+      if (backing) ids.push(builder.rect(x, y + top, w, h, backing, { cornerRadius: 4 }));
       ids.push(builder.add({
         fills: [],
         height: h,
@@ -1156,7 +1185,7 @@ function sampleItem(builder, sampleIndex, baseline, sample) {
         type: "FRAME",
         width: w,
         x,
-        y: y + 28,
+        y: y + top,
       }, { role: "component-sample", sample: sampleIndex.get(sample) }));
       return ids;
     },
@@ -1164,31 +1193,45 @@ function sampleItem(builder, sampleIndex, baseline, sample) {
 }
 
 function familyCard(builder, title, summary, items, innerWidth) {
-  const summaryText = summary ? wrapText(summary, 12, innerWidth) : "";
+  const cardPad = builder.compactComponents ? 0 : CARD_PAD;
+  const titleSize = 18;
+  const titleText = title && builder.transparentComponents
+    ? wrapText(`${builder.label("preview.annotation")} · ${title}`, titleSize, innerWidth,
+      builder.compactComponents ? compactTitleWidth : lineWidth) : title;
+  const titleHeight = title ? designSystemTextMetrics(titleText, titleSize).height + (builder.transparentComponents ? 6 : 0) : 0;
+  const titleSpace = title ? builder.transparentComponents ? titleHeight + 8 : 30 : 0;
+  const summarySize = builder.transparentComponents ? 14 : 12;
+  const summaryText = summary ? wrapText(summary, summarySize, innerWidth) : "";
+  const summaryHeight = summaryText ? designSystemTextMetrics(summaryText, summarySize).height + (builder.transparentComponents ? 6 : 0) : 0;
   const top =
-    CARD_PAD +
-    (title ? 30 : 0) +
-    (summaryText ? designSystemTextMetrics(summaryText, 12).height + 8 : 0) +
-    (title || summaryText ? 12 : 0);
-  const placed = flow(items, innerWidth, 24, 32);
-  const width = innerWidth + 2 * CARD_PAD;
-  const height = top + placed.endY + CARD_PAD;
+    cardPad +
+    titleSpace +
+    (summaryText ? summaryHeight + 8 : 0) +
+    (title || summaryText ? builder.transparentComponents ? NOTE_GAP : 12 : 0);
+  const placed = flow(items, innerWidth, 24, builder.transparentComponents ? 24 : 32);
+  const width = innerWidth + 2 * cardPad;
+  const height = top + placed.endY + cardPad;
   return {
     height,
     width,
     draw(x, y) {
-      const ids = [builder.rect(x, y, width, height, CARD_FILL, {
+      const annotationGroup = builder.transparentComponents ? `component-note-${x}-${y}` : undefined;
+      const ids = builder.transparentComponents ? [] : [builder.rect(x, y, width, height, CARD_FILL, {
         cornerRadius: 12,
         name: `Component card · ${title ?? ""}`,
         strokes: [{ alignment: "inner", color: CARD_STROKE, type: "solid", width: 1 }],
       })];
-      if (title) ids.push(builder.text(x + CARD_PAD, y + CARD_PAD, title, { fontSize: 18, fontWeight: 600 }));
+      if (title) ids.push(builder.text(x + cardPad, y + cardPad, titleText,
+        { fontSize: titleSize, fontWeight: builder.transparentComponents ? 700 : 600, ...(builder.transparentComponents ? { color: NOTE_COLOR } : {}) },
+        annotationGroup ? { annotationGroup } : undefined,
+        builder.transparentComponents ? { width: innerWidth, height: titleHeight, name: title } : {}));
       if (summaryText) {
-        ids.push(builder.text(x + CARD_PAD, y + CARD_PAD + (title ? 30 : 0), summaryText,
-          { fontSize: 12, opacity: 0.55 }, undefined, { width: innerWidth }));
+        ids.push(builder.text(x + cardPad, y + cardPad + titleSpace, summaryText,
+          { fontSize: summarySize, ...(builder.transparentComponents ? { color: NOTE_COLOR, fontWeight: 600 } : { opacity: 0.55 }) },
+          annotationGroup ? { annotationGroup } : undefined, { width: innerWidth, height: summaryHeight }));
       }
       items.forEach((item, index) => {
-        ids.push(...item.draw(x + CARD_PAD + placed.positions[index][0], y + top + placed.positions[index][1]));
+        ids.push(...item.draw(x + cardPad + placed.positions[index][0], y + top + placed.positions[index][1]));
       });
       return ids;
     },
@@ -1197,14 +1240,21 @@ function familyCard(builder, title, summary, items, innerWidth) {
 
 function locatedItem(builder, family, familyIndex, size) {
   const label = family.label ?? builder.label("component");
+  const caption = builder.transparentComponents ? `${builder.label("preview.annotation")} · ${label}` : label;
   const [w, h] = size;
+  const captionSize = builder.transparentComponents ? 14 : 13;
+  const metrics = designSystemTextMetrics(caption, captionSize);
+  const captionHeight = metrics.height + (builder.transparentComponents ? 6 : 0);
+  const top = builder.transparentComponents ? captionHeight + NOTE_GAP : 28;
   return {
-    height: Math.max(h, 48) + 28,
-    width: Math.max(w, 200, designSystemTextMetrics(label, 13).width),
+    height: Math.max(h, 48) + top,
+    width: Math.max(w, 200, metrics.width),
     draw(x, y) {
       return [
-        builder.text(x, y, label, { fontSize: 13, opacity: 0.75 }, { role: "caption", runtimeId: family.caption }),
-        builder.add({ fills: [], height: h, name: label, type: "FRAME", width: w, x, y: y + 28 },
+        builder.text(x, y, caption, { fontSize: captionSize, ...(builder.transparentComponents ? { color: NOTE_COLOR, fontWeight: 600 } : { opacity: 0.75 }) },
+          { role: "caption", runtimeId: family.caption, ...(builder.transparentComponents ? { annotationGroup: `located-note-${familyIndex}` } : {}) },
+          { name: label, height: captionHeight }),
+        builder.add({ fills: [], height: h, name: label, type: "FRAME", width: w, x, y: y + top },
           { family: familyIndex, role: "located-family" }),
       ];
     },
@@ -1225,8 +1275,13 @@ function classificationOrder(sample) {
 // other half, options.allVariantsOf (Set of Component Set ids) shows every
 // variant of those sets instead of a representative few, and
 // options.minWidth and options.minColumns narrow a small page.
+// options.transparentComponents keeps generated export chrome outside the
+// component pixels: transparent canvas/samples and spaced, unbacked notes.
 export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
-  const builder = new PageBuilder({ locale: options.locale, seed: options.seed ?? ids.board });
+  const compactComponents = options.transparentComponents === true && options.only === "components";
+  const pagePad = compactComponents ? NOTE_GAP : PAD;
+  const cardPad = compactComponents ? 0 : CARD_PAD;
+  const builder = new PageBuilder({ locale: options.locale, seed: options.seed ?? ids.board, transparentComponents: options.transparentComponents, compactComponents });
   const typeIds = ids.types ?? {};
 
   // Components first: their columns set the page width the tokens use.
@@ -1248,12 +1303,37 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
   }
   for (const entry of entries) {
     const firstCombination = Math.min(...entry.samples.map((sample) => sample.combinationIndex ?? 0));
-    const chosen = options.allVariantsOf?.has(entry.setId)
+    const allVariants = options.allVariantsOf?.has(entry.setId);
+    const chosen = allVariants
       ? entry.samples.filter((sample) => (sample.combinationIndex ?? 0) === firstCombination)
       : representativeComponentSamples(entry.samples);
     entry.title = entry.samples[0].familyName;
-    entry.summary = familySummary(builder, entry.samples);
-    entry.items = chosen.map((sample) => sampleItem(builder, sampleIndex, chosen[0], sample));
+    const variants = new Map(entry.samples.map((sample) => [sample.variantId, sample]));
+    const omitDefaultCaption = compactComponents && variants.size === 1 && chosen.length === 1 &&
+      !(chosen[0].axes ?? []).length && !chosen[0].combinationLabel;
+    entry.items = chosen.map((sample) => sampleItem(builder, sampleIndex, chosen[0], sample, !omitDefaultCaption));
+    const shown = new Set(chosen.map((sample) => sample.variantId));
+    const props = (sample) => Object.fromEntries((sample.axes ?? []).map((axis) => [axis.name, sample.selection?.[axis.id]]));
+    entry.preview = {
+      component: entry.title,
+      mode: allVariants ? "all-variants" : "representative",
+      shownVariants: shown.size,
+      totalVariants: variants.size,
+      shownSamples: chosen.length,
+      totalSamples: entry.samples.length,
+      omittedVariants: [...variants].filter(([id]) => !shown.has(id)).map(([, sample]) => props(sample)),
+      backdrops: chosen.flatMap((sample, index) => entry.items[index].backing ? [{
+        variant: props(sample),
+        ...(sample.combinationLabel ? { theme: sample.combinationLabel } : {}),
+        color: entry.items[index].backing,
+      }] : []),
+    };
+    const scope = builder.label("preview.variants", shown.size, variants.size);
+    entry.summary = [
+      familySummary(builder, entry.samples, compactComponents ? "\n" : " · "),
+      compactComponents ? [scope, ...(allVariants ? [] : [builder.label("preview.representative")])].join("\n")
+        : `${scope} · ${builder.label(allVariants ? "preview.all-variants" : "preview.representative")}`,
+    ].filter(Boolean).join("\n");
   }
   const located = (refs.families ?? [])
     .map((family, index) => ({ family, index }))
@@ -1263,17 +1343,20 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
     if (!size) continue;
     entries.push({ category: null, items: [locatedItem(builder, family, index, size)], summary: null, title: null });
   }
-  // Every column has one width; a card with many samples spans the fewest
-  // columns that keep it no taller than wide.
-  const inner = Math.max(COMPONENT_INNER_MIN, ...entries.flatMap((entry) => entry.items.map((item) => item.width)));
-  const columnWidth = inner + 2 * CARD_PAD;
+  // Compact exports fit two small samples per row and allow a taller card
+  // before widening it. The normal design-system grid keeps its sizing.
+  const inner = Math.max(compactComponents ? 240 : COMPONENT_INNER_MIN, ...entries.map((entry) => {
+    const widest = Math.max(...entry.items.map((item) => item.width));
+    return compactComponents && entry.items.length > 1 && widest <= 240 ? 2 * widest + NOTE_GAP : widest;
+  }));
+  const columnWidth = inner + 2 * cardPad;
   const cardAt = (entry, span) =>
-    familyCard(builder, entry.title, entry.summary, entry.items, span * columnWidth + (span - 1) * CARD_GAP - 2 * CARD_PAD);
+    familyCard(builder, entry.title, entry.summary, entry.items, span * columnWidth + (span - 1) * CARD_GAP - 2 * cardPad);
   for (const entry of entries) {
     entry.span = 1;
     while (entry.span < 4) {
       const card = cardAt(entry, entry.span);
-      if (card.height <= card.width) break;
+      if (card.height <= card.width * (compactComponents ? 1.5 : 1)) break;
       entry.span += 1;
     }
   }
@@ -1284,8 +1367,8 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
   const columns =
     entries.length === 0
       ? 1
-      : Math.min(8, Math.max(options.minColumns ?? 4, ...entries.map((entry) => entry.span), Math.ceil(Math.sqrt(area / (1.5 * columnWidth * columnWidth)))));
-  const contentWidth = Math.max(options.minWidth ?? 2000, columns * columnWidth + (columns - 1) * CARD_GAP);
+      : Math.min(8, Math.max(options.minColumns ?? (compactComponents ? 1 : 4), ...entries.map((entry) => entry.span), Math.ceil(Math.sqrt(area / (1.5 * columnWidth * columnWidth)))));
+  const contentWidth = Math.max(options.minWidth ?? (compactComponents ? 0 : 2000), columns * columnWidth + (columns - 1) * CARD_GAP);
 
   // Tokens, top to bottom: each color family, typography, then the smaller
   // sections across four columns. Wide specimens reserve more columns.
@@ -1328,20 +1411,20 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
   }
 
   const children = [];
-  let y = PAD;
+  let y = pagePad;
   if (options.only !== "components") {
-    children.push(builder.text(PAD, y, builder.label("title"), { fontSize: 28, fontWeight: 700 }, { runtimeId: ids.tokenLabel }));
+    children.push(builder.text(pagePad, y, builder.label("title"), { fontSize: 28, fontWeight: 700 }, { runtimeId: ids.tokenLabel }));
     y += 64;
     if (wide.length === 0 && small.length === 0) {
-      children.push(builder.text(PAD, y, builder.label("no-tokens"), { fontSize: 13, opacity: 0.55 }, { runtimeId: ids.tokensEmpty }));
+      children.push(builder.text(pagePad, y, builder.label("no-tokens"), { fontSize: 13, opacity: 0.55 }, { runtimeId: ids.tokensEmpty }));
       y += 28 + SECTION_GAP;
     }
     for (const item of wide) {
-      children.push(...item.draw(PAD, y));
+      children.push(...item.draw(pagePad, y));
       y += item.height + SECTION_GAP;
     }
     if (small.length > 0) {
-      const placed = spanColumns(small, PAD, y, 4, smallWidth);
+      const placed = spanColumns(small, pagePad, y, 4, smallWidth);
       small.forEach((item, index) => children.push(...item.draw(placed.positions[index][0], placed.positions[index][1])));
       y = placed.endY + SECTION_GAP;
     }
@@ -1349,10 +1432,15 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
   }
 
   // Components under the tokens, grouped by classification.
-  let right = PAD + Math.max(contentWidth, ...wide.map((item) => item.width ?? 0));
+  let right = pagePad + (compactComponents && entries.length
+    ? Math.max(0, options.minWidth ?? 0) : Math.max(contentWidth, ...wide.map((item) => item.width ?? 0)));
   if (options.only !== "tokens") {
-    children.push(builder.text(PAD, y, builder.label("components-source"), { fontSize: 22, fontWeight: 700 }, { runtimeId: ids.componentsSection }));
-    y += 48;
+    if (!builder.transparentComponents || entries.length === 0) {
+      children.push(builder.text(pagePad, y, builder.label("components-source"),
+        { fontSize: 22, fontWeight: 700, ...(builder.transparentComponents ? { color: NOTE_COLOR } : {}) },
+        { runtimeId: ids.componentsSection, ...(builder.transparentComponents ? { componentNote: true } : {}) }));
+      y += 48;
+    }
     const groups = [];
     for (const entry of entries) {
       const span = Math.min(entry.span, columns);
@@ -1362,12 +1450,17 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
       else groups.push({ cards: [card], category: entry.category });
     }
     if (groups.length === 0) {
-      children.push(builder.text(PAD, y, builder.label("no-components"), { fontSize: 13, opacity: 0.55 }, { runtimeId: ids.componentsEmpty }));
-      y += 28;
+      const emptySize = builder.transparentComponents ? 14 : 13;
+      const emptyHeight = designSystemTextMetrics(builder.label("no-components"), emptySize).height + (builder.transparentComponents ? 6 : 0);
+      children.push(builder.text(pagePad, y, builder.label("no-components"),
+        { fontSize: emptySize, ...(builder.transparentComponents ? { color: NOTE_COLOR, fontWeight: 600 } : { opacity: 0.55 }) },
+        { runtimeId: ids.componentsEmpty, ...(builder.transparentComponents ? { componentNote: true } : {}) }, { height: emptyHeight }));
+      y += builder.transparentComponents ? emptyHeight + 16 : 28;
     }
     for (const group of groups) {
-      children.push(builder.text(PAD, y, `${group.category ?? builder.label("component")} · ${group.cards.length}`, { fontSize: 15, fontWeight: 600, opacity: 0.6 }));
-      const placed = spanColumns(group.cards, PAD, y + 34, columns, columnWidth);
+      if (!builder.transparentComponents)
+        children.push(builder.text(pagePad, y, `${group.category ?? builder.label("component")} · ${group.cards.length}`, { fontSize: 15, fontWeight: 600, opacity: 0.6 }));
+      const placed = spanColumns(group.cards, pagePad, y + (builder.transparentComponents ? 0 : 34), columns, columnWidth);
       group.cards.forEach((card, index) => {
         children.push(...card.draw(placed.positions[index][0], placed.positions[index][1]));
       });
@@ -1375,12 +1468,20 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
       y = placed.endY + SECTION_GAP;
     }
   }
-  const width = right + PAD;
-  const height = y - SECTION_GAP + PAD;
+  const width = right + pagePad;
+  const height = y - (compactComponents && entries.length === 0 ? 0 : SECTION_GAP) + pagePad;
+  // Component notes have no panels. Keep unrelated Token label backings.
+  const pageChildren = builder.transparentComponents ? children.flatMap((id) => {
+    const node = builder.nodes[id];
+    if (node.type !== "TEXT" || node.designSystem.annotationGroup || node.designSystem.componentNote) return [id];
+    return [builder.rect(node.x - 4, node.y - 2, node.width + 8, node.height + 4, "#ffffff",
+      { name: `Annotation background · ${node.name}` },
+      { role: "annotation-background" }), id];
+  }) : children;
   const rootId = builder.add(
     {
-      children,
-      fills: [{ color: PAGE_FILL, type: "solid" }],
+      children: pageChildren,
+      fills: builder.transparentComponents ? [] : [{ color: PAGE_FILL, type: "solid" }],
       height,
       id: "node_ds_page",
       name: builder.label("title"),
@@ -1394,6 +1495,17 @@ export function buildDesignSystemPage(refs = {}, ids = {}, options = {}) {
   return {
     height,
     nodes: builder.nodes,
+    ...(options.only === "tokens" || !samples.length ? {} : { preview: {
+      kind: "component-catalog",
+      ...(builder.transparentComponents ? {
+        componentBackground: "transparent", annotationBackground: "transparent",
+        annotationBorder: "none", annotationLabel: builder.label("preview.annotation"),
+      } : {}),
+      components: entries.flatMap((entry) => entry.preview ? [entry.preview] : []),
+      note: builder.transparentComponents
+        ? "Displayed samples only; this preview does not validate every theme or context combination. Component notes use larger bold text with no background or frame and leave clear space around samples. Component regions retain authored fills and alpha without added backgrounds."
+        : "Displayed samples only; this preview does not validate every theme or context combination. Backdrops are added for preview and are not component fills.",
+    } }),
     rootId,
     runtimeIds: builder.runtimeIds,
     version: DESIGN_SYSTEM_PAGE_VERSION,
@@ -1431,7 +1543,7 @@ export function expandDesignSystemPage(page, refs = {}, options = {}) {
     }
     nodes[id].children = [prefix + source.rootId];
   }
-  return { nodes, rootId: page.rootId };
+  return { nodes, rootId: page.rootId, ...(page.preview ? { preview: page.preview } : {}) };
 }
 
 // A located family's component tree as its screen projects it, for the
