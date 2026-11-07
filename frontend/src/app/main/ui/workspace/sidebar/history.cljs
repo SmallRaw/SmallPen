@@ -12,6 +12,7 @@
    [app.common.time :as ct]
    [app.main.data.workspace.undo :as dwu]
    [app.main.refs :as refs]
+   [app.main.smallpen.ui.history :as sp-history]
    [app.main.store :as st]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
@@ -52,8 +53,9 @@
     nil))
 
 (defn parse-change
-  "Given a single change parses the information into an uniform map"
-  [change]
+  "Given a single change parses the information into an uniform map.
+  Token changes also take the undo change that reverts them."
+  [change & [undo-change]]
   (let [r (fn [type id]
             {:type type
              :operation (extract-operation change)
@@ -85,7 +87,7 @@
       (:add-typography
        :mod-typography) (r :typography (get-in change [:typography :id]))
       :del-typography (r :typography (:id change))
-      nil)))
+      (sp-history/token-change change undo-change))))
 
 (defn resolve-shape-types
   "Retrieve the type to be shown to the user"
@@ -125,6 +127,9 @@
         "rect" (tr "workspace.undo.entry.multiple.rect")
         "shape" (tr "workspace.undo.entry.multiple.shape")
         "text" (tr "workspace.undo.entry.multiple.text")
+        "token" (tr "workspace.undo.entry.multiple.token")
+        "token-set" (tr "workspace.undo.entry.multiple.token-set")
+        "token-theme" (tr "workspace.undo.entry.multiple.token-theme")
         "typography" (tr "workspace.undo.entry.multiple.typography")
         (str "workspace.undo.entry.multiple." attribute))
       "single"
@@ -143,6 +148,9 @@
         "rect" (tr "workspace.undo.entry.single.rect")
         "shape" (tr "workspace.undo.entry.single.shape")
         "text" (tr "workspace.undo.entry.single.text")
+        "token" (tr "workspace.undo.entry.single.token")
+        "token-set" (tr "workspace.undo.entry.single.token-set")
+        "token-theme" (tr "workspace.undo.entry.single.token-theme")
         "typography" (tr "workspace.undo.entry.single.typography")
         (str "workspace.undo.entry.single." attribute)))))
 
@@ -171,14 +179,17 @@
     :component i/component
     :media i/img
     :image i/img
+    :token i/tokens
+    :token-set i/folder
+    :token-theme i/tokens
     i/svg))
 
 (defn is-shape? [type]
   (contains? #{:shape :rect :circle :text :path :frame :group} type))
 
-(defn parse-entry [{:keys [redo-changes]}]
-  (->> redo-changes
-       (map parse-change)))
+(defn parse-entry [{:keys [redo-changes] :as entry}]
+  (->> (sp-history/paired-undo-changes entry)
+       (map parse-change redo-changes)))
 
 (defn- short-id
   "Build a short git-like label for an undo entry. Derives it from the
@@ -210,6 +221,7 @@
         ;; Retrieve also by-type and by-operation
         types (group-by first (keys entries))
         operations (group-by second (keys entries))
+        token-entry (sp-history/token-action-entry entries is-shape?)
 
         ;; The cases for the selection of the representative entry are a bit
         ;; convoluted. Best to read the comments to clarify.
@@ -221,6 +233,9 @@
           ;; If we only have one operation over one shape we return the last change
           (single? entries)
           (-> entries (get (first (keys entries))) (last))
+
+          (some? token-entry)
+          token-entry
 
           ;; If we're creating an object it will have priority
           (single? (:new operations))
@@ -269,7 +284,7 @@
                        (map :id))
           candidates)]
 
-    (assoc selected-entry :detail detail)))
+    (assoc selected-entry :detail (when-not (sp-history/token-type? (:type selected-entry)) detail))))
 
 (defn parse-entries [entries objects]
   ;; Propagate per-entry metadata (timestamp, undo-group, author) onto
@@ -281,7 +296,9 @@
               (select-entry)
               (assoc :timestamp  (:timestamp  raw-entry)
                      :undo-group (:undo-group raw-entry)
-                     :by         (:by         raw-entry))))
+                     :by         (:by         raw-entry)
+                     ::sp-history/start-index (::sp-history/start-index raw-entry)
+                     ::sp-history/end-index   (::sp-history/end-index raw-entry))))
         entries))
 
 (mf/defc history-entry-details* [{:keys [entry]}]
@@ -383,19 +400,21 @@
   []
   (let [objects (mf/deref refs/workspace-page-objects)
         {:keys [items index]} (mf/deref workspace-undo)
-        entries (parse-entries items objects)]
+        entries (parse-entries (sp-history/undo-rows items) objects)]
     [:div {:class (stl/css :history-toolbox)}
      (if (empty? entries)
        [:div {:class (stl/css :history-entry-empty)}
         [:> empty-state* {:icon i/history
                           :text (tr "workspace.undo.empty")}]]
        [:ul {:class (stl/css :history-entries)}
-        (for [[idx-entry entry] (->> entries (map-indexed vector) reverse)] #_[i (range 0 10)]
-             [:> history-entry* {:key (str "entry-" idx-entry)
-                                 :entry entry
-                                 :idx-entry idx-entry
-                                 :is-current (= idx-entry index)
-                                 :is-disabled (> idx-entry index)}])])]))
+        (for [entry (reverse entries)
+              :let [start-index (::sp-history/start-index entry)
+                    idx-entry   (::sp-history/end-index entry)]]
+          [:> history-entry* {:key (str "entry-" idx-entry)
+                              :entry entry
+                              :idx-entry idx-entry
+                              :is-current (<= start-index index idx-entry)
+                              :is-disabled (> start-index index)}])])]))
 
 
 

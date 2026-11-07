@@ -235,6 +235,7 @@
          (try
            (->> (http/send! {:method :get
                              :uri font-url
+                             :omit-default-headers true
                              :response-type :buffer})
                 (rx/map
                  (fn [{:keys [body]}]
@@ -260,7 +261,7 @@
     :google
     (google-font-ttf-url font-id font-variant-id font-weight font-style)
     :custom
-    (dm/str (u/join cf/public-uri "assets/by-id/" asset-id))
+    (cf/resolve-font-asset asset-id)
     :builtin
     (dm/str (u/join cf/public-uri "fonts/" asset-id))))
 
@@ -323,10 +324,7 @@
         font-weight-fallback (or (:font-weight span) (:font-weight paragraph))
         font-style-fallback (or (:font-style span) (:font-style paragraph))
         font-data (font-db-data font-id font-variant-id font-weight-fallback font-style-fallback)]
-    (-> span
-        (assoc :font-variant-id (or (:id font-data) (:id font-data) font-variant-id)
-               :font-weight (or (:weight font-data) font-weight-fallback)
-               :font-style (or (:style font-data) font-style-fallback)))))
+    (cfnt/with-variant-attributes span paragraph font-data)))
 
 (defn normalize-paragraph-font
   [paragraph]
@@ -335,10 +333,7 @@
         font-weight-fallback (:font-weight paragraph)
         font-style-fallback (:font-style paragraph)
         font-data (font-db-data font-id font-variant-id font-weight-fallback font-style-fallback)]
-    (-> paragraph
-        (assoc :font-variant-id (or (:id font-data) (:id font-data) font-variant-id)
-               :font-weight (or (:weight font-data) font-weight-fallback)
-               :font-style (or (:style font-data) font-style-fallback)))))
+    (cfnt/with-variant-attributes paragraph {} font-data)))
 
 (defn serialize-font-size
   [font-size]

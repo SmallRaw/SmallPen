@@ -10,6 +10,8 @@
    [app.common.data :as d]
    [app.common.math :as mth]
    [app.common.types.color :as cc]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.ui.reference-hex-input :refer [reference-hex-input*]]
    [app.main.ui.ds.controls.input :refer [input*]]
    [app.main.ui.ds.foundations.assets.icon :as i]
    [app.util.dom :as dom]
@@ -30,7 +32,8 @@
   [val]
   (* (/ val 255) 100))
 
-(mf/defc color-inputs* [{:keys [type color disable-opacity mode on-mode-change on-change]}]
+(mf/defc color-inputs* [{:keys [type color disable-opacity mode on-mode-change on-change
+                                reference-name reference-tokens on-change-reference on-clear-reference]}]
   (let [{red :r green :g blue :b
          hue :h saturation :s value :v
          hex :hex alpha :alpha} color
@@ -306,17 +309,24 @@
                      :on-change (on-change-property :v 100)
                      :on-key-down (on-key-down-property :v 100)}]])]
      [:div {:class (stl/css :hex-alpha-wrapper)}
-      [:> input* {:id "hex-value"
-                  :class (stl/css :hex-input)
-                  :ref (:hex refs)
-                  :type "text"
-                  :text-icon "HEX"
-                  :property "Hex"
-                  :aria-label "Hexadecimal color value"
-                  :max 7
-                  :default-value hex
-                  :on-change on-change-hex
-                  :on-blur on-blur-hex}]
+      (if (smallpen/enabled?)
+        [:> reference-hex-input* {:hex hex
+                                  :reference-name reference-name
+                                  :reference-tokens reference-tokens
+                                  :on-change-color setup-hex-color
+                                  :on-change-reference on-change-reference
+                                  :on-clear-reference on-clear-reference}]
+        [:> input* {:id "hex-value"
+                    :class (stl/css :hex-input)
+                    :ref (:hex refs)
+                    :type "text"
+                    :text-icon "HEX"
+                    :property "Hex"
+                    :aria-label "Hexadecimal color value"
+                    :max 7
+                    :default-value hex
+                    :on-change on-change-hex
+                    :on-blur on-blur-hex}])
 
       (when (not disable-opacity)
         [:> input* {:id "alpha-value"

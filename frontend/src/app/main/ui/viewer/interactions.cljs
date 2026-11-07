@@ -16,8 +16,10 @@
    [app.main.data.comments :as dcm]
    [app.main.data.viewer :as dv]
    [app.main.features :as features]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
+   [app.main.ui.context :as ctx]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.hooks :as h]
    [app.main.ui.viewer.shapes :as shapes]
@@ -182,13 +184,16 @@
                                         :size size
                                         :delta delta
                                         :is-fixed is-fixed}]
-      [:> viewport-svg* {:page page
-                         :frame frame
-                         :base base
-                         :offset offset
-                         :size size
-                         :delta delta
-                         :is-fixed is-fixed}])))
+      ;; SmallPen does not persist Penpot's derived text position-data, so
+      ;; the viewer lets the text renderer use its foreignObject fallback.
+      [:& (mf/provider ctx/is-render?) {:value (smallpen/enabled?)}
+       [:> viewport-svg* {:page page
+                          :frame frame
+                          :base base
+                          :offset offset
+                          :size size
+                          :delta delta
+                          :is-fixed is-fixed}]])))
 
 (mf/defc flows-menu*
   {::mf/wrap [mf/memo]}

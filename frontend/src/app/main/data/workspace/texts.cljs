@@ -42,6 +42,7 @@
    [app.main.features :as features]
    [app.main.fonts :as fonts]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.api.fonts :as wasm.fonts]
@@ -853,10 +854,10 @@
 
           (let [ids (into #{} (filter changed-text?) (keys props))]
             (rx/of (dwu/start-undo-transaction undo-id)
-                   (dwsh/update-shapes ids update-fn {:with-objects? true
-                                                      :reg-objects? true
-                                                      :stack-undo? true
-                                                      :ignore-touched true})
+                   (dwsh/update-shapes ids update-fn
+                                       (smallpen/derived-layout-options
+                                        {:with-objects? true :reg-objects? true
+                                         :stack-undo? true :ignore-touched true}))
                    (ptk/data-event :layout/update {:ids ids})
                    (dwu/commit-undo-transaction undo-id))))))))
 
@@ -1027,7 +1028,8 @@
 
     ptk/WatchEvent
     (watch [_ _ _]
-      (rx/of (dwm/apply-modifiers {:stack-undo? true})))))
+      (rx/of (dwm/apply-modifiers
+              (smallpen/derived-layout-options {:stack-undo? true}))))))
 
 (defn commit-position-data
   []
@@ -1045,7 +1047,11 @@
                 (fn [shape]
                   (-> shape
                       (assoc :position-data (get position-data (:id shape)))))
-                {:stack-undo? true :reg-objects? false}))))))
+                ;; SmallPen re-measures texts whenever generated pages are
+                ;; re-projected; an undo entry here would drop the redo tail.
+                (if (smallpen/enabled?)
+                  {:save-undo? false :reg-objects? false :skip-component-sync? true}
+                  {:stack-undo? true :reg-objects? false})))))))
 
 (defn update-position-data
   [id position-data]

@@ -33,6 +33,7 @@
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
+   [app.main.smallpen :as smallpen]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
@@ -114,14 +115,15 @@
               (let [modif-tree (dwm/create-modif-tree ids (ctm/reflow-modifiers))]
                 (if (features/active-feature? state "render-wasm/v1")
                   (rx/of (dwm/apply-wasm-modifiers modif-tree
-                                                   :stack-undo? true
-                                                   :undo-group undo-group
-                                                   :ignore-touched true))
-                  (rx/of (dwm/apply-modifiers {:page-id page-id
-                                               :modifiers modif-tree
-                                               :stack-undo? true
-                                               :ignore-touched true
-                                               :undo-group undo-group}))))
+                                                   (smallpen/derived-layout-options
+                                                    {:stack-undo? true
+                                                     :undo-group undo-group
+                                                     :ignore-touched true})))
+                  (rx/of (dwm/apply-modifiers
+                          (smallpen/derived-layout-options
+                           {:page-id page-id :modifiers modif-tree
+                            :stack-undo? true :ignore-touched true
+                            :undo-group undo-group})))))
               (rx/empty))
 
             ;; The apply events above are dispatched and applied synchronously,
@@ -556,77 +558,21 @@
 
 (defn fix-child-sizing
   [objects parent-changes shape]
-
   (let [parent (-> (cfh/get-parent objects (:id shape))
-                   (d/deep-merge parent-changes))
-
-        auto-width? (ctl/auto-width? parent)
-        auto-height? (ctl/auto-height? parent)
-        col? (ctl/col? parent)
-        row? (ctl/row? parent)
-
-        all-children (->> parent
-                          :shapes
-                          (map (d/getf objects))
-                          (remove ctl/position-absolute?))]
-
-    (cond-> shape
-      ;; If the parent is hug width and the direction column
-      ;; change to fixed when ALL children are fill
-      (and col? auto-width? (every? ctl/fill-width? all-children))
-      (assoc :layout-item-h-sizing :fix)
-
-      ;; If the parent is hug height and the direction is column
-      ;; change to fixed when ANY children is fill
-      (and col? auto-height? (ctl/fill-height? shape))
-      (assoc :layout-item-v-sizing :fix)
-
-      ;; If the parent is hug width and the direction row
-      ;; change to fixed when ANY children is fill
-      (and row? auto-width? (ctl/fill-width? shape))
-      (assoc :layout-item-h-sizing :fix)
-
-      ;; If the parent is hug height and the direction row
-      ;; change to fixed when ALL children are fill
-      (and row? auto-height? (every? ctl/fill-height? all-children))
-      (assoc :layout-item-v-sizing :fix))))
+                   (d/deep-merge parent-changes))]
+    (ctl/fix-child-sizing parent (map (d/getf objects) (:shapes parent)) shape)))
 
 (defn fix-parent-sizing
   [parent objects ids-set changes]
+  (ctl/fix-parent-sizing
+   parent
+   (->> parent :shapes
+        (map (d/getf objects))
+        (map (fn [shape]
+               (if (contains? ids-set (:id shape))
+                 (d/deep-merge shape changes)
+                 shape))))))
 
-  (let [auto-width? (ctl/auto-width? parent)
-        auto-height? (ctl/auto-height? parent)
-        col? (ctl/col? parent)
-        row? (ctl/row? parent)
-
-        all-children
-        (->> parent :shapes
-             (map (d/getf objects))
-             (map (fn [shape]
-                    (if (contains? ids-set (:id shape))
-                      (d/deep-merge shape changes)
-                      shape))))]
-
-    (cond-> parent
-      ;; Col layout and parent is hug-width if all children are fill-width
-      ;; change parent to fixed
-      (and col? auto-width? (every? ctl/fill-width? all-children))
-      (assoc :layout-item-h-sizing :fix)
-
-      ;; Col layout and parent is hug-height if any children is fill-height
-      ;; change parent to fixed
-      (and col? auto-height? (some ctl/fill-height? all-children))
-      (assoc :layout-item-v-sizing :fix)
-
-      ;; Row layout and parent is hug-width if any children is fill-width
-      ;; change parent to fixed
-      (and row? auto-width? (some ctl/fill-width? all-children))
-      (assoc :layout-item-h-sizing :fix)
-
-      ;; Row layout and parent is hug-height if all children are fill-height
-      ;; change parent to fixed
-      (and row? auto-height? (every? ctl/fill-height? all-children))
-      (assoc :layout-item-v-sizing :fix))))
 (defn update-layout-child
   ([ids attrs] (update-layout-child ids attrs nil))
   ([ids attrs options]

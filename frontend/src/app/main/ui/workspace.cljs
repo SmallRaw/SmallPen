@@ -17,6 +17,7 @@
    [app.main.fonts :as fonts]
    [app.main.refs :as refs]
    [app.main.router :as-alias rt]
+   [app.main.smallpen.token-import]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.product.loader :refer [loader*]]

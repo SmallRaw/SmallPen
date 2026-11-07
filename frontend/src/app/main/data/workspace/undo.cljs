@@ -208,7 +208,7 @@
 
 (defn start-undo-transaction
   "Start a transaction, so that changes in it are added together into a single undo entry."
-  [id & {:keys [timeout] :or {timeout discard-transaction-time-millis}}]
+  [id & {:keys [timeout undo-group] :or {timeout discard-transaction-time-millis}}]
   (ptk/reify ::start-undo-transaction
     ptk/UpdateEvent
     (update [_ state]
@@ -218,8 +218,11 @@
               (fn [undo-state]
                 (-> undo-state
                     ;; Commits made while it is open without an undo group of
-                    ;; their own get this one
-                    (update :transaction #(d/nilv % (assoc empty-tx :commit-group (uuid/next))))
+                    ;; their own get this one. An explicit undo group joins
+                    ;; the adjacent user action.
+                    (update :transaction #(d/nilv % (cond-> (assoc empty-tx :commit-group (uuid/next))
+                                                      (some? undo-group)
+                                                      (assoc :undo-group undo-group))))
                     (update :transactions-pending assoc id (ct/now))))))
 
     ptk/WatchEvent

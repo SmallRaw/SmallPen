@@ -1,0 +1,24 @@
+{
+  "name": "@smallpen/desktop",
+  "version": "0.1.0-alpha.21",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "smallpen-desktop": "./bin/smallpen-desktop.mjs",
+    "smallpen-desktop-host": "./bin/desktop-host.mjs"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "src"
+  ],
+  "scripts": {
+    "build": "node scripts/build-electron.mjs",
+    "build:macos": "node scripts/build-electron.mjs",
+    "build:windows": "node scripts/build-electron.mjs"
+  },
+  "dependencies": {
+    "@smallpen/background": "0.1.0-alpha.21",
+    "@smallpen/web": "0.1.0-alpha.21"
+  }
+}

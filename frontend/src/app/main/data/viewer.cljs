@@ -27,6 +27,7 @@
    [app.main.features.pointer-map :as fpmap]
    [app.main.repo :as rp]
    [app.main.router :as rt]
+   [app.main.smallpen.routing :as sprt]
    [app.render-wasm.api :as wasm.api]
    [app.util.globals :as ug]
    [beicon.v2.core :as rx]
@@ -677,7 +678,9 @@
              page-id (some-> (:page-id qparams) uuid/parse)
              frames  (get-in state [:viewer :pages page-id :frames])
              index   (d/index-of-pred frames #(= (:id %) frame-id))]
-         (rx/of (go-to-frame-by-index (or index 0))))))))
+         (if-let [nav (when (nil? index) (sprt/viewer-frame-nav state frame-id))]
+           (rx/of nav)
+           (rx/of (go-to-frame-by-index (or index 0)))))))))
 
 (defn go-to-frame-auto
   []

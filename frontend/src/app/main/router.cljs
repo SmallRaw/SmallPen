@@ -34,6 +34,18 @@
   [routes]
   routes)
 
+(defonce ^:private params-adapter (atom nil))
+
+(defn set-params-adapter!
+  "Install `(fn [id params] params')`, applied to the params of every
+  resolved route, or clear it with nil (the default, a no-op)."
+  [f]
+  (reset! params-adapter f))
+
+(defn- adapt-params
+  [id params]
+  (if-let [f @params-adapter] (f id params) params))
+
 (defn resolve
   "Build the history token (`?screen=<name>&params`) for a route.
   Returns nil when the route id is not enabled."
@@ -44,7 +56,7 @@
      ;; The target screen always wins: callers often forward the
      ;; current query params (which carry the previous screen).
      (str "?" (u/map->query-string
-               (into {:screen (name id)} (dissoc params :screen)))))))
+               (into {:screen (name id)} (dissoc (adapt-params id params) :screen)))))))
 
 (defn resolve-uri
   "Build the absolute URL string for a route under `cf/public-uri`."

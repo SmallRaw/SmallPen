@@ -22,6 +22,7 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.workspace.sidebar.assets.components :as wsac]
+   [app.main.ui.workspace.sidebar.assets.media :as wsam]
    [app.main.ui.workspace.viewport.viewport-ref :as uwvv]
    [app.util.dom :as dom]
    [app.util.dom.dnd :as dnd]
@@ -546,6 +547,9 @@
                meta? (kbd/meta? event)]
            (st/emit! (mse/->MouseEvent :up ctrl? shift? alt? meta?))
            (mf/set-ref-val! comp-inst-ref false))
+
+         (wsam/media-drop? event)
+         (wsam/drop-media! event viewport-coord)
 
          ;; Will trigger when the user drags an image from a browser
          ;; to the viewport (firefox and chrome do it a bit different

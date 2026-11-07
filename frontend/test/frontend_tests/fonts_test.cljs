@@ -7,9 +7,11 @@
 (ns frontend-tests.fonts-test
   (:require
    [app.common.uuid :as uuid]
+   [app.config :as cf]
    [app.main.data.fonts :as df]
    [app.main.fonts :as fonts]
    [app.main.store :as st]
+   [app.render-wasm.api.fonts :as wasm-fonts]
    [app.util.globals :as globals]
    [app.util.http :as http]
    [app.util.webapi :as wa]
@@ -18,6 +20,34 @@
    [frontend-tests.helpers.async :as async]
    [frontend-tests.helpers.mock :as mock]
    [potok.v2.core :as ptk]))
+
+(t/deftest webgl-custom-fonts-use-the-active-asset-resolver
+  (let [asset-id (random-uuid)
+        font-id (str "custom-" (random-uuid))
+        local-url (str "http://127.0.0.1:62391/package/blobs/" asset-id)]
+    (with-redefs [cf/resolve-font-asset
+                  (fn [id]
+                    (t/is (= asset-id id))
+                    local-url)]
+      (t/is (= local-url
+               (#'wasm-fonts/font-id->ttf-url font-id asset-id
+                                              "normal-400" 400 "normal"))))
+    (t/is (= (cf/resolve-media asset-id)
+             (#'wasm-fonts/font-id->ttf-url font-id asset-id
+                                            "normal-400" 400 "normal")))))
+
+(t/deftest webgl-font-downloads-do-not-send-rpc-headers
+  (let [requests (atom [])
+        url "http://127.0.0.1:62391/package/font/file"]
+    (with-redefs [http/send! (mock/stub (fn [request]
+                                          (swap! requests conj request)
+                                          (rx/empty)))]
+      (rx/subs! identity (fn [error] (throw error))
+                ((:callback (#'wasm-fonts/fetch-font {} url false false)))))
+    (swap! wasm-fonts/fetching dissoc url)
+    (t/is (= 1 (count @requests)))
+    (t/is (= url (:uri (first @requests))))
+    (t/is (true? (:omit-default-headers (first @requests))))))
 
 (def sample-font
   {:id "sourcesanspro"

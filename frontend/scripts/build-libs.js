@@ -48,6 +48,13 @@ const rebuildNotify = {
 
 const config = {
   entryPoints: ["target/index.js"],
+  // Match the test resolver: both providers import the same core source.
+  alias: {
+    "smallpen-stroke-geometry":
+      "../smallpen/packages/core/src/stroke-geometry.mjs",
+    "smallpen-token-authoring":
+      "../smallpen/packages/core/src/token-authoring.mjs",
+  },
   bundle: true,
   format: "esm",
   banner: {

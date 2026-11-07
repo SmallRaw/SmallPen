@@ -22,6 +22,8 @@
    [app.main.data.workspace :as dw]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.ui.tokens :as sp-tokens]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
@@ -40,7 +42,6 @@
    [app.main.ui.workspace.sidebar.shortcuts :refer [shortcuts-container*]]
    [app.main.ui.workspace.sidebar.sitemap :refer [sitemap*]]
    [app.main.ui.workspace.sidebar.versions :refer [versions-toolbox*]]
-   [app.main.ui.workspace.tokens.sidebar :refer [tokens-sidebar-tab*]]
    [app.util.dom :as dom]
    [app.util.i18n :refer [tr]]
    [rumext.v2 :as mf]))
@@ -118,7 +119,8 @@
 
 (mf/defc left-sidebar*
   {::mf/memo true}
-  [{:keys [layout file tokens-lib tokens-status active-tokens resolved-active-tokens]}]
+  [{:keys [layout file tokens-lib tokens-status active-tokens resolved-active-tokens
+           current-tokens resolved-current-tokens]}]
   (let [options-mode   (mf/deref refs/options-mode-global)
         project        (mf/deref refs/project)
         file-id        (get file :id)
@@ -128,6 +130,7 @@
         mode-inspect?  (= options-mode :inspect)
         shortcuts?     (contains? layout :shortcuts)
         show-debug?    (contains? layout :debug-panel)
+        show-tokens?   (and (smallpen/enabled?) (contains? layout :tokens-panel))
 
         section        (cond
                          (or mode-inspect? (contains? layout :layers)) :layers
@@ -168,6 +171,7 @@
 
         aside-class
         (stl/css-case :left-sidebar      true
+                      :smallpen-token-matrix show-tokens?
                       :global/two-row    (<= width 300)
                       :global/three-row  (and (> width 300) (<= width 400))
                       :global/four-row   (> width 400))
@@ -202,6 +206,10 @@
         (true? show-debug?)
         [:> debug-panel* {:class (stl/css :left-sidebar-content)}]
 
+        (true? show-tokens?)
+        [:> sp-tokens/token-matrix-panel* {:tokens-lib tokens-lib
+                                           :tokens-status tokens-status}]
+
         :else
         [:div {:class (stl/css  :left-sidebar-content)}
          [:> tab-switcher* {:tabs tabs
@@ -219,11 +227,13 @@
                                  :scroll-store scroll-store*}]
 
             :tokens
-            [:> tokens-sidebar-tab*
+            [:> sp-tokens/tokens-tab*
              {:tokens-lib tokens-lib
               :tokens-status tokens-status
               :active-tokens active-tokens
               :resolved-active-tokens resolved-active-tokens
+              :current-tokens current-tokens
+              :resolved-current-tokens resolved-current-tokens
               :scroll-store scroll-store*}]
 
             :layers
@@ -241,11 +251,13 @@
   {::mf/private true
    ::mf/memo true}
   []
-  (let [selected*
+  (let [remote-history? (smallpen/capability-enabled? :remote-history)
+
+        selected*
         (hooks/use-persisted-state ::history-sidebar "history")
 
         selected
-        (deref selected*)
+        (if remote-history? (deref selected*) "actions")
 
         on-change-tab
         (mf/use-fn
@@ -257,6 +269,11 @@
             :id "history"}
            {:label (tr "workspace.versions.tab.actions")
             :id "actions"}])
+
+        tabs
+        (mf/with-memo [tabs remote-history?]
+          (cond->> tabs
+            (not remote-history?) (filterv #(= "actions" (:id %)))))
 
         button
         (mf/with-memo []
@@ -349,7 +366,7 @@
 
        [:div {:class (stl/css :right-sidebar-content)}
         (cond
-          is-comments?
+          (and is-comments? (smallpen/capability-enabled? :comments))
           [:> comments-sidebar* {}]
 
           is-history?
@@ -409,6 +426,10 @@
                            :page-id page-id
                            :tokens-lib tokens-lib
                            :tokens-status tokens-status
+                           :current-tokens active-tokens
+                           :resolved-current-tokens (if tokenscript?
+                                                      tokenscript-resolved-active-tokens
+                                                      resolved-active-tokens)
                            :active-tokens active-tokens-force-set
                            :resolved-active-tokens (if tokenscript?
                                                      tokenscript-resolved-active-tokens-force-set

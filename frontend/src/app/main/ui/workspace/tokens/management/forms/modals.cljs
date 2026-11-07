@@ -11,6 +11,7 @@
    [app.common.types.tokens-lib :as ctob]
    [app.main.data.modal :as modal]
    [app.main.refs :as refs]
+   [app.main.smallpen.ui.token-modal :as sp-token-modal]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
    [app.main.ui.ds.foundations.assets.icon  :as i]
    [app.main.ui.workspace.tokens.management.forms.form-container :refer [form-container*]]
@@ -22,7 +23,7 @@
 
 (defn- calculate-position
   "Calculates the style properties for the given coordinates and position"
-  [{vh :height} position x y token-type]
+  [{vh :height} position x y token-type rulers?]
   (let [; TODO: Revisit these harcoded values
         modal-height (case token-type
                        :color
@@ -37,13 +38,16 @@
         overflow-fix      (max 0 (+ y (- 50) modal-height (- vh)))
         bottom-offset     "1rem"
         top-offset        (dm/str (- y 70) "px")
-        max-height-top    (str "calc(100vh - " top-offset)
-        max-height-bottom (str "calc(100vh -" bottom-offset)
+        max-height-top    (str "calc(100vh - " top-offset ")")
+        max-height-bottom (str "calc(100vh - " bottom-offset ")")
         x-pos 325
-        rulers?       (mf/deref refs/rulers?)
         left-offset   (if rulers? 80 58)
         left-position (dm/str (- x x-pos) "px")]
     (cond
+      ;; Centered by the caller (`centered-style`), not anchored to x/y.
+      (= position :center)
+      {}
+
       (or (nil? x) (nil? y))
       {:left "auto" :right "16rem" :top "4rem"}
 
@@ -67,16 +71,20 @@
          :top (dm/str (- y 70 overflow-fix) "px")
          :maxHeight max-height-top}))))
 
-(defn- use-viewport-position-style [x y position token-type]
-  (let [vport (-> (l/derived :vport refs/workspace-local)
+(defn- use-viewport-position-style [x y position token-type owner-bounds]
+  (let [rulers? (mf/deref refs/rulers?)
+        vport (-> (l/derived :vport refs/workspace-local)
                   (mf/deref))]
-    (-> (calculate-position vport position x y token-type)
+    (-> (merge (calculate-position vport position x y token-type rulers?)
+               (when (= position :center)
+                 (sp-token-modal/centered-style owner-bounds)))
         (clj->js))))
 
 (mf/defc token-update-create-modal
   {::mf/wrap-props false}
-  [{:keys [x y position token token-type action selected-token-set-id initial-errors] :as _args}]
-  (let [wrapper-style (use-viewport-position-style x y position token-type)
+  [{:keys [x y position token token-type action selected-token-set-id initial-errors
+           on-create-token value-only? value-context owner-bounds] :as _args}]
+  (let [wrapper-style (use-viewport-position-style x y position token-type owner-bounds)
         modal-size-large* (mf/use-state (or (= token-type :typography)
                                             (= token-type :color)
                                             (= token-type :shadow)))
@@ -89,9 +97,12 @@
                              (reset! modal-size-large* visible)))]
     [:div {:class (stl/css-case
                    :token-modal-wrapper true
+                   :token-modal-centered (= position :center)
                    :token-modal-large modal-size-large?)
            :style wrapper-style
            :data-testid "token-update-create-modal"}
+     (when (= position :center)
+       [:> sp-token-modal/backdrop* {}])
      [:> icon-button* {:on-click close-modal
                        :class (stl/css :close-btn)
                        :icon i/close
@@ -103,6 +114,9 @@
                           :selected-token-set-id selected-token-set-id
                           :token-type token-type
                           :initial-errors initial-errors
+                          :on-create-token on-create-token
+                          :value-only? value-only?
+                          :value-context value-context
                           :on-display-colorpicker update-modal-size}]]))
 
 ;; Modals ----------------------------------------------------------------------

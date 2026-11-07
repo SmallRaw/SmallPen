@@ -627,7 +627,7 @@
 
 (defn create-token
   ([token] (create-token nil token))
-  ([set-id token]
+  ([set-id token & {:keys [undo-group]}]
    (ptk/reify ::create-token
      ptk/WatchEvent
      (watch [it state _]
@@ -641,7 +641,8 @@
                            (pcb/with-library-data data)
                            (pcb/set-token (ctob/get-id token-set)
                                           (:id token)
-                                          token))]
+                                          token)
+                           (pcb/set-undo-group undo-group))]
 
            (rx/of (dch/commit-changes changes)
                   (ev/event (-> {::ev/name "create-token" :type token-type}
@@ -683,7 +684,7 @@
 
 (defn update-token
   ([id params] (update-token nil id params))
-  ([set-id id params]
+  ([set-id id params & {:keys [undo-group]}]
    (assert (uuid? id) "expected uuid for `id`")
 
    (ptk/reify ::update-token
@@ -705,7 +706,8 @@
                                (pcb/with-library-data data)
                                (pcb/set-token (ctob/get-id token-set)
                                               id
-                                              token'))]
+                                              token')
+                               (pcb/set-undo-group undo-group))]
              (toggle-token-path (str (name token-type) "." (:name token)))
              (rx/of (dch/commit-changes changes)
                     (ev/event (-> {::ev/name "edit-token" :type token-type}
@@ -743,7 +745,7 @@
                (ptk/data-event ::ev/event {::ev/name "bulk-update-tokens" :type type}))))))
 
 (defn delete-token
-  [set-id token-id]
+  [set-id token-id & {:keys [undo-group]}]
   (dm/assert! (uuid? set-id))
   (dm/assert! (uuid? token-id))
   (ptk/reify ::delete-token
@@ -761,7 +763,8 @@
 
                 changes (-> (pcb/empty-changes it)
                             (pcb/with-library-data data)
-                            (pcb/set-token set-id token-id nil))]
+                            (pcb/set-token set-id token-id nil)
+                            (pcb/set-undo-group undo-group))]
             (rx/of (dch/commit-changes changes)
                    (ev/event (-> {::ev/name "delete-token" :type token-type}
                                  (merge (meta it)))))))))))

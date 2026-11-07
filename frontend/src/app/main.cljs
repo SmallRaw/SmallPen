@@ -20,6 +20,8 @@
    [app.main.errors :as errors]
    [app.main.features :as feat]
    [app.main.rasterizer :as thr]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.routing :as sprt]
    [app.main.store :as st]
    [app.main.ui :as ui]
    [app.main.ui.alert]
@@ -103,7 +105,7 @@
        (->> stream
             (rx/filter dp/profile-fetched?)
             (rx/map deref)
-            (rx/filter dp/is-authenticated?)
+            (rx/filter #(and (dp/is-authenticated? %) (not (smallpen/enabled?))))
             (rx/take 1)
             (rx/map #(ws/initialize)))
 
@@ -135,12 +137,17 @@
       (mw/init!)
       (i18n/init)
       (cur/init-styles)
+      (smallpen/init!)
+      (sprt/install!)
 
       (mf/set-update-scheduler {:on-trip errors/on-update-loop})
 
       (init-ui)
-      (st/emit! (plugins/initialize)
-                (initialize)))))
+      ;; SmallPen's capability profile (loaded after boot) disables plugins.
+      (if (smallpen/enabled?)
+        (st/emit! (initialize))
+        (st/emit! (plugins/initialize)
+                  (initialize))))))
 
 (defn ^:export reinit
   ([]

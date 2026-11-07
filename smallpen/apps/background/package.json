@@ -1,0 +1,19 @@
+{
+  "name": "@smallpen/background",
+  "version": "0.1.0-alpha.21",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "bin": {
+    "smallpen-background": "./bin/smallpen-background.mjs"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "dependencies": {
+    "@smallpen/core": "0.1.0-alpha.21",
+    "@smallpen/local-package": "0.1.0-alpha.21",
+    "@smallpen/penpot-adapter": "0.1.0-alpha.21"
+  }
+}

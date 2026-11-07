@@ -62,15 +62,12 @@
          (obj/set! image "onabort" nil))))))
 
 (defn- svg-get-adjusted-size
-  "Returns the adjusted size of an SVG."
+  "Scales the SVG to the requested output width before bitmap allocation."
   [width height max]
   ;; Guard against zero/NaN dimensions that would cause division by zero
   ;; or produce invalid sizes, leading to createImageBitmap failures.
   (when (and (pos? width) (pos? height))
-    (let [ratio (/ width height)]
-      (if (< width height)
-        [max (* max (/ 1 ratio))]
-        [(* max ratio) max]))))
+    [max (* max (/ height width))]))
 
 (defn- svg-get-size-from-viewbox
   "Returns the size of an SVG from its viewbox."
@@ -109,9 +106,10 @@
 
 (defn- svg-set-intrinsic-size!
   "Sets the intrinsic size of an SVG to the given max size."
-  [^js svg max]
+  [^js svg max height]
   (let [doc   (get-document-element svg)
-        [w h] (or (svg-get-size svg max)
+        [w h] (or (when (some? height) [max height])
+                  (svg-get-size svg max)
                   ;; Fallback: if we can't determine size from viewBox or
                   ;; intrinsic attributes, use the max size as a square.
                   [max max])]
@@ -232,10 +230,10 @@
 
 (defn- svg-prepare
   "Prepares an SVG for rendering (resolves images to Data URIs and adds intrinsic size)."
-  [data styles width]
+  [data styles width height]
   (let [svg (svg-parse data)]
     (->> (svg-resolve-all! svg styles)
-         (rx/map #(svg-set-intrinsic-size! % width))
+         (rx/map #(svg-set-intrinsic-size! % width height))
          (rx/map svg-stringify))))
 
 (defn- bitmap->blob
@@ -253,20 +251,28 @@
 
        (constantly nil)))))
 
+(defn- bitmap-resize-options
+  [width height quality]
+  (cond-> #js {:resizeWidth width
+               :resizeQuality quality}
+    (some? height) (obj/set! "resizeHeight" height)))
+
 (defn- render-image-bitmap
   "Renders a thumbnail using it's SVG and returns an ImageBitmap of the image."
   [payload]
   (let [data   (unchecked-get payload "data")
         styles (unchecked-get payload "styles")
         width  (d/nilv (unchecked-get payload "width") 300)
+        height (unchecked-get payload "height")
         quality (d/nilv (unchecked-get payload "quality") "medium")]
-    (->> (svg-prepare data styles width)
+    (->> (svg-prepare data styles width height)
          (rx/map #(wapi/create-blob % "image/svg+xml"))
          (rx/map wapi/create-uri)
          (rx/mapcat (fn [uri]
                       (->> (create-image uri)
-                           (rx/mapcat #(wapi/create-image-bitmap-with-workaround % #js {:resizeWidth width
-                                                                                        :resizeQuality quality}))
+                           (rx/mapcat #(wapi/create-image-bitmap-with-workaround
+                                        %
+                                        (bitmap-resize-options width height quality)))
                            (rx/tap #(wapi/revoke-uri uri))))))))
 
 (defn- render-blob

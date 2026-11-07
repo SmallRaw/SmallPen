@@ -21,6 +21,7 @@
    [app.main.data.team :as dtm]
    [app.main.repo :as rp]
    [app.main.router :as rt]
+   [app.main.smallpen.viewport :as spvp]
    [app.main.store :as st]
    [app.util.dom :as-alias dom]
    [app.util.i18n :refer [tr]]
@@ -518,8 +519,17 @@
         (rx/of (rt/nav :dashboard-settings {:team-id team-id}))))))
 
 (defn go-to-workspace
-  [& {:keys [team-id file-id page-id layout] :as options}]
+  [& {:keys [team-id file-id page-id layout board-id design-system?] :as options}]
   (ptk/reify ::go-to-workspace
+    ;; SmallPen: generated Design System pages keep their pan/zoom.
+    ptk/UpdateEvent
+    (update [_ state]
+      (spvp/restore-viewport state file-id page-id design-system?))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      (spvp/persist-current-viewport! state))
+
     ptk/WatchEvent
     (watch [_ state _]
       (let [team-id (or team-id (:current-team-id state))
@@ -528,11 +538,17 @@
                         (-> (dsh/lookup-file-data state file-id)
                             (get :pages)
                             (first)))
+            board-id (spvp/initial-board-id state file-id page-id board-id
+                                            design-system?)
 
             params  (-> (rt/get-params state)
                         (assoc :team-id team-id)
                         (assoc :file-id file-id)
                         (assoc :page-id page-id)
+                        ;; DSE-R13: optional frame id so the workspace
+                        ;; zooms to it right after the viewport initializes.
+                        (cond-> (or (some? board-id) design-system?)
+                          (assoc :board-id board-id))
                         (update :layout  #(or layout %))
                         (d/without-nils))]
         (rx/of (rt/nav :workspace params options))))))

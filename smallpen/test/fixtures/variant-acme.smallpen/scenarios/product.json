@@ -1,0 +1,29 @@
+{
+  "scenarios": [
+    {
+      "actions": [],
+      "context": {
+        "axis_platform": "mobile"
+      },
+      "expectedVisibleNodeIds": [
+        "node_home_root"
+      ],
+      "fixture": {},
+      "id": "scn_home_default",
+      "name": "Default",
+      "target": {
+        "kind": "screen",
+        "presentationId": "pres_home_mobile",
+        "screen": {
+          "assetId": "scr_home",
+          "packageId": "pkg_acme"
+        }
+      },
+      "viewport": {
+        "height": 844,
+        "scale": 1,
+        "width": 390
+      }
+    }
+  ]
+}

@@ -42,6 +42,7 @@
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.snap :as snap]
    [app.main.store :as st]
    [app.main.streams :as ms]
@@ -763,7 +764,8 @@
                (d/toggle-selection id shift?))]
 
          ;; Take the first mouse position and start a move or a duplicate
-         (when (or (d/not-empty? selected) (some? id))
+         (when (and (not (dsep/current-page-locked? state))
+                    (or (d/not-empty? selected) (some? id)))
            (->> ms/mouse-position
                 (rx/map #(gpt/to-vec initial %))
                 (rx/map #(gpt/length %))
@@ -1250,8 +1252,8 @@
         (if (every? #(and (ctl/any-layout-immediate-child? objects %)
                           (not (ctl/position-absolute? %)))
                     selected-shapes)
-          (rx/of (reorder-selected-layout-child direction))
-          (rx/of (nudge-selected-shapes direction shift?)))))))
+          (dsep/unless-locked state (reorder-selected-layout-child direction))
+          (dsep/unless-locked state (nudge-selected-shapes direction shift?)))))))
 
 (defn- calculate-delta
   [position bbox relative-to]

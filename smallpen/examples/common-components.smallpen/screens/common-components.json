@@ -1,0 +1,230 @@
+{
+  "id": "scr_common_components",
+  "name": "Composition example",
+  "basePresentationId": "pres_demo_desktop",
+  "counterparts": [],
+  "presentations": [
+    {
+      "id": "pres_demo_desktop",
+      "name": "Desktop",
+      "platform": "desktop",
+      "rootId": "node_demo_workspace",
+      "interactions": [],
+      "viewport": {
+        "width": 840,
+        "height": 620
+      },
+      "nodes": {
+        "node_demo_workspace": {
+          "id": "node_demo_workspace",
+          "name": "Workspace / composed page",
+          "type": "FRAME",
+          "x": 0,
+          "y": 0,
+          "width": 840,
+          "height": 620,
+          "children": [
+            "node_demo_page_title",
+            "node_demo_page_badge",
+            "node_demo_page_input",
+            "node_demo_page_button",
+            "node_demo_page_dialog",
+            "node_demo_page_note",
+            "node_demo_page_note2"
+          ],
+          "cornerRadius": 8,
+          "tokenBindings": {
+            "cornerRadius": {
+              "packageId": "pkg_design_system",
+              "assetId": "tok_radius_md_base"
+            },
+            "fill": {
+              "packageId": "pkg_design_system",
+              "assetId": "tok_demo_light_canvas"
+            }
+          },
+          "fills": [
+            {
+              "type": "solid",
+              "color": "#f5f3f8"
+            }
+          ]
+        },
+        "node_demo_page_title": {
+          "id": "node_demo_page_title",
+          "name": "Title instance",
+          "type": "INSTANCE",
+          "x": 24,
+          "y": 24,
+          "width": 320,
+          "height": 76,
+          "children": [],
+          "instance": {
+            "component": {
+              "packageId": "pkg_design_system",
+              "assetId": "cmp_demo_title"
+            },
+            "variant": {
+              "axis_demo_level": "page"
+            },
+            "overrides": {}
+          }
+        },
+        "node_demo_page_badge": {
+          "id": "node_demo_page_badge",
+          "name": "Badge instance",
+          "type": "INSTANCE",
+          "x": 690,
+          "y": 46,
+          "width": 108,
+          "height": 32,
+          "children": [],
+          "instance": {
+            "component": {
+              "packageId": "pkg_design_system",
+              "assetId": "cmp_demo_badge"
+            },
+            "variant": {
+              "axis_demo_tone": "success"
+            },
+            "overrides": {}
+          }
+        },
+        "node_demo_page_input": {
+          "id": "node_demo_page_input",
+          "name": "Input instance",
+          "type": "INSTANCE",
+          "x": 24,
+          "y": 132,
+          "width": 320,
+          "height": 104,
+          "children": [],
+          "instance": {
+            "component": {
+              "packageId": "pkg_design_system",
+              "assetId": "cmp_demo_input"
+            },
+            "variant": {
+              "axis_demo_state": "focus"
+            },
+            "overrides": {}
+          }
+        },
+        "node_demo_page_button": {
+          "id": "node_demo_page_button",
+          "name": "Button instance",
+          "type": "INSTANCE",
+          "x": 40,
+          "y": 256,
+          "width": 152,
+          "height": 44,
+          "children": [],
+          "instance": {
+            "component": {
+              "packageId": "pkg_design_system",
+              "assetId": "cmp_demo_button"
+            },
+            "variant": {
+              "axis_demo_style": "primary",
+              "axis_demo_content": "text",
+              "axis_demo_state": "default"
+            },
+            "overrides": {
+              "node_button_primary_text_default_label:text": "Save changes"
+            }
+          }
+        },
+        "node_demo_page_dialog": {
+          "id": "node_demo_page_dialog",
+          "name": "Dialog instance",
+          "type": "INSTANCE",
+          "x": 424,
+          "y": 132,
+          "width": 392,
+          "height": 300,
+          "children": [],
+          "instance": {
+            "component": {
+              "packageId": "pkg_design_system",
+              "assetId": "cmp_demo_dialog"
+            },
+            "variant": {
+              "axis_demo_kind": "form"
+            },
+            "overrides": {}
+          }
+        },
+        "node_demo_page_note": {
+          "id": "node_demo_page_note",
+          "name": "Components above are reused here as instances.",
+          "type": "TEXT",
+          "text": "Components above are reused here as instances.",
+          "x": 40,
+          "y": 502,
+          "width": 740,
+          "height": 19,
+          "children": [],
+          "textStyle": {
+            "fontFamily": "Inter",
+            "fontId": "gfont-inter",
+            "fontSize": 14,
+            "fontWeight": 500,
+            "lineHeight": 1.2,
+            "fontVariantId": "500"
+          },
+          "tokenBindings": {
+            "typography": {
+              "packageId": "pkg_design_system",
+              "assetId": "tok_demo_type_label"
+            },
+            "fill": {
+              "packageId": "pkg_design_system",
+              "assetId": "tok_demo_light_ink"
+            }
+          },
+          "fills": [
+            {
+              "type": "solid",
+              "color": "#25232c"
+            }
+          ]
+        },
+        "node_demo_page_note2": {
+          "id": "node_demo_page_note2",
+          "name": "Save changes is a local label override; the source still says Continue.",
+          "type": "TEXT",
+          "text": "Save changes is a local label override; the source still says Continue.",
+          "x": 40,
+          "y": 536,
+          "width": 740,
+          "height": 19,
+          "children": [],
+          "textStyle": {
+            "fontFamily": "Inter",
+            "fontId": "gfont-inter",
+            "fontSize": 14,
+            "fontWeight": 500,
+            "lineHeight": 1.2,
+            "fontVariantId": "500"
+          },
+          "tokenBindings": {
+            "typography": {
+              "packageId": "pkg_design_system",
+              "assetId": "tok_demo_type_label"
+            },
+            "fill": {
+              "packageId": "pkg_design_system",
+              "assetId": "tok_demo_light_muted"
+            }
+          },
+          "fills": [
+            {
+              "type": "solid",
+              "color": "#74717d"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

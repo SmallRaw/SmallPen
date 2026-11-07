@@ -365,11 +365,14 @@ fn distribute_fill_across_space(layout_axis: &LayoutAxis, tracks: &mut [TrackDat
             if child.is_fill_across {
                 let mut size =
                     track.across_size - child.margin_across_start - child.margin_across_end;
-                size = size.clamp(child.min_across_size, child.max_across_size);
-
                 if !layout_axis.is_auto_across {
                     size = f32::min(size, layout_axis.across_space());
                 }
+                // Padding can exceed a container's current size while an
+                // ancestor is being reflowed. A negative fill size reflects
+                // the child and its text; overflow must retain a positive
+                // size instead. Apply the minimum after the available space.
+                size = size.clamp(child.min_across_size, child.max_across_size);
                 child.across_size = size;
             }
         }

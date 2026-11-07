@@ -28,6 +28,7 @@
    [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.svg-upload :as svg]
    [app.main.repo :as rp]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.store :as st]
    [app.util.http :as http]
    [app.util.i18n :refer [tr]]
@@ -93,6 +94,16 @@
                    :fills fills}]
 
         (rx/of (dwsh/create-and-add-shape :rect x y shape))))))
+
+(defn place-library-media
+  "Place an existing local or linked-library Media asset at the viewport center
+  without copying its bytes. The Penpot adapter preserves the owning Package as
+  the canonical qualified mediaRef when the change is committed."
+  [media-obj]
+  (ptk/reify ::place-library-media
+    ptk/WatchEvent
+    (watch [_ state _]
+      (rx/of (image-uploaded media-obj (dsh/get-viewport-center state))))))
 
 (defn svg-uploaded
   [svg-data file-id position]
@@ -280,7 +291,12 @@
                       :local? true
                       :on-image #(st/emit! (image-uploaded % position))
                       :on-svg   #(st/emit! (svg-uploaded % file-id position)))]
-    (process-media-objects params)))
+    (ptk/reify ::upload-media-workspace
+      ptk/WatchEvent
+      (watch [_ state _]
+        (if (dsep/current-page-locked? state)
+          (rx/of (dsep/blocked-warning :structure))
+          (rx/of (process-media-objects params)))))))
 
 (defn upload-fill-image
   [file on-success]

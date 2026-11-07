@@ -16,6 +16,7 @@
    [app.common.data.macros :as dm]
    [app.common.render-wasm.helpers :as h]
    [app.common.render-wasm.mem :as mem]
+   [app.common.render-wasm.precision :as precision]
    [app.common.render-wasm.serializers :as sr]
    [app.common.render-wasm.serializers.color :as sr-clr]
    [app.common.render-wasm.wasm :as wasm]
@@ -87,6 +88,8 @@
            (dm/get-prop selrect :x2)
            (dm/get-prop selrect :y2)]
           [0.0 0.0 0.0 0.0])
+        [sx1 sx2] (precision/size-preserving-range sx1 sx2)
+        [sy1 sy2] (precision/size-preserving-range sy1 sy2)
         r1 (d/nilv (get shape :r1) 0.0)
         r2 (d/nilv (get shape :r2) 0.0)
         r3 (d/nilv (get shape :r3) 0.0)

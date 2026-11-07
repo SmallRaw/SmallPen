@@ -27,6 +27,17 @@
   &.token-modal-large {
     max-block-size: 95vh;
   }
+
+  &.token-modal-centered {
+    position: fixed;
+    z-index: calc(var(--z-index-set) + 1);
+    box-sizing: border-box;
+    inline-size: min(32rem, 100%);
+    block-size: fit-content;
+    min-height: 0;
+    max-width: none;
+    margin: auto;
+  }
 }
 
 .close-btn {

@@ -197,7 +197,8 @@
           (dom/remove-attribute! checkbox "indeterminate"))))
 
     [:section {:class (stl/css :fill-section)
-               :aria-label (tr "workspace.options.fill.section")}
+               :aria-label (tr "workspace.options.fill.section")
+               :data-testid "shape-fill-section"}
      [:div {:class (stl/css :fill-title)}
       [:> title-bar* {:collapsable  has-fills?
                       :collapsed    (not open?)

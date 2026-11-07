@@ -588,6 +588,66 @@
            (and (row? objects frame-id)
                 (every? (partial fill-height? objects) children-ids)))))
 
+(defn fix-child-sizing
+  "A flex parent that hugs an axis cannot keep a child that fills it: the
+  child of `parent` becomes fixed on that axis. `children` are the
+  parent's children."
+  [parent children child]
+  (let [auto-width?  (auto-width? parent)
+        auto-height? (auto-height? parent)
+        col?         (col? parent)
+        row?         (row? parent)
+        children     (remove position-absolute? children)]
+    (cond-> child
+      ;; If the parent is hug width and the direction column
+      ;; change to fixed when ALL children are fill
+      (and col? auto-width? (every? fill-width? children))
+      (assoc :layout-item-h-sizing :fix)
+
+      ;; If the parent is hug height and the direction is column
+      ;; change to fixed when ANY children is fill
+      (and col? auto-height? (fill-height? child))
+      (assoc :layout-item-v-sizing :fix)
+
+      ;; If the parent is hug width and the direction row
+      ;; change to fixed when ANY children is fill
+      (and row? auto-width? (fill-width? child))
+      (assoc :layout-item-h-sizing :fix)
+
+      ;; If the parent is hug height and the direction row
+      ;; change to fixed when ALL children are fill
+      (and row? auto-height? (every? fill-height? children))
+      (assoc :layout-item-v-sizing :fix))))
+
+(defn fix-parent-sizing
+  "A flex parent that hugs an axis its children fill becomes fixed on that
+  axis. `children` are the parent's children, with their changes."
+  [parent children]
+  (let [auto-width?  (auto-width? parent)
+        auto-height? (auto-height? parent)
+        col?         (col? parent)
+        row?         (row? parent)]
+    (cond-> parent
+      ;; Col layout and parent is hug-width if all children are fill-width
+      ;; change parent to fixed
+      (and col? auto-width? (every? fill-width? children))
+      (assoc :layout-item-h-sizing :fix)
+
+      ;; Col layout and parent is hug-height if any children is fill-height
+      ;; change parent to fixed
+      (and col? auto-height? (some fill-height? children))
+      (assoc :layout-item-v-sizing :fix)
+
+      ;; Row layout and parent is hug-width if any children is fill-width
+      ;; change parent to fixed
+      (and row? auto-width? (some fill-width? children))
+      (assoc :layout-item-h-sizing :fix)
+
+      ;; Row layout and parent is hug-height if all children are fill-height
+      ;; change parent to fixed
+      (and row? auto-height? (every? fill-height? children))
+      (assoc :layout-item-v-sizing :fix))))
+
 (defn remove-layout-container-data
   [shape]
   (dissoc shape

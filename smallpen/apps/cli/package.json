@@ -1,0 +1,27 @@
+{
+  "name": "@smallpen/cli",
+  "version": "0.1.0-alpha.21",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    "./launcher": "./bin/smallpen-check.cjs"
+  },
+  "bin": {
+    "smallpen": "./bin/smallpen-check.cjs"
+  },
+  "files": [
+    "bin",
+    "skills"
+  ],
+  "dependencies": {
+    "@smallpen/core": "0.1.0-alpha.21",
+    "@smallpen/local-package": "0.1.0-alpha.21"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SmallRaw/SmallPen.git",
+    "directory": "smallpen/apps/cli"
+  }
+}

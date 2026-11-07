@@ -1,0 +1,31 @@
+{
+  "entries": {
+    "assets": [],
+    "components": [
+      "components/components.json"
+    ],
+    "contexts": [],
+    "requirements": [],
+    "scenarios": [],
+    "screens": [
+      "screens/screen.json"
+    ],
+    "tokens": [
+      "tokens/tokens.json"
+    ]
+  },
+  "formatVersion": 1,
+  "name": "Design System Fixture",
+  "packageId": "pkg_design_system",
+  "role": "foundation",
+  "defaultScreenId": "scr_design_system",
+  "libraries": [
+    {
+      "packageId": "pkg_dsp_shared",
+      "source": {
+        "path": "dsp-shared.smallpen",
+        "type": "local"
+      }
+    }
+  ]
+}

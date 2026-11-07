@@ -1,0 +1,3 @@
+# Use Penpot token sets and themes for themes
+
+SmallPen expresses themes only as Penpot token sets and themes, the model Penpot's token manager, Tokens Studio and DTCG `$themes` share, because per-Token `contextValues` on theme Context Axes rendered in the CLI but never reached Penpot's token manager, so the two surfaces disagreed. The default layout is one self-contained Package; in the Foundation + Product layout the Foundation owns the sets and themes and the Product stores its choice of Foundation theme ids on its dependency. Packages that use `contextValues` still load, render, and accept writes with a warning, and `migrate-themes` upgrades them by copy (ADR 0003). The contract is `smallpen/docs/TOKEN-THEMES.md`.

@@ -14,6 +14,9 @@
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.assets :as dwa]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.dse :as dse]
+   [app.main.smallpen.ui.assets :as spa]
    [app.main.store :as st]
    [app.main.ui.components.context-menu-a11y :refer [context-menu*]]
    [app.main.ui.components.search-bar :refer [search-bar*]]
@@ -188,7 +191,12 @@
             :handler on-section-filter-change}
            {:name    (tr "workspace.assets.typography")
             :id      "typographies"
-            :handler on-section-filter-change}])]
+            :handler on-section-filter-change}])
+
+        options
+        (mf/with-memo [options]
+          (cond-> options
+            (smallpen/enabled?) (spa/section-filter-options)))]
 
     (mf/with-effect [file-id term section]
       (swap! session-filters* assoc file-id {:term term :section section}))
@@ -197,6 +205,7 @@
 
     [:article  {:class (stl/css :assets-bar)
                 :data-scroll-container true
+                :data-smallpen-compact (when (smallpen/enabled?) "true")
                 :on-scroll on-scroll-save
                 :ref assets-ref}
      [:div {:class (stl/css :assets-header)}
@@ -245,6 +254,11 @@
                          :aria-label (tr "workspace.assets.sort")
                          :on-click toggle-ordering
                          :icon (if reverse-sort? "asc-sort" "desc-sort")}]]]
+
+     ;; Drag-free "add component to a source container", only shown on the
+     ;; generated SmallPen Design System page.
+     (when (smallpen/enabled?)
+       [:> dse/insert-panel* {}])
 
      [:& (mf/provider cmm/assets-filters) {:value filters}
       [:& (mf/provider cmm/assets-toggle-ordering) {:value toggle-ordering}

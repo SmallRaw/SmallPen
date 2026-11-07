@@ -26,6 +26,10 @@
   overflow: auto;
 }
 
+.colorpicker-wide {
+  --colorpicker-width: min(#{$sz-384}, calc(100vw - (2 * var(--sp-m))));
+}
+
 .colorpicker {
   border-radius: $br-8;
   overflow: hidden;

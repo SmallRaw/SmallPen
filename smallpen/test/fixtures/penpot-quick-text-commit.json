@@ -1,0 +1,193 @@
+{
+  "baseRevision": "a2d28b2221b14b31f0d4e41e578a70a1b6a45199df762990ce70066f2f0271c5",
+  "changes": [
+    {
+      "type": "add-obj",
+      "id": "b85335c7-6185-80fe-8008-b8fc70fcfb6c",
+      "page-id": "d942cb6f-ffc6-52ba-a563-605e0810d1ef",
+      "parent-id": "07a3abf1-5e40-50f6-9f87-05ec221d1e6a",
+      "frame-id": "07a3abf1-5e40-50f6-9f87-05ec221d1e6a",
+      "index": null,
+      "ignore-touched": false,
+      "obj": {
+        "width": 200,
+        "height": 50,
+        "flip-x": null,
+        "points": [
+          {
+            "x": 380,
+            "y": 300
+          },
+          {
+            "x": 580,
+            "y": 300
+          },
+          {
+            "x": 580,
+            "y": 350
+          },
+          {
+            "x": 380,
+            "y": 350
+          }
+        ],
+        "grow-type": "fixed",
+        "x": 380,
+        "id": "b85335c7-6185-80fe-8008-b8fc70fcfb6c",
+        "transform": {
+          "a": 1,
+          "b": 0,
+          "c": 0,
+          "d": 1,
+          "e": 0,
+          "f": 0
+        },
+        "selrect": {
+          "x": 380,
+          "y": 300,
+          "width": 200,
+          "height": 50,
+          "x1": 380,
+          "y1": 300,
+          "x2": 580,
+          "y2": 350
+        },
+        "frame-id": "07a3abf1-5e40-50f6-9f87-05ec221d1e6a",
+        "name": "Text",
+        "rotation": 0,
+        "transform-inverse": {
+          "a": 1,
+          "b": 0,
+          "c": 0,
+          "d": 1,
+          "e": 0,
+          "f": 0
+        },
+        "type": "text",
+        "y": 300,
+        "hide-in-viewer": false,
+        "flip-y": null,
+        "parent-id": "07a3abf1-5e40-50f6-9f87-05ec221d1e6a"
+      }
+    },
+    {
+      "type": "mov-objects",
+      "parent-id": "07a3abf1-5e40-50f6-9f87-05ec221d1e6a",
+      "page-id": "d942cb6f-ffc6-52ba-a563-605e0810d1ef",
+      "shapes": [
+        "b85335c7-6185-80fe-8008-b8fc70fcfb6c"
+      ]
+    },
+    {
+      "type": "mod-obj",
+      "id": "b85335c7-6185-80fe-8008-b8fc70fcfb6c",
+      "page-id": "d942cb6f-ffc6-52ba-a563-605e0810d1ef",
+      "operations": [
+        {
+          "type": "set",
+          "attr": "content",
+          "val": {
+            "type": "root",
+            "children": [
+              {
+                "type": "paragraph-set",
+                "children": [
+                  {
+                    "line-height": "1.2",
+                    "font-family": "sourcesanspro",
+                    "fills": [
+                      {
+                        "fill-color": "#000000",
+                        "fill-opacity": 1
+                      }
+                    ],
+                    "key": "5kb3o",
+                    "children": [
+                      {
+                        "line-height": "1.2",
+                        "font-family": "sourcesanspro",
+                        "fills": [
+                          {
+                            "fill-color": "#000000",
+                            "fill-opacity": 1
+                          }
+                        ],
+                        "text-transform": "none",
+                        "text-align": "left",
+                        "text": "Hello 世界",
+                        "font-weight": "400",
+                        "text-decoration": "none",
+                        "text-direction": "ltr",
+                        "font-size": "14",
+                        "letter-spacing": "0",
+                        "font-style": "normal",
+                        "font-id": "sourcesanspro",
+                        "font-variant-id": "regular"
+                      }
+                    ],
+                    "text-transform": "none",
+                    "text-align": "left",
+                    "font-weight": "400",
+                    "typography-ref-file": null,
+                    "text-decoration": "none",
+                    "text-direction": "ltr",
+                    "type": "paragraph",
+                    "font-size": "14",
+                    "letter-spacing": "0",
+                    "typography-ref-id": null,
+                    "font-style": "normal",
+                    "font-id": "sourcesanspro",
+                    "font-variant-id": "regular"
+                  }
+                ]
+              }
+            ]
+          },
+          "ignore-geometry": false,
+          "ignore-touched": false
+        },
+        {
+          "type": "set",
+          "attr": "name",
+          "val": "Hello 世界",
+          "ignore-geometry": false,
+          "ignore-touched": false
+        },
+        {
+          "type": "set",
+          "attr": "position-data",
+          "val": [
+            {
+              "y1": -1,
+              "width": 61.625,
+              "x1": 0,
+              "font-family": "sourcesanspro",
+              "height": 18,
+              "fills": [
+                {
+                  "fill-color": "#000000",
+                  "fill-opacity": 1
+                }
+              ],
+              "text-transform": "none",
+              "x": 380,
+              "direction": "ltr",
+              "text": "Hello 世界",
+              "font-weight": "400",
+              "text-decoration": "none",
+              "font-size": "14px",
+              "y": 317,
+              "x2": 61.625,
+              "letter-spacing": "normal",
+              "y2": 17,
+              "font-style": "normal"
+            }
+          ],
+          "ignore-geometry": false,
+          "ignore-touched": false
+        }
+      ]
+    }
+  ],
+  "commitId": "b85335c7-6185-80fe-8008-b8fc719b4f62"
+}

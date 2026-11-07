@@ -13,6 +13,10 @@ $assets-button-width: deprecated.$s-28;
 
 .colors-group {
   margin-top: deprecated.$s-4;
+
+  :global([data-smallpen-compact]) & {
+    margin-block-start: var(--sp-xxs);
+  }
 }
 
 .asset-list {
@@ -31,6 +35,10 @@ $assets-button-width: deprecated.$s-28;
   border-radius: deprecated.$br-8;
   background-color: var(--assets-item-background-color);
   cursor: pointer;
+
+  :global([data-smallpen-compact]) & {
+    margin-block-end: var(--sp-xxs);
+  }
 
   &.selected {
     border: deprecated.$s-1 solid var(--assets-item-border-color);

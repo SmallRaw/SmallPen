@@ -16,10 +16,12 @@
    [app.common.uuid :as uuid]
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
+   [app.main.data.notifications :as ntf]
    [app.main.data.persistence.commits :as pcm]
    [app.main.data.persistence.lock :as plk]
    [app.main.data.workspace :as-alias dw]
    [app.main.features :as features]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.worker :as mw]
    [app.render-wasm.api :as wasm.api]
    [app.render-wasm.shape :as wasm.shape]
@@ -294,9 +296,12 @@
     (watch [_ state _]
       (let [file-id     (or file-id (:current-file-id state))
             uchg        (vec undo-changes)
-            rchg        (vec redo-changes)
+            rchg        (dsep/without-copied-identity (get-in state [:files file-id])
+                                                      (vec redo-changes))
             features    (get state :features)
-            permissions (get state :permissions)]
+            permissions (get state :permissions)
+            blocked     (dsep/commit-block-reason (get-in state [:files file-id]) rchg
+                                                  (ptk/type (:origin params)))]
 
         ;; Historical previews must not create edits to the live file. Check
         ;; this when creating commits so previously queued edits can still save.
@@ -305,7 +310,8 @@
         ;; uniformly subscribe and observe termination.
         (if (and (:can-edit permissions)
                  (not (dm/get-in state [:workspace-global :preview-id]))
-                 (or ignore-save-lock (not (plk/locked? state))))
+                 (or ignore-save-lock (not (plk/locked? state)))
+                 (not blocked))
           (do
             (log/trace :hint "commit-changes" :redo-changes redo-changes)
             (let [selected   (dm/get-in state [:workspace-local :selected])
@@ -328,4 +334,6 @@
                          (assoc :translation? translation?)
                          (assoc :skip-component-sync? skip-component-sync?)
                          (commit)))))
-          (rx/empty))))))
+          (if (and blocked save-undo?)
+            (rx/of (ntf/warn (dsep/blocked-message blocked)))
+            (rx/empty)))))))

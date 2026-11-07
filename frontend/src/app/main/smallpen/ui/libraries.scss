@@ -1,0 +1,151 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+@use "ds/_sizes.scss" as *;
+@use "ds/_borders.scss" as *;
+@use "ds/_utils.scss" as *;
+@use "ds/typography.scss" as t;
+@use "ds/mixins.scss" as *;
+
+.libraries-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-xxxl);
+  max-height: $sz-400;
+  padding-block-start: var(--sp-l);
+}
+
+.library-section {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  align-content: start;
+  gap: var(--sp-s);
+  min-width: 0;
+}
+
+.title-spacing {
+  margin: 0 0 0 calc(-1 * var(--sp-s));
+}
+
+.library-list {
+  display: grid;
+  grid-auto-rows: min-content;
+  gap: var(--sp-s);
+  max-height: px2rem(320);
+  overflow-y: auto;
+}
+
+.library-list-empty {
+  margin-block: var(--sp-l);
+  text-align: center;
+  color: var(--color-foreground-secondary);
+}
+
+.library-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-s);
+  padding: var(--sp-m);
+  border: $b-1 solid var(--color-background-quaternary);
+  border-radius: $br-8;
+}
+
+.library-content {
+  min-width: 0;
+}
+
+.library-name {
+  @include t.use-typography("body-large");
+  @include text-ellipsis;
+
+  color: var(--library-name-foreground-color);
+}
+
+.library-source,
+.library-summary {
+  @include t.use-typography("body-small");
+
+  color: var(--library-content-foreground-color);
+}
+
+.library-source {
+  @include text-ellipsis;
+
+  margin-block: var(--sp-xxs);
+}
+
+.library-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--sp-xs);
+}
+
+.library-form {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-m);
+}
+
+.source-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: var(--sp-xxs);
+  border-radius: $br-8;
+  background: var(--color-background-secondary);
+}
+
+.source-option {
+  @include t.use-typography("body-small");
+
+  min-height: $sz-32;
+  padding-inline: var(--sp-m);
+  color: var(--color-foreground-secondary);
+  border: 0;
+  border-radius: $br-6;
+  background: transparent;
+  cursor: pointer;
+}
+
+.source-selected {
+  color: var(--color-foreground-primary);
+  background: var(--color-background-quaternary);
+}
+
+.source-label {
+  @include t.use-typography("body-small");
+
+  display: grid;
+  gap: var(--sp-xs);
+  color: var(--color-foreground-secondary);
+}
+
+.source-input {
+  @include t.use-typography("body-medium");
+
+  width: 100%;
+  height: $sz-40;
+  padding-inline: var(--sp-m);
+  color: var(--color-foreground-primary);
+  border: $b-1 solid var(--color-background-quaternary);
+  border-radius: $br-8;
+  background: var(--color-background-primary);
+
+  &:focus {
+    outline: $b-2 solid var(--color-accent-primary);
+    outline-offset: -$b-1;
+  }
+}
+
+.source-help,
+.library-error {
+  @include t.use-typography("body-small");
+
+  margin: 0;
+  color: var(--color-foreground-secondary);
+}
+
+.library-error {
+  color: var(--color-foreground-error);
+}

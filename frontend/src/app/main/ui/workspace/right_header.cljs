@@ -16,6 +16,7 @@
    [app.main.data.workspace.history :as dwh]
    [app.main.data.workspace.shortcuts :as sc]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.components.dropdown :refer [dropdown]]
    [app.main.ui.context :as ctx]
@@ -200,8 +201,9 @@
         (dom/select-text! (mf/ref-val input-ref))))
 
     [:div {:class (stl/css :workspace-header-right)}
-     [:div {:class (stl/css :users-section)}
-      [:> active-sessions*]]
+     (when (smallpen/capability-enabled? :presence)
+       [:div {:class (stl/css :users-section)}
+        [:> active-sessions*]])
 
      [:& progress-widget]
 
@@ -216,7 +218,8 @@
         :on-zoom-fit on-zoom-fit
         :on-zoom-selected on-zoom-selected}]]
 
-     [:div {:class (stl/css :comments-section)}
+     [:div {:class (stl/css :comments-section)
+            :hidden (not (smallpen/capability-enabled? :comments))}
       [:> icon-button* {:variant "action"
                         :class (stl/css :comments-btn)
                         :tooltip-placement "bottom-left"
@@ -249,4 +252,3 @@
                        :aria-label (tr "workspace.header.viewer" (get-tt :open-viewer))
                        :icon i/play
                        :on-click nav-to-viewer}]]))
-

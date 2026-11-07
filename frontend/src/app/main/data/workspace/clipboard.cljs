@@ -51,6 +51,7 @@
    [app.main.refs :as refs]
    [app.main.repo :as rp]
    [app.main.router :as rt]
+   [app.main.smallpen.edit-policy :as dsep]
    [app.main.store :as st]
    [app.main.streams :as ms]
    [app.render-wasm.text-paste :as text-paste]
@@ -352,12 +353,14 @@
    (ptk/reify ::paste-from-clipboard
      ptk/WatchEvent
      (watch [_ state _]
-       (if (page-ready? (dsh/lookup-page-objects state))
+       ;; SmallPen DS pages refuse pastes before media gets uploaded.
+       (if (and (page-ready? (dsh/lookup-page-objects state))
+                (not (dsep/current-page-locked? state)))
          (->> (clipboard/from-navigator (clipboard-options state))
               (rx/mapcat (create-paste-from-blob false (boolean replace?)))
               (rx/take 1)
               (rx/catch on-clipboard-permission-error))
-         (rx/empty))))))
+         (dsep/blocked-stream state))))))
 
 (defn paste-from-event
   "Perform a `paste` operation from user emmited event."
@@ -372,8 +375,8 @@
         ;; Some paste events can be fired while we're editing a text
         ;; we forbid that scenario so the default behaviour is executed.
         ;; Pastes arriving before the page is loaded are ignored as well.
-        (if (or is-editing? (not (page-ready? objects)))
-          (rx/empty)
+        (if (or is-editing? (not (page-ready? objects)) (dsep/current-page-locked? state))
+          (if is-editing? (rx/empty) (dsep/blocked-stream state))
           (->> (clipboard/from-synthetic-clipboard-event event (clipboard-options state))
                (rx/mapcat (create-paste-from-blob in-viewport? false))))))))
 

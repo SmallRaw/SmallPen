@@ -16,6 +16,7 @@
    [app.main.features :as features]
    [app.main.repo :as rp]
    [app.main.router :as rt]
+   [app.main.smallpen.routing :as sprt]
    [app.main.store :as st]
    [app.util.storage :as storage]
    [beicon.v2.core :as rx]
@@ -65,6 +66,7 @@
           :dashboard-deleted
           :workspace}
         (concat
+         [:smallpen-home :smallpen-design-system]
          (when (contains? cf/flags :admin-console)
            [:nitrate-entry])
          (when *assert*
@@ -268,10 +270,16 @@
         ;; (e.g. `template`) are forwarded to the dashboard or kept for
         ;; after login.
         root?        (nil? (rt/get-query-param query-params :screen))
-        match        (rt/match router token)]
-    (if (some? match)
+        match        (rt/match router token)
+        redirect     (sprt/redirect match query-params)]
+    (cond
+      (some? redirect)
+      (st/emit! redirect)
+
+      (some? match)
       (handle-sso-error-and-navigate match send-event-info? (rt/get-current-href))
 
+      :else
       ;; We just recheck with an additional profile request; this
       ;; avoids some race conditions that causes unexpected redirects
       ;; on invitations workflows (and probably other cases).

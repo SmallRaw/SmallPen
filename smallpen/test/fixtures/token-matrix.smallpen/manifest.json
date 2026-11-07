@@ -1,0 +1,16 @@
+{
+  "defaultScreenId": "scr_roundtrip",
+  "entries": {
+    "assets": [],
+    "components": [],
+    "contexts": [],
+    "requirements": [],
+    "scenarios": [],
+    "screens": ["screens/roundtrip.json"],
+    "tokens": ["tokens/design.json"]
+  },
+  "formatVersion": 1,
+  "name": "SmallPen Token Matrix",
+  "packageId": "pkg_token_matrix",
+  "role": "foundation"
+}

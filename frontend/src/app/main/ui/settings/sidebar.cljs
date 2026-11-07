@@ -13,6 +13,7 @@
    [app.main.data.modal :as modal]
    [app.main.data.team :as dtm]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.dashboard.sidebar :refer [profile-section*]]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
@@ -144,10 +145,39 @@
                      :class (stl/css :feedback-icon)}]
           [:span {:class (stl/css :element-title)} (tr "labels.contact-us")]])]]]))
 
+(def ^:private go-smallpen-home
+  #(st/emit! (rt/nav :smallpen-home)))
+
+(mf/defc smallpen-sidebar-content*
+  "SmallPen has no account, team or subscription; its settings only hold
+  the local preferences."
+  {::mf/private true}
+  []
+  [:div {:class (stl/css :sidebar-content)}
+   [:div {:class (stl/css :sidebar-content-section)}
+    [:button {:class (stl/css :back-to-dashboard)
+              :on-click go-smallpen-home}
+     [:> icon* {:icon-id i/arrow-left
+                :class (stl/css :arrow-icon)}]
+     [:span {:class (stl/css :back-text)} (tr "smallpen.home.navigation")]]]
+
+   [:hr {:class (stl/css :sidebar-separator)}]
+
+   [:nav {:class (stl/css :sidebar-content-section)
+          :aria-label (tr "labels.settings")}
+    [:ul {:class (stl/css :sidebar-nav-settings)}
+     [:li {:class (stl/css :current :settings-item)
+           :on-click go-settings-options
+           :data-testid "settings-profile"}
+      [:span {:class (stl/css :element-title)} (tr "labels.settings")]]]]])
+
 (mf/defc sidebar*
   {::mf/wrap [mf/memo]}
   [{:keys [profile section]}]
   [:aside {:class (stl/css :dashboard-sidebar :settings)}
-   [:> sidebar-content* {:profile profile
-                         :section section}]
-   [:> profile-section* {:profile profile}]])
+   (if (smallpen/enabled?)
+     [:> smallpen-sidebar-content* {}]
+     [:> sidebar-content* {:profile profile
+                           :section section}])
+   (when-not (smallpen/enabled?)
+     [:> profile-section* {:profile profile}])])

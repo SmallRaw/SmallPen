@@ -19,6 +19,7 @@
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.collapse :as dwc]
    [app.main.refs :as refs]
+   [app.main.smallpen.ui.layers :as sp-layers]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
@@ -176,7 +177,8 @@
                         :variant-error variant-error
                         :component-id component-id
                         :is-hidden hidden?
-                        :on-tab-press on-tab-press}]]
+                        :on-tab-press on-tab-press}]
+       [:> sp-layers/design-system-badge* {:shape item}]]
       (when (not ^boolean is-read-only)
         [:div {:class (stl/css-case
                        :element-actions true

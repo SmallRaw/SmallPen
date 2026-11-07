@@ -16,6 +16,7 @@
    [app.main.data.workspace :as dw]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen.ui.layers :as sp-layers]
    [app.main.store :as st]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.context :as ctx]
@@ -136,13 +137,14 @@
 
         on-blur
         (mf/use-fn
-         (mf/deps id is-separator?)
+         (mf/deps id is-separator? name)
          (fn [event]
            (let [new-name (ctp/normalize-page-name (dom/get-target-val event))]
              (if (not (ctp/valid-page-name? new-name))
                (when is-separator?
                  (st/emit! (dw/delete-page id)))
-               (st/emit! (dw/rename-page id new-name))))
+               (when-not (sp-layers/skip-page-rename? name new-name)
+                 (st/emit! (dw/rename-page id new-name)))))
            (st/emit! (dw/stop-rename-page-item))))
 
         on-key-down
@@ -236,6 +238,7 @@
                       :title name
                       :data-testid "page-name"}
                name]
+              [:> sp-layers/design-system-page-badge* {:page page}]
               [:div {:class (stl/css :page-item-actions)}
                (when (and is-deletable (not read-only?))
                  [:> icon-button* {:variant "action"

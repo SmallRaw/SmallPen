@@ -1,0 +1,23 @@
+{
+  "name": "@smallpen/local-package",
+  "version": "0.1.0-alpha.21",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "files": [
+    "assets",
+    "src",
+    "runtime"
+  ],
+  "dependencies": {
+    "@smallpen/core": "0.1.0-alpha.21",
+    "opentype.js": "2.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SmallRaw/SmallPen.git",
+    "directory": "smallpen/packages/local-package"
+  }
+}

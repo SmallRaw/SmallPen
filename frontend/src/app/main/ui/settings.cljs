@@ -10,6 +10,7 @@
    [app.main.data.dashboard.shortcuts :as sc]
    [app.main.refs :as refs]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.ds.foundations.typography :as t]
    [app.main.ui.ds.foundations.typography.heading :refer [heading*]]
@@ -39,11 +40,15 @@
                   :typography t/title-large
                   :class (stl/css :dashboard-title-text)
                   :data-testid "account-title"}
-     (tr "dashboard.your-account-title")]]])
+     (if (smallpen/enabled?)
+       (tr "labels.settings")
+       (tr "dashboard.your-account-title"))]]])
 
 (mf/defc settings*
   [{:keys [route type error-report-id error-href]}]
-  (let [section (get-in route [:data :name])
+  (let [section (if (smallpen/enabled?)
+                  :settings-options
+                  (get-in route [:data :name]))
         profile (mf/deref refs/profile)]
 
     (hooks/use-shortcuts ::dashboard sc/shortcuts :dashboard)

@@ -1,0 +1,435 @@
+{
+  "activeSetIds": [],
+  "activeThemeIds": [
+    "theme_language_zh_cn",
+    "theme_device_mobile",
+    "theme_mode_dark",
+    "theme_brand_vivid"
+  ],
+  "id": "tlib_roundtrip",
+  "sets": [
+    {
+      "description": "Mobile device values",
+      "id": "tset_device_mobile",
+      "name": "Device/Mobile",
+      "tokens": [
+        {
+          "description": "Mobile page gutter",
+          "id": "tok_spacing_page_mobile",
+          "name": "--spacing-page",
+          "type": "spacing",
+          "value": 13
+        },
+        {
+          "description": "Mobile panel width",
+          "id": "tok_size_panel_mobile",
+          "name": "--size-panel",
+          "type": "sizing",
+          "value": 12
+        },
+        {
+          "description": "Card corner radius",
+          "id": "tok_32697e0560aa800580088d958bcf3310",
+          "name": "--radius-card",
+          "type": "border-radius",
+          "value": 18
+        },
+        {
+          "description": "Body font size",
+          "id": "tok_font_size_body_mobile",
+          "name": "--font-size-body",
+          "type": "font-size",
+          "value": 16
+        },
+        {
+          "description": "",
+          "id": "tok_text_case_test_mobile",
+          "name": "testneno",
+          "type": "text-case",
+          "value": "none"
+        }
+      ]
+    },
+    {
+      "description": "Web device values",
+      "id": "tset_device_web",
+      "name": "Device/Web",
+      "tokens": [
+        {
+          "description": "Web page gutter",
+          "id": "tok_spacing_page_web",
+          "name": "--spacing-page",
+          "type": "spacing",
+          "value": 24
+        },
+        {
+          "description": "Web panel width",
+          "id": "tok_size_panel_web",
+          "name": "--size-panel",
+          "type": "sizing",
+          "value": 640
+        },
+        {
+          "description": "Card corner radius",
+          "id": "tok_radius_card_web",
+          "name": "--radius-card",
+          "type": "border-radius",
+          "value": 18
+        },
+        {
+          "description": "Body font size",
+          "id": "tok_font_size_body_web",
+          "name": "--font-size-body",
+          "type": "font-size",
+          "value": 16
+        },
+        {
+          "description": "",
+          "id": "tok_text_case_test_web",
+          "name": "testneno",
+          "type": "text-case",
+          "value": "none"
+        }
+      ]
+    },
+    {
+      "description": "Desktop device values",
+      "id": "tset_device_desktop",
+      "name": "Device/Desktop",
+      "tokens": [
+        {
+          "description": "Desktop page gutter",
+          "id": "tok_spacing_page_desktop",
+          "name": "--spacing-page",
+          "type": "spacing",
+          "value": 32
+        },
+        {
+          "description": "Desktop panel width",
+          "id": "tok_size_panel_desktop",
+          "name": "--size-panel",
+          "type": "sizing",
+          "value": 720
+        },
+        {
+          "description": "Card corner radius",
+          "id": "tok_radius_card_desktop",
+          "name": "--radius-card",
+          "type": "border-radius",
+          "value": 18
+        },
+        {
+          "description": "Body font size",
+          "id": "tok_font_size_body_desktop",
+          "name": "--font-size-body",
+          "type": "font-size",
+          "value": 16
+        },
+        {
+          "description": "",
+          "id": "tok_text_case_test_desktop",
+          "name": "testneno",
+          "type": "text-case",
+          "value": "none"
+        }
+      ]
+    },
+    {
+      "description": "Light mode colors",
+      "id": "tset_mode_light",
+      "name": "Mode/Light",
+      "tokens": [
+        {
+          "description": "Accent background",
+          "id": "tok_accent_light",
+          "name": "--accent",
+          "type": "color",
+          "value": "#f4f4f6"
+        },
+        {
+          "description": "Accent foreground",
+          "id": "tok_accent_foreground_light",
+          "name": "--accent-foreground",
+          "type": "color",
+          "value": "#ffffff"
+        },
+        {
+          "description": "Page background",
+          "id": "tok_background_light",
+          "name": "--background",
+          "type": "color",
+          "value": "#ffffff"
+        },
+        {
+          "description": "Default border",
+          "id": "tok_border_light",
+          "name": "--border",
+          "type": "color",
+          "value": "#ebebef"
+        },
+        {
+          "description": "Card background",
+          "id": "tok_card_light",
+          "name": "--card",
+          "type": "color",
+          "value": "#ffffff"
+        },
+        {
+          "description": "Card border",
+          "id": "tok_card_border_light",
+          "name": "--card-border",
+          "type": "color",
+          "value": "#f0f0f0aa"
+        },
+        {
+          "description": "Card foreground",
+          "id": "tok_card_foreground_light",
+          "name": "--card-foreground-foreground",
+          "type": "color",
+          "value": "#000000"
+        },
+        {
+          "description": "First chart color",
+          "id": "tok_chart_1_light",
+          "name": "--chart-1",
+          "type": "color",
+          "value": "#e76e50"
+        },
+        {
+          "description": "Second chart color",
+          "id": "tok_chart_2_light",
+          "name": "--chart-2",
+          "type": "color",
+          "value": "#2a9d90"
+        }
+      ]
+    },
+    {
+      "description": "Dark mode colors",
+      "id": "tset_mode_dark",
+      "name": "Mode/Dark",
+      "tokens": [
+        {
+          "description": "Accent background",
+          "id": "tok_accent_dark",
+          "name": "--accent",
+          "type": "color",
+          "value": "#262626"
+        },
+        {
+          "description": "Accent foreground",
+          "id": "tok_accent_foreground_dark",
+          "name": "--accent-foreground",
+          "type": "color",
+          "value": "#fafafa"
+        },
+        {
+          "description": "Page background",
+          "id": "tok_background_dark",
+          "name": "--background",
+          "type": "color",
+          "value": "#0a0a0a"
+        },
+        {
+          "description": "Default border",
+          "id": "tok_border_dark",
+          "name": "--border",
+          "type": "color",
+          "value": "#262626"
+        },
+        {
+          "description": "Card background",
+          "id": "tok_card_dark",
+          "name": "--card",
+          "type": "color",
+          "value": "#171717"
+        },
+        {
+          "description": "Card border",
+          "id": "tok_card_border_dark",
+          "name": "--card-border",
+          "type": "color",
+          "value": "#292929"
+        },
+        {
+          "description": "Card foreground",
+          "id": "tok_card_foreground_dark",
+          "name": "--card-foreground-foreground",
+          "type": "color",
+          "value": "#fafafa"
+        },
+        {
+          "description": "First chart color",
+          "id": "tok_chart_1_dark",
+          "name": "--chart-1",
+          "type": "color",
+          "value": "#2662d9"
+        },
+        {
+          "description": "Second chart color",
+          "id": "tok_chart_2_dark",
+          "name": "--chart-2",
+          "type": "color",
+          "value": "#2eb88a"
+        }
+      ]
+    },
+    {
+      "description": "Soft brand treatment",
+      "id": "tset_brand_soft",
+      "name": "Theme/Soft",
+      "tokens": [
+        {
+          "description": "Soft brand accent",
+          "id": "tok_brand_accent_soft",
+          "name": "--brand-accent",
+          "type": "color",
+          "value": "#7c6df2"
+        }
+      ]
+    },
+    {
+      "description": "Vivid brand treatment",
+      "id": "tset_brand_vivid",
+      "name": "Theme/Vivid",
+      "tokens": [
+        {
+          "description": "Vivid brand accent",
+          "id": "tok_brand_accent_vivid",
+          "name": "--brand-accent",
+          "type": "color",
+          "value": "#f23ae5"
+        }
+      ]
+    },
+    {
+      "description": "Simplified Chinese typography",
+      "id": "tset_language_zh_cn",
+      "name": "Language/zh-CN",
+      "tokens": [
+        {
+          "description": "Chinese body font",
+          "id": "tok_font_body_zh_cn",
+          "name": "--font-body",
+          "type": "font-family",
+          "value": "Noto Sans SC"
+        }
+      ]
+    },
+    {
+      "description": "English typography",
+      "id": "tset_language_en",
+      "name": "Language/en",
+      "tokens": [
+        {
+          "description": "English body font",
+          "id": "tok_font_body_en",
+          "name": "--font-body",
+          "type": "font-family",
+          "value": "Inter"
+        }
+      ]
+    }
+  ],
+  "themes": [
+    {
+      "description": "Mobile device",
+      "externalId": "smallpen-device-mobile",
+      "group": "Device",
+      "id": "theme_device_mobile",
+      "isSource": false,
+      "name": "Mobile",
+      "setIds": [
+        "tset_device_mobile"
+      ]
+    },
+    {
+      "description": "Web device",
+      "externalId": "smallpen-device-web",
+      "group": "Device",
+      "id": "theme_device_web",
+      "isSource": false,
+      "name": "Web",
+      "setIds": [
+        "tset_device_web"
+      ]
+    },
+    {
+      "description": "Desktop device",
+      "externalId": "smallpen-device-desktop",
+      "group": "Device",
+      "id": "theme_device_desktop",
+      "isSource": false,
+      "name": "Desktop",
+      "setIds": [
+        "tset_device_desktop"
+      ]
+    },
+    {
+      "description": "Light mode",
+      "externalId": "smallpen-mode-light",
+      "group": "Mode",
+      "id": "theme_mode_light",
+      "isSource": false,
+      "name": "Light",
+      "setIds": [
+        "tset_mode_light"
+      ]
+    },
+    {
+      "description": "Dark mode",
+      "externalId": "smallpen-mode-dark",
+      "group": "Mode",
+      "id": "theme_mode_dark",
+      "isSource": false,
+      "name": "Dark",
+      "setIds": [
+        "tset_mode_dark"
+      ]
+    },
+    {
+      "description": "Soft brand theme",
+      "externalId": "smallpen-brand-soft",
+      "group": "Theme",
+      "id": "theme_brand_soft",
+      "isSource": false,
+      "name": "Soft",
+      "setIds": [
+        "tset_brand_soft"
+      ]
+    },
+    {
+      "description": "Vivid brand theme",
+      "externalId": "smallpen-brand-vivid",
+      "group": "Theme",
+      "id": "theme_brand_vivid",
+      "isSource": false,
+      "name": "Vivid",
+      "setIds": [
+        "tset_brand_vivid"
+      ]
+    },
+    {
+      "description": "Simplified Chinese",
+      "externalId": "smallpen-language-zh-cn",
+      "group": "Language",
+      "id": "theme_language_zh_cn",
+      "isSource": false,
+      "name": "简体中文",
+      "setIds": [
+        "tset_language_zh_cn"
+      ]
+    },
+    {
+      "description": "English",
+      "externalId": "smallpen-language-en",
+      "group": "Language",
+      "id": "theme_language_en",
+      "isSource": false,
+      "name": "English",
+      "setIds": [
+        "tset_language_en"
+      ]
+    }
+  ]
+}

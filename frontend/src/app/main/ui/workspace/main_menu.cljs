@@ -32,6 +32,8 @@
    [app.main.features :as features]
    [app.main.refs :as refs]
    [app.main.repo :as rp]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.ui.main-menu :as sp-menu]
    [app.main.store :as st]
    [app.main.ui.components.dropdown-menu :refer [dropdown-menu*
                                                  dropdown-menu-item*]]
@@ -112,10 +114,10 @@
         (mf/use-fn #(st/emit! (dcm/go-to-feedback)))
 
         plugins?
-        (features/active-feature? @st/state "plugins/runtime")
+        (and (smallpen/capability-enabled? :plugins) (features/active-feature? @st/state "plugins/runtime"))
 
         mcp-enabled?
-        (contains? cf/flags :mcp)
+        (and (smallpen/capability-enabled? :mcp) (contains? cf/flags :mcp))
 
         show-shortcuts
         (mf/use-fn
@@ -331,6 +333,8 @@
          "system" (tr "workspace.header.menu.toggle-dark-theme")
          (tr "workspace.header.menu.toggle-light-theme"))]
       [:> shortcuts* {:id :toggle-theme}]]
+     [:> sp-menu/preferences-items* {:item-class (stl/css :base-menu-item :submenu-item)
+                                     :name-class (stl/css :item-name)}]
      (when (contains? cf/flags :render-switch)
        [:> dropdown-menu-item* {:on-click    toggle-render
                                 :class       (stl/css :base-menu-item :submenu-item)
@@ -415,18 +419,19 @@
          (tr "workspace.header.menu.unlock-guides")
          (tr "workspace.header.menu.lock-guides"))]]
 
-     [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
-                              :on-click    toggle-comments-visibility
-                              :on-key-down (fn [event]
-                                             (when (kbd/enter? event)
-                                               (toggle-comments-visibility event)))
-                              :data-testid "display-comments"
-                              :id          "file-menu-comments"}
-      [:span {:class (stl/css :item-name)}
-       (if (contains? layout :display-comments)
-         (tr "workspace.header.menu.hide-comments")
-         (tr "workspace.header.menu.show-comments"))]
-      [:> shortcuts* {:id :toggle-comments-visibility}]]
+     (when (smallpen/capability-enabled? :comments)
+       [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
+                                :on-click    toggle-comments-visibility
+                                :on-key-down (fn [event]
+                                               (when (kbd/enter? event)
+                                                 (toggle-comments-visibility event)))
+                                :data-testid "display-comments"
+                                :id          "file-menu-comments"}
+        [:span {:class (stl/css :item-name)}
+         (if (contains? layout :display-comments)
+           (tr "workspace.header.menu.hide-comments")
+           (tr "workspace.header.menu.show-comments"))]
+        [:> shortcuts* {:id :toggle-comments-visibility}]])
 
      (when-not ^boolean read-only?
        [:*
@@ -684,7 +689,7 @@
                         :on-close on-close}
 
      (if ^boolean shared?
-       (when can-edit
+       (when (and can-edit (not (smallpen/enabled?)))
          [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
                                   :on-click    on-remove-shared
                                   :on-key-down on-remove-shared-key-down
@@ -692,7 +697,7 @@
           [:span {:class (stl/css :item-name)}
            (tr "dashboard.unpublish-shared")]])
 
-       (when can-edit
+       (when (and can-edit (not (smallpen/enabled?)))
          [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
                                   :on-click    on-add-shared
                                   :on-key-down on-add-shared-key-down
@@ -700,7 +705,8 @@
           [:span {:class (stl/css :item-name)}
            (tr "dashboard.add-shared")]]))
 
-     (when can-edit
+     ;; SmallPen keeps history local; cloud versions are not available.
+     (when (and can-edit (smallpen/capability-enabled? :remote-history))
        [:*
         [:div {:class (stl/css :separator)}]
 
@@ -749,7 +755,7 @@
   {::mf/private true
    ::mf/wrap [mf/memo]}
   [{:keys [open-plugins on-close]}]
-  (when (features/active-feature? @st/state "plugins/runtime")
+  (when (and (smallpen/capability-enabled? :plugins) (features/active-feature? @st/state "plugins/runtime"))
     (let [plugins          (preg/plugins-list)
           user-can-edit?   (:can-edit (deref refs/permissions))
           permissions-peek (deref refs/plugins-permissions-peek)]
@@ -816,7 +822,7 @@
 (mf/defc mcp-menu*
   {::mf/private true}
   [{:keys [on-close mcp]}]
-  (let [plugins-enabled? (features/use-feature "plugins/runtime")
+  (let [plugins-enabled? (and (features/use-feature "plugins/runtime") (smallpen/capability-enabled? :plugins))
         has-valid-token? (get mcp :token-valid)
         enabled?         (get mcp :enabled)
 
@@ -1014,6 +1020,9 @@
                          :id "workspace:menu"
                          :on-close close-menu
                          :class (stl/css :base-menu :menu)}
+      [:> sp-menu/home-item* {:item-class (stl/css :base-menu-item :menu-item)
+                              :name-class (stl/css :item-name)}]
+
       [:> dropdown-menu-item* {:class (stl/css :base-menu-item :menu-item)
                                :on-click    on-menu-click
                                :on-key-down (fn [event]
@@ -1066,7 +1075,7 @@
        [:> icon* {:icon-id i/arrow-right
                   :class (stl/css :item-arrow)}]]
 
-      (when (features/active-feature? @st/state "plugins/runtime")
+      (when (and (smallpen/capability-enabled? :plugins) (features/active-feature? @st/state "plugins/runtime"))
         [:> dropdown-menu-item* {:class (stl/css :base-menu-item :menu-item)
                                  :on-click    on-menu-click
                                  :on-key-down (fn [event]
@@ -1080,7 +1089,7 @@
          [:> icon* {:icon-id i/arrow-right
                     :class (stl/css :item-arrow)}]])
 
-      (when (contains? cf/flags :mcp)
+      (when (and (smallpen/capability-enabled? :mcp) (contains? cf/flags :mcp))
         (let [enabled?         (get mcp :enabled)
               conn-status      (get mcp :connection-status)
               has-valid-token? (get mcp :token-valid)

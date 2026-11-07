@@ -1,0 +1,990 @@
+{
+  "_comment": "Penpot commits recorded in the browser against examples/common-components.smallpen: a Button variant dropped from Assets, then moved with Shift+ArrowDown. __FILE__ stands for snapshot.runtime.file.",
+  "dropVariant": {
+    "baseRevision": "4ebf5ebbf85ad3151c2720c741456aa34ab3501597ce343bba28625729d6229d",
+    "changes": [
+      {
+        "type": "add-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "00000000-0000-0000-0000-000000000000",
+        "frame-id": "00000000-0000-0000-0000-000000000000",
+        "index": null,
+        "ignore-touched": true,
+        "obj": {
+          "proportion-lock": false,
+          "width": 152,
+          "height": 44,
+          "flip-x": null,
+          "fills": [
+            {
+              "fill-opacity": 0,
+              "fill-color": "#ffffff"
+            }
+          ],
+          "r1": 8,
+          "strokes": [],
+          "points": [
+            {
+              "x": -240,
+              "y": 355
+            },
+            {
+              "x": -88,
+              "y": 355
+            },
+            {
+              "x": -88,
+              "y": 399
+            },
+            {
+              "x": -240,
+              "y": 399
+            }
+          ],
+          "plugin-data": {},
+          "x": -240,
+          "id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -240,
+            "y": 355,
+            "width": 152,
+            "height": 44,
+            "x1": -240,
+            "y1": 355,
+            "x2": -88,
+            "y2": 399
+          },
+          "component-root": true,
+          "frame-id": "00000000-0000-0000-0000-000000000000",
+          "name": "Button / ghost",
+          "shapes": [
+            "eed40d5f-ae5e-803e-8008-b937f838d8d1",
+            "eed40d5f-ae5e-803e-8008-b937f838d8d2",
+            "eed40d5f-ae5e-803e-8008-b937f838d8d3"
+          ],
+          "r2": 8,
+          "rotation": 0,
+          "hide-fill-on-export": false,
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "frame",
+          "r3": 8,
+          "y": 355,
+          "component-file": "__FILE__",
+          "component-id": "b2bd9904-cc5c-5401-ade4-1e3dd2f8c154",
+          "proportion": 1,
+          "shape-ref": "fc30366e-838b-5d21-b80e-84eeb4151217",
+          "flip-y": null,
+          "r4": 8,
+          "parent-id": "00000000-0000-0000-0000-000000000000"
+        }
+      },
+      {
+        "type": "add-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d1",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "frame-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "index": null,
+        "ignore-touched": true,
+        "obj": {
+          "width": 94,
+          "height": 19,
+          "flip-x": null,
+          "points": [
+            {
+              "x": -198,
+              "y": 368
+            },
+            {
+              "x": -104,
+              "y": 368
+            },
+            {
+              "x": -104,
+              "y": 387
+            },
+            {
+              "x": -198,
+              "y": 387
+            }
+          ],
+          "plugin-data": {},
+          "grow-type": "fixed",
+          "x": -198,
+          "id": "eed40d5f-ae5e-803e-8008-b937f838d8d1",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -198,
+            "y": 368,
+            "width": 94,
+            "height": 19,
+            "x1": -198,
+            "y1": 368,
+            "x2": -104,
+            "y2": 387
+          },
+          "frame-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+          "name": "Continue",
+          "content": {
+            "type": "root",
+            "vertical-align": "top",
+            "children": [
+              {
+                "type": "paragraph-set",
+                "children": [
+                  {
+                    "type": "paragraph",
+                    "line-height": "1.2",
+                    "text-align": "left",
+                    "text-direction": "ltr",
+                    "children": [
+                      {
+                        "line-height": "1.2",
+                        "font-family": "Inter",
+                        "fills": [
+                          {
+                            "fill-opacity": 1,
+                            "fill-color": "#6750a4"
+                          }
+                        ],
+                        "text-transform": "none",
+                        "text": "Continue",
+                        "font-weight": "500",
+                        "text-decoration": "none",
+                        "font-size": "14",
+                        "letter-spacing": "0",
+                        "font-style": "normal",
+                        "font-id": "gfont-inter",
+                        "font-variant-id": "500"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "rotation": 0,
+          "interactions": [],
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "text",
+          "y": 368,
+          "shape-ref": "94fc80d4-76a6-50a7-986b-50731ddc8846",
+          "flip-y": null,
+          "parent-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0"
+        }
+      },
+      {
+        "type": "add-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d2",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "frame-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "index": null,
+        "ignore-touched": true,
+        "obj": {
+          "proportion-lock": false,
+          "width": 16,
+          "height": 2,
+          "flip-x": null,
+          "fills": [
+            {
+              "fill-opacity": 1,
+              "fill-color": "#6750a4"
+            }
+          ],
+          "r1": 0,
+          "strokes": [],
+          "points": [
+            {
+              "x": -226,
+              "y": 375
+            },
+            {
+              "x": -210,
+              "y": 375
+            },
+            {
+              "x": -210,
+              "y": 377
+            },
+            {
+              "x": -226,
+              "y": 377
+            }
+          ],
+          "plugin-data": {},
+          "x": -226,
+          "id": "eed40d5f-ae5e-803e-8008-b937f838d8d2",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -226,
+            "y": 375,
+            "width": 16,
+            "height": 2,
+            "x1": -226,
+            "y1": 375,
+            "x2": -210,
+            "y2": 377
+          },
+          "frame-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+          "name": "Add icon",
+          "r2": 0,
+          "rotation": 0,
+          "interactions": [],
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "rect",
+          "r3": 0,
+          "y": 375,
+          "proportion": 1,
+          "shape-ref": "d4c0499f-996b-51c8-8638-451b742a5a15",
+          "flip-y": null,
+          "r4": 0,
+          "parent-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0"
+        }
+      },
+      {
+        "type": "add-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d3",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "parent-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "frame-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "index": null,
+        "ignore-touched": true,
+        "obj": {
+          "proportion-lock": false,
+          "width": 2,
+          "height": 16,
+          "flip-x": null,
+          "fills": [
+            {
+              "fill-opacity": 1,
+              "fill-color": "#6750a4"
+            }
+          ],
+          "r1": 0,
+          "strokes": [],
+          "points": [
+            {
+              "x": -219,
+              "y": 369
+            },
+            {
+              "x": -217,
+              "y": 369
+            },
+            {
+              "x": -217,
+              "y": 385
+            },
+            {
+              "x": -219,
+              "y": 385
+            }
+          ],
+          "plugin-data": {},
+          "x": -219,
+          "id": "eed40d5f-ae5e-803e-8008-b937f838d8d3",
+          "transform": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "selrect": {
+            "x": -219,
+            "y": 369,
+            "width": 2,
+            "height": 16,
+            "x1": -219,
+            "y1": 369,
+            "x2": -217,
+            "y2": 385
+          },
+          "frame-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+          "name": "Add icon",
+          "r2": 0,
+          "rotation": 0,
+          "interactions": [],
+          "transform-inverse": {
+            "a": 1,
+            "b": 0,
+            "c": 0,
+            "d": 1,
+            "e": 0,
+            "f": 0
+          },
+          "type": "rect",
+          "r3": 0,
+          "y": 369,
+          "proportion": 1,
+          "shape-ref": "75c921e2-210e-523e-b8d9-f71638a74488",
+          "flip-y": null,
+          "r4": 0,
+          "parent-id": "eed40d5f-ae5e-803e-8008-b937f838d8d0"
+        }
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d1",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "position-data",
+            "val": [
+              {
+                "y1": -1,
+                "width": 60.515625,
+                "x1": 0,
+                "font-family": "Inter",
+                "height": 17,
+                "fills": [
+                  {
+                    "fill-opacity": 1,
+                    "fill-color": "#6750a4"
+                  }
+                ],
+                "text-transform": "none",
+                "x": -198,
+                "direction": "ltr",
+                "text": "Continue",
+                "font-weight": "500",
+                "text-decoration": "none",
+                "font-size": "14px",
+                "y": 384,
+                "x2": 60.515625,
+                "letter-spacing": "normal",
+                "y2": 16,
+                "font-style": "normal"
+              }
+            ],
+            "ignore-geometry": false,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 308,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": 24,
+                "y": 308
+              },
+              {
+                "x": 176,
+                "y": 308
+              },
+              {
+                "x": 176,
+                "y": 352
+              },
+              {
+                "x": 24,
+                "y": 352
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "x",
+            "val": 24,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": 24,
+              "y": 308,
+              "width": 152,
+              "height": 44,
+              "x1": 24,
+              "y1": 308,
+              "x2": 176,
+              "y2": 352
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d1",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 321,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": 66,
+                "y": 321
+              },
+              {
+                "x": 160,
+                "y": 321
+              },
+              {
+                "x": 160,
+                "y": 340
+              },
+              {
+                "x": 66,
+                "y": 340
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "position-data",
+            "val": [
+              {
+                "y1": -1,
+                "width": 60.515625,
+                "x1": 0,
+                "font-family": "Inter",
+                "height": 17,
+                "fills": [
+                  {
+                    "fill-opacity": 1,
+                    "fill-color": "#6750a4"
+                  }
+                ],
+                "text-transform": "none",
+                "x": 66,
+                "direction": "ltr",
+                "text": "Continue",
+                "font-weight": "500",
+                "text-decoration": "none",
+                "font-size": "14px",
+                "y": 337,
+                "x2": 60.515625,
+                "letter-spacing": "normal",
+                "y2": 16,
+                "font-style": "normal"
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "x",
+            "val": 66,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": 66,
+              "y": 321,
+              "width": 94,
+              "height": 19,
+              "x1": 66,
+              "y1": 321,
+              "x2": 160,
+              "y2": 340
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d2",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 328,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": 38,
+                "y": 328
+              },
+              {
+                "x": 54,
+                "y": 328
+              },
+              {
+                "x": 54,
+                "y": 330
+              },
+              {
+                "x": 38,
+                "y": 330
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "x",
+            "val": 38,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": 38,
+              "y": 328,
+              "width": 16,
+              "height": 2,
+              "x1": 38,
+              "y1": 328,
+              "x2": 54,
+              "y2": 330
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d3",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 322,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": 45,
+                "y": 322
+              },
+              {
+                "x": 47,
+                "y": 322
+              },
+              {
+                "x": 47,
+                "y": 338
+              },
+              {
+                "x": 45,
+                "y": 338
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "x",
+            "val": 45,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": 45,
+              "y": 322,
+              "width": 2,
+              "height": 16,
+              "x1": 45,
+              "y1": 322,
+              "x2": 47,
+              "y2": 338
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "hide-in-viewer",
+            "val": true,
+            "ignore-geometry": false,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mov-objects",
+        "parent-id": "16fef1a6-1ed9-5c38-bc82-f85c53c67853",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "shapes": [
+          "eed40d5f-ae5e-803e-8008-b937f838d8d0"
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "constraints-v",
+            "val": "top",
+            "ignore-geometry": false,
+            "ignore-touched": true
+          },
+          {
+            "type": "set",
+            "attr": "constraints-h",
+            "val": "left",
+            "ignore-geometry": false,
+            "ignore-touched": true
+          }
+        ]
+      }
+    ],
+    "commitId": "eed40d5f-ae5e-803e-8008-b937f83b16d9"
+  },
+  "moveDropped": {
+    "baseRevision": "40fe4286845d5c3de1493300d96e935c4e832afc1424c6956948db5f8b3ca359",
+    "changes": [
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d0",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 318,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": 24,
+                "y": 318
+              },
+              {
+                "x": 176,
+                "y": 318
+              },
+              {
+                "x": 176,
+                "y": 362
+              },
+              {
+                "x": 24,
+                "y": 362
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": 24,
+              "y": 318,
+              "width": 152,
+              "height": 44,
+              "x1": 24,
+              "y1": 318,
+              "x2": 176,
+              "y2": 362
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d1",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 331,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": 66,
+                "y": 331
+              },
+              {
+                "x": 160,
+                "y": 331
+              },
+              {
+                "x": 160,
+                "y": 350
+              },
+              {
+                "x": 66,
+                "y": 350
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "position-data",
+            "val": [
+              {
+                "y1": -1,
+                "width": 60.515625,
+                "x1": 0,
+                "font-family": "Inter",
+                "height": 17,
+                "fills": [
+                  {
+                    "fill-opacity": 1,
+                    "fill-color": "#6750a4"
+                  }
+                ],
+                "text-transform": "none",
+                "x": 66,
+                "direction": "ltr",
+                "text": "Continue",
+                "font-weight": "500",
+                "text-decoration": "none",
+                "font-size": "14px",
+                "y": 347,
+                "x2": 60.515625,
+                "letter-spacing": "normal",
+                "y2": 16,
+                "font-style": "normal"
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": 66,
+              "y": 331,
+              "width": 94,
+              "height": 19,
+              "x1": 66,
+              "y1": 331,
+              "x2": 160,
+              "y2": 350
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d2",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 338,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": 38,
+                "y": 338
+              },
+              {
+                "x": 54,
+                "y": 338
+              },
+              {
+                "x": 54,
+                "y": 340
+              },
+              {
+                "x": 38,
+                "y": 340
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": 38,
+              "y": 338,
+              "width": 16,
+              "height": 2,
+              "x1": 38,
+              "y1": 338,
+              "x2": 54,
+              "y2": 340
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      },
+      {
+        "type": "mod-obj",
+        "id": "eed40d5f-ae5e-803e-8008-b937f838d8d3",
+        "page-id": "27825af4-bbcd-5c4f-994b-94ed99a9874b",
+        "operations": [
+          {
+            "type": "set",
+            "attr": "y",
+            "val": 332,
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "points",
+            "val": [
+              {
+                "x": 45,
+                "y": 332
+              },
+              {
+                "x": 47,
+                "y": 332
+              },
+              {
+                "x": 47,
+                "y": 348
+              },
+              {
+                "x": 45,
+                "y": 348
+              }
+            ],
+            "ignore-geometry": true,
+            "ignore-touched": false
+          },
+          {
+            "type": "set",
+            "attr": "selrect",
+            "val": {
+              "x": 45,
+              "y": 332,
+              "width": 2,
+              "height": 16,
+              "x1": 45,
+              "y1": 332,
+              "x2": 47,
+              "y2": 348
+            },
+            "ignore-geometry": true,
+            "ignore-touched": false
+          }
+        ]
+      }
+    ],
+    "commitId": "eed40d5f-ae5e-803e-8008-b937fd7e3ed3"
+  }
+}

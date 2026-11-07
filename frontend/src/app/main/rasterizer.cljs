@@ -17,8 +17,10 @@
    [app.common.uri :as u]
    [app.common.uuid :as uuid]
    [app.config :as cf]
+   [app.main.smallpen :as smallpen]
    [app.util.dom :as dom]
    [app.util.http :as http]
+   [app.util.object :as obj]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]))
 
@@ -79,11 +81,13 @@
 
 (defn render
   "Renders an SVG"
-  [{:keys [data styles width result] :as params}]
+  [{:keys [data styles width height result] :as params}]
   (let [styles  (replace-uris (d/nilv styles ""))
         result  (d/nilv result "blob")
         id      (dm/str (uuid/next))
-        payload #js {:data data :styles styles :width width :result result}
+        payload (cond-> #js {:data data :styles styles :width width :result result}
+                  ;; SmallPen pins the explicit thumbnail height.
+                  (and (some? height) (smallpen/enabled?)) (obj/set! "height" height))
         message #js {:id id
                      :scope "penpot/rasterizer"
                      :payload payload}]

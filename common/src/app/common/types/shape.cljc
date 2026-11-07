@@ -198,11 +198,17 @@
    (sg/small-double :min -1000 :max 1000)
    (sg/elements [true false])))
 
+;; `schema:svg-scalar` and `schema:svg-attrs` are compiled once. Every
+;; shape type merges `schema:shape-generic-attrs` and every schema that
+;; holds a shape is compiled on load; inline, the whitelist of hundreds
+;; of keys was rebuilt each time, six times the memory of a shape schema.
+
 (def ^:private schema:svg-scalar
   "A scalar svg attr value: trimmed strings or numbers/booleans
   straight from programmatic svg data."
-  [:or {:gen/gen schema:svg-scalar-gen}
-   :string ::sm/number :boolean])
+  (sm/schema
+   [:or {:gen/gen schema:svg-scalar-gen}
+    :string ::sm/number :boolean]))
 
 (def schema:svg-attrs
   "Closed `:svg-attrs`: every key birth can store, derived from
@@ -212,13 +218,14 @@
   programmatic svg data), except `:style`, which birth parses into a
   map. `:tag` stays a keyword: switching it to string would touch ~22
   comparison sites and 7 tag sets for zero behavior gain."
-  (into [:map {:title "SvgAttrs" :closed true}]
-        (map (fn [k]
-               [k {:optional true}
-                (if (= k :style)
-                  [:map-of :keyword schema:svg-scalar]
-                  schema:svg-scalar)]))
-        csvg/svg-stored-attr-keys))
+  (sm/schema
+   (into [:map {:title "SvgAttrs" :closed true}]
+         (map (fn [k]
+                [k {:optional true}
+                 (if (= k :style)
+                   [:map-of :keyword schema:svg-scalar]
+                   schema:svg-scalar)]))
+         csvg/svg-stored-attr-keys)))
 
 (def ^:private schema:svg-shallow-node-gen
   "Bounded generator for the svg node schemas below: one shallow node.

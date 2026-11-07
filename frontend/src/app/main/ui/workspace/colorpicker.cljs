@@ -19,12 +19,14 @@
    [app.main.data.event :as ev]
    [app.main.data.modal :as modal]
    [app.main.data.shortcuts :as dsc]
+   [app.main.data.tinycolor :as tinycolor]
    [app.main.data.workspace.colors :as dc]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.media :as dwm]
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen :as smallpen]
    [app.main.store :as st]
    [app.main.ui.components.file-uploader :refer [file-uploader]]
    [app.main.ui.components.select :refer [select]]
@@ -107,7 +109,9 @@
       (dom/set-css-property! node "--lightness-grad-mid" (format-hsl lightness-mid)))))
 
 (mf/defc colorpicker*
-  [{:keys [data disable-gradient disable-opacity disable-image on-change on-accept origin combined-tokens color-origin on-token-change tab applied-token token-disabled]}]
+  [{:keys [data disable-gradient disable-opacity disable-image on-change on-accept
+           on-reference-accept origin combined-tokens color-origin on-token-change
+           on-token-detach reference-tokens tab applied-token token-disabled]}]
   (let [state                  (mf/deref refs/colorpicker)
         node-ref               (mf/use-ref)
 
@@ -132,6 +136,26 @@
         picked-color-select    (mf/deref picked-color-select)
 
         current-color          (:current-color state)
+
+        reference-name*        (mf/use-state applied-token)
+        reference-name         (deref reference-name*)
+        reference-name-ref     (mf/use-ref applied-token)
+
+        set-reference-name
+        (mf/use-fn
+         (fn [token-name]
+           (mf/set-ref-val! reference-name-ref token-name)
+           (reset! reference-name* token-name)))
+
+        clear-reference
+        (mf/use-fn
+         (mf/deps on-token-detach)
+         (fn []
+           (when-let [token-name (and (smallpen/enabled?)
+                                      (mf/ref-val reference-name-ref))]
+             (set-reference-name nil)
+             (when (fn? on-token-detach)
+               (on-token-detach token-name)))))
 
         active-fill-tab        (if (:image data)
                                  :image
@@ -203,20 +227,47 @@
 
         handle-change-mode
         (mf/use-fn
+         (mf/deps clear-reference)
          (fn [value]
+           (when (not= value :color)
+             (clear-reference))
            (case value
              :color (st/emit! (dc/activate-colorpicker-color))
              :gradient (st/emit! (dc/activate-colorpicker-gradient :linear-gradient))
              :image (st/emit! (dc/activate-colorpicker-image))
              nil)))
 
-        handle-change-color
+        update-picker-color
         (mf/use-fn
          (mf/deps current-color drag?)
          (fn [color]
            (let [color (merge current-color color)
                  color (dc/materialize-color-components color)]
              (st/emit! (dc/update-colorpicker-color color (not drag?))))))
+
+        handle-change-color
+        (mf/use-fn
+         (mf/deps clear-reference update-picker-color)
+         (fn [color]
+           (clear-reference)
+           (update-picker-color color)))
+
+        handle-change-reference
+        (mf/use-fn
+         (mf/deps on-token-change update-picker-color)
+         (fn [event token]
+           (set-reference-name (:name token))
+           (if (fn? on-token-change)
+             (on-token-change event token)
+             (when-let [color (tinycolor/valid-color (:resolved-value token))]
+               (let [hex     (tinycolor/->hex-string color)
+                     alpha   (tinycolor/alpha color)
+                     [r g b] (cc/hex->rgb hex)
+                     [h s v] (cc/hex->hsv hex)]
+                 (update-picker-color {:hex hex
+                                       :alpha alpha
+                                       :r r :g g :b b
+                                       :h h :s s :v v}))))))
 
         handle-click-picker
         (mf/use-fn
@@ -230,11 +281,12 @@
 
         on-select-library-color
         (mf/use-fn
-         (mf/deps data handle-change-color)
+         (mf/deps data handle-change-color clear-reference)
          (fn [_ color]
            (if (and (some? (:color color)) (some? (:gradient data)))
              (handle-change-color {:hex (:color color) :alpha (:opacity color)})
              (let [color (d/without-qualified color)]
+               (clear-reference)
                (st/emit! (dc/add-recent-color color)
                          (dc/apply-color-from-colorpicker color))
                (on-change color)))))
@@ -263,9 +315,12 @@
 
         on-color-accept
         (mf/use-fn
-         (mf/deps state)
+         (mf/deps state on-accept on-reference-accept)
          (fn []
-           (on-accept (dc/get-color-from-colorpicker-state state))
+           (if (and (mf/ref-val reference-name-ref)
+                    (fn? on-reference-accept))
+             (on-reference-accept (str "{" (mf/ref-val reference-name-ref) "}"))
+             (on-accept (dc/get-color-from-colorpicker-state state)))
            (modal/hide!)))
 
         options
@@ -393,6 +448,9 @@
     (mf/with-effect [data]
       (when @should-update?
         (st/emit! (dc/update-colorpicker data))))
+
+    (mf/with-effect [applied-token]
+      (set-reference-name applied-token))
 
     ;; Updates the CSS color variable when there is a change in the color
     (use-color-picker-css-variables! node-ref current-color)
@@ -542,6 +600,10 @@
               :mode hsb-mode
               :on-mode-change #(reset! hsb-mode* %)
               :color current-color
+              :reference-name reference-name
+              :reference-tokens reference-tokens
+              :on-change-reference #(handle-change-reference nil %)
+              :on-clear-reference clear-reference
               :on-change handle-change-color}]
 
             [:> libraries*
@@ -554,8 +616,8 @@
               :on-add-library-color on-add-library-color}]])]
 
         [:> token-section* {:combined-tokens combined-tokens
-                            :on-token-change on-token-change
-                            :applied-token applied-token
+                            :on-token-change (if (smallpen/enabled?) handle-change-reference on-token-change)
+                            :applied-token (if (smallpen/enabled?) reference-name applied-token)
                             :color-origin color-origin}])]
      (when (fn? on-accept)
        [:div {:class (stl/css :actions)}
@@ -743,6 +805,9 @@
            tab
            token-disabled
            applied-token
+           reference-tokens
+           on-token-detach
+           on-reference-accept
            on-accept]}]
   (let [vport       (mf/deref viewport)
         dirty?      (mf/use-var false)
@@ -782,6 +847,7 @@
                         active-tokens)
 
         color-tokens (:color active-tokens)
+        reference-tokens (or reference-tokens color-tokens)
 
         grouped-tokens-by-set
         (mf/with-memo [tokens-lib active-sets-names color-tokens]
@@ -804,7 +870,8 @@
         (when (and @dirty? @last-change on-close)
           (on-close @last-change))))
 
-    [:div {:class (stl/css :colorpicker-tooltip)
+    [:div {:class (stl/css-case :colorpicker-tooltip true
+                                :colorpicker-wide (smallpen/enabled?))
            :data-testid "colorpicker"
            :style style}
 
@@ -814,10 +881,13 @@
                        :disable-opacity disable-opacity
                        :disable-image disable-image
                        :on-token-change on-token-change
+                       :on-token-detach on-token-detach
                        :applied-token applied-token
                        :token-disabled token-disabled
+                       :reference-tokens reference-tokens
                        :on-change on-change'
                        :origin origin
                        :tab tab
                        :color-origin color-origin
+                       :on-reference-accept on-reference-accept
                        :on-accept on-accept}]]))

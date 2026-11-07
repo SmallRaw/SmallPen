@@ -19,6 +19,8 @@
    [app.main.data.workspace.undo :as dwu]
    [app.main.refs :as refs]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.ui.assets :as spa]
    [app.main.store :as st]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.context :as ctx]
@@ -27,6 +29,8 @@
    [app.main.ui.workspace.sidebar.assets.colors :refer [colors-section*]]
    [app.main.ui.workspace.sidebar.assets.common :as cmm]
    [app.main.ui.workspace.sidebar.assets.components :refer [components-section*]]
+   [app.main.ui.workspace.sidebar.assets.media :refer [media-section*]]
+   [app.main.ui.workspace.sidebar.assets.tokens :refer [tokens-section*]]
    [app.main.ui.workspace.sidebar.assets.typographies :refer [typographies-section*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
@@ -160,8 +164,9 @@
 
 (mf/defc file-library-content*
   {::mf/private true}
-  [{:keys [file is-local is-loaded open-status-ref on-clear-selection filters colors typographies components count-variants]}]
+  [{:keys [file is-local is-loaded open-status-ref on-clear-selection filters colors typographies components count-variants media token-groups]}]
   (let [open-status       (mf/deref open-status-ref)
+        smallpen-mode     (smallpen/enabled?)
 
         file-id           (:id file)
 
@@ -183,12 +188,29 @@
         (and (or (= filters-section "all")
                  (= filters-section "colors"))
              (or (> (count colors) 0)
-                 (not has-filters-term?)))
+                 (not has-filters-term?))
+             (not smallpen-mode))
+
+        show-media?
+        (and smallpen-mode
+             (or (= filters-section "all")
+                 (= filters-section "graphics"))
+             (pos? (count media)))
 
         show-typography?
         (and (or (= filters-section "all")
                  (= filters-section "typographies"))
              (or (pos? (count typographies))
+                 (and (not smallpen-mode) (not has-filters-term?))))
+
+        token-count
+        (reduce + 0 (map (comp count :tokens) token-groups))
+
+        show-tokens?
+        (and smallpen-mode
+             (not is-local)
+             (= filters-section "all")
+             (or (pos? token-count)
                  (not has-filters-term?)))
 
         force-open-components?
@@ -199,6 +221,9 @@
 
         force-open-typographies?
         (when ^boolean has-filters-term? (> 60 (count typographies)))
+
+        force-open-tokens?
+        (when ^boolean has-filters-term? (> 60 token-count))
 
         on-asset-click
         (mf/use-fn
@@ -295,6 +320,13 @@
             :on-assets-delete on-assets-delete
             :on-clear-selection on-clear-selection}])
 
+        (when ^boolean show-media?
+          [:> media-section*
+           {:file-id file-id
+            :media media
+            :is-open (or ^boolean has-filters-term?
+                         ^boolean (get open-status :graphics false))}])
+
         (when ^boolean show-typography?
           [:> typographies-section*
            {:file file
@@ -311,9 +343,18 @@
             :on-assets-delete on-assets-delete
             :on-clear-selection on-clear-selection}])
 
+        (when ^boolean show-tokens?
+          [:> tokens-section*
+           {:file-id file-id
+            :token-groups token-groups
+            :is-open (or ^boolean force-open-tokens?
+                         ^boolean (get open-status :tokens true))}])
+
         (when (and (not ^boolean show-components?)
                    (not ^boolean show-colors?)
-                   (not ^boolean show-typography?))
+                   (not ^boolean show-media?)
+                   (not ^boolean show-typography?)
+                   (not ^boolean show-tokens?))
           [:div  {:class (stl/css :asset-title)}
            [:span {:class (stl/css :no-found-icon-wrapper)}
             [:> icon* {:icon-id i/search
@@ -332,6 +373,9 @@
 
         colors       (:colors library)
         typographies (:typographies library)
+
+        {:keys [media token-groups]}
+        (spa/use-library-extras library filters is-local)
 
         filters-term (:term filters)
         is-loaded    (some? library)
@@ -411,6 +455,8 @@
          :colors filtered-colors
          :components filtered-components
          :typographies filtered-typographies
+         :media media
+         :token-groups token-groups
          :on-clear-selection unselect-all
          :open-status-ref open-status-ref
          :count-variants count-variants}])]))

@@ -21,7 +21,7 @@
     "build:storybook:cljs": "clojure -M:dev:shadow-cljs compile storybook",
     "build:wasm": "../render-wasm/build frontend",
     "build:app:libs": "node ./scripts/build-libs.js",
-    "build:app:main": "clojure -M:dev:shadow-cljs release main worker",
+    "build:app:main": "clojure -M:dev:shadow-cljs release main worker smallpen-render",
     "build:app:worker": "clojure -M:dev:shadow-cljs release worker",
     "build:app": "pnpm run clear:shadow-cache && pnpm run build:app:main && pnpm run build:app:libs",
     "check-fmt:clj": "cljfmt check --parallel=true src/ test/",
@@ -48,9 +48,11 @@
     "watch": "exit 0",
     "watch:app": "pnpm run clear:shadow-cache && pnpm run clear:wasm && pnpm run build:wasm && concurrently --kill-others-on-fail \"pnpm run watch:app:assets\" \"pnpm run watch:app:main\" \"pnpm run watch:app:libs\"",
     "watch:storybook": "pnpm run build:storybook:assets && concurrently --kill-others-on-fail \"storybook dev -p 3451 -h 0.0.0.0 --no-open\" \"node ./scripts/watch-storybook.js\"",
-    "postinstall": "(cd ../plugins/libs/plugins-runtime; pnpm install; pnpm run build) && (cd packages/ui && pnpm run build)"
+    "postinstall": "(cd ../plugins/libs/plugins-runtime; pnpm install; pnpm run build) && (cd packages/ui && pnpm run build)",
+    "build:app:renderer": "node ../smallpen/scripts/build-renderer.mjs"
   },
   "devDependencies": {
+    "@smallpen/core": "link:../smallpen/packages/core",
     "@penpot/draft-js": "link:packages/draft-js",
     "@penpot/mousetrap": "link:packages/mousetrap",
     "@penpot/plugins-runtime": "link:../plugins/libs/plugins-runtime",

@@ -1,0 +1,269 @@
+import { printText } from "./result-files.mjs";
+import { SmallPenError } from "@smallpen/core";
+import { commandContract } from "./command-contract.mjs";
+import { CLI_RULES } from "./workflow.mjs";
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  COMMAND_GROUPS,
+  PUBLIC_COMMANDS,
+  actionContract,
+  inputQueries,
+  groupRoute,
+  groupDefinition,
+  groupActions,
+  publicGuidance,
+} from "./command-tree.mjs";
+
+export const nextQuery = (argv) => ({ operation: `smallpen.${argv[0]}`, argv });
+const query = (...argv) => nextQuery([...argv, "--json"]);
+const rules = {
+  start: [
+    "Define, compose, then continue and check",
+    () => CLI_RULES.start,
+  ],
+  project: [
+    "Blank packages and workspace ownership",
+    () => [CLI_RULES.modelling.packages],
+  ],
+  flows: [
+    "Prototype triggers and destinations",
+    () => [CLI_RULES.actions.flows],
+  ],
+  validate: [
+    "Check scope, issues and coverage",
+    () => [CLI_RULES.actions.validate],
+  ],
+  themes: [
+    "Temporary theme combinations and defaults",
+    () =>
+      Object.values(CLI_RULES.selection).filter(
+        (value) => typeof value === "string",
+      ),
+  ],
+  tokens: [
+    "Token layers, rows and option values",
+    () => [CLI_RULES.modelling.tokenLayers, CLI_RULES.modelling.tokenWrites],
+  ],
+  components: [
+    "Component variants and generated design system",
+    () => [
+      CLI_RULES.modelling.componentVariants,
+      CLI_RULES.modelling.designSystem,
+    ],
+  ],
+  platforms: [
+    "Desktop, mobile and other platforms: themes, variants or Presentations",
+    () => [CLI_RULES.modelling.platforms],
+  ],
+  targets: [
+    "Packages, Screens and Presentations",
+    () => [CLI_RULES.modelling.packages, CLI_RULES.modelling.presentations],
+  ],
+  output: [
+    "Specifications for implementation, wireframes for structure, PNG for appearance",
+    () =>
+      Object.values(CLI_RULES.output)
+        .filter((value) => typeof value === "string")
+        .slice(0, 3),
+  ],
+  writes: [
+    "Atomic edits, retries and explicit reverse edits",
+    () => [CLI_RULES.actions.settings, CLI_RULES.output.writes],
+  ],
+};
+
+const inputs = {
+  apply: "batch",
+  init: "init",
+  "import-tokens": "token",
+};
+const notes = {
+  themes: [
+    "Read available groups/options/defaults. This call resolves only its arguments; no selection is remembered.",
+  ],
+  view: [
+    "Component catalogs show representative samples; preview.components reports shownVariants, totalVariants and omittedVariants for each component. view PACKAGE --component NAME --as png shows all its variants. Component regions keep authored alpha without added backgrounds; component notes use larger bold text on transparent space, with no background or frame and clear separation from samples.",
+    "Names the target: --page, --component, --token, --canvas or nothing for the whole package; --as text first.",
+  ],
+  export: [
+    "Whole-component PNG/wireframe exports show every variant, matching view. --variant or --element selects one definition target. Whole-component sheet evidence describes a catalog layout; select a variant for its authored geometry and sources.",
+    "Three outputs: --format spec for implementation, wireframe for structure, png for appearance. --format png --evidence writes all three from one native layout. Compare layout.hash; image inspection requires an image-capable caller.",
+  ],
+  validate: [
+    "A page checks every version and a component every variant unless --platform or --variant names one; read coverage and skipped checks.",
+  ],
+  "import-tokens": [
+    "Review without --apply first. --dry-run takes precedence over --apply and never commits.",
+  ],
+};
+
+export function commandOverview(name) {
+  const contract = commandContract(name);
+  const positional = contract.arguments.map(({ name, required }) =>
+    required ? `<${name}>` : `[${name}]`,
+  );
+  const required = Object.values(contract.parameters)
+    .filter((parameter) => parameter.required)
+    .map(
+      ({ option, type }) => `${option}${type === "boolean" ? "" : " <value>"}`,
+    );
+  return {
+    command: name,
+    purpose: contract.purpose,
+    usage: ["smallpen", name, ...positional, ...required, "[options]"].join(
+      " ",
+    ),
+    options: Object.values(contract.parameters).map(({ option }) => option),
+    ...(notes[name] ? { notes: notes[name] } : {}),
+    nextOperations: [
+      query("schema", "command", name),
+      ...(inputs[name] ? [query("schema", inputs[name])] : []),
+    ],
+  };
+}
+
+function unknown(topic, section) {
+  throw new SmallPenError(
+    "unknown_help_topic",
+    `Unknown help topic: ${[topic, section].filter(Boolean).join(" ")}`,
+    {
+      nextOperations: [
+        query(
+          "help",
+          ...(["workflow", "rules"].includes(topic) ? [topic] : []),
+        ),
+      ],
+    },
+  );
+}
+
+export function helpTopic(topic, section, { full = false } = {}) {
+  if (!topic) {
+    if (section) return unknown(topic, section);
+    return {
+      purpose: "Manage local SmallPen design packages",
+      usage: "smallpen COMMAND [arguments] [options]",
+      notes: [
+        "Common route: help rules start. Use help OBJECT to list actions, help OBJECT ACTION for usage, and schema command OBJECT ACTION for parameters and input queries. Common rules: help rules.",
+        "Scene guidance for complete designs and component/content previews: help skills.",
+        "One .smallpen directory is one Canonical Package. Each call is independent; there is no current selection, current page, or cross-call session state.",
+        "Reads start small. --full expands data; large results use a temporary resultFile with SHA-256. --stdout explicitly allows large stdout. Random names share one temporary folder; files older than 30 minutes are cleaned each invocation. --output retains exports.",
+      ],
+      commands: PUBLIC_COMMANDS,
+      nextOperations: [query("help", "rules", "start")],
+    };
+  }
+  if (Object.hasOwn(COMMAND_GROUPS, topic)) {
+    const definition = groupDefinition(topic, section);
+    if (definition)
+      return {
+        command: [topic, section].filter(Boolean).join(" "),
+        purpose: definition.purpose,
+        usage: `smallpen ${[topic, section].filter(Boolean).join(" ")} ACTION [arguments] [options]`,
+        options: ["--help", "--json"],
+        actions: groupActions(topic, section),
+        nextOperations: [
+          query("schema", "command", topic, ...(section?.split(" ") ?? [])),
+        ],
+      };
+    const route = groupRoute(topic, section);
+    const contract = actionContract(topic, section);
+    const engineNotes = notes[route.engine];
+    const required = Object.values(contract.parameters)
+      .filter((p) => p.required)
+      .map((p) => `${p.option} <value>`);
+    return {
+      command: route.name,
+      purpose: route.purpose,
+      usage: [
+        "smallpen",
+        route.name,
+        ...contract.arguments.map((a) =>
+          a.required ? `<${a.name}>` : `[${a.name}]`,
+        ),
+        ...required,
+        "[options]",
+      ].join(" "),
+      options: Object.values(contract.parameters).map((p) => p.option),
+      ...(engineNotes ? { notes: engineNotes } : {}),
+      nextOperations: [
+        query("schema", "command", ...route.name.split(" ")),
+        ...inputQueries(route),
+      ],
+      ...(full
+        ? {
+            parameters: contract.parameters,
+            intentActions: contract.intentActions,
+          }
+        : {}),
+    };
+  }
+  if (topic === "skills") {
+    if (section) return unknown(topic, section);
+    const locations = [
+      new URL("../../../skills/smallpen-ui-design/SKILL.md", import.meta.url),
+      new URL("../skills/smallpen-ui-design/SKILL.md", import.meta.url),
+    ];
+    const path = fileURLToPath(locations.find(existsSync) ?? locations[1]);
+    return {
+      topic,
+      purpose: "Skill guidance for complete screens and flows, reusable UI systems and content previews",
+      skills: [{ name: "smallpen-ui-design", path, directory: dirname(path), available: existsSync(path) }],
+      notes: [
+        `Read ${path}, or install its directory with your AI host's Skill installer.`,
+        "Load the Skill for the task; bundled files alone do not mean the AI loaded them. The Skill reads project specifications and uses CLI checks and native previews.",
+      ],
+    };
+  }
+  if (topic === "workflow") return helpTopic("rules", section, { full });
+  if (topic === "rules") {
+    if (full && !section) return CLI_RULES;
+    if (section) {
+      if (!Object.hasOwn(rules, section)) return unknown(topic, section);
+      const [title, read] = rules[section];
+      return { topic, id: section, title, notes: read() };
+    }
+    return {
+      topic,
+      rules: Object.entries(rules).map(([id, [title]]) => ({
+        id,
+        title,
+        nextOperations: [query("help", "rules", id)],
+      })),
+    };
+  }
+  if (section) return unknown(topic, section);
+  return commandOverview(topic);
+}
+
+export function printBriefHelp(topic, section, options) {
+  const value = helpTopic(topic, section, options);
+  if (["rules", "workflow"].includes(topic) && options?.full && !section) {
+    printText(JSON.stringify(value, null, 2) + "\n");
+    return;
+  }
+  const lines = [
+    topic && topic !== "help"
+      ? `SmallPen ${topic}${section ? ` ${section}` : ""}`
+      : "SmallPen Canonical Package CLI",
+    value.purpose ?? value.title ?? "",
+    value.usage ? `Usage: ${value.usage}` : "",
+  ];
+  if (value.options) lines.push(`Options: ${value.options.join(" ")}`);
+  lines.push(...(value.notes ?? []));
+  if (value.guidance) lines.push(value.guidance);
+  for (const entry of value.stages ?? value.rules ?? [])
+    lines.push(
+      `${entry.id}: ${entry.title}`,
+      `  smallpen ${entry.nextOperations[0].argv.join(" ")}`,
+    );
+  for (const { command, purpose } of value.commands ?? [])
+    lines.push(`  ${command.padEnd(20)} ${purpose}`);
+  for (const { action, purpose } of value.actions ?? [])
+    lines.push(`  ${action.padEnd(20)} ${purpose}`);
+  for (const { argv } of value.nextOperations ?? [])
+    lines.push(`Next: smallpen ${argv.join(" ")}`);
+  printText(lines.filter(Boolean).join("\n") + "\n");
+}

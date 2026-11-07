@@ -13,6 +13,8 @@
    [app.main.data.team :as dtm]
    [app.main.refs :as refs]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.routing :as sprt]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.debug.icons-preview :refer [icons-preview*]]
@@ -46,6 +48,9 @@
 
 (def settings-page*
   (mf/lazy #(mod/load 'app.main.ui.settings/settings-page*)))
+
+(def smallpen-home-page*
+  (mf/lazy #(mod/load 'app.main.smallpen.home/smallpen-home-page*)))
 
 (def workspace-page*
   (mf/lazy #(mod/load 'app.main.ui.workspace/workspace-page*)))
@@ -123,6 +128,14 @@
        :nitrate-entry
        [:> nitrate-entry/nitrate-entry-page* {:profile profile}]
 
+       :smallpen-home
+       (when (smallpen/enabled?)
+         [:? [:> smallpen-home-page*]])
+
+       :smallpen-design-system
+       (when (smallpen/enabled?)
+         [:> sprt/design-system-entry* {:file-id (get-in params [:query :file-id])}])
+
        (:settings-profile
         :settings-password
         :settings-options
@@ -193,7 +206,8 @@
 
        :workspace
        (let [params     (get params :query)
-             team-id    (some-> params :team-id uuid/parse*)
+             team-id    (or (some-> params :team-id uuid/parse*)
+                            (when (smallpen/enabled?) smallpen/local-team-id))
              file-id    (some-> params :file-id uuid/parse*)
              page-id    (some-> params :page-id uuid/parse*)
              layout     (some-> params :layout keyword)]

@@ -16,6 +16,7 @@
    [app.main.data.workspace.drawing.curve :as curve]
    [app.main.data.workspace.drawing.line :as line]
    [app.main.data.workspace.path :as path]
+   [app.main.smallpen.edit-policy :as dsep]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
@@ -34,16 +35,19 @@
                                       (if (= tool :comments)
                                         (disj workspace-layout :document-history)
                                         workspace-layout)))
-          (update :workspace-drawing assoc :tool tool)
+          (update :workspace-drawing assoc :tool (when-not (dsep/drawing-blocked? state tool) tool))
           ;; When changing drawing tool disable "scale text" mode
           ;; automatically, to help users that ignore how this
           ;; mode works.
           (update :workspace-layout disj :scale-text)))
 
     ptk/WatchEvent
-    (watch [_ _ stream]
+    (watch [_ state stream]
       (rx/merge
-       (when (= tool :path)
+       (when (dsep/drawing-blocked? state tool)
+         (rx/of (dsep/blocked-warning :structure)))
+
+       (when (and (= tool :path) (not (dsep/drawing-blocked? state tool)))
          (rx/of (start-drawing :path)))
 
        (when (and (not= tool :comments)
@@ -66,7 +70,7 @@
     (ptk/reify ::start-drawing
       ptk/UpdateEvent
       (update [_ state]
-        (update-in state [:workspace-drawing :lock] #(if (nil? %) lock-id %)))
+        (update-in state [:workspace-drawing :lock] #(if (and (nil? %) (not (dsep/drawing-blocked? state type))) lock-id %)))
 
       ptk/WatchEvent
       (watch [_ state stream]

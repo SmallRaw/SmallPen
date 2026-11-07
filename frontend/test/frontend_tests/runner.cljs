@@ -40,6 +40,7 @@
    [frontend-tests.data.workspace-libraries-sync-test]
    [frontend-tests.data.workspace-mcp-test]
    [frontend-tests.data.workspace-media-test]
+   [frontend-tests.data.workspace-modifiers-test]
    [frontend-tests.data.workspace-notifications-test]
    [frontend-tests.data.workspace-pages-test]
    [frontend-tests.data.workspace-path-edition-test]
@@ -115,6 +116,7 @@
    [frontend-tests.render-wasm.text-paste-test]
    [frontend-tests.render-wasm.webgl-test]
    [frontend-tests.router-test]
+   [frontend-tests.smallpen-suite :as smallpen-suite]
    [frontend-tests.svg-fills-test]
    [frontend-tests.svg-filters-test]
    [frontend-tests.text-editor-paste-guard-test]
@@ -242,6 +244,7 @@
    'frontend-tests.data.workspace-libraries-sync-test
    'frontend-tests.data.workspace-mcp-test
    'frontend-tests.data.workspace-media-test
+   'frontend-tests.data.workspace-modifiers-test
    'frontend-tests.data.workspace-notifications-test
    'frontend-tests.data.workspace-pages-test
    'frontend-tests.data.workspace-path-edition-test
@@ -388,6 +391,9 @@
    'frontend-tests.util.dom.dnd-test
    'frontend-tests.util-zip-test
    'frontend-tests.worker-snap-test])
+
+;; SmallPen test namespaces are registered in `frontend-tests.smallpen-suite`.
+(set! test-namespaces (into test-namespaces smallpen-suite/test-namespaces))
 
 (assert (every? find-ns-obj test-namespaces)
         "test-namespaces contains a namespace that isn't required in runner.cljs")

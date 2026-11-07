@@ -28,6 +28,8 @@
    [app.main.data.workspace.tokens.library-edit :as dwtl]
    [app.main.refs :as refs]
    [app.main.render :refer [component-svg]]
+   [app.main.smallpen :as smallpen]
+   [app.main.smallpen.ui.libraries :as sp-libraries]
    [app.main.store :as st]
    [app.main.ui.components.color-bullet :as cb]
    [app.main.ui.components.link-button :as lb]
@@ -1148,7 +1150,7 @@
         (mf/use-state #(d/nilv starting-tab (if token-lib-sync? "file" "libraries")))
 
         selected-tab
-        (deref selected-tab*)
+        (if (smallpen/enabled?) "smallpen" (deref selected-tab*))
 
         on-change-tab
         (mf/use-fn #(reset! selected-tab* %))
@@ -1165,10 +1167,15 @@
             [{:label (tr "workspace.libraries.libraries")
               :id "libraries"}
              {:label (tr "workspace.libraries.updates")
-              :id "updates"}]))]
+              :id "updates"}]))
+
+        tabs
+        (mf/with-memo [tabs]
+          (if (smallpen/enabled?) (sp-libraries/dialog-tabs) tabs))]
 
     (mf/with-effect []
-      (st/emit! (dtm/fetch-shared-files)))
+      (when-not (smallpen/enabled?)
+        (st/emit! (dtm/fetch-shared-files))))
 
     [:div {:class (stl/css :modal-overlay)
            :on-click close-dialog-outside
@@ -1186,6 +1193,9 @@
                          :selected selected-tab
                          :on-change on-change-tab}
        (case selected-tab
+         "smallpen"
+         [:> sp-libraries/libraries-tab*]
+
          "file"
          (when token-lib-sync?
            [:> file-tab* {:is-shared shared?

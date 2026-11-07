@@ -19,6 +19,8 @@
    [app.main.data.workspace.path.state :as path.state]
    [app.main.features :as features]
    [app.main.refs :as refs]
+   [app.main.smallpen.ui.options :as sp-options]
+   [app.main.smallpen.ui.refs :as sp-refs]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.layout.tab-switcher :refer [tab-switcher*]]
@@ -121,6 +123,7 @@
   (let [sp-panel (mf/deref refs/specialized-panel)
         drawing  (mf/deref refs/workspace-drawing)
         edition  (mf/deref refs/selected-edition)
+        ds-page? (mf/deref sp-refs/design-system-page?)
 
         edit-path
         (mf/deref refs/workspace-edit-path)
@@ -175,16 +178,24 @@
         (count selected)]
 
     [:div {:class (stl/css :element-options :design-options)}
-     [:> align-options* {:shapes shapes
-                         :objects objects
-                         :path-edit? path-editing?
-                         :node-count path-node-count}]
-     (when-not path-editing?
+     (when-not ds-page?
+       [:> align-options* {:shapes shapes
+                           :objects objects
+                           :path-edit? path-editing?
+                           :node-count path-node-count}])
+     (when-not (or path-editing? ds-page?)
        [:> bool-options* {:total-selected total-selected
                           :shapes shapes
                           :shapes-with-children shapes-with-children}])
 
+     [:> sp-options/design-system-sections* {:shapes shapes
+                                             :file-id file-id
+                                             :page-id page-id}]
+
      (cond
+       (sp-options/properties-locked? ds-page? shapes)
+       nil
+
        ;; Show path-specific options during node editing.
        path-editing?
        [:> path/path-edition-options*
