@@ -45,6 +45,7 @@ import {
   createCatalog,
   createSemanticTree,
   projectScreen,
+  projectComponentVariant,
   designChanges,
   designChangesText,
   elementMoveOperation,
@@ -2633,21 +2634,11 @@ async function lookAt(packagePath, args, ids, target) {
   const as = option(args, "--as") ?? "text";
   const pass = lookPass(args);
   if (as === "issues") {
-    const report = await validateCommand(packagePath, ["validate", packagePath, ...ids, ...pass]);
-    const listed = lookIssueList(report.issues, args);
-    return lookResult(
-      target,
-      flag(args, "--full")
-        ? report
-        : {
-            issueCount: listed.issues.length,
-            ...listed,
-            ...(report.hints ? { hints: report.hints } : {}),
-            revision: report.revision,
-          },
-      args,
-      as,
-    );
+    if (flag(args, "--full"))
+      return lookResult(target, await validateCommand(packagePath, ["validate", packagePath, ...ids, ...pass]), args, as);
+    return lookIssues(packagePath, args, [
+      { ids, where: target.page ?? target.component ?? "design" },
+    ], target);
   }
   const argv =
     as === "png"
@@ -2716,75 +2707,22 @@ async function lookSheet(packagePath, args, workspace, part, target) {
   return result;
 }
 
-// Issues read by name: where says the element, IDs need --full. Preview
-// limits (sizes the local renderer cannot compute) are the tool's, not the
-// design's, so they become one note.
-function lookIssueList(issues, args, target, describe) {
-  const limits = issues.filter((issue) => issue.code === "layout_projection_partial");
-  const design = issues.filter((issue) => issue.code !== "layout_projection_partial");
-  const named = flag(args, "--full")
-    ? design
-    : design.map(({ nodeId: _node, otherNodeId: _other, unsupportedFields: _fields, target: inner, ...issue }) => {
-        const detail = inner && describe ? describe(inner) : undefined;
-        return {
-          ...(target ? { target: detail ? `${target} (${detail})` : target } : {}),
-          ...issue,
-        };
-      });
-  return {
-    issues: named,
-    ...(limits.length
-      ? {
-          previewNote: `The local preview cannot compute some automatic sizes in ${limits.length} place${limits.length === 1 ? "" : "s"}; geometry there may differ in the App. Check those with the App or a PNG.`,
-        }
-      : {}),
-  };
-}
-
-// Issues of several targets in one list; each issue says where it is.
+// Views keep the same check scope and receipt as validate. One workspace
+// snapshot and one runner serve all targets, including compact replies.
 async function lookIssues(packagePath, args, targets, target, extra = []) {
-  const issues = [...extra];
-  let checked = 0;
-  let notes = 0;
-  for (const { ids, where, describe } of targets) {
-    const report = await validateCommand(packagePath, [
-      "validate",
-      packagePath,
-      ...ids,
-      "--full",
-      ...lookPass(args).filter((item) => item !== "--full"),
-    ]);
-    checked += 1;
-    const listed = lookIssueList(report.issues, args, where, describe);
-    issues.push(...listed.issues);
-    if (listed.previewNote) notes += 1;
-  }
-  const page = pageItems(issues, pagination(args));
+  const report = await validateCommand(
+    packagePath,
+    ["validate", packagePath, ...lookPass(args)],
+    { targets, extraIssues: extra },
+  );
   return {
+    ...report,
     target,
     as: "issues",
-    checked,
-    issueCount: issues.length,
-    issues: flag(args, "--full") ? issues : page.items,
-    ...(flag(args, "--full") ? {} : { page: page.page }),
-    ...(notes
-      ? {
-          previewNote: `The local preview cannot compute some automatic sizes in ${notes} of ${checked} targets; geometry there may differ in the App.`,
-        }
-      : {}),
+    checked: targets.length,
     nextOperations: lookAgain(args, "text"),
   };
 }
-
-// Which variant or page version a --all report's issue came from.
-const describeVariant = (set) => (selection) => {
-  const variant = set.variants.find(({ id }) => id === selection.variantId);
-  return variant ? variantLabel(set, variant) : undefined;
-};
-const describeVersion = (screen) => (selection) => {
-  const presentation = screen.presentations.find(({ id }) => id === selection.presentationId);
-  return presentation ? (presentation.platform ?? presentation.name) : undefined;
-};
 
 function lookComponentSets(workspace) {
   const sets = [];
@@ -3100,7 +3038,7 @@ async function lookCommand(packagePath, args) {
           allVariants: true,
         }, target);
       if (as === "issues")
-        return lookIssues(packagePath, args, [{ ids: ["--component-id", set.id, ...owned, "--all"], where: set.name, describe: describeVariant(set) }], target);
+        return lookIssues(packagePath, args, [{ ids: ["--component-id", set.id, ...owned, "--all"], where: set.name }], target);
     }
     const variant = findVariant(set, variantText);
     const label = variantLabel(set, variant);
@@ -3132,7 +3070,6 @@ async function lookCommand(packagePath, args) {
       return lookIssues(packagePath, args, sets.map(({ owner, set }) => ({
         ids: ["--component-id", set.id, ...(owner === product ? [] : ["--package-id", owner.manifest.packageId]), "--all"],
         where: set.name,
-        describe: describeVariant(set),
       })), target);
     // Components made in the App on a page are that page's elements.
     const located = [product, foundation, ...libraries].filter(Boolean).flatMap((owner) =>
@@ -3194,11 +3131,10 @@ async function lookCommand(packagePath, args) {
   if (as === "png" || as === "wireframe") return lookSheet(packagePath, args, workspace, undefined, target);
   if (as === "issues")
     return lookIssues(packagePath, args, [
-      ...screens.map((screen) => ({ ids: ["--screen-id", screen.id, "--all"], where: screen.name, describe: describeVersion(screen) })),
+      ...screens.map((screen) => ({ ids: ["--screen-id", screen.id, "--all"], where: screen.name })),
       ...sets.map(({ owner, set }) => ({
         ids: ["--component-id", set.id, ...(owner === product ? [] : ["--package-id", owner.manifest.packageId]), "--all"],
         where: set.name,
-        describe: describeVariant(set),
       })),
     ], target, packageNameIssues(workspace));
   const tokens = listEffectiveTokens(product, { context: contextSelection(args), foundation, libraries });
@@ -3636,14 +3572,22 @@ function selectionNames({ product, foundation, libraries = [] }, selection = {})
     const entry = product.manifest.entries.screens.find((item) => product.entries[item]?.id === selection.screenId);
     const screen = entry && product.entries[entry];
     const presentation = screen?.presentations.find(({ id }) => id === selection.presentationId);
-    return screen ? { page: screen.name, ...(presentation ? { platform: presentation.platform ?? presentation.name } : {}) } : {};
+    const nodes = selection.nodeId && presentation
+      ? projectScreen(product, screen.id, { foundation, libraries, presentationId: presentation.id, context: selection.context }).nodes
+      : undefined;
+    return screen ? { page: screen.name, ...(presentation ? { platform: presentation.platform ?? presentation.name } : {}),
+      ...(nodes ? { element: elementPath(nodes, presentation.rootId, selection.nodeId) || nodes[selection.nodeId]?.name } : {}) } : {};
   }
   if (selection.componentId) {
     for (const owner of [product, foundation, ...libraries].filter(Boolean)) {
       const set = owner.domain.componentSets.get(selection.componentId);
       if (!set) continue;
       const variant = set.variants.find(({ id }) => id === selection.variantId);
-      return { component: set.name, ...(variant ? { variant: variantLabel(set, variant) } : {}) };
+      const nodes = selection.nodeId && variant
+        ? projectComponentVariant(product, variant, { owner, foundation, libraries, context: selection.context })
+        : undefined;
+      return { component: set.name, ...(variant ? { variant: variantLabel(set, variant) } : {}),
+        ...(nodes ? { element: elementPath(nodes, variant.rootId, selection.nodeId) || nodes[selection.nodeId]?.name } : {}) };
     }
   }
   return {};
@@ -3660,7 +3604,7 @@ function packageNameIssues({ product, foundation }) {
 // (a broken reference) makes the package invalid and says where.
 // The whole package, or one named page or component (`only`), in one short
 // report by name.
-async function validateWholePackage(packagePath, args, workspace, resolution, only) {
+async function validateWholePackage(packagePath, args, workspace, resolution, only, extraIssues = []) {
   const { product } = workspace;
   const pass = lookPass(args).filter((item) => item !== "--full");
   const targets = only ?? [
@@ -3669,11 +3613,7 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
     ...[...product.domain.componentSets.values()]
       .map((set) => ({ ids: ["--component-id", set.id, "--all"], where: set.name })),
   ];
-  const targetLabel = (selection = {}) => {
-    const named = selectionNames(workspace, selection);
-    const label = [named.page ?? named.component, named.platform ?? named.variant].filter(Boolean);
-    return label.length > 1 ? `${label[0]} (${label[1]})` : label[0] ?? "design";
-  };
+  const targetLabel = (selection = {}) => validationLabel(workspace, selection);
   const issues = [], checked = [], skipped = [], hints = [];
   let unreadable = 0;
   const jobs = [];
@@ -3701,7 +3641,7 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
   // from design issues and every skipped layout check counted in coverage.
   const limits = issues.filter((issue) => issue.code === "layout_projection_partial");
   const notChecked = skipped.filter((skip) => skip.check !== "visual-intent");
-  const design = [...(only ? [] : packageNameIssues(workspace)), ...issues.filter((issue) => issue.code !== "layout_projection_partial")];
+  const design = [...extraIssues, ...(only ? [] : packageNameIssues(workspace)), ...issues.filter((issue) => issue.code !== "layout_projection_partial")];
   const full = flag(args, "--full");
   const page = pageItems(design, pagination(args));
   return {
@@ -3728,7 +3668,7 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
       // Pages by version; components as one line each unless --full.
       targets: full ? checked.map(targetLabel) : Object.entries(checked.reduce((groups, selection) => {
         const named = selectionNames(workspace, selection);
-        const key = named.component ? `component:${named.component}` : targetLabel(selection);
+        const key = named.component && !named.element ? `component:${named.component}` : targetLabel(selection);
         (groups[key] ??= []).push(selection);
         return groups;
       }, {})).map(([key, list]) => key.startsWith("component:") && list.length > 1
@@ -3875,7 +3815,8 @@ function projectSummary(snapshot) {
 function validationLabel(workspace, selection) {
   const named = selectionNames(workspace, selection);
   const parts = [named.page ?? named.component, named.platform ?? named.variant].filter(Boolean);
-  return parts.length > 1 ? `${parts[0]} (${parts[1]})` : parts[0] ?? "design";
+  const label = parts.length > 1 ? `${parts[0]} (${parts[1]})` : parts[0] ?? "design";
+  return named.element ? `${label} / ${named.element}` : label;
 }
 
 async function runChecks(workspace, jobs, args) {
@@ -3993,7 +3934,7 @@ async function validateTargets(workspace, args) {
   return visual;
 }
 
-async function validateCommand(packagePath, args, { named = false } = {}) {
+async function validateCommand(packagePath, args, { named = false, targets, extraIssues } = {}) {
   if (
     flag(args, "--all") &&
     !option(args, "--component-id") &&
@@ -4027,6 +3968,7 @@ async function validateCommand(packagePath, args, { named = false } = {}) {
     );
   }
   const workspace = await tokenWorkspace(packagePath, args);
+  if (targets) return validateWholePackage(packagePath, args, workspace, resolution, targets, extraIssues);
   const targeted = [
     "--screen-id",
     "--presentation-id",
@@ -4037,7 +3979,7 @@ async function validateCommand(packagePath, args, { named = false } = {}) {
   ].some((arg) => flag(args, arg));
   if (!targeted) return validateWholePackage(packagePath, args, workspace, resolution);
   if (named) {
-    const ids = ["--screen-id", "--presentation-id", "--component-id", "--package-id", "--variant-id"]
+    const ids = ["--screen-id", "--presentation-id", "--component-id", "--package-id", "--variant-id", "--node-id"]
       .flatMap((name) => (option(args, name) !== undefined ? [name, option(args, name)] : []));
     const where = option(args, "--page") ?? option(args, "--component");
     return validateWholePackage(packagePath, args, workspace, resolution, [{ ids: [...ids, ...(flag(args, "--all") ? ["--all"] : [])], where }]);
@@ -4862,7 +4804,7 @@ async function main(args) {
   if (command === "validate") {
     // A named page or component reads like the whole-package report;
     // --full keeps every stored check.
-    const named = publicSurface && option(args, "--element") === undefined && !flag(args, "--full") &&
+    const named = publicSurface && !flag(args, "--full") &&
       (option(args, "--page") !== undefined || option(args, "--component") !== undefined);
     const report = await validateCommand(packagePath, args, { named });
     // Sizes the preview cannot compute: one note, not one issue each.
@@ -5654,15 +5596,15 @@ function errorDetails(error, args) {
     const locator =
       typeof args[1] === "string" ? resolve(args[1]) : "<package>";
     const commands = [
+      ...(typeof details.baseRevision === "string" && details.baseRevision.length ? [{
+        argv: ["changes", locator, "--since", details.baseRevision, "--json"],
+        explanation:
+          "Read changes since the candidate's base revision. If history is unavailable, use the current view instead.",
+      }] : []),
       {
         argv: ["view", locator, "--json"],
         explanation:
-          "Read the current revision, then look at the affected targets by name to check concurrent changes before rebuilding the intent.",
-      },
-      {
-        argv: ["apply", locator, "--batch", "<rebuilt-intent.json>", "--json"],
-        explanation:
-          "In the batch JSON set baseRevision to the actual revision and batchId to a new unique id, keep the remaining operations, then run this apply.",
+          "Locate the affected targets, then read their current specifications before rebuilding a scoped edit or a fresh preview. Preserve concurrent edits.",
       },
     ];
     const remainingIntent = Array.isArray(details.nextOperations)
@@ -5679,35 +5621,11 @@ function errorDetails(error, args) {
           }
         : {}),
       commands,
-      nextOperations: Array.isArray(details.nextOperations)
-        ? details.nextOperations.map((operation, index) => {
-            const step = {
-              ...operation,
-              ...(commands[index] ? { argv: commands[index].argv } : {}),
-            };
-            if (flag(args, "--full") || !operation.args?.operations)
-              return step;
-            const { operations: _operations, ...operationArgs } =
-              operation.args;
-            return { ...step, args: operationArgs };
-          })
-        : [
-            {
-              argv: commands[0].argv,
-              args: { expectedRevision: details.actualRevision },
-              operation: "smallpen.refresh",
-            },
-            {
-              argv: commands[1].argv,
-              args: {
-                baseRevision: details.actualRevision,
-                newBatchId: "<unique-id>",
-              },
-              operation: "smallpen.apply.replay-intent",
-            },
-          ],
+      nextOperations: commands.map(({ argv }) => ({
+        argv, operation: `smallpen.${argv[0]}`,
+      })),
       recovery:
-        "The write was rejected atomically; nothing was applied. Read the actual revision and inspect the affected targets for concurrent changes. Rebuild the retained intent file against that revision with a new unique batchId inside the JSON (advanced apply takes no --batch-id option), then rerun advanced apply --batch. Preserve concurrent updates that are still needed.",
+        "The write was rejected atomically; nothing was applied. Read changes and current affected specifications, then rebuild only the intended fields with a new unique batchId or review a fresh page preview. Retained operations are the rejected intent, not an approved retry. Do not make an old snapshot current by changing only baseRevision.",
     };
   }
   if (error?.code === "missing_local_asset" && isRecord(details.reference)) {

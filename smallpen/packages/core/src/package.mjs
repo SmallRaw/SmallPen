@@ -7036,7 +7036,7 @@ export async function prepareOperationBatch(before, batch, options = {}) {
   if (batch.baseRevision !== before.revision) {
     fail(
       "stale_revision",
-      "Operation Batch baseRevision is stale; refresh and replay the intent",
+      "Operation Batch baseRevision is stale; read the current design before rebuilding the intent",
       {
         actualRevision: before.revision,
         baseRevision: batch.baseRevision,

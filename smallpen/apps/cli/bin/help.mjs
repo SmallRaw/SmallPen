@@ -426,7 +426,7 @@ Purpose:
   element, so an Agent can see what a change touches before making it.
   Foundation Tokens are resolved through the Product dependency.`,
   apply: `Usage:
-  smallpen apply <package.smallpen> --batch BATCH.json [--dry-run] [--explain] [--diff]
+  smallpen apply <package.smallpen> --batch BATCH.json [--dry-run] [--diff]
                  [--warning-detail compact|full] [--confirm-unmatched]
                  [--compact] [--inverse-out FILE] [--json]
 
@@ -503,9 +503,9 @@ Errors and recovery:
   stale_revision returns actual/base revisions. Inspect current content first:
   the intended change may already be committed. Rebuild only the remaining intent
   against the actual revision and use a new unique batch ID; do not blindly replay.
-  --dry-run validates and returns the result/inverse without writing. --explain
-  adds per-operation targets and --diff a before/after field diff of every
-  changed entry; both are previews that never write, with or without --dry-run.
+  --dry-run validates and returns the result/inverse without writing. --diff
+  also returns per-operation targets and before/after fields. --explain is a
+  compatibility alias for --diff. Neither flag writes, with or without --dry-run.
   Invalid batches never write.`,
   watch: `Usage:
   smallpen watch <package.smallpen> [--interval MS] [--max-events N] [--json]

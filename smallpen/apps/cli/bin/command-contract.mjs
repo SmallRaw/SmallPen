@@ -131,7 +131,7 @@ const PARAMETERS = {
     "string",
     "Only Tokens that take values in this theme group (Brand); requires --definitions",
   ),
-  diff: flag("--diff", "Preview the batch diff without writing"),
+  diff: flag("--diff", "Explain affected targets and preview the batch diff without writing"),
   from: parameter("--from", "string", "Source element as \"Page / Element\""),
   to: parameter("--to", "string", "Destination page name"),
   on: parameter("--on", "string", "Trigger; default click", {
@@ -180,7 +180,7 @@ const PARAMETERS = {
   preview: flag("--preview", "Render the candidate page as PNG, specification and evidence without writing; returns the exact batch to apply after review"),
   explain: flag(
     "--explain",
-    "Preview affected targets and fields without writing",
+    "Compatibility alias for --diff; explains affected targets and fields without writing",
   ),
   family: parameter("--family", "string", "Font family name"),
   file: path("--file", "Source binary file"),

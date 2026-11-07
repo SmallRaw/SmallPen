@@ -1,6 +1,11 @@
 export const CLI_RULES = Object.freeze({
   purpose:
     "CLI operation rules. Read the selected command and input schema; pass explicit locators and returned IDs.",
+  start: [
+    "Define only what the task needs: project init creates a blank package; token set and component define establish the chosen style, and component set changes shared parts. Existing projects can reuse their current definitions; a complete Token inventory or component library is not a prerequisite.",
+    "Compose with page draw from a JSON file in the Agent's own folder. --preview renders a candidate without changing the Package and returns the exact advanced apply argv to save it after review. Read view --as spec for constraints and sources, PNG for appearance; page set or page draw into a named container changes a smaller scope. A preview checks only its selected size, themes and state.",
+    "Continue after App edits with changes --since REVISION, then read the affected specification before a scoped page set or component set. validate checks the selected versions/variants; read its coverage and skipped checks. export is for retained deliverables; choose formats supported by the installed CLI. Discover search, themes, fonts/media and flow when the task needs them. A stale candidate needs a fresh review; changing only baseRevision does not resolve a conflict.",
+  ],
   selection: {
     appStateIndependent: true,
     defaults:
@@ -14,14 +19,14 @@ export const CLI_RULES = Object.freeze({
   },
   actions: {
     settings:
-      "Work by name: every listed write takes Token paths ({path} binds a Token), theme options as Group/Option and component, page, element, canvas, color and font names; the CLI makes IDs, node tables and coordinates. Names never repeat: siblings, pages, components, canvases, theme options and assets each have their own; \"Name [2]\" picks one of a name stored twice so it can be renamed. Only advanced apply takes IDs. All writes are atomic; --dry-run/--explain/--diff preview without writing.",
+      "Work by name: every listed write takes Token paths ({path} binds a Token), theme options as Group/Option and component, page, element, canvas, color and font names; the CLI makes IDs, node tables and coordinates. Names never repeat: siblings, pages, components, canvases, theme options and assets each have their own; \"Name [2]\" picks one of a name stored twice so it can be renamed. Only advanced apply takes IDs. All writes are atomic. --dry-run validates without writing; --diff also explains affected targets and fields. --explain is a compatibility alias for --diff. page draw --preview renders a native candidate; these modes never write.",
     definitions:
-      "token theme list returns groups/options/defaults; token list --definitions [--group GROUP] reads stored option values; token list/show/explain resolve values and sources.",
+      "token theme list returns groups/options/defaults; token list --definitions [--group GROUP] reads stored option values. token show resolves a compact value and source; token explain diagnoses candidates and resolution; token impact locates known stored bindings, not every transitive dependency across libraries.",
     flows:
       "flow list shows starts and links by page and element name; flow link adds a link, flow unlink removes an element's links, flow start --page makes a start and --remove undoes it.",
     view: "view looks at anything by name: nothing (whole package), --tokens/--token, --components/--component [--variant --element], --pages/--page [--platform --element]; --as text|spec|wireframe|png|issues. Text navigates; spec implements and traces sources; wireframe shows structure; PNG reviews appearance. Outlines collapse component internals and group repeated instances. changes --since REVISION lists, by name, what changed after a revision, including edits made in the App.",
     validate:
-      "validate checks canonical validity and reports scoped text/layout/contrast issues separately. status valid means valid data, not complete visual approval. Always read issueCount, visualStatus and coverage.skipped. Pagination does not reduce the checked scope.",
+      "validate checks canonical validity and reports scoped text/layout/contrast issues separately. status valid means valid data, not complete visual approval. Always read issueCount, visualStatus and coverage.skipped. In issue views, checked counts requested target groups; coverage.targetCount counts the versions/variants actually checked. Coverage target names include a selected element's path. Pagination does not reduce the checked scope.",
     export:
       "export saves a page/component/region specification, wireframe or PNG. --format png --evidence writes all three from one native solve. Compare layout.hash, target, themes and revision; read coverage and unresolved fields.",
   },

@@ -112,7 +112,9 @@ test("stale writes return executable public recovery commands (SP-037)", async (
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.error.code, "stale_revision");
   assert.ok(Array.isArray(payload.error.details.commands));
-  const [viewStep, replayStep] = payload.error.details.commands;
+  const [changesStep, viewStep] = payload.error.details.commands;
+  const missingHistory = await runCli(changesStep.argv);
+  assert.equal(JSON.parse(missingHistory.stdout).error.code, "unknown_revision");
   assert.deepEqual(viewStep.argv, ["view", packagePath, "--json"]);
   const viewed = await runCli(viewStep.argv);
   assert.equal(viewed.code, 0, viewed.stdout);
@@ -120,18 +122,7 @@ test("stale writes return executable public recovery commands (SP-037)", async (
     JSON.parse(viewed.stdout).revision,
     payload.error.details.actualRevision,
   );
-  assert.deepEqual(replayStep.argv.slice(0, 4), [
-    "advanced",
-    "apply",
-    packagePath,
-    "--batch",
-  ]);
-  assert.ok(
-    !replayStep.argv.includes("--batch-id"),
-    "apply has no --batch-id option",
-  );
-  assert.match(replayStep.explanation, /baseRevision/);
-  assert.match(replayStep.explanation, /batchId/);
+  assert.ok(payload.error.details.commands.every(({ argv }) => ["changes", "view"].includes(argv[0])));
   assert.equal(payload.error.details.remainingIntent, undefined);
   assert.equal(
     payload.error.details.remainingIntentCount,
@@ -1181,8 +1172,8 @@ test("unknown and value-less options are rejected around new flags (RV-003-D)", 
   }
 });
 
-// RV-004-C: the stale error's own commands must be executable as-is (with only
-// the placeholder batch path substituted) and must preserve concurrent edits.
+// RV-004-C: read the stale error's recovery queries, then rebuild a scoped
+// edit from the current design and preserve concurrent fields.
 test("stale recovery commands execute and preserve concurrent edits (RV-004-C)", async () => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-rv004c-"));
   const packagePath = join(root, "p.smallpen");
@@ -1230,27 +1221,25 @@ test("stale recovery commands execute and preserve concurrent edits (RV-004-C)",
   assert.equal(stale.error.details.baseRevision, base.revision);
   assert.equal(stale.error.details.actualRevision, concurrent.revision);
 
-  // Execute the error's view command verbatim; the error itself carries the
-  // actual revision to rebuild against (SP-037 checks the view reports it).
-  const viewArgv = stale.error.details.commands[0].argv;
+  const changed = await runCli(stale.error.details.commands[0].argv);
+  assert.equal(changed.code, 0, changed.stdout);
+  assert.ok(JSON.parse(changed.stdout).changeCount > 0);
+  const viewArgv = stale.error.details.commands[1].argv;
   assert.equal(viewArgv[0], "view");
   const viewed = await runCli(viewArgv);
   assert.equal(viewed.code, 0, viewed.stdout);
   assert.match(JSON.parse(viewed.stdout).text, /Editable Rectangle/);
   assert.equal(await revisionOf(packagePath), concurrent.revision);
 
-  // Rebuild the intent file: baseRevision=B, NEW batchId, same operations.
+  await runCli(["view", packagePath, "--page", "Round Trip", "--element", "Editable Rectangle", "--as", "spec", "--json"]);
+  // Rebuild only the requested name, after reviewing the current fill.
   const rebuiltPath = join(root, "rebuilt-intent.json");
   await writeJson(rebuiltPath, {
     baseRevision: concurrent.revision,
     batchId: "batch_rv004c_rebuilt",
-    operations: JSON.parse(await readFile(staleIntentPath, "utf8")).operations,
+    operations: [{ type: "update-node", screenId: "scr_roundtrip", nodeId: "node_rectangle", changes: { name: "Recovered name" } }],
   });
-  // Only substitute the placeholder batch path in the returned apply argv.
-  const replayArgv = stale.error.details.commands[1].argv.map((part) =>
-    part.startsWith("<") && part.endsWith(">") ? rebuiltPath : part,
-  );
-  assert.deepEqual(replayArgv.slice(0, 2), ["advanced", "apply"]);
+  const replayArgv = ["advanced", "apply", packagePath, "--batch", rebuiltPath, "--json"];
   const recovered = JSON.parse((await runCli(replayArgv)).stdout);
   assert.equal(recovered.batchId, "batch_rv004c_rebuilt");
 

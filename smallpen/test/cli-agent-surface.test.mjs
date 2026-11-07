@@ -1647,7 +1647,7 @@ test("impact reports Product usages of a Foundation Token", async (context) => {
   assert.equal(full.locations[0].screenId, "scr_home");
 });
 
-test("CLI stale-write errors include exact refresh and replay operations", async (context) => {
+test("CLI stale-write errors offer changes and current view before rebuilding", async (context) => {
   const initialized = await initializedCliWorkspace(context);
   const batchPath = join(initialized.parent, "stale.json");
   await writeFile(
@@ -1669,25 +1669,23 @@ test("CLI stale-write errors include exact refresh and replay operations", async
   assert.equal(result.code, 1);
   const error = JSON.parse(result.stdout).error;
   assert.equal(error.code, "stale_revision");
-  // Refresh reads the package by name; replay reruns the grouped apply.
+  // Recovery reads current work; rejected operations are not an approved retry.
   assert.deepEqual(
     error.details.nextOperations.map(({ operation }) => operation),
-    ["smallpen.view", "smallpen.advanced.apply"],
+    ["smallpen.changes", "smallpen.view"],
   );
   assert.deepEqual(error.details.nextOperations[0].argv, [
+    "changes",
+    initialized.productPath,
+    "--since",
+    "stale",
+    "--json",
+  ]);
+  assert.deepEqual(error.details.nextOperations[1].argv, [
     "view",
     initialized.productPath,
     "--json",
   ]);
-  assert.deepEqual(error.details.nextOperations[1].argv.slice(0, 3), [
-    "advanced",
-    "apply",
-    initialized.productPath,
-  ]);
-  assert.equal(
-    error.details.nextOperations[1].args.baseRevision,
-    error.details.actualRevision,
-  );
 });
 
 test("CLI rejects option typos instead of silently guessing", async () => {

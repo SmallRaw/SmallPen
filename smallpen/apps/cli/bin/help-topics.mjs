@@ -19,6 +19,10 @@ import {
 export const nextQuery = (argv) => ({ operation: `smallpen.${argv[0]}`, argv });
 const query = (...argv) => nextQuery([...argv, "--json"]);
 const rules = {
+  start: [
+    "Define, compose, then continue and check",
+    () => CLI_RULES.start,
+  ],
   project: [
     "Blank packages and workspace ownership",
     () => [CLI_RULES.modelling.packages],
@@ -142,12 +146,13 @@ export function helpTopic(topic, section, { full = false } = {}) {
       purpose: "Manage local SmallPen design packages",
       usage: "smallpen COMMAND [arguments] [options]",
       notes: [
-        "Use help OBJECT to list actions, help OBJECT ACTION for usage, and schema command OBJECT ACTION for parameters and input queries. Common rules: help rules.",
+        "Common route: help rules start. Use help OBJECT to list actions, help OBJECT ACTION for usage, and schema command OBJECT ACTION for parameters and input queries. Common rules: help rules.",
         "Scene guidance for complete designs and component/content previews: help skills.",
         "One .smallpen directory is one Canonical Package. Each call is independent; there is no current selection, current page, or cross-call session state.",
         "Reads start small. --full expands data; large results use a temporary resultFile with SHA-256. --stdout explicitly allows large stdout. Random names share one temporary folder; files older than 30 minutes are cleaned each invocation. --output retains exports.",
       ],
       commands: PUBLIC_COMMANDS,
+      nextOperations: [query("help", "rules", "start")],
     };
   }
   if (Object.hasOwn(COMMAND_GROUPS, topic)) {

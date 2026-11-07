@@ -18,6 +18,11 @@ AI 不安装 Skill，也能通过 `help` → `help OBJECT` → `help OBJECT ACTI
 
 ## 生成与安装
 
+`help rules start` 给出定义基础、拼装预览、接续检查三阶段常用路线。
+路线与技术规则由 CLI 源码生成到 Skill；完整命令仍按任务发现。
+不要求先建完整 Token 或组件库。`--diff` 是推荐的写入预演选项，
+`--explain` 保留相同的只读行为；原生页面预览使用 `page draw --preview`。
+
 共同基础维护在 `skill-src/base.md`，应用规则维护在 `skill-src/ui-design.md`。`npm run build:skills` 从源码取得可变技术规则，组合成独立可安装的 `skills/smallpen-ui-design/SKILL.md`，并复制到 npm CLI 包内。`npm run check:skills` 检查仓库内的正本；发布打包和 `build:cli` 都先生成再附带成品。
 
 `help skills --json` 返回 Skill 的实际文件路径和安装目录，适用于源码、独立 CLI 和 npm CLI。AI 可按该路径读取，也可通过宿主的 Skill 安装机制安装后使用。附带文件、安装成功和本轮实际加载是三件事；Skill 的验收必须让独立 AI 读取交付材料并实际执行任务。

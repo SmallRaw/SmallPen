@@ -45,6 +45,7 @@ export async function buildSkills({
     `${template}\n\n## CLI rules from source\n\n` +
     [
       `CLI version: ${cliVersion}. Use the installed CLI's help/schema when its version differs.`,
+      ...CLI_RULES.start,
       `Replies are compact JSON with a ${OUTPUT_LIMIT_BYTES / 1024} KiB budget. Large complete results use resultFile paths; --full expands data, while --stdout explicitly requests large stdout.`,
       `Temporary results have unique names in one system temporary directory. Each invocation cleans managed files older than ${RESULT_RETENTION_MS / 60000} minutes. Read them promptly; --output keeps requested deliverables.`,
       `When the project uses Tokens: ${CLI_RULES.selection.defaults}`,
