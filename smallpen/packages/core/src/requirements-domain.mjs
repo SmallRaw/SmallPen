@@ -22,7 +22,7 @@ function assetReference(value, prefix, path) {
   return structuredClone(value);
 }
 
-export function parseDesignTarget(value, path) {
+function parseDesignTarget(value, path) {
   if (!isRecord(value) || typeof value.kind !== "string") {
     fail("invalid_design_target", `${path} is invalid`, { path });
   }

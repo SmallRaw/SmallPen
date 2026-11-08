@@ -29,6 +29,7 @@ import {
   readBatchHistory,
   updateFontFamily,
 } from "@smallpen/local-package";
+import { assetEntry, readModelEntry, seedLegacyIds, tokenEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
@@ -42,6 +43,7 @@ async function copyFixture(context) {
   context.after(() => rm(parent, { force: true, recursive: true }));
   const requested = join(parent, "roundtrip.smallpen");
   await cp(fixture, requested, { recursive: true });
+  await seedLegacyIds(requested, "roundtrip");
   return (await openPackage(requested)).locator;
 }
 
@@ -83,7 +85,7 @@ test("Media import, removal, and re-import each write a new revision (H1)", asyn
   const reopened = await openPackage(packagePath);
   assert.equal(reopened.revision, again.result.revision);
   assert.deepEqual(
-    reopened.entries["assets/assets.json"].media.map(({ id }) => id),
+    assetEntry(reopened).media.map(({ id }) => id),
     [mediaInput.id],
   );
 });
@@ -108,7 +110,7 @@ test("a Font family renamed A to B and back to A writes every step (H1)", async 
   assert.notEqual(backToA.revision, toB.revision);
   const reopened = await openPackage(packagePath);
   assert.equal(reopened.revision, backToA.revision);
-  assert.equal(reopened.entries["assets/assets.json"].fonts[0].family, "Alpha");
+  assert.equal(assetEntry(reopened).fonts[0].family, "Alpha");
 });
 
 test("the batch ledger keys identities by base revision and operations (H1)", async (context) => {
@@ -206,27 +208,25 @@ test("an oversized batch ledger is skipped without being buffered", async (conte
 
 test("commits never write through to the inodes of the previous Package (M1)", async (context) => {
   const packagePath = await copyFixture(context);
-  const screenPath = join(packagePath, "screens/roundtrip.json");
+  const screenPath = join(packagePath, "pages", "Round Trip.html");
   const original = await readFile(screenPath, "utf8");
   // A reader holding the pre-commit inode must keep seeing the old bytes.
-  const held = join(dirname(packagePath), "held-screen.json");
+  const held = join(dirname(packagePath), "held-screen.html");
   await link(screenPath, held);
 
-  const base = (await openPackage(packagePath)).revision;
+  const before = await openPackage(packagePath);
+  const base = before.revision;
   const result = await applyOperationBatch(
     packagePath,
     opacityBatch(base, 0.25, "batch_hard_link_safety"),
   );
 
-  assert.ok(result.changedFiles.includes("screens/roundtrip.json"));
+  assert.ok(result.changedFiles.includes("pages/Round Trip.html"));
   assert.equal(await readFile(held, "utf8"), original);
   assert.notEqual(await readFile(screenPath, "utf8"), original);
   const reopened = await openPackage(packagePath);
   assert.equal(reopened.revision, result.revision);
-  assert.deepEqual(
-    reopened.entries["tokens/tokens.json"],
-    JSON.parse(await readFile(join(fixture, "tokens/tokens.json"), "utf8")),
-  );
+  assert.deepEqual(tokenEntry(reopened), tokenEntry(before));
 });
 
 test("a live PID claim without a verifiable identity expires once it stops refreshing (M2)", async (context) => {
@@ -256,36 +256,15 @@ test("a live PID claim without a verifiable identity expires once it stops refre
   assert.ok(Date.now() - started < 10000);
 });
 
-test("a commit never writes through a symlinked directory in the Package", async (context) => {
+test("a symlinked directory in the Package is refused before anything is read or written", async (context) => {
   const packagePath = await copyFixture(context);
   const outside = join(dirname(packagePath), "outside");
   await mkdir(outside);
-  await writeFile(join(outside, "more.json"), "keep\n");
-  await symlink(outside, join(packagePath, "themes"));
-  const opened = await openPackage(packagePath);
+  await writeFile(join(outside, "more.html"), "keep\n");
+  await symlink(outside, join(packagePath, "pages", "Linked"));
 
-  await assert.rejects(
-    applyOperationBatch(packagePath, {
-      baseRevision: opened.revision,
-      batchId: "symlinked_directory",
-      operations: [
-        {
-          definition: {
-            $extensions: { smallpen: { id: "tok_ink" } },
-            $type: "color",
-            $value: "#000000",
-          },
-          filePath: "themes/more.json",
-          path: "ink.base",
-          tokenId: "tok_ink",
-          type: "put-token",
-        },
-      ],
-    }),
-    (error) => error?.code === "invalid_entry_path",
-  );
-  assert.equal(await readFile(join(outside, "more.json"), "utf8"), "keep\n");
-  assert.equal((await openPackage(packagePath)).revision, opened.revision);
+  await assert.rejects(openPackage(packagePath), (error) => error?.code === "invalid_entry_path");
+  assert.equal(await readFile(join(outside, "more.html"), "utf8"), "keep\n");
 });
 
 test("a symlinked write lock never removes files in the folder it points at", async (context) => {
@@ -308,20 +287,11 @@ test("a symlinked write lock never removes files in the folder it points at", as
 
 test("a FIFO in a Package fails the read instead of blocking it", { skip: process.platform === "win32" }, async (context) => {
   const packagePath = await copyFixture(context);
-  const entry = join(packagePath, "screens/roundtrip.json");
+  const entry = join(packagePath, "pages", "Round Trip.html");
   await rm(entry);
   execFileSync("mkfifo", [entry]);
-  const ledger = `${packagePath}.batches.json`;
-  execFileSync("mkfifo", [ledger]);
   await assert.rejects(
     openPackage(packagePath),
-    (error) => error?.code === "invalid_entry_json",
-  );
-  await rm(ledger);
-  const lockPath = join(dirname(packagePath), `.${basename(packagePath)}.write-lock`);
-  execFileSync("mkfifo", [join(lockPath, "owner.json")]);
-  await assert.rejects(
-    openPackage(packagePath),
-    (error) => error?.code === "invalid_entry_json",
+    (error) => error?.code === "invalid_entry_path",
   );
 });

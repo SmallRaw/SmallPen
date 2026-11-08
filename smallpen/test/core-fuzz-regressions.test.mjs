@@ -24,13 +24,14 @@ import {
   openPackage,
   renderProjection,
 } from "@smallpen/local-package";
+import { onlyScreen, readModelEntry, seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
 
 async function fixtureValues(name) {
-  const root = join(here, "fixtures", name);
-  const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
+  const root = join(here, "fixtures", "model", String(name).replace(/\.smallpen$/, ""));
+  const manifest = await readModelEntry(root, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(root, entry), "utf8")));
@@ -43,6 +44,7 @@ async function copyFixture(context, name = "roundtrip.smallpen") {
   context.after(() => rm(parent, { force: true, recursive: true }));
   const target = join(parent, name);
   await cp(join(here, "fixtures", name), target, { recursive: true });
+  await seedLegacyIds(target, String(name).replace(/\.smallpen$/, ""));
   return (await openPackage(target)).locator;
 }
 
@@ -78,18 +80,14 @@ test("deeply nested package values fail typed instead of overflowing the stack",
     loadPackageFromValues("memory://deep.smallpen", deepEntry),
     typed("package_value_too_deep"),
   );
-  // JSON.parse accepts the nesting, so the disk path must stop it too.
+  // A page nested deeper than any design fails with a located error, not a
+  // stack overflow, on the disk path too.
   const packagePath = await copyFixture(context);
-  const manifestPath = join(packagePath, "manifest.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  await writeFile(
-    manifestPath,
-    JSON.stringify(manifest).replace(
-      /}$/,
-      `,"extra":${"[".repeat(20000)}${"]".repeat(20000)}}`,
-    ),
-  );
-  await assert.rejects(openPackage(packagePath), typed("package_value_too_deep"));
+  const pagePath = join(packagePath, "pages", "Round Trip.html");
+  const page = await readFile(pagePath, "utf8");
+  await writeFile(pagePath, page.replace("</body>", `${'<div class="w-[1px] h-[1px]">'.repeat(20000)}${"</div>".repeat(20000)}\n</body>`));
+  await assert.rejects(openPackage(packagePath), (error) =>
+    error.details?.issues?.some(({ code, file }) => code === "html_too_deep" && file === "pages/Round Trip.html"));
 });
 
 test("deeply nested Operation Batch values fail typed before cloning", async () => {
@@ -229,16 +227,6 @@ test("nodes without a children field load, read, project, and render", async () 
   await createEvidence(snapshot, {});
 });
 
-test("an entry that matches its file only case-insensitively is rejected on every file system", async (context) => {
-  const packagePath = await copyFixture(context);
-  const manifestPath = join(packagePath, "manifest.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  manifest.entries.screens = ["Screens/RoundTrip.json"];
-  await writeFile(manifestPath, JSON.stringify(manifest));
-  // macOS and Windows resolve the mismatched name; Linux reports it missing.
-  await assert.rejects(openPackage(packagePath), typed("invalid_entry_path"));
-});
-
 test("listing Tokens rejects an unknown Context Axis even with no Tokens", async () => {
   const values = await fixtureValues("roundtrip.smallpen");
   values.set("manifest.json", {
@@ -270,7 +258,7 @@ function opacityBatch(revision, opacity, batchId) {
 }
 
 function rectangleOpacity(snapshot) {
-  return snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+  return onlyScreen(snapshot).presentations[0].nodes
     .node_rectangle.opacity;
 }
 
@@ -330,47 +318,6 @@ function runCli(args) {
     child.once("close", (code) => resolve({ code, stdout }));
   });
 }
-
-test("high-level commands rerun with the same --batch-id replay instead of conflicting", async (context) => {
-  const packagePath = await copyFixture(context);
-  const intentPath = `${packagePath}.draw.json`;
-  await writeFile(
-    intentPath,
-    JSON.stringify({ page: "Retry", children: [{ name: "Retry", width: 10, height: 10 }] }),
-  );
-  const args = ["page", "draw", packagePath, "--intent", intentPath, "--batch-id", "draw_retry", "--json"];
-  const first = await runCli(args);
-  assert.equal(first.code, 0, first.stdout);
-  const firstResult = JSON.parse(first.stdout);
-  const retry = await runCli(args);
-  assert.equal(retry.code, 0, retry.stdout);
-  const retryResult = JSON.parse(retry.stdout);
-  assert.equal(retryResult.alreadyApplied, true);
-  assert.equal(retryResult.revision, firstResult.revision);
-  assert.equal((await openPackage(packagePath)).revision, firstResult.revision);
-
-  // A different intent under the same id still conflicts, with retry guidance.
-  const intent = JSON.parse(await readFile(intentPath, "utf8"));
-  intent.children[0].name = "Other";
-  await writeFile(intentPath, JSON.stringify(intent));
-  const conflict = await runCli(args);
-  assert.equal(conflict.code, 1);
-  const payload = JSON.parse(conflict.stdout);
-  assert.equal(payload.error.code, "batch_id_conflict");
-  assert.match(payload.error.details.correction, /same high-level command input/);
-});
-
-test("tokens --context rejects an unknown Axis on a Package without Tokens", async (context) => {
-  const packagePath = await copyFixture(context);
-  const manifestPath = join(packagePath, "manifest.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  manifest.entries.tokens = [];
-  await writeFile(manifestPath, JSON.stringify(manifest));
-  await rename(join(packagePath, "tokens"), join(packagePath, "..", "unused-tokens"));
-  const result = await runCli(["token", "list", packagePath, "--context", "foo=bar", "--json"]);
-  assert.equal(result.code, 1, result.stdout);
-  assert.equal(JSON.parse(result.stdout).error.code, "invalid_context_selection");
-});
 
 test("an empty Penpot mov-objects is a no-op, alone or beside a real edit", async () => {
   const snapshot = await loadPackageFromValues(

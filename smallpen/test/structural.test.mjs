@@ -10,9 +10,11 @@ import {
   prepareOperationBatch,
 } from "@smallpen/core";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { onlyScreen, seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixtureModel = join(here, "fixtures", "model", "roundtrip");
 const newRuntimeId = "44444444-4444-4444-8444-444444444444";
 const newNodeId = "node_44444444444444448444444444444444";
 const newPageRuntimeId = "77777777-7777-4777-8777-777777777777";
@@ -24,14 +26,14 @@ const nestedChildNodeId = "node_99999999999949998999999999999999";
 
 async function fixtureValues() {
   const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
+    await readFile(join(fixtureModel, "manifest.json"), "utf8"),
   );
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
     values.set(
       entry,
-      JSON.parse(await readFile(join(fixture, entry), "utf8")),
+      JSON.parse(await readFile(join(fixtureModel, entry), "utf8")),
     );
   }
   return values;
@@ -138,7 +140,7 @@ test("a Penpot add followed by placement applies and reverses atomically", async
   );
   const prepared = await prepareOperationBatch(snapshot, batch);
   const presentation =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0];
+    onlyScreen(prepared.snapshot).presentations[0];
   assert.deepEqual(presentation.nodes.node_canvas.children, [
     "node_rectangle",
     newNodeId,
@@ -211,7 +213,7 @@ test("Penpot nested geometry converts page coordinates to parent-relative coordi
   });
   const added = await prepareOperationBatch(snapshot, addedBatch);
   let nodes =
-    added.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+    onlyScreen(added.snapshot).presentations[0].nodes;
   assert.deepEqual(
     { x: nodes[nestedParentNodeId].x, y: nodes[nestedParentNodeId].y },
     { x: 120, y: 180 },
@@ -245,7 +247,7 @@ test("Penpot nested geometry converts page coordinates to parent-relative coordi
     commitId: "nested-move",
   });
   const moved = await prepareOperationBatch(added.snapshot, movedBatch);
-  nodes = moved.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+  nodes = onlyScreen(moved.snapshot).presentations[0].nodes;
   assert.deepEqual(
     { x: nodes[nestedParentNodeId].x, y: nodes[nestedParentNodeId].y },
     { x: 300, y: 250 },
@@ -281,7 +283,7 @@ test("Penpot page-root edits use a Canonical forest and reverse exactly", async 
   assert.equal(add.operations[0].parentId, null);
   const added = await prepareOperationBatch(snapshot, add);
   const addedPresentation =
-    added.snapshot.entries["screens/roundtrip.json"].presentations[0];
+    onlyScreen(added.snapshot).presentations[0];
   assert.equal(addedPresentation.rootId, "node_canvas");
   assert.deepEqual(addedPresentation.rootIds, ["node_canvas", newNodeId]);
   const addReversed = await prepareOperationBatch(
@@ -304,7 +306,7 @@ test("Penpot page-root edits use a Canonical forest and reverse exactly", async 
   });
   const moved = await prepareOperationBatch(snapshot, move);
   const movedPresentation =
-    moved.snapshot.entries["screens/roundtrip.json"].presentations[0];
+    onlyScreen(moved.snapshot).presentations[0];
   assert.deepEqual(movedPresentation.rootIds, [
     "node_canvas",
     "node_rectangle",
@@ -329,12 +331,12 @@ test("Penpot page-root edits use a Canonical forest and reverse exactly", async 
   });
   const reordered = await prepareOperationBatch(moved.snapshot, reorder);
   assert.deepEqual(
-    reordered.snapshot.entries["screens/roundtrip.json"].presentations[0]
+    onlyScreen(reordered.snapshot).presentations[0]
       .rootIds,
     ["node_rectangle", "node_canvas"],
   );
   assert.equal(
-    reordered.snapshot.entries["screens/roundtrip.json"].presentations[0]
+    onlyScreen(reordered.snapshot).presentations[0]
       .rootId,
     "node_rectangle",
   );
@@ -356,7 +358,7 @@ test("Penpot page-root edits use a Canonical forest and reverse exactly", async 
   });
   const removed = await prepareOperationBatch(snapshot, remove);
   const removedPresentation =
-    removed.snapshot.entries["screens/roundtrip.json"].presentations[0];
+    onlyScreen(removed.snapshot).presentations[0];
   assert.equal(removedPresentation.rootId, null);
   assert.deepEqual(removedPresentation.rootIds, []);
   assert.deepEqual(removedPresentation.nodes, {});
@@ -500,7 +502,7 @@ test("a duplicated Penpot subtree keeps every new runtime identity", async () =>
 
   const duplicated = await prepareOperationBatch(snapshot, batch);
   const presentation =
-    duplicated.snapshot.entries["screens/roundtrip.json"].presentations[0];
+    onlyScreen(duplicated.snapshot).presentations[0];
   assert.deepEqual(presentation.nodes[frameNodeId].children, [childNodeId]);
   assert.equal(
     duplicated.snapshot.runtime.nodes.scr_roundtrip.pres_desktop[frameNodeId],
@@ -555,7 +557,7 @@ test("Penpot delete, move, and reorder operations each reverse exactly", async (
   });
   const moved = await prepareOperationBatch(snapshot, move);
   assert.deepEqual(
-    moved.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(moved.snapshot).presentations[0].nodes
       .node_frame.children,
     ["node_rectangle", newNodeId],
   );
@@ -578,7 +580,7 @@ test("Penpot delete, move, and reorder operations each reverse exactly", async (
   });
   const reordered = await prepareOperationBatch(snapshot, reorder);
   assert.deepEqual(
-    reordered.snapshot.entries["screens/roundtrip.json"].presentations[0]
+    onlyScreen(reordered.snapshot).presentations[0]
       .nodes.node_canvas.children,
     ["node_frame", "node_rectangle"],
   );
@@ -600,7 +602,7 @@ test("Penpot delete, move, and reorder operations each reverse exactly", async (
   });
   const removed = await prepareOperationBatch(snapshot, remove);
   const removedNodes =
-    removed.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+    onlyScreen(removed.snapshot).presentations[0].nodes;
   assert.equal(removedNodes.node_frame, undefined);
   assert.equal(removedNodes[newNodeId], undefined);
   const deleteReversed = await prepareOperationBatch(
@@ -658,6 +660,7 @@ test("mod-page names the canvas literally and the inverse restores it (RV-002-A)
   for (const [index, name] of cases.entries()) {
     const packagePath = join(tmpdir(), `smallpen-rv002a-${index}.smallpen`);
     await cp(fixture, packagePath, { recursive: true });
+    await seedLegacyIds(packagePath, "roundtrip");
     const snapshot = await openPackage(packagePath);
     const pageId = snapshot.runtime.pages.scr_roundtrip.pres_desktop;
     const batch = compilePenpotChanges(snapshot, {
@@ -694,14 +697,14 @@ async function offsetCanvasSnapshot() {
 }
 
 function nodeAt(snapshot, nodeId) {
-  return snapshot.entries["screens/roundtrip.json"].presentations[0].nodes[
+  return onlyScreen(snapshot).presentations[0].nodes[
     nodeId
   ];
 }
 
 function absoluteOrigin(snapshot, nodeId) {
   const nodes =
-    snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+    onlyScreen(snapshot).presentations[0].nodes;
   let x = 0;
   let y = 0;
   let current = nodeId;

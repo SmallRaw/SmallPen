@@ -1,0 +1,12 @@
+<sp-component name="Title" props="Level: page | section | dialog">
+  <div class="w-[320px] h-[76px] bg-surface rounded-base">
+    <p data-name="Heading" class="left-[16px] top-[12px] w-[290px] h-[37px] text-demo-ink type-demo-page">Workspace settings</p>
+    <p data-name="Description" class="left-[16px] top-[50px] w-[290px] h-[19px] text-demo-muted type-demo-label">A clear title with supporting context.</p>
+  </div>
+  <sp-variant when="Level: section">
+    <p data-name="Heading" class="h-[29px] type-demo-section">Team members</p>
+  </sp-variant>
+  <sp-variant when="Level: dialog">
+    <p data-name="Heading" class="h-[26px] type-demo-dialog">Invite a teammate</p>
+  </sp-variant>
+</sp-component>

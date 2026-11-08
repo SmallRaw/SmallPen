@@ -339,7 +339,7 @@ export function validateDesignReferences(manifest, entries, domain) {
 // checks. Local Screen Instances fail loading already; Instances inside
 function label(componentSet, selection) {
   return (componentSet.axes ?? []).filter((axis) => selection?.[axis.id] !== undefined)
-    .map((axis) => `${axis.name}=${selection[axis.id]}`).join(", ") || "default";
+    .map((axis) => `${axis.name}: ${selection[axis.id]}`).join("; ") || "default";
 }
 
 // Component variants and Instances of other Packages only show here.
@@ -360,12 +360,12 @@ export function staleInstanceDiagnostics(snapshot, options = {}) {
     // it can choose from, and the name-based command that fixes it.
     const label = (selection) =>
       (componentSet.axes ?? []).filter((axis) => selection?.[axis.id] !== undefined)
-        .map((axis) => `${axis.name}=${selection[axis.id]}`).join(", ") || "no selection";
+        .map((axis) => `${axis.name}: ${selection[axis.id]}`).join("; ") || "no selection";
     const variants = componentSet.variants.map((variant) => label(variant.selection));
     diagnostics.push({
       code: "stale_instance_variant",
       component: { ...structuredClone(reference), name: componentSet.name },
-      fix: `${redraw}, giving it one of these variants in props: ${variants.slice(0, 12).join("; ")}`,
+      fix: `${redraw}: give its props one of these variants: ${variants.slice(0, 12).join("; ")}`,
       operationFix: fix,
       where,
       variants,
@@ -389,7 +389,7 @@ export function staleInstanceDiagnostics(snapshot, options = {}) {
           `update-component-node {componentId:"${componentSet.id}", variantId:"${variant.id}", ` +
             `nodeId:"${nodeId}", changes:{instance:{...}}} with a valid variant selection`,
           `${componentSet.name} (${label(componentSet, variant.selection)}) / ${node.name ?? nodeId}`,
-          `Redefine ${componentSet.name} with component define`,
+          `Edit the <sp-use> inside ${componentSet.name} in its components/ file`,
         );
       }
     }
@@ -406,7 +406,7 @@ export function staleInstanceDiagnostics(snapshot, options = {}) {
           `select-instance-variant {screenId:"${screen.id}", presentationId:"${presentation.id}", ` +
             `nodeId:"${nodeId}", selection:{...}}`,
           `${screen.name} (${presentation.platform ?? presentation.name}) / ${node.name ?? nodeId}`,
-          `Redraw ${node.name ?? "the copy"} on ${screen.name} with page draw`,
+          `Edit the <sp-use> of ${node.name ?? "the copy"} in the ${screen.name} page file`,
         );
       }
     }

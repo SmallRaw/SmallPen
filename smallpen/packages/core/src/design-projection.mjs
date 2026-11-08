@@ -18,6 +18,7 @@ import {
   normalizedLayoutGap,
 } from "./projection-values.mjs";
 import { appliedTokenFields } from "./token-attributes.mjs";
+import { mergeInstanceOverrides } from "./named-targets.mjs";
 
 function screenById(snapshot, screenId) {
   const entry = snapshot.manifest.entries.screens.find(
@@ -391,6 +392,23 @@ function applyResizeConstraints(nodes, parentId, before) {
   }
 }
 
+// A variant change retains the copy's scale relative to its source. A
+// different icon name with the same source size must not enlarge the copy.
+function switchedCopyDimensions(source, switched, product, options) {
+  if (!switched) return {};
+  const target = componentTarget(product, options.foundation, options.libraries ?? [], source.instance.component);
+  if (!target) return {};
+  const before = findComponentVariant(target.componentSet, source.instance.variant).variant;
+  const after = findComponentVariant(target.componentSet, { ...source.instance.variant, ...switched }).variant;
+  if (!before || !after) return {};
+  const root = variant => applyEffectiveTokenBindings(variant.nodes[variant.rootId], product, options);
+  const previous = root(before), next = root(after), dimensions = {};
+  for (const axis of ["width", "height"])
+    if ([source[axis], previous[axis], next[axis]].every(Number.isFinite))
+      dimensions[axis] = previous[axis] > 0 ? source[axis] * (next[axis] / previous[axis]) : next[axis];
+  return dimensions;
+}
+
 function instantiateComponent(instanceValue, product, options, stack) {
   const instance = structuredClone(instanceValue);
   const target = componentTarget(
@@ -406,7 +424,8 @@ function instantiateComponent(instanceValue, product, options, stack) {
       { instanceId: instance.id, reference: instance.instance.component },
     );
   }
-  if (stack.has(target.componentSet.id)) {
+  const componentKey = `${target.owner.manifest.packageId}:${target.componentSet.id}`;
+  if (stack.has(componentKey)) {
     fail(
       "component_instance_cycle",
       `Component instance cycle includes ${target.componentSet.id}`,
@@ -436,7 +455,7 @@ function instantiateComponent(instanceValue, product, options, stack) {
     }
     const label = (selection) =>
       (target.componentSet.axes ?? []).filter((axis) => selection?.[axis.id] !== undefined)
-        .map((axis) => `${axis.name}=${selection[axis.id]}`).join(", ") || "no selection";
+        .map((axis) => `${axis.name}: ${selection[axis.id]}`).join("; ") || "no selection";
     stale.push({
       code: "stale_instance_variant",
       component: { ...structuredClone(instance.instance.component), name: target.componentSet.name },
@@ -449,7 +468,7 @@ function instantiateComponent(instanceValue, product, options, stack) {
       severity: "error",
     });
   }
-  stack.add(target.componentSet.id);
+  stack.add(componentKey);
   const result = {};
   const sourceNodes = match.variant.nodes;
   let nestedFallbackUsed = false;
@@ -469,10 +488,24 @@ function instantiateComponent(instanceValue, product, options, stack) {
     if (source.instance) {
       // A copy may switch a nested copy's variant ("<nested>:variant").
       const switched = instance.instance.overrides?.[`${sourceId}:variant`];
-      // A switched copy takes the size of its new variant, as Penpot's swap.
-      const nestedSource = switched
-        ? { ...source, width: undefined, height: undefined, instance: { ...source.instance, variant: { ...(source.instance.variant ?? {}), ...switched } } }
-        : source;
+      const dimensions = switchedCopyDimensions(source, switched, product, options);
+      // Apply explicit copy sizes before expanding its glyph constraints;
+      // applying the same override later must not leave oversized children.
+      for (const axis of ["width", "height"])
+        if (Object.hasOwn(instance.instance.overrides ?? {}, `${sourceId}:${axis}`))
+          dimensions[axis] = instance.instance.overrides[`${sourceId}:${axis}`];
+      const nestedOverrides = Object.fromEntries(Object.entries(instance.instance.overrides ?? {})
+        .filter(([path]) => path.startsWith(`${sourceId}__`) && [":variant", ":width", ":height"].some(field => path.endsWith(field)))
+        .map(([path, value]) => [path.slice(sourceId.length + 2), value]));
+      const nestedSource = {
+        ...source,
+        ...dimensions,
+        instance: {
+          ...source.instance,
+          ...(switched ? { variant: { ...(source.instance.variant ?? {}), ...switched } } : {}),
+          overrides: mergeInstanceOverrides(source.instance.overrides, nestedOverrides),
+        },
+      };
       const nested = instantiateComponent(
         { ...nestedSource, id: derivedId },
         product,
@@ -489,9 +522,17 @@ function instantiateComponent(instanceValue, product, options, stack) {
         ? instance.id
         : prefixedNodeId(instance.id, childId),
     );
+    // A grid's cells name its children; in a copy they carry the copy's ids.
+    const cells = source["layout-grid-cells"] && Object.fromEntries(
+      Object.entries(source["layout-grid-cells"]).map(([cellId, cell]) => [cellId, {
+        ...cell,
+        shapes: (cell.shapes ?? []).map((childId) => prefixedNodeId(instance.id, childId)),
+      }]),
+    );
     result[derivedId] = {
       ...source,
       ...(sourceId === match.variant.rootId ? instance : {}),
+      ...(cells ? { "layout-grid-cells": cells } : {}),
       children,
       componentRef: structuredClone(instance.instance.component),
       id: derivedId,
@@ -588,7 +629,7 @@ function instantiateComponent(instanceValue, product, options, stack) {
         libraries: options.libraries,
       }),
   );
-  stack.delete(target.componentSet.id);
+  stack.delete(componentKey);
   return {
     fallbackUsed: match.fallbackUsed || nestedFallbackUsed,
     nodes: result,

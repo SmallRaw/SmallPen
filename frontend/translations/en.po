@@ -7233,6 +7233,10 @@ msgstr "Added"
 msgid "workspace.libraries.shared-library-btn"
 msgstr "Connect library"
 
+#: src/app/main/smallpen/ui/libraries.cljs
+msgid "workspace.libraries.smallpen.standalone"
+msgstr "This package stands alone. To reuse components or Tokens from another package, copy its files (components/, tokens.css, assets/) into this package."
+
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs:552
 msgid "workspace.libraries.text.mixed-tokens"
 msgstr "Mixed tokens"
@@ -10001,36 +10005,6 @@ msgstr "Autosaved versions will be kept for %s days."
 msgid "workspace.assets.tokens"
 msgstr "Tokens"
 
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.add-source"
-msgstr "ADD A LIBRARY SOURCE"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.foundation"
-msgstr "Foundation"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.local-help"
-msgstr "Browse uploads a copy of a self-contained library folder beside this project (up to 50 MB / 2000 files). Then click Add to link it. You can also enter a local path manually."
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.local-path"
-msgstr "Local path"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.remote-help"
-msgstr "The URL remains the Library source. SmallPen keeps a verified local snapshot for faster loading and offline use."
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.remote-url"
-msgstr "Remote URL"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.tokens"
-msgid_plural "workspace.libraries.smallpen.tokens"
-msgstr[0] "1 token"
-msgstr[1] "%s tokens"
-
 #: src/app/main/smallpen/home.cljs:236
 msgid "smallpen.home.empty-subtitle"
 msgstr "Create a new .smallpen Package or open one to begin."
@@ -10385,10 +10359,6 @@ msgstr "token set"
 #: src/app/main/ui/workspace/sidebar/history.cljs:164
 msgid "workspace.undo.entry.single.token-theme"
 msgstr "token theme"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.browse"
-msgstr "Browse…"
 
 #: src/app/main/ui/workspace/sidebar/assets/media.cljs
 msgid "workspace.assets.graphics"

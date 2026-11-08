@@ -13,9 +13,10 @@ import {
   SMALLPEN_RUNTIME_CAPABILITIES,
 } from "@smallpen/core";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 const capabilityMediaId = "media_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
 
 test("the SmallPen runtime profile is local-only and disables AI/collaboration surfaces", () => {
@@ -68,9 +69,7 @@ async function imageValues() {
 }
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -258,6 +257,11 @@ test("the format capability contract advertises only implemented Web behavior", 
         "layout-item-align-self",
         "layout-item-absolute",
         "layout-item-z-index",
+        "layout-grid-dir",
+        "layout-grid-rows",
+        "layout-grid-columns",
+        "layout-grid-cells",
+        "layout-justify-items",
         "constraints-h",
         "constraints-v",
         "fixed-scroll",
@@ -378,6 +382,11 @@ test("the format capability contract advertises only implemented Web behavior", 
         "layout-item-align-self",
         "layout-item-absolute",
         "layout-item-z-index",
+        "layout-grid-dir",
+        "layout-grid-rows",
+        "layout-grid-columns",
+        "layout-grid-cells",
+        "layout-justify-items",
         "constraints-h",
         "constraints-v",
         "fixed-scroll",
@@ -544,6 +553,11 @@ test("the format capability contract advertises only implemented Web behavior", 
         "layout-item-align-self",
         "layout-item-absolute",
         "layout-item-z-index",
+        "layout-grid-dir",
+        "layout-grid-rows",
+        "layout-grid-columns",
+        "layout-grid-cells",
+        "layout-justify-items",
         "constraints-h",
         "constraints-v",
         "fixed-scroll",
@@ -629,7 +643,7 @@ test("every advertised Canonical node type passes the Core package boundary", as
       values,
     );
     assert.equal(
-      snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+      onlyScreen(snapshot).presentations[0].nodes
         .node_rectangle.type,
       nodeType,
     );
@@ -806,6 +820,31 @@ test("every advertised Penpot write compiles, applies, and reverses", async () =
     { attribute: "layout-item-align-self", canonicalField: "layout-item-align-self", value: "center" },
     { attribute: "layout-item-absolute", canonicalField: "layout-item-absolute", value: true },
     { attribute: "layout-item-z-index", canonicalField: "layout-item-z-index", value: 2 },
+    { attribute: "layout-grid-dir", canonicalField: "layout-grid-dir", value: "column" },
+    { attribute: "layout-justify-items", canonicalField: "layout-justify-items", value: "center" },
+    {
+      attribute: "layout-grid-columns",
+      canonicalField: "layout-grid-columns",
+      value: [{ type: "fixed", value: 120 }, { type: "flex", value: 1 }, { type: "auto" }],
+    },
+    { attribute: "layout-grid-rows", canonicalField: "layout-grid-rows", value: [{ type: "percent", value: 50 }] },
+    {
+      // Cells name children by App id; the package keeps node ids.
+      attribute: "layout-grid-cells",
+      canonicalField: "layout-grid-cells",
+      canonicalValue: {
+        "6a0f7a8e-4c7e-4a39-9a51-6b3c1c1d0f01": {
+          column: 1, "column-span": 1, id: "6a0f7a8e-4c7e-4a39-9a51-6b3c1c1d0f01", position: "auto",
+          row: 1, "row-span": 1, shapes: ["node_rectangle"],
+        },
+      },
+      value: (runtimeId) => ({
+        "6a0f7a8e-4c7e-4a39-9a51-6b3c1c1d0f01": {
+          column: 1, "column-span": 1, id: "6a0f7a8e-4c7e-4a39-9a51-6b3c1c1d0f01", position: "auto",
+          row: 1, "row-span": 1, shapes: [runtimeId],
+        },
+      }),
+    },
     { attribute: "constraints-h", canonicalField: "constraints-h", value: "left" },
     { attribute: "constraints-v", canonicalField: "constraints-v", value: "top" },
     { attribute: "fixed-scroll", canonicalField: "fixed-scroll", value: true },
@@ -841,7 +880,7 @@ test("every advertised Penpot write compiles, applies, and reverses", async () =
       changes: [
         {
           id: runtimeId,
-          operations: [{ attr: attribute, type: "set", val: value }],
+          operations: [{ attr: attribute, type: "set", val: typeof value === "function" ? value(runtimeId) : value }],
           type: "mod-obj",
         },
       ],
@@ -849,7 +888,7 @@ test("every advertised Penpot write compiles, applies, and reverses", async () =
     });
     const prepared = await prepareOperationBatch(snapshot, batch);
     const changedNode =
-      prepared.snapshot.entries["screens/roundtrip.json"].presentations[0]
+      onlyScreen(prepared.snapshot).presentations[0]
         .nodes.node_rectangle;
     assert.deepEqual(
       changedNode[canonicalField],
@@ -894,7 +933,7 @@ test("a Penpot navigate interaction persists and reverses exactly", async () => 
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const rectangle =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0]
+    onlyScreen(prepared.snapshot).presentations[0]
       .nodes.node_rectangle;
   assert.deepEqual(rectangle.interactions, [interaction]);
 
@@ -930,7 +969,7 @@ test("a Penpot Flow start persists and reverses exactly", async () => {
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const presentation =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0];
+    onlyScreen(prepared.snapshot).presentations[0];
   assert.deepEqual(presentation.prototypeFlows, [
     { id: flowId, name: "Flow 1", startingNodeId: "node_canvas" },
   ]);
@@ -960,7 +999,7 @@ test("a Penpot Flow start persists and reverses exactly", async () => {
     }),
   );
   assert.equal(
-    renamed.snapshot.entries["screens/roundtrip.json"].presentations[0]
+    onlyScreen(renamed.snapshot).presentations[0]
       .prototypeFlows[0].name,
     "Checkout",
   );
@@ -975,7 +1014,7 @@ test("a Penpot Flow start persists and reverses exactly", async () => {
     }),
   );
   assert.deepEqual(
-    deleted.snapshot.entries["screens/roundtrip.json"].presentations[0]
+    onlyScreen(deleted.snapshot).presentations[0]
       .prototypeFlows,
     [],
   );
@@ -1003,7 +1042,7 @@ test("Penpot canvas colors persist together in one reversible page update", asyn
     }),
   );
   const presentation =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0];
+    onlyScreen(prepared.snapshot).presentations[0];
   assert.equal(presentation.background, "#111827");
   assert.equal(presentation["pixel-grid-color"], "#22d3ee");
   assert.equal(presentation["pixel-grid-opacity"], 0.45);
@@ -1083,7 +1122,7 @@ test("Penpot geometry removes UI floating-point noise and default radii", async 
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const changed =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(changed.width, 240);
   assert.equal(Object.hasOwn(changed, "cornerRadius"), false);
@@ -1170,7 +1209,7 @@ test("Penpot undo restores touched state and canonical values together", async (
   assert.deepEqual(batch.operations[0].changes, { opacity: 1 });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const changed =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(changed.opacity, 1);
   assert.equal(Object.hasOwn(changed, "touched"), false);

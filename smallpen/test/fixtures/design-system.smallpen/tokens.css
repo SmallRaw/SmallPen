@@ -1,0 +1,23 @@
+:root {
+  --radius-base: 8px;
+  --spacing-space-small: 4px;
+  --spacing-space-medium: 8px;
+  --spacing-space-large: 16px;
+  --type-heading: 600 28px/1.2 "Inter";
+  --type-body: 400 16px/1.5 "Inter";
+  --radius-alias: var(--radius-base);
+}
+
+:root[data-color="light"] {
+  --color-surface: #ffffff;
+  --color-surface-variant: #e7e0ec;
+  --color-primary: #6750a4;
+  --color-on-primary: #ffffff;
+}
+
+:root[data-color="dark"] {
+  --color-surface: #1b1b1f;
+  --color-surface-variant: #4a4458;
+  --color-primary: #d0bcff;
+  --color-on-primary: #381e72;
+}

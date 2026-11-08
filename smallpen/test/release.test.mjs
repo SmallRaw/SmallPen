@@ -50,7 +50,7 @@ test("the CLI release is self-contained apart from its documented Node runtime",
   assert.equal(imported.stdout.trim(), "app-wasm");
 
   const cli = join(output, "app", "apps", "cli", "bin", "smallpen.mjs");
-  const validated = await run(process.execPath, [cli, "validate", fixture, "--json"]);
+  const validated = await run(process.execPath, [cli, "check", fixture, "--json"]);
   assert.equal(validated.code, 0, validated.stderr || validated.stdout);
-  assert.equal(JSON.parse(validated.stdout).status, "valid");
+  assert.equal(JSON.parse(validated.stdout).ok, true);
 });

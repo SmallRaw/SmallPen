@@ -8,12 +8,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import {
-  listPackageEntries,
-  loadPackageFromValues,
-  resolveEffectiveToken,
-  SMALLPEN_FORMAT_CAPABILITIES,
-} from "@smallpen/core";
+import { resolveEffectiveToken, SMALLPEN_FORMAT_CAPABILITIES } from "@smallpen/core";
+import { openPackage } from "@smallpen/local-package";
 
 const execFileAsync = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -21,27 +17,16 @@ const fixture = join(here, "fixtures", "design-system.smallpen");
 const invalidDir = join(here, "fixtures", "expected-invalid");
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
 
-async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
-  const { entries } = listPackageEntries(manifest);
-  const values = new Map([["manifest.json", manifest]]);
-  for (const entry of entries) {
-    values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
-  }
-  return values;
-}
+const expectations = {
+  "unknown-type": "invalid_token_name",
+  "duplicate-id": "duplicate_token",
+  "missing-alias": "token_alias_missing",
+  "alias-cycle": "token_alias_cycle",
+};
 
-async function invalidValues(name) {
-  const dir = join(invalidDir, `${name}.smallpen`);
-  const manifest = JSON.parse(await readFile(join(dir, "manifest.json"), "utf8"));
-  const { entries } = listPackageEntries(manifest);
-  const values = new Map([["manifest.json", manifest]]);
-  for (const entry of entries) {
-    values.set(entry, JSON.parse(await readFile(join(dir, entry), "utf8")));
-  }
-  return loadPackageFromValues(`memory://invalid-${name}.smallpen`, values);
+function tokenId(snapshot, path) {
+  for (const [id, token] of snapshot.domain.tokens) if (token.path === path) return id;
+  throw new Error(`No Token ${path}`);
 }
 
 test("every canonical token type is inventoried in the baseline", async () => {
@@ -55,78 +40,60 @@ test("every canonical token type is inventoried in the baseline", async () => {
 });
 
 test("alias positive control resolves through base without rewriting the source", async () => {
-  const snapshot = await loadPackageFromValues(
-    "memory://design-system.smallpen",
-    await fixtureValues(),
-  );
+  const snapshot = await openPackage(fixture);
   const alias = resolveEffectiveToken(snapshot, {
-    assetId: "tok_alias_demo_radius",
-    packageId: "pkg_design_system",
+    assetId: tokenId(snapshot, "radius-alias"),
+    packageId: snapshot.manifest.packageId,
   }, { traceSources: true });
   assert.equal(alias.value, 8);
   assert.equal(alias.aliasChain.length, 2);
-  assert.equal(alias.aliasChain.at(-1).path, "base");
-  assert.equal(alias.aliasChain[0].tokenId, "tok_alias_demo_radius");
-  // The alias token keeps its expression; resolution never overwrites it.
-  const library = (await fixtureValues()).get("tokens/tokens.json");
-  const aliasToken = library.sets
-    .find((set) => set.id === "tset_alias_demo")
-    .tokens.find((token) => token.id === "tok_alias_demo_radius");
-  assert.equal(aliasToken.value, "{base}");
+  assert.equal(alias.aliasChain.at(-1).path, "radius-base");
+  // The alias keeps its expression in tokens.css; resolution never rewrites it.
+  const css = await readFile(join(fixture, "tokens.css"), "utf8");
+  assert.match(css, /--radius-alias: var\(--radius-base\);/);
 });
 
 test("negative controls are independently rejected with typed errors", async () => {
-  const expectations = {
-    "unknown-type": "unsupported_token_type",
-    "duplicate-id": "duplicate_token_id",
-    "missing-alias": "missing_token_alias",
-    "alias-cycle": "token_alias_cycle",
-  };
   for (const [name, expectedCode] of Object.entries(expectations)) {
     await assert.rejects(
-      invalidValues(name),
-      (error) => error?.code === expectedCode,
+      openPackage(join(invalidDir, `${name}.smallpen`)),
+      (error) => error?.code === expectedCode && error.details.issues[0].file === "tokens.css",
       `${name} must fail with ${expectedCode}`,
     );
   }
 });
 
-test("CLI validate rejects every negative fixture with its typed error", async () => {
-  const expectations = {
-    "unknown-type": "unsupported_token_type",
-    "duplicate-id": "duplicate_token_id",
-    "missing-alias": "missing_token_alias",
-    "alias-cycle": "token_alias_cycle",
-  };
-  for (const name of Object.keys(expectations)) {
+test("CLI view and check reject every negative fixture with its typed error", async () => {
+  for (const [name, code] of Object.entries(expectations)) {
     const target = join(invalidDir, `${name}.smallpen`);
     await assert.rejects(
-      execFileAsync(process.execPath, [cli, "validate", target, "--json"], {
-        cwd: join(here, ".."),
-      }),
-      (error) => {
-        const payload = JSON.parse(error?.stdout ?? "{}");
-        return error.code === 1 && payload.error?.code === expectations[name];
-      },
-      `${name} must fail CLI validate with ${expectations[name]}`,
+      execFileAsync(process.execPath, [cli, "view", target, "--json"], { cwd: join(here, "..") }),
+      (error) => error.code === 1 && JSON.parse(error.stdout ?? "{}").error?.code === code,
+      `${name} must fail CLI view with ${code}`,
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, [cli, "check", target, "--json"], { cwd: join(here, "..") }),
+      (error) => error.code === 1 && JSON.parse(error.stdout).issues.some((issue) => issue.code === code),
+      `${name} must fail CLI check with ${code}`,
     );
   }
 });
 
-test("baseline invariant snapshot pins tree, revision and active combination", async () => {
+test("baseline invariant snapshot pins status, revision and active combination", async () => {
   const baseline = JSON.parse(
     await readFile(join(here, "fixtures", "design-system-baseline.json"), "utf8"),
   );
   const { stdout } = await execFileAsync(
     process.execPath,
-    [cli, "validate", fixture, "--json"],
+    [cli, "check", fixture, "--render", "--json"],
     { cwd: join(here, "..") },
   );
   const validated = JSON.parse(stdout);
-  assert.equal(validated.status, baseline.status);
+  assert.equal(validated.render.status, baseline.status);
   assert.equal(validated.revision, baseline.revision);
-  const library = (await fixtureValues()).get("tokens/tokens.json");
-  const active = library.activeThemeIds.map((id) => {
+  const snapshot = await openPackage(fixture);
+  const library = snapshot.entries[snapshot.manifest.entries.tokens[0]];
+  const active = library.defaultThemeIds.map((id) => {
     const theme = library.themes.find((candidate) => candidate.id === id);
     return `${theme.group}/${theme.name}`;
   });

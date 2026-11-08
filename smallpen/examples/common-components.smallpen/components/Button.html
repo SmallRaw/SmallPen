@@ -1,0 +1,148 @@
+<sp-component name="Button" props="Style: primary | secondary | ghost; Content: text | leading | trailing | icon; State: default | hover | pressed | disabled">
+  <div class="w-[152px] h-[44px] bg-primary rounded-base">
+    <p data-name="Label" class="left-[20px] top-[13px] w-[94px] h-[19px] text-on-primary type-demo-label">Continue</p>
+    <div data-shape="rectangle" data-name="Plus horizontal" class="left-[14px] top-[20px] w-[16px] h-[2px] bg-on-primary hidden"></div>
+    <div data-shape="rectangle" data-name="Plus vertical" class="left-[21px] top-[14px] w-[2px] h-[16px] bg-on-primary hidden"></div>
+  </div>
+  <sp-variant when="Style: secondary" class="bg-surface-variant">
+    <p data-name="Label" class="text-primary"></p>
+    <div data-name="Plus horizontal" class="bg-primary shown"></div>
+    <div data-name="Plus vertical" class="bg-primary shown"></div>
+  </sp-variant>
+  <sp-variant when="Style: ghost" class="bg-surface-variant">
+    <p data-name="Label" class="text-primary"></p>
+    <div data-name="Plus horizontal" class="bg-primary shown"></div>
+    <div data-name="Plus vertical" class="bg-primary shown"></div>
+  </sp-variant>
+  <sp-variant when="Content: leading" class="bg-surface-variant">
+    <p data-name="Label" class="left-[42px] top-[13px] text-primary"></p>
+    <div data-name="Plus horizontal" class="shown bg-primary"></div>
+    <div data-name="Plus vertical" class="shown bg-primary"></div>
+  </sp-variant>
+  <sp-variant when="Content: trailing" class="bg-surface-variant">
+    <div data-name="Plus horizontal" class="left-[120px] top-[20px] shown bg-primary"></div>
+    <div data-name="Plus vertical" class="left-[127px] top-[14px] shown bg-primary"></div>
+    <p data-name="Label" class="text-primary"></p>
+  </sp-variant>
+  <sp-variant when="Content: icon" class="w-[44px] h-[44px] bg-surface-variant">
+    <p data-name="Label" class="hidden"></p>
+    <div data-name="Plus horizontal" class="shown bg-primary"></div>
+    <div data-name="Plus vertical" class="shown bg-primary"></div>
+  </sp-variant>
+  <sp-variant when="State: hover" class="opacity-[0.82] bg-surface-variant">
+    <div data-name="Plus horizontal" class="shown"></div>
+    <div data-name="Plus vertical" class="shown"></div>
+  </sp-variant>
+  <sp-variant when="State: pressed" class="opacity-[0.65] bg-surface-variant">
+    <div data-name="Plus horizontal" class="shown"></div>
+    <div data-name="Plus vertical" class="shown"></div>
+  </sp-variant>
+  <sp-variant when="State: disabled" class="opacity-[0.35] bg-surface-variant">
+    <div data-name="Plus horizontal" class="shown"></div>
+    <div data-name="Plus vertical" class="shown"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: text; State: hover" class="bg-primary">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: text; State: pressed" class="bg-primary">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: text; State: disabled" class="bg-primary">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: leading; State: default" class="bg-primary">
+    <p data-name="Label" class="text-on-primary"></p>
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: leading; State: hover" class="bg-primary">
+    <p data-name="Label" class="text-on-primary"></p>
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: leading; State: pressed" class="bg-primary">
+    <p data-name="Label" class="text-on-primary"></p>
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: leading; State: disabled" class="bg-primary">
+    <p data-name="Label" class="text-on-primary"></p>
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: trailing; State: default" class="bg-primary">
+    <p data-name="Label" class="text-on-primary"></p>
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: trailing; State: hover" class="bg-primary">
+    <p data-name="Label" class="text-on-primary"></p>
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: trailing; State: pressed" class="bg-primary">
+    <p data-name="Label" class="text-on-primary"></p>
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: trailing; State: disabled" class="bg-primary">
+    <p data-name="Label" class="text-on-primary"></p>
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: icon; State: default" class="bg-primary">
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: icon; State: hover" class="bg-primary">
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: icon; State: pressed" class="bg-primary">
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: primary; Content: icon; State: disabled" class="bg-primary">
+    <div data-name="Plus horizontal" class="bg-on-primary"></div>
+    <div data-name="Plus vertical" class="bg-on-primary"></div>
+  </sp-variant>
+  <sp-variant when="Style: secondary; Content: text; State: default">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: secondary; Content: text; State: hover">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: secondary; Content: text; State: pressed">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: secondary; Content: text; State: disabled">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: ghost; Content: text; State: default" class="bg-[#ffffff00]">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: ghost; Content: text; State: hover">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: ghost; Content: text; State: pressed">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: ghost; Content: text; State: disabled">
+    <div data-name="Plus horizontal" class="hidden"></div>
+    <div data-name="Plus vertical" class="hidden"></div>
+  </sp-variant>
+  <sp-variant when="Style: ghost; Content: leading; State: default" class="bg-[#ffffff00]"></sp-variant>
+  <sp-variant when="Style: ghost; Content: trailing; State: default" class="bg-[#ffffff00]"></sp-variant>
+  <sp-variant when="Style: ghost; Content: icon; State: default" class="bg-[#ffffff00]">
+  </sp-variant>
+</sp-component>

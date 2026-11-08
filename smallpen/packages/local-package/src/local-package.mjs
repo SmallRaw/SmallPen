@@ -13,21 +13,26 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
   stat,
   symlink,
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  join,
+  resolve,
+} from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
 import {
   canonicalJSON,
   checkOperationShape,
+  encodePackage,
   fail,
-  listPackageEntries,
-  loadPackageFromValues,
   prepareOperationBatch,
   sha256Hex,
   SmallPenError,
@@ -41,7 +46,16 @@ import {
   writeFileDurable,
 } from "./fs-utils.mjs";
 import { batchHistoryPath, HISTORY_CACHE_IDLE_MS } from "./history-cache.mjs";
+import {
+  decodeSnapshot,
+  forgetPackage,
+  openSnapshot,
+  rememberCommittedState,
+  rememberRevision,
+  writeIdentity,
+} from "./html-store.mjs";
 import { prepareFontFiles } from "./font-convert.mjs";
+import { acceptPackageFiles } from "./check-gate.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -203,112 +217,9 @@ async function resolvePackageRoot(locator) {
   return packagePath;
 }
 
-async function resolveEntry(packagePath, entry) {
-  const candidatePath = resolve(packagePath, entry);
-  if (!isWithinRoot(packagePath, candidatePath)) {
-    fail(
-      "invalid_entry_path",
-      `Canonical entry escapes the Package: ${entry}`,
-    );
-  }
-  let entryInfo;
-  try {
-    entryInfo = await lstat(candidatePath);
-  } catch (error) {
-    fail(
-      "invalid_entry_path",
-      `Unable to resolve Canonical entry ${entry}: ${error.message}`,
-      { entry },
-    );
-  }
-  if (entryInfo.isSymbolicLink()) {
-    fail("invalid_entry_path", `Canonical entry cannot be a symlink: ${entry}`);
-  }
-  const entryPath = await realpath(candidatePath);
-  if (!isWithinRoot(packagePath, entryPath)) {
-    fail(
-      "invalid_entry_path",
-      `Canonical entry resolves outside the Package: ${entry}`,
-    );
-  }
-  // Case- and normalization-insensitive file systems (macOS, Windows) resolve
-  // an entry that differs from the file name only in case or Unicode form; a
-  // case-sensitive system (Linux, CI) would not. Require the exact name.
-  const onDisk = relative(packagePath, entryPath).split(sep).join("/");
-  if (onDisk !== entry) {
-    fail(
-      "invalid_entry_path",
-      `Canonical entry ${entry} does not match the file name ${onDisk}`,
-      { entry, onDisk },
-    );
-  }
-  return entryPath;
-}
-
-async function readJson(path, code, details) {
-  try {
-    return JSON.parse(await readRegularFile(path, "utf8"));
-  } catch (error) {
-    if (error instanceof SmallPenError) throw error;
-    fail(code, `Unable to read ${basename(path)}: ${error.message}`, details);
-  }
-}
-
-async function readPackageValues(packagePath) {
-  const manifest = await readJson(
-    await resolveEntry(packagePath, "manifest.json"),
-    "invalid_manifest_json",
-    { packagePath },
-  );
-  const { entries } = listPackageEntries(manifest);
-  const values = new Map([["manifest.json", manifest]]);
-  await Promise.all(
-    entries.map(async (entry) => {
-      values.set(
-        entry,
-        await readJson(
-          await resolveEntry(packagePath, entry),
-          "invalid_entry_json",
-          { entry, packagePath },
-        ),
-      );
-    }),
-  );
-  const blobsPath = join(packagePath, "blobs");
-  let blobEntries = [];
-  try {
-    const info = await lstat(blobsPath);
-    if (info.isSymbolicLink() || !info.isDirectory()) {
-      fail("invalid_media_blob_directory", "Package blobs must be a directory");
-    }
-    blobEntries = await readdir(blobsPath, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  await Promise.all(
-    blobEntries.map(async (entry) => {
-      if (!entry.isFile() || !/^[a-f0-9]{64}$/.test(entry.name)) {
-        fail(
-          "invalid_media_blob",
-          `Package blob entry is invalid: blobs/${entry.name}`,
-        );
-      }
-      const path = `blobs/${entry.name}`;
-      values.set(
-        path,
-        await readRegularFile(await resolveEntry(packagePath, path)),
-      );
-    }),
-  );
-  return values;
-}
-
-async function openPackageUnlocked(locator) {
+async function openPackageUnlocked(locator, options = {}) {
   const packagePath = await resolvePackageRoot(locator);
-  return loadPackageFromValues(
-    packagePath,
-    await readPackageValues(packagePath),
-  );
+  return openSnapshot(packagePath, options);
 }
 
 async function cleanup(paths) {
@@ -382,16 +293,16 @@ async function activeWriteClaim(activePath) {
   }
 }
 
-async function releaseWriteClaim(activePath, claimName, claimPath) {
+async function releaseWriteClaim(activePath, claimName, claimPath, lockPath) {
   if (await activeWriteClaim(activePath) === claimName) {
     await rm(activePath, { force: true });
   }
   await rm(claimPath, { force: true });
-  // Keep the claim directory as the stable synchronization point. Removing it
-  // here can race with a waiter that has already created its claim and would
-  // either delete that live claim or leave the waiter operating on an unlinked
-  // directory. Empty lock directories contain no ownership state and are safe
-  // to reuse on the next acquisition.
+  // The lock directory goes once it is empty, so nothing is left beside the
+  // Package. rmdir refuses while any claim is in it, so a live waiter keeps
+  // it; a writer that loses it between mkdir and writing its claim makes it
+  // again (acquireWriteLock retries).
+  if (lockPath) await rmdir(lockPath).catch(() => {});
 }
 
 async function acquireWriteLock(packagePath) {
@@ -413,25 +324,34 @@ async function acquireWriteLock(packagePath) {
   const claimPath = join(lockPath, claimName);
   const activePath = join(lockPath, "active");
   try {
-    await mkdir(lockPath, { recursive: true });
-    // Claims are read, written and removed by name inside the lock directory:
-    // a symlink there (an archive can carry one) would aim that at any folder.
-    if ((await lstat(lockPath)).isSymbolicLink()) {
-      fail(
-        "invalid_write_lock",
-        "Package write lock must be a directory, not a symlink",
-        { lockPath, packagePath },
-      );
+    // A releasing writer removes the empty directory; if that happens between
+    // mkdir and the claim, make it again.
+    for (let attempt = 0; ; attempt += 1) {
+      await mkdir(lockPath, { recursive: true });
+      // Claims are read, written and removed by name inside the lock directory:
+      // a symlink there (an archive can carry one) would aim that at any folder.
+      if ((await lstat(lockPath)).isSymbolicLink()) {
+        fail(
+          "invalid_write_lock",
+          "Package write lock must be a directory, not a symlink",
+          { lockPath, packagePath },
+        );
+      }
+      try {
+        await writeFile(
+          claimPath,
+          JSON.stringify({
+            createdAt: new Date().toISOString(),
+            pid: process.pid,
+            processIdentity: ownerProcessIdentity,
+          }),
+          { flag: "wx" },
+        );
+        break;
+      } catch (error) {
+        if (error?.code !== "ENOENT" || attempt >= 20) throw error;
+      }
     }
-    await writeFile(
-      claimPath,
-      JSON.stringify({
-        createdAt: new Date().toISOString(),
-        pid: process.pid,
-        processIdentity: ownerProcessIdentity,
-      }),
-      { flag: "wx" },
-    );
   } catch (error) {
     if (!UNWRITABLE_LOCATION_CODES.has(error?.code)) throw error;
     fail(
@@ -447,7 +367,7 @@ async function acquireWriteLock(packagePath) {
   heartbeat.unref?.();
   const release = () => {
     clearInterval(heartbeat);
-    return releaseWriteClaim(activePath, claimName, claimPath);
+    return releaseWriteClaim(activePath, claimName, claimPath, lockPath);
   };
   const deadline = Date.now() + 30000;
   try {
@@ -504,6 +424,16 @@ async function lockTarget(locator) {
   }
 }
 
+// Each revision a caller reads is kept, so `changes --since` can compare
+// it with a later one, however the files changed in between.
+async function rememberSnapshot(snapshot) {
+  try {
+    await rememberRevision(snapshot.locator, snapshot.manifest.packageId, snapshot.revision, snapshot.files, snapshot.assets);
+  } catch (error) {
+    process.emitWarning(`Revision cache unavailable: ${error.message}`, { code: "SMALLPEN_HISTORY_CACHE_UNAVAILABLE" });
+  }
+}
+
 export async function openPackage(locator) {
   const target = await lockTarget(locator);
   // A missing Package without a commit journal fails without creating a
@@ -531,13 +461,7 @@ export async function openPackage(locator) {
   try {
     await recoverInterruptedCommit(target);
     const snapshot = await openPackageUnlocked(target);
-    if (await pathExists(`${target}.batches.json`)) {
-      try { await readBatchLedger(target); }
-      catch (error) {
-        // Auxiliary history migration must not prevent opening a valid design.
-        process.emitWarning(`Legacy history migration deferred: ${error.message}`, { code: "SMALLPEN_HISTORY_CACHE_UNAVAILABLE" });
-      }
-    }
+    await rememberSnapshot(snapshot);
     return snapshot;
   } finally {
     await release();
@@ -613,13 +537,7 @@ async function assertNoSymlinkAncestors(candidatePath, entry) {
   }
 }
 
-async function writeCandidate(
-  originalPath,
-  snapshot,
-  changedFiles,
-  deletedFiles,
-  blobWrites = new Map(),
-) {
+async function writeCandidate(originalPath, writes, deletes) {
   const transactionPath = await mkdtemp(
     join(dirname(originalPath), `.${basename(originalPath)}.transaction-`),
   );
@@ -627,42 +545,27 @@ async function writeCandidate(
   try {
     const directories = new Set([transactionPath]);
     await linkPackageTree(originalPath, candidatePath, directories);
-    // Changed files and blobs are always written as new inodes: unlink the
-    // shared hard link first so the live Package is never modified in place.
-    const replace = async (target, data, encoding) => {
+    // Changed files are always written as new inodes: unlink the shared
+    // hard link first so the live Package is never modified in place.
+    for (const [entry, data] of writes) {
+      const target = resolve(candidatePath, entry);
+      if (!isWithinRoot(candidatePath, target)) {
+        fail("invalid_entry_path", `Changed file escapes the Package: ${entry}`);
+      }
+      await assertNoSymlinkAncestors(candidatePath, entry);
       await rm(target, { force: true });
       await mkdir(dirname(target), { recursive: true });
       directories.add(dirname(target));
-      await writeFileDurable(target, data, encoding);
-    };
-    for (const entry of changedFiles) {
-      const target = resolve(candidatePath, entry);
-      if (!isWithinRoot(candidatePath, target)) {
-        fail("invalid_entry_path", `Changed entry escapes the Package: ${entry}`);
-      }
-      await assertNoSymlinkAncestors(candidatePath, entry);
-      const value =
-        entry === "manifest.json"
-          ? snapshot.manifest
-          : snapshot.entries[entry];
-      await replace(target, canonicalJSON(value), "utf8");
+      await writeFileDurable(target, data, typeof data === "string" ? "utf8" : undefined);
     }
-    for (const entry of deletedFiles) {
+    for (const entry of deletes) {
       const target = resolve(candidatePath, entry);
       if (!isWithinRoot(candidatePath, target)) {
-        fail("invalid_entry_path", `Deleted entry escapes the Package: ${entry}`);
+        fail("invalid_entry_path", `Deleted file escapes the Package: ${entry}`);
       }
       await assertNoSymlinkAncestors(candidatePath, entry);
       await rm(target, { force: true });
       directories.add(dirname(target));
-    }
-    for (const [entry, bytes] of blobWrites) {
-      const target = resolve(candidatePath, entry);
-      if (!isWithinRoot(candidatePath, target)) {
-        fail("invalid_entry_path", `Media blob escapes the Package: ${entry}`);
-      }
-      await assertNoSymlinkAncestors(candidatePath, entry);
-      await replace(target, bytes);
     }
     for (const directory of directories) {
       if (await pathExists(directory)) await syncDirectory(directory);
@@ -672,6 +575,32 @@ async function writeCandidate(
     await cleanup([transactionPath]);
     throw error;
   }
+}
+
+function sameBytes(left, right) {
+  if (left === undefined || right === undefined) return left === right;
+  const a = typeof left === "string" ? Buffer.from(left) : Buffer.from(left);
+  const b = typeof right === "string" ? Buffer.from(right) : Buffer.from(right);
+  return Buffer.compare(a, b) === 0;
+}
+
+// Only files whose meaning changed are written: a file is rewritten when
+// its canonical form before and after the write differ, so untouched files
+// keep their author's formatting. Files the format does not own (notes,
+// unknown files) are never deleted. Returns the writes, the deletions and
+// the resulting files.
+function fileChanges(diskFiles, beforeCanonical, afterCanonical) {
+  const writes = new Map();
+  for (const [path, content] of afterCanonical) {
+    if (sameBytes(beforeCanonical.get(path), content) && diskFiles.has(path)) continue;
+    if (sameBytes(diskFiles.get(path), content)) continue;
+    writes.set(path, typeof content === "string" ? Buffer.from(content) : content);
+  }
+  const deletes = [...beforeCanonical.keys()].filter((path) => !afterCanonical.has(path) && diskFiles.has(path));
+  const result = new Map(diskFiles);
+  for (const path of deletes) result.delete(path);
+  for (const [path, bytes] of writes) result.set(path, bytes);
+  return { writes, deletes, files: result };
 }
 
 async function commitCandidate(originalPath, candidatePath, transactionPath) {
@@ -732,80 +661,171 @@ async function themeSelectionDependencies(locator, before, batch, dependencies) 
   }
 }
 
+// Asset facts for the files a snapshot's media and fonts write, by blob key.
+function assetFactsByBlob(snapshot) {
+  const facts = new Map();
+  for (const entry of snapshot.manifest.entries.assets) {
+    for (const media of snapshot.entries[entry].media) {
+      facts.set(media.blob, { sha256: media.sha256, byteLength: media.byteLength, mimeType: media.mimeType, width: media.width, height: media.height });
+    }
+    for (const font of snapshot.entries[entry].fonts) {
+      for (const variant of font.variants) {
+        for (const file of Object.values(variant.files)) facts.set(file.blob, { sha256: file.sha256, byteLength: file.byteLength });
+      }
+    }
+  }
+  return facts;
+}
+
+// A write is computed and checked in memory first: the new state is
+// encoded, decoded again and compared before any file changes. Only then is
+// it committed to disk, and the process cache takes the new state as is.
 async function applyOperationBatchLocked(locator, batch, dependencies = {}) {
   const before = await openPackageUnlocked(locator);
   const blobWrites = batch.blobs ?? new Map();
   if (!(blobWrites instanceof Map)) {
     fail("invalid_blob_writes", "Operation Batch blobs must be a Map");
   }
-  for (const [entry, bytes] of blobWrites) {
-    before.blobs.set(entry, bytes);
-  }
+  const blobs = before.blobs.clone ? before.blobs.clone() : new Map(before.blobs);
+  for (const [entry, bytes] of blobWrites) blobs.set(entry, bytes);
   const prepared = await prepareOperationBatch(
-    before,
+    { ...before, blobs },
     batch,
     await themeSelectionDependencies(locator, before, batch, dependencies),
   );
-  const referencedBlobs = new Set(
-    prepared.snapshot.manifest.entries.assets.flatMap((entry) =>
-      [
-        ...prepared.snapshot.entries[entry].media.map((media) => media.blob),
-        ...prepared.snapshot.entries[entry].fonts.flatMap((font) =>
-          font.variants.flatMap((variant) =>
-            Object.values(variant.files).map(({ blob }) => blob),
-          ),
-        ),
-      ],
-    ),
-  );
+  const assetFacts = assetFactsByBlob(prepared.snapshot);
   for (const entry of blobWrites.keys()) {
-    if (!referencedBlobs.has(entry)) {
+    if (!assetFacts.has(entry)) {
       fail(
         "unreferenced_blob_write",
         `Operation Batch binary blob is not referenced: ${entry}`,
       );
     }
   }
-  const result = {
-    ...prepared.result,
-    changedFiles: [...new Set([...prepared.result.changedFiles, ...blobWrites.keys()])].sort(),
-  };
   if (
     prepared.result.changedFiles.length === 0 &&
     prepared.result.deletedFiles.length === 0
   ) {
-    return result;
+    return { ...prepared.result, changedFiles: [], deletedFiles: [] };
   }
-
-  const transaction = await writeCandidate(
-    before.locator,
-    prepared.snapshot,
-    prepared.result.changedFiles,
-    prepared.result.deletedFiles,
-    blobWrites,
-  );
+  // The snapshot is written as canonical HTML files. Content the format
+  // cannot hold fails here, before anything is written.
+  let encoded;
   try {
-    const validated = await openPackage(transaction.candidatePath);
-    if (validated.revision !== prepared.result.revision) {
-      fail(
-        "candidate_revision_mismatch",
-        "Candidate Package revision changed during validation",
-        {
-          actualRevision: validated.revision,
-          expectedRevision: prepared.result.revision,
-        },
-      );
-    }
+    encoded = encodePackage({
+      ...prepared.snapshot,
+      blobs,
+      runtime: prepared.snapshot.runtime ?? before.runtime,
+    });
+  } catch (error) {
+    if (error instanceof SmallPenError) throw error;
+    fail(error.code ?? "unsupported_in_html_format", error.message, error.details);
+  }
+  const beforeCanonical = encodePackage(before);
+  const { writes, deletes, files: afterText } = fileChanges(before.files, beforeCanonical.files, encoded.files);
+  // Assets: copy bytes only for new or changed files; delete only assets
+  // the package referenced before and no longer does.
+  const afterAssets = new Map();
+  const loadedBlobs = [];
+  for (const [path, blob] of encoded.assets) {
+    const facts = assetFacts.get(blob);
+    afterAssets.set(path, facts);
+    if (before.assets?.get(path)?.sha256 === facts.sha256) continue;
+    const bytes = blobs.get(blob);
+    if (!bytes) fail("missing_media_blob", `The bytes for ${path} are missing`, { path });
+    writes.set(path, bytes);
+    loadedBlobs.push([blob, bytes]);
+  }
+  for (const [path, facts] of before.assets ?? []) {
+    if (afterAssets.has(path)) continue;
+    if (beforeCanonical.assets.has(path)) deletes.push(path);
+    else afterAssets.set(path, facts);
+  }
+  const { state, snapshot: checked } = await decodeSnapshot(locator, afterText, afterAssets, {
+    identity: encoded.identity,
+    loadedBlobs,
+  });
+  const revision = checked.revision;
+  // The undo batch starts from the files just written, whose revision is
+  // the hash of those files, not of the in-memory model.
+  const result = {
+    ...prepared.result,
+    revision,
+    changedFiles: [...writes.keys()].sort(),
+    deletedFiles: deletes.sort(),
+    ...(prepared.result.inverseBatch && {
+      inverseBatch: {
+        ...prepared.result.inverseBatch,
+        baseRevision: revision,
+        operations: withFileEntryKeys(prepared.result.inverseBatch.operations, prepared.snapshot, checked),
+      },
+    }),
+  };
+  if (writes.size === 0 && deletes.length === 0) return { ...result, revision: before.revision };
+
+  const transaction = await writeCandidate(before.locator, writes, deletes);
+  try {
     await commitCandidate(
       before.locator,
       transaction.candidatePath,
       transaction.transactionPath,
     );
-    return result;
   } catch (error) {
     await cleanup([transaction.transactionPath]);
+    forgetPackage(before.locator);
     throw error;
   }
+  const packageId = before.manifest.packageId;
+  // What the App saved is valid by construction: it becomes the accepted
+  // version the check gate rolls rejected agent edits back to.
+  try {
+    await acceptPackageFiles(before.locator);
+  } catch (error) {
+    process.emitWarning(`Design saved but the accepted version was not updated: ${error.message}`, {
+      code: "SMALLPEN_ACCEPTED_VERSION_WRITE_FAILED",
+    });
+  }
+  try {
+    await rememberCommittedState(before.locator, state, afterText, afterAssets);
+    await writeIdentity(before.locator, packageId, encoded.identity);
+    await rememberRevision(before.locator, packageId, revision, afterText, afterAssets);
+  } catch (error) {
+    forgetPackage(before.locator);
+    process.emitWarning(`Design saved but its caches were not updated: ${error.message}`, {
+      code: "SMALLPEN_IDENTITY_CACHE_WRITE_FAILED",
+    });
+  }
+  return result;
+}
+
+// An Operation that creates an entry names it the way the in-memory model
+// does (components/x.json); read back from the files the same entry has the
+// file's key (components/x.html). Undo Operations must name the entries the
+// next read will have, so this maps each new key to its file key: screens by
+// id, component files by the components they hold, a Package's only Token or
+// asset library by being the only one.
+function withFileEntryKeys(operations, memory, files) {
+  const renames = new Map();
+  for (const kind of Object.keys(memory.manifest.entries)) {
+    const fileKeys = files.manifest.entries[kind] ?? [];
+    const added = memory.manifest.entries[kind].filter((key) => !fileKeys.includes(key));
+    if (!added.length) continue;
+    const spare = fileKeys.filter((key) => !memory.manifest.entries[kind].includes(key));
+    const idsOf = (value) => new Set(
+      kind === "components" ? (value?.componentSets ?? [value]).map((item) => item?.id) : [value?.id],
+    );
+    for (const key of added) {
+      if (fileKeys.length === 1 && memory.manifest.entries[kind].length === 1) {
+        renames.set(key, fileKeys[0]);
+        continue;
+      }
+      const ids = idsOf(memory.entries[key]);
+      const match = spare.find((candidate) => [...idsOf(files.entries[candidate])].some((id) => id !== undefined && ids.has(id)));
+      if (match) renames.set(key, match);
+    }
+  }
+  if (!renames.size) return operations;
+  return operations.map((operation) => (renames.has(operation.entry) ? { ...operation, entry: renames.get(operation.entry) } : operation));
 }
 
 // The ledger is a null-prototype map so batch IDs such as "__proto__" stay
@@ -1170,6 +1190,19 @@ export async function replayRecordedBatch(locator, batch, options = {}) {
 // `options.onCommitted(snapshot)` receives the Package as it stands right
 // after this batch, read while the write lock is still held, so callers never
 // mistake a later external write for their own commit.
+// Runs `work` while holding the package write lock, so a rollback of an
+// agent's files never interleaves with an App save.
+export async function withPackageWriteLock(locator, work) {
+  const packagePath = await lockTarget(locator);
+  const release = await acquireWriteLock(packagePath);
+  try {
+    await recoverInterruptedCommit(packagePath);
+    return await work(await resolvePackageRoot(packagePath));
+  } finally {
+    await release();
+  }
+}
+
 export async function applyOperationBatch(locator, batch, options = {}) {
   const packagePath = await lockTarget(locator);
   const release = await acquireWriteLock(packagePath);
@@ -1251,7 +1284,7 @@ export async function importMedia(
     fail("invalid_media_blob", "Imported Media bytes must be a Uint8Array");
   }
   const before = await openPackage(locator);
-  const entry = before.manifest.entries.assets[0] ?? "assets/assets.json";
+  const entry = before.manifest.entries.assets[0] ?? "assets";
   const library = before.manifest.entries.assets[0]
     ? structuredClone(before.entries[entry])
     : { colors: [], fonts: [], id: "alib_design", media: [], typographies: [] };
@@ -1309,7 +1342,7 @@ export async function removeMedia(locator, mediaId, options = {}) {
 }
 
 function assetLibraryForWrite(snapshot) {
-  const entry = snapshot.manifest.entries.assets[0] ?? "assets/assets.json";
+  const entry = snapshot.manifest.entries.assets[0] ?? "assets";
   const library = snapshot.manifest.entries.assets[0]
     ? structuredClone(snapshot.entries[entry])
     : { colors: [], fonts: [], id: "alib_design", media: [], typographies: [] };

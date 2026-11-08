@@ -4,126 +4,78 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
   mkdir,
-  readdir,
   readFile,
   rename,
   rm,
   writeFile,
+  realpath,
 } from "node:fs/promises";
 import {
+  basename,
   dirname,
-  isAbsolute,
   join,
-  relative,
   resolve,
 } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 
 import {
-  componentDefineOperation,
-  flowLinkIntent,
-  flowStartIntent,
-  pageDrawOperation,
-  componentSetOperation,
-  textSizingRepairOperations,
-  pageSetOperation,
-  themeAddIntents,
-  themeDefaultIntent,
-  themeDeleteIntent,
-  themeRenameIntent,
-  tokenDeleteOperations,
   tokenOptionValues,
-  tokenSetOperations,
   buildDesignSystemPage,
   canonicalJSON,
-  listAssets,
-  interactionIntentOperations,
-  prototypeConnections,
-  validatePrototypeChanges,
-  checkOperationShape,
-  compileDraftMerge,
-  createCatalog,
   createSemanticTree,
-  projectScreen,
   projectComponentVariant,
+  projectScreen,
   designChanges,
   designChangesText,
-  elementMoveOperation,
   findComponent,
   canvasLayout,
-  assetDeleteOperations,
-  assetSetOperations,
-  componentDeleteOperation,
-  componentRenameOperation,
   duplicateNameIssues,
-  checkNotUsedElsewhere,
-  flowLinks,
-  flowLinksText,
-  flowStartRemoveOperation,
-  flowUnlinkOperation,
-  pageDeleteOperations,
-  pageRenameOperations,
-  placePageOnCanvas,
-  renameCanvasOperation,
-  reorderPageOperation,
   elementPath,
   findElement,
   findPage,
   findPresentation,
   findVariant,
-  createCompareView,
-  createInitializationState,
   createWorkspaceRuntime,
   designSystemPageOptions,
-  diffDrafts,
   expandDesignSystemPage,
   locatedFamilySource,
-  designTokenAdviceForBatch,
   defaultTokenWorkspace,
-  draftFromSnapshot,
-  explainEffectiveToken,
-  formatWarningsForBatch,
-  importTokens,
-  INIT_LAYOUTS,
   listEffectiveTokens,
   variantLabel,
   listTokenDefinitions,
+  tokenCssDeclaration,
+  tokenUseCounts,
   listTokenThemes,
   packageFormatWarnings,
-  tokenLibraryOf,
-  prepareOperationBatch,
-  resolveEffectiveToken,
-  searchEffectiveTokens,
   selectTokenThemes,
-  themeIntentOperations,
   SmallPenError,
   SMALLPEN_FORMAT_CAPABILITIES,
   staleInstanceDiagnostics,
+  checkPackageFiles,
+  formatIssues,
+  tokenTypeOfName,
 } from "@smallpen/core";
 import {
   BATCH_HISTORY_LIMITS,
-  applyOperationBatch,
-  batchHistoryPath,
-  defaultLibraryCacheRoot,
-  fontVariantName,
-  importDraft,
-  importFontVariant,
-  importMedia,
   initializeBlankWorkspace,
-  initializeWorkspace,
-  inspectFont,
-  migrateThemesByCopy,
+  openRevisionSnapshot,
+  readPackageFiles,
+  rememberPackageFiles,
+  readAccepted,
+  writeAccepted,
+  acceptPackageFiles,
+  gateFiles,
+  changedPaths,
+  revertFiles,
+  withPackageWriteLock,
+  inspectMedia as inspectMediaBytes,
   inspectMedia,
+  exportHtmlReview,
   openPackage,
   readBatchHistory,
-  openRemoteLibrary,
-  layoutSizingRules,
-  measureProjectionText,
-  replayRecordedBatch,
   resolveWorkspace,
 } from "@smallpen/local-package";
 
-import { COMMAND_NAMES, commandGuidance, printHelp } from "./help.mjs";
+import { COMMAND_NAMES, commandGuidance, helpWithInput, printHelp } from "./help.mjs";
 import {
   COMMAND_CONTRACTS,
   commandContract,
@@ -132,7 +84,8 @@ import {
   validateCommandArguments,
 } from "./command-contract.mjs";
 import { schemaTopic } from "./schema.mjs";
-import { helpTopic, printBriefHelp } from "./help-topics.mjs";
+import { renderHtmlReviewPage } from "./html-render.mjs";
+import { printBriefHelp } from "./help-topics.mjs";
 import { CLI_RULES } from "./workflow.mjs";
 import {
   COMMAND_GROUPS,
@@ -155,6 +108,7 @@ import {
 import {
   componentLookup,
   componentSummaryText,
+  variantDifferences,
   platformHints,
   localWireframe,
   resolveDesignLayout,
@@ -164,11 +118,7 @@ import {
   validateDesign,
 } from "./design-output.mjs";
 import { inspectionCoverage, inspectionReport, inspectionText } from "./inspection-output.mjs";
-import { definitionReuseAdvice } from "./reuse-advice.mjs";
-import { warningOutput } from "./warning-output.mjs";
 import {
-  discoverySummary,
-  packageSummary,
   pageItems,
   viewSummary,
 } from "./read-output.mjs";
@@ -176,11 +126,18 @@ import {
 import { runValidationJobs } from "./validation-runner.mjs";
 
 let writeState = "not-applied";
+// Refusals that come before anything is written.
+const REFUSED_BEFORE_WRITING = new Set(["workspace_already_exists", "invalid_workspace_path", "invalid_package_path", "package_already_exists", "invalid_init_layout"]);
 async function trackedWrite(action) {
   writeState = "unknown";
-  const result = await action();
-  writeState = "committed";
-  return result;
+  try {
+    const result = await action();
+    writeState = "committed";
+    return result;
+  } catch (error) {
+    if (REFUSED_BEFORE_WRITING.has(error?.code)) writeState = "not-applied";
+    throw error;
+  }
 }
 // Localized labels follow the environment unless --locale is given: any
 // zh* locale selects the Chinese labels, everything else English.
@@ -196,33 +153,10 @@ function tokenLabels(locale) {
     : { context: "Design Context", items: "Effective Tokens" };
 }
 
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 // Locale-independent order for JSON output: localeCompare follows the host
 // LANG (Danish sorts "aa" after "ab"), which would reorder lists and pages.
 function compareText(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-// Caller-supplied input files fail with a typed error instead of a raw
-// filesystem internal_error.
-async function readInputFile(path, optionName, encoding) {
-  try {
-    return await readFile(path, encoding);
-  } catch (error) {
-    if (
-      !["EACCES", "EISDIR", "ENOENT", "ENOTDIR", "EPERM"].includes(error?.code)
-    ) {
-      throw error;
-    }
-    throw new SmallPenError(
-      "unreadable_input_file",
-      `${optionName} file cannot be read: ${error.message}`,
-      { option: optionName, path: resolve(path), reason: error.code },
-    );
-  }
 }
 
 function option(args, name) {
@@ -258,14 +192,6 @@ function options(args, name) {
 
 function flag(args, name) {
   return args.includes(name);
-}
-
-function parseJson(source, code, details = {}) {
-  try {
-    return JSON.parse(source);
-  } catch (error) {
-    throw new SmallPenError(code, `Invalid JSON: ${error.message}`, details);
-  }
 }
 
 function contextSelection(args) {
@@ -355,24 +281,16 @@ function withoutIds(value) {
 function keepsIds(args) {
   return (
     flag(args, "--full") ||
-    ["schema", "help", "version", "advanced", "apply", "repair", "--help", "-h", "--version"].includes(args[0]) ||
-    (args[0] === "project" && args[1] === "repair") ||
+    ["schema", "help", "version", "--help", "-h", "--version"].includes(args[0]) ||
     args.includes("--help")
   );
 }
 
 // A write by name answers what changed, what to look at and how to undo;
 // hashes, counts and each advised value stay in --full.
-function compactWriteReceipt(value, packagePath) {
+function compactWriteReceipt(value) {
   if (!value || typeof value !== "object" || typeof value.batchId !== "string" || value.error) return value;
   const out = { ...value };
-  // Undo is a new write of the saved inverse batch against this revision.
-  if (out.inverseBatchPath && !out.dryRun) {
-    out.undo = {
-      argv: ["advanced", "apply", packagePath, "--batch", out.inverseBatchPath],
-      note: "A new write against this revision; it refuses if the package changed since. The file expires after 30 minutes.",
-    };
-  }
   delete out.reverseEdit;
   if (out.revision !== undefined) delete out.baseRevision;
   for (const key of ["inverseBatchHash", "changeReportHash", "affectedIdsCount", "changedFilesCount", "deletedFilesCount",
@@ -407,17 +325,8 @@ function printJson(value) {
   // Every command that runs is public now: guidance names grouped paths.
   value = publicGuidance(value);
   const args = process.argv.slice(2);
-  if (!keepsIds(args)) value = compactWriteReceipt(withoutIds(value), args[commandMatch(args)?.route ? commandMatch(args).length : 1]);
-  const measuredOutput = [
-    "help",
-    "themes",
-    "theme",
-    "view",
-    "export",
-    "validate",
-    "assets",
-    "asset",
-  ].includes(args[0]);
+  if (!keepsIds(args)) value = compactWriteReceipt(withoutIds(value));
+  const measuredOutput = ["help", "view", "export", "check"].includes(args[0]);
   const inline = flag(args, "--stdout") || flag(args, "--base64");
   const encode = (reply) =>
     JSON.stringify(reply, (_key, child) =>
@@ -512,7 +421,9 @@ function printJson(value) {
     const resultFile = saveResult(
       `${JSON.stringify(JSON.parse(json), null, 2)}\n`,
     );
-    const text = value.outline ?? value.wireframe;
+    // The readable part (outline, spec or wireframe) also as plain text,
+    // so it can be searched without parsing the JSON.
+    const text = value.text ?? value.outline ?? value.wireframe;
     if (typeof text === "string") resultFile.text = saveResult(text, "txt");
     const brief = Object.fromEntries(
       keys
@@ -753,154 +664,6 @@ function viewPagination(args) {
   };
 }
 
-function inspect(snapshot) {
-  return {
-    annotations: [...snapshot.domain.annotations.values()],
-    components: [
-      ...[...snapshot.domain.componentSets.values()].map(
-        ({ axes, deprecated, id, name, variants, visibility }) => ({
-          axes,
-          deprecated,
-          id,
-          kind: "set",
-          name,
-          variants: variants.map(({ id: variantId, selection }) => ({
-            id: variantId,
-            selection,
-          })),
-          visibility,
-        }),
-      ),
-      ...[...snapshot.domain.locatedComponents.values()].map(
-        ({ id, mainNodeId, name, path, presentationId, screenId }) => ({
-          id,
-          kind: "located",
-          mainNodeId,
-          name,
-          path,
-          presentationId,
-          screenId,
-        }),
-      ),
-    ].sort((left, right) => compareText(left.id, right.id)),
-    contexts: {
-      axes: [...snapshot.domain.contextAxes.values()],
-      profiles: [...snapshot.domain.contextProfiles.values()],
-    },
-    draft: snapshot.manifest.draft
-      ? structuredClone(snapshot.manifest.draft)
-      : undefined,
-    flows: [...snapshot.domain.flows.values()],
-    formatCapabilities: SMALLPEN_FORMAT_CAPABILITIES,
-    guidance: {
-      beforeDesigning: [
-        {
-          args: {
-            packagePath: snapshot.locator,
-            query: "<intended-component-name-or-purpose>",
-          },
-          operation: "smallpen.search-components",
-        },
-        {
-          args: {
-            packagePath: snapshot.locator,
-            value: "<intended-style-value>",
-          },
-          operation: "smallpen.search-tokens",
-        },
-      ],
-      stateless: true,
-    },
-    package: {
-      dependencies: structuredClone(snapshot.manifest.dependencies ?? []),
-      id: snapshot.manifest.packageId,
-      name: snapshot.manifest.name,
-      revision: snapshot.revision,
-      role: snapshot.manifest.role,
-    },
-    requirements: [...snapshot.domain.requirements.values()],
-    scenarios: [...snapshot.domain.scenarios.values()],
-    screens: snapshot.manifest.entries.screens.map((entry) => {
-      const screen = snapshot.entries[entry];
-      return {
-        basePresentationId: screen.basePresentationId,
-        id: screen.id,
-        name: screen.name,
-        presentations: screen.presentations.map((presentation) => ({
-          id: presentation.id,
-          name: presentation.name,
-          nodeCount: Object.keys(presentation.nodes).length,
-          rootId: presentation.rootId,
-        })),
-      };
-    }),
-    tokens: [...snapshot.domain.tokens.values()].map(
-      ({ contextValues, id, overrideOf, path, type, visibility }) => ({
-        contextValues,
-        id,
-        overrideOf,
-        path,
-        type,
-        visibility,
-      }),
-    ),
-  };
-}
-
-function listDomain(snapshot, kind) {
-  const groups = {
-    components: [
-      ...snapshot.domain.componentSets.values(),
-      ...snapshot.domain.locatedComponents.values(),
-    ],
-    contexts: [
-      ...snapshot.domain.contextAxes.values(),
-      ...snapshot.domain.contextProfiles.values(),
-    ],
-    flows: [...snapshot.domain.flows.values()],
-    presentations: snapshot.manifest.entries.screens.flatMap((entry) =>
-      snapshot.entries[entry].presentations.map((presentation) => ({
-        ...presentation,
-        nodes: undefined,
-        screenId: snapshot.entries[entry].id,
-      })),
-    ),
-    requirements: [...snapshot.domain.requirements.values()],
-    scenarios: [...snapshot.domain.scenarios.values()],
-    screens: snapshot.manifest.entries.screens.map(
-      (entry) => snapshot.entries[entry],
-    ),
-    tokens: [...snapshot.domain.tokens.values()],
-  };
-  if (kind === "all") {
-    return Object.entries(groups).flatMap(([group, values]) =>
-      values.map((value) => ({ group, item: value })),
-    );
-  }
-  if (!Object.hasOwn(groups, kind)) {
-    throw new SmallPenError("invalid_list_kind", `Unknown list kind: ${kind}`, {
-      validValues: ["all", ...Object.keys(groups)],
-    });
-  }
-  return groups[kind].map((item) => ({ group: kind, item }));
-}
-
-// --theme GROUP/NAME selects token themes for this read only: the
-// workspace is viewed with those themes active, nothing is written.
-// Reads go on when the only Repair is Instances that lost their variant:
-// they draw with the closest variant and report a stale_instance_variant
-// diagnostic, as the editor shows them.
-// Renames number a name already taken ("List 2") the way App edits do: the
-// shared batch step does it for both.
-function renameNumbering(command) {
-  return ["page-rename", "component-rename", "canvas-rename"].includes(command) ? { repeatedNames: "number" } : {};
-}
-
-// A write a retry can repeat safely: its command takes --batch-id.
-function batchIdWrite(command) {
-  return Object.hasOwn(COMMAND_CONTRACTS, command) && Boolean(commandContract(command).parameters.batchId);
-}
-
 async function readableWorkspace(packagePath) {
   const resolution = await resolveCliWorkspace(packagePath);
   if (resolution.status === "ready") return resolution.workspace;
@@ -973,28 +736,8 @@ function workspaceStaleInstances(resolution) {
 }
 
 function resolveCliWorkspace(packagePath) {
-  return resolveWorkspace(packagePath, {
-    libraryCacheRoot: defaultLibraryCacheRoot(),
-  });
+  return resolveWorkspace(packagePath);
 }
-
-async function tokenAdviceWorkspace(packagePath) {
-  const resolution = await resolveCliWorkspace(packagePath);
-  if (resolution.status === "ready") return resolution.workspace;
-  return {
-    foundation: resolution.foundation,
-    product: resolution.product,
-  };
-}
-
-const NAMED_TOKEN_WRITES = new Set([
-  "theme-add",
-  "theme-default",
-  "theme-delete",
-  "theme-rename",
-  "token-delete",
-  "token-set",
-]);
 
 // The token themes a read can select with --theme, and which are active.
 function themeSummary(product, foundation) {
@@ -1022,30 +765,11 @@ function workspaceRevisions(product, foundation, libraries = []) {
           ),
         }
       : {}),
-    productRevision: product.revision,
+    // A package is one directory: its revision is the revision; the
+    // product/foundation pair only shows with a foundation.
+    ...(foundation ? { productRevision: product.revision } : {}),
     revision: product.revision,
   };
-}
-
-// --path names a Token the way agents do; --token-id stays for links that
-// carry an ID.
-function tokenReference(args, product, others = []) {
-  const path = option(args, "--path");
-  if (path === undefined)
-    return {
-      assetId: option(args, "--token-id"),
-      packageId: option(args, "--package-id") ?? product.manifest.packageId,
-    };
-  const requested = option(args, "--package-id");
-  for (const snapshot of [product, ...others].filter(Boolean)) {
-    if (requested && snapshot.manifest.packageId !== requested) continue;
-    const token = [...snapshot.domain.tokens.values()].find(
-      (candidate) => candidate.path === path,
-    );
-    if (token)
-      return { assetId: token.id, packageId: snapshot.manifest.packageId };
-  }
-  throw new SmallPenError("missing_token", `No Token named ${path}`, { path });
 }
 
 async function writeAtomic(path, value) {
@@ -1078,454 +802,9 @@ async function writeAtomic(path, value) {
   }
 }
 
-// SP-042/SP-043: every write supports an explain/diff preview computed from the
-// same prepared candidate that the atomic write would use; nothing is written.
-const EXPLAIN_TARGET_FIELDS = [
-  "assetId",
-  "componentId",
-  "entry",
-  "field",
-  "mediaId",
-  "nodeId",
-  "presentationId",
-  "screenId",
-  "tokenId",
-  "type",
-  "variantId",
-];
-
-function explainBatch(before, prepared, batch) {
-  const explain = (batch.operations ?? []).map((operation, index) => {
-    const target = Object.fromEntries(
-      EXPLAIN_TARGET_FIELDS.filter(
-        (field) => operation[field] !== undefined,
-      ).map((field) => [field, operation[field]]),
-    );
-    return { index, type: operation.type, target };
-  });
-  const diff = [
-    ...prepared.result.changedFiles.map((entry) => {
-      const beforeEntry = before.entries[entry];
-      const afterEntry = prepared.snapshot.entries[entry];
-      if (beforeEntry === undefined || afterEntry === undefined) {
-        return { entry, replaced: true };
-      }
-      const changes = {};
-      for (const key of new Set([
-        ...Object.keys(beforeEntry),
-        ...Object.keys(afterEntry),
-      ])) {
-        const beforeValue = beforeEntry[key];
-        const afterValue = afterEntry[key];
-        if (
-          JSON.stringify(beforeValue ?? null) !==
-          JSON.stringify(afterValue ?? null)
-        ) {
-          changes[key] = {
-            after: afterValue ?? null,
-            before: beforeValue ?? null,
-          };
-        }
-      }
-      return { changes, entry };
-    }),
-    ...prepared.result.deletedFiles.map((entry) => ({ deleted: true, entry })),
-  ];
-  return { diff, explain };
-}
-
-// Save an explicit reverse edit, guarded by the confirmed revision. It is a
-// new write through apply, never a command that rewinds package history.
-async function writeReply(result, args) {
-  if (result.alreadyApplied) result = { ...result, changed: false };
-  const full = flag(args, "--full");
-  const inverseOut = option(args, "--inverse-out");
-  const inverseJson = result.inverseBatch
-    ? `${JSON.stringify(result.inverseBatch, null, 2)}\n`
-    : undefined;
-  let inverseBatchPath;
-  let changeReportPath;
-  let undoError;
-  const fileHashes = {
-    ...(inverseJson
-      ? {
-          inverseBatchHash: createHash("sha256")
-            .update(inverseJson)
-            .digest("hex"),
-        }
-      : {}),
-  };
-  if ((inverseOut !== undefined || !full) && inverseJson && !result.dryRun) {
-    try {
-      inverseBatchPath = await writeAtomic(
-        inverseOut ?? artifactPath("undo", "json"),
-        inverseJson,
-      );
-    } catch (error) {
-      // The canonical write already succeeded. Keep its confirmation even when
-      // an auxiliary undo export cannot be saved; a retry must retain identity.
-      const retry = [
-        ...args.filter((arg) => !["--compact", "--full"].includes(arg)),
-        "--full",
-      ];
-      const inverseIndex = retry.indexOf("--inverse-out");
-      if (inverseIndex !== -1) retry.splice(inverseIndex, 2);
-      if (
-        batchIdWrite(args[0]) &&
-        !retry.includes("--batch-id")
-      )
-        retry.push("--batch-id", result.batchId);
-      undoError = {
-        code: "inverse_output_failed",
-        reason: error.code ?? "io_error",
-        message:
-          "The write is confirmed, but the reverse-edit file was not saved.",
-        ...(args[0] === "apply" || batchIdWrite(args[0])
-          ? {
-              nextOperations: [
-                {
-                  argv: retry,
-                  operation: `smallpen.${args[0]}`,
-                  when: "while-still-at-the-confirmed-revision",
-                },
-              ],
-            }
-          : {
-              ledgerPath: await batchHistoryPath(resolve(args[1])),
-              batchId: result.batchId,
-            }),
-      };
-    }
-  }
-  if (result.diff && !result.dryRun && !result.alreadyApplied) {
-    try {
-      const report = canonicalJSON({
-        batchId: result.batchId,
-        baseRevision: result.baseRevision,
-        revision: result.revision,
-        operations: result.explain,
-        entries: result.diff,
-      });
-      fileHashes.changeReportHash = createHash("sha256")
-        .update(report)
-        .digest("hex");
-      changeReportPath = await writeAtomic(
-        artifactPath("changes", "json"),
-        report,
-      );
-    } catch (error) {
-      // Failure to save supplementary evidence must not hide a confirmed write.
-      undoError ??= {
-        code: "change_report_output_failed",
-        reason: error.code ?? "io_error",
-        message:
-          "The write is confirmed; exact differences remain in the --full reply.",
-      };
-    }
-  }
-  const reverseEdit = result.inverseBatch
-    ? {
-        newWrite: true,
-        baseRevision: result.inverseBatch.baseRevision,
-        ...(full && inverseBatchPath
-          ? {
-              inputPath: inverseBatchPath,
-              argv: ["apply", args[1], "--batch", inverseBatchPath, "--json"],
-            }
-          : {}),
-        guidance:
-          "Verify inverseBatchHash and this baseRevision before applying; temporary files expire after 30 minutes. After later edits, read current fields and create a scoped reverse edit.",
-      }
-    : undefined;
-  if (full) {
-    return {
-      ...result,
-      ...fileHashes,
-      ...(inverseBatchPath ? { inverseBatchPath } : {}),
-      ...(changeReportPath ? { changeReportPath } : {}),
-      ...(reverseEdit ? { reverseEdit } : {}),
-      ...(undoError ? { undoError } : {}),
-    };
-  }
-  const showDetails = flag(args, "--diff") || flag(args, "--explain");
-  const {
-    guidance: _guidance,
-    inverseBatch,
-    diff,
-    explain,
-    ...compactResult
-  } = result;
-  const rest = { ...compactResult, ...(showDetails ? { diff, explain } : {}) };
-  const files =
-    (result.changedFiles?.length ?? 0) + (result.deletedFiles?.length ?? 0);
-  const warnings = result.warningSummary?.total ?? result.warnings?.length ?? 0;
-  const verb = result.alreadyApplied
-    ? "Already applied"
-    : result.changed === false
-      ? result.dryRun ? "No changes (preview)" : "No changes"
-      : result.dryRun ? "Previewed" : "Applied";
-  // Empty advice says nothing: leave it out of the short reply.
-  if (!rest.reuseReminders?.length) delete rest.reuseReminders;
-  if (!rest.reuseSummary?.total) delete rest.reuseSummary;
-  return {
-    ...rest,
-    ...fileHashes,
-    alreadyApplied: Boolean(result.alreadyApplied),
-    changed: result.changed ?? !result.noChange,
-    dryRun: Boolean(result.dryRun),
-    ...Object.fromEntries(
-      ["affectedIds", "changedFiles", "deletedFiles", "warnings", "explain"]
-        .filter((key) => Array.isArray(rest[key]))
-        .flatMap((key) => [
-          [key, rest[key].slice(0, 20)],
-          [`${key}Count`, rest[key].length],
-        ]),
-    ),
-    ...(rest.diff
-      ? {
-          diff: rest.diff.slice(0, 20).map(({ changes, ...entry }) => ({
-            ...entry,
-            ...(changes ? { fields: Object.keys(changes) } : {}),
-          })),
-          diffCount: rest.diff.length,
-        }
-      : {}),
-    ...(inverseBatch
-      ? { inverseOperationCount: inverseBatch.operations.length }
-      : {}),
-    ...(inverseBatchPath ? { inverseBatchPath } : {}),
-    ...(changeReportPath ? { changeReportPath } : {}),
-    ...(reverseEdit ? { reverseEdit } : {}),
-    ...(undoError ? { undoError } : {}),
-    summary:
-      `${verb} ${result.batchId}: revision ${result.revision}, ` +
-      `${files} changed file(s), ` +
-      `${warnings} warning(s).`,
-  };
-}
-
-// A write by name says what it did in the words changes uses, from the
-// same comparison.
-async function applyBatch(packagePath, batch, args, preview) {
-  const before = publicSurface ? await openPackage(packagePath).catch(() => undefined) : undefined;
-  const reply = await writeReply(await prepareAndApplyBatch(packagePath, batch, args, preview), args);
-  if (before && reply.changed && !reply.dryRun && !reply.alreadyApplied) {
-    const text = designChangesText(designChanges(before, await openPackage(packagePath)));
-    if (text !== "No design changes.") reply.done = text;
-  }
-  return reply;
-}
-
-async function prepareAndApplyBatch(packagePath, batch, args, preview) {
-  const detail = option(args, "--warning-detail") ?? "compact";
-  if (!["compact", "full"].includes(detail)) {
-    throw new SmallPenError(
-      "invalid_warning_detail",
-      "--warning-detail must be compact or full",
-      {
-        validValues: ["compact", "full"],
-      },
-    );
-  }
-  if (batch.blobs !== undefined) {
-    throw new SmallPenError(
-      "invalid_blob_writes",
-      "CLI Operation Batch JSON cannot contain binary blob writes",
-    );
-  }
-  // High-level commands rebuild their batch from the current revision, so a
-  // retry with the same --batch-id after success carries the recorded result
-  // as its base and may no longer prepare (its nodes already exist). Consult
-  // the ledger first; previews never write and skip it.
-  if (
-    args[0] !== "apply" &&
-    option(args, "--batch-id") !== undefined &&
-    !flag(args, "--dry-run") &&
-    !flag(args, "--explain") &&
-    !flag(args, "--diff") &&
-    !flag(args, "--preview")
-  ) {
-    const replayed = await replayRecordedBatch(packagePath, batch, {
-      rebuilt: true,
-    });
-    if (replayed) return replayed;
-  }
-  // 通用 apply 仍然能修复处于 Repair 的 Product；Token 建议不能变成写入门禁。
-  const { foundation, libraries, product } =
-    await tokenAdviceWorkspace(packagePath);
-  let prepared;
-  try {
-    // Foundation and Library components let preparation check Instance
-    // override paths that target them.
-    prepared = await prepareOperationBatch(product, batch, {
-      foundation,
-      libraries,
-    });
-  } catch (error) {
-    if (error?.code === "stale_revision" && !preview) {
-      const replayed = await replayRecordedBatch(packagePath, batch);
-      if (replayed) return replayed;
-    }
-    throw error;
-  }
-  validatePrototypeChanges(product, prepared.snapshot);
-  const { suppressed, warnings } = designTokenAdviceForBatch(
-    prepared.snapshot,
-    batch,
-    {
-      foundation,
-      before: product,
-    },
-  );
-  // A reminder names the Token to bind: an exact match alone, with just
-  // its path, value and reference.
-  const reuse = [
-    ...warnings
-      .filter(({ code }) => code === "design_token_not_used")
-      .map(({ contextScope: _scope, suggestions, valueSource: _source, ...item }) => ({
-        ...item,
-        suggestions: suggestions
-          .filter(({ exactValue }) => exactValue)
-          .map(({ path, reference, value }) => ({ path, reference, value })),
-      })),
-    ...definitionReuseAdvice(product, batch, { foundation, libraries }),
-  ];
-  // Import warnings have their own schema and are not design-style advice.
-  const advice =
-    args[0] === "import-tokens"
-      ? { warnings }
-      : warningOutput(warnings, detail, {
-          confirmUnmatched: flag(args, "--confirm-unmatched"),
-          suppressed,
-        });
-  const formatWarnings = formatWarningsForBatch(batch);
-  advice.reuseReminders = reuse.slice(0, 3);
-  advice.reuseSummary = {
-    total: reuse.length,
-    shown: Math.min(reuse.length, 3),
-    remaining: Math.max(0, reuse.length - 3),
-    scope: "this-batch-only",
-    note: "Advice, not a write gate. Search existing Tokens/components before creating new assets.",
-  };
-  if (formatWarnings.length > 0) {
-    advice.warnings = [...formatWarnings, ...(advice.warnings ?? [])];
-    if (advice.warningSummary) {
-      advice.warningSummary = {
-        ...advice.warningSummary,
-        formatWarnings: formatWarnings.length,
-        total: advice.warningSummary.total + formatWarnings.length,
-      };
-    }
-  }
-  const change = changeSummary(product, prepared, batch);
-  if (preview) {
-    return {
-      ...prepared.result, ...change, dryRun: true, ...advice,
-      ...((flag(args, "--explain") || flag(args, "--diff")) ? explainBatch(product, prepared, batch) : {}),
-      preview: await preview(prepared.snapshot, { foundation, libraries }, batch),
-    };
-  }
-  if (flag(args, "--explain") || flag(args, "--diff")) {
-    // explain/diff are read-only previews in any combination; neither flag
-    // writes, with or without --dry-run (CLI-AI-TOPIC: "explain and diff
-    // never write").
-    return {
-      ...prepared.result,
-      ...explainBatch(product, prepared, batch),
-      ...change,
-      dryRun: true,
-      ...advice,
-    };
-  }
-  if (flag(args, "--dry-run")) {
-    return { ...prepared.result, ...change, dryRun: true, ...advice };
-  }
-  return {
-    // The Foundation lets a Product select the Foundation's token themes.
-    ...(await trackedWrite(() =>
-      applyOperationBatch(packagePath, batch, {
-        dependencies: { foundation, libraries },
-      }),
-    )),
-    baseRevision: product.revision,
-    ...explainBatch(product, prepared, batch),
-    ...change,
-    ...advice,
-  };
-}
-
-// A valid batch can still leave every byte as it was (for example a value
-// that is already set). Say so instead of reporting a silent success.
-function changeSummary(before, prepared, batch) {
-  if (prepared.snapshot.revision !== before.revision) return { changed: true };
-  return {
-    changed: false,
-    noChange: {
-      code: "no_change",
-      message:
-        `The batch is valid but changes nothing: the ${batch.operations.length} ` +
-        "operation(s) leave the Package at its current revision. Check the " +
-        "targets and values (smallpen view PACKAGE --page NAME --json).",
-    },
-  };
-}
-
-function searchValue(args) {
-  const color = option(args, "--color");
-  const source = option(args, "--value");
-  if (color !== undefined) return { type: "color", value: color };
-  if (source === undefined) return {};
-  try {
-    return { value: JSON.parse(source) };
-  } catch {
-    return { value: source };
-  }
-}
-
 async function initializeCommand(workspacePath, args) {
   const layout = option(args, "--layout") ?? "single";
-  const answersPath = option(args, "--answers");
-  // Compatibility for explicit complete briefs in older scripts. Public
-  // project init never exposes this import, and no CLI mode asks questions.
-  if (answersPath) {
-    const answers = parseJson(
-      await readInputFile(answersPath, "--answers", "utf8"),
-      "invalid_initialization_answers_json",
-      { path: answersPath },
-    );
-    if (!isRecord(answers)) {
-      throw new SmallPenError(
-        "invalid_initialization_answers_json",
-        "--answers must contain a JSON object",
-      );
-    }
-    const state = createInitializationState({
-      ...answers,
-      ...(args.includes("--layout")
-        ? { foundationChoice: INIT_LAYOUTS[layout] }
-        : {}),
-    });
-    if (state.status !== "proposal") {
-      throw new SmallPenError(
-        "incomplete_initialization_brief",
-        "Legacy brief import requires all fields; use project init to create a blank package",
-        {
-          missing: state.pendingQuestionIds,
-          nextOperations: [
-            {
-              operation: "smallpen.help",
-              argv: ["help", "project", "init", "--json"],
-            },
-          ],
-        },
-      );
-    }
-    const initialized = await trackedWrite(() =>
-      initializeWorkspace(workspacePath, state.proposal, { confirmed: true }),
-    );
-    return { ...initialized, ...(await initializedSummary(initialized)) };
-  }
-  // A blank package has no pages yet: page draw makes the first.
+  // A blank package has no pages yet: the agent writes the first page file.
   const initialized = await trackedWrite(() =>
     initializeBlankWorkspace(workspacePath, {
       layout,
@@ -1534,6 +813,9 @@ async function initializeCommand(workspacePath, args) {
     }),
   );
   const paths = [initialized.packagePath, initialized.foundationPath, initialized.productPath].filter(Boolean);
+  // A new package is the first accepted version: an agent's first broken
+  // edit can be reverted.
+  for (const path of paths) await acceptPackageFiles(path);
   const opened = await Promise.all(paths.map((path) => openPackage(path)));
   const summary = (snapshot) => ({ name: snapshot.manifest.name, path: snapshot.locator, revision: snapshot.revision });
   return {
@@ -1541,115 +823,7 @@ async function initializeCommand(workspacePath, args) {
     packages: initialized.packagePath
       ? { package: summary(opened[0]) }
       : { foundation: summary(opened[0]), product: summary(opened[1]) },
-    next: "token set, component define, then page draw for the first page",
-  };
-}
-
-// The init reply names every id the first writes need (Packages, Screen,
-// root node, starter Tokens, token themes and Component Sets), so an Agent
-// can start without reading the new files.
-async function initializedSummary({
-  foundationPath,
-  packagePath,
-  productPath,
-}) {
-  const single = packagePath !== undefined;
-  const foundation = await openPackage(single ? packagePath : foundationPath);
-  const product = single ? foundation : await openPackage(productPath);
-  const screenEntry = product.manifest.entries.screens.find(
-    (entry) => product.entries[entry].id === product.manifest.defaultScreenId,
-  );
-  const screen = product.entries[screenEntry];
-  const presentation = screen.presentations.find(
-    ({ id }) => id === screen.basePresentationId,
-  );
-  const root = presentation.nodes[presentation.rootId];
-  const packageSummary = (snapshot) => ({
-    packageId: snapshot.manifest.packageId,
-    path: snapshot.locator,
-    revision: snapshot.revision,
-  });
-  const library = tokenLibraryOf(foundation);
-  const setOf = new Map(
-    (library?.sets ?? []).flatMap((tokenSet) =>
-      tokenSet.tokens.map((token) => [token.id, tokenSet]),
-    ),
-  );
-  const themes = listTokenThemes(product, single ? undefined : foundation);
-  const inactive = themes.find(({ active }) => !active);
-  return {
-    packages: single
-      ? { package: packageSummary(foundation) }
-      : {
-          foundation: packageSummary(foundation),
-          product: packageSummary(product),
-        },
-    start: {
-      contextAxes: [...foundation.domain.contextAxes.values()].map(
-        ({ defaultValue, id, name, values }) => ({
-          defaultValue,
-          id,
-          name: name ?? id,
-          values: values.map((value) => value.id),
-        }),
-      ),
-      presentationId: presentation.id,
-      rootNode: { height: root.height, id: root.id, width: root.width },
-      scenarioIds: [...product.domain.scenarios.keys()].sort(compareText),
-      screenId: screen.id,
-    },
-    seeded: {
-      componentSets: [...foundation.domain.componentSets.values()].map(
-        ({ axes, id, name, variants }) => ({
-          axes: axes.map((axis) => axis.id),
-          componentId: id,
-          name,
-          packageId: foundation.manifest.packageId,
-          variants: variants.map((variant) => ({
-            rootId: variant.rootId,
-            selection: variant.selection,
-            label: axes.map((axis) => `${axis.name}=${variant.selection?.[axis.id]}`).join(", "),
-            variantId: variant.id,
-          })),
-        }),
-      ),
-      note:
-        "Starter content. token set, component define and page draw change or replace it by " +
-        "name; a theme option's own value is a token set value for that option. " +
-        (single
-          ? "Write everything to packages.package.path."
-          : "Write Tokens, themes and Component Sets to packages.foundation.path; " +
-            "write Screens and nodes to packages.product.path."),
-      tokenSets: (library?.sets ?? []).map(({ id, name, tokens }) => ({
-        name,
-        setId: id,
-        tokenCount: tokens.length,
-      })),
-      tokens: [...foundation.domain.tokens.values()].map(
-        ({ filePath, id, path, rawValue, type }) => ({
-          filePath,
-          packageId: foundation.manifest.packageId,
-          path,
-          ...(setOf.has(id) ? { setId: setOf.get(id).id } : {}),
-          tokenId: id,
-          type,
-          value: rawValue,
-        }),
-      ),
-    },
-    themes: themes.map(({ active, id, path, setIds }) => ({
-      active,
-      path,
-      setIds,
-      themeId: id,
-    })),
-    ...(inactive
-      ? {
-          themeUsage:
-            `Read another theme without writing: smallpen view ${product.locator} ` +
-            `--theme ${inactive.path} --json. Store the selection with set-active-token-themes.`,
-        }
-      : {}),
+    next: "Write Tokens in tokens.css, components in components/, pages in pages/, then run smallpen check (smallpen help rules format)",
   };
 }
 
@@ -1761,12 +935,36 @@ async function designForCommand(workspace, args) {
   });
 }
 
+async function htmlExportCommand(packagePath, args) {
+  const unsupported = ["--component", "--variant", "--element", "--design-system", "--base64", "--evidence", "--locale"]
+    .filter(name => args.includes(name));
+  if (unsupported.length)
+    throw new SmallPenError("unsupported_html_export_option", "HTML exports whole page versions; remove incompatible selectors/output flags", { options: unsupported });
+  const workspace = await tokenWorkspace(packagePath, args);
+  const scale = numberOption(args, "--scale") ?? 1;
+  return exportHtmlReview(workspace, {
+    output: option(args, "--output"), page: option(args, "--page"),
+    canvas: option(args, "--canvas"), platform: option(args, "--platform"), scale,
+    progress: terminalProgress("exporting"),
+  }, async target => {
+    const design = selectedDesign(workspace, {
+      screenId: target.screenId, presentationId: target.presentationId,
+      ...(options(args, "--context").length ? { context: contextSelection(args) } : {}),
+    });
+    return renderHtmlReviewPage(workspace, design, {
+      scale, stored: storedNodesOf(workspace, design.selection),
+    });
+  });
+}
+
 async function designCommand(packagePath, args, override, suppliedWorkspace) {
   const workspace = suppliedWorkspace ?? await tokenWorkspace(packagePath, args);
   let design = override ?? (await designForCommand(workspace, args));
   const format =
     option(args, "--format") ?? (args[0] === "view" ? "outline" : "wireframe");
-  if (["spec", "wireframe", "png"].includes(format))
+  // The outline reads sizes from the same native layout as spec and PNG,
+  // not from the file's estimate.
+  if (["spec", "wireframe", "png", "outline"].includes(format))
     design = await resolveDesignLayout(workspace, design, {
       raster: format === "png", scale: numberOption(args, "--scale"),
       forExport: flag(args, "--evidence"),
@@ -1789,17 +987,21 @@ async function designCommand(packagePath, args, override, suppliedWorkspace) {
     ),
     selection: design.selection,
     // Path and resolved value say what the selection resolves to; --full
-    // adds each binding's reference and source. A PNG says it in pixels.
-    ...(format === "png" && !flag(args, "--full") ? {} : {
+    // adds each binding's reference and source. A PNG says it in pixels,
+    // and a wireframe shows structure only.
+    ...((format === "png" || format === "wireframe") && !flag(args, "--full") ? {} : {
       tokenSources: flag(args, "--full")
         ? design.tokenSources
         : design.tokenSources?.map(({ path, value }) => ({ path, value })),
     }),
     diagnostics: nameDiagnostics(design.projection.diagnostics ?? [], design.projection),
     ...(report ? {
-      layout: { ...report.snapshot, diagnostics: undefined, diagnosticCount: report.snapshot.diagnostics.length },
+      layout: { ...report.snapshot, diagnostics: undefined, diagnosticCount: report.snapshot.diagnostics.length,
+        ...(report.snapshot.libraries?.length ? {} : { libraries: undefined }) },
       coverage: flag(args, "--full") ? report.coverage : inspectionCoverage(report.coverage),
-      issueCount: report.issues.length,
+      // A spec lists its issues; a picture or wireframe leaves the count to
+      // --as issues, which folds repeats the same way check --render does.
+      ...(format === "spec" ? { issueCount: report.issues.length } : {}),
       ...(flag(args, "--full") ? { inspection: report } : {}),
     } : {}),
   };
@@ -1941,8 +1143,8 @@ async function designCommand(packagePath, args, override, suppliedWorkspace) {
       contentBytes: Buffer.byteLength(text),
       nextOperations: [
         {
-          argv: ["validate", packagePath, ...designArgs(args)],
-          operation: "smallpen.validate",
+          argv: ["check", packagePath, "--render", ...designArgs(args)],
+          operation: "smallpen.check",
         },
       ],
     };
@@ -1950,7 +1152,7 @@ async function designCommand(packagePath, args, override, suppliedWorkspace) {
   if (format === "png") {
     const render = design.render;
     const output = await writeAtomic(
-      option(args, "--output") ?? artifactPath("render", "png"),
+      withExtension(option(args, "--output"), ".png") ?? artifactPath("render", "png"),
       render.bytes,
     );
     const relevant = new Set([
@@ -1981,7 +1183,7 @@ async function designCommand(packagePath, args, override, suppliedWorkspace) {
   const text = format === "spec" ? `${inspectionText(report, { details: flag(args, "--full") || Boolean(design.selection.nodeId) })}\n`
     : `${JSON.stringify(receipt)}\n\n${format === "wireframe" ? localWireframe(design) : outline}\n`;
   const output = await writeAtomic(
-    option(args, "--output") ?? artifactPath(format, "txt"),
+    withExtension(option(args, "--output"), ".txt") ?? artifactPath(format, "txt"),
     text,
   );
   return {
@@ -2052,470 +1254,6 @@ function designArgs(args) {
   return [...result, "--json"];
 }
 
-function tokenImpact(snapshot, tokenId, packageId) {
-  const locations = [];
-  const visit = (value, location) => {
-    if (!isRecord(value)) return;
-    if (isRecord(value.tokenBindings)) {
-      for (const [field, binding] of Object.entries(value.tokenBindings)) {
-        if (
-          isRecord(binding) &&
-          binding.assetId === tokenId &&
-          (binding.packageId === undefined || binding.packageId === packageId)
-        ) {
-          locations.push({ ...location, field });
-        }
-      }
-    }
-    for (const [key, child] of Object.entries(value)) {
-      if (key !== "tokenBindings") visit(child, { ...location, key });
-    }
-  };
-  for (const entry of snapshot.manifest.entries.screens) {
-    const screen = snapshot.entries[entry];
-    for (const presentation of screen.presentations ?? []) {
-      for (const node of Object.values(presentation.nodes ?? {})) {
-        visit(node, {
-          kind: "screen-node",
-          page: screen.name,
-          platform: presentation.platform ?? presentation.name,
-          element: elementPath(presentation.nodes, presentation.rootId, node.id) || node.name,
-          nodeId: node.id,
-          presentationId: presentation.id,
-          screenId: screen.id,
-        });
-      }
-    }
-  }
-  for (const entry of snapshot.manifest.entries.components ?? []) {
-    const componentFile = snapshot.entries[entry];
-    for (const component of componentFile.componentSets ?? []) {
-      for (const variant of component.variants ?? []) {
-        for (const node of Object.values(variant.nodes ?? {})) {
-          visit(node, {
-            componentId: component.id,
-            kind: "component-node",
-            component: component.name,
-            variant: variantLabel(component, variant),
-            element: elementPath(variant.nodes, variant.rootId, node.id) || node.name,
-            nodeId: node.id,
-            variantId: variant.id,
-          });
-        }
-      }
-    }
-  }
-  return locations.sort((left, right) =>
-    compareText(JSON.stringify(left), JSON.stringify(right)),
-  );
-}
-
-function catalogItemSummary(component, owners) {
-  const owner = owners.find(
-    (snapshot) => snapshot?.manifest.packageId === component.packageId,
-  );
-  const set = owner?.domain.componentSets.get(component.id);
-  return {
-    ...discoverySummary(component, set ?? component),
-    // Variants by name, as view --variant takes them.
-    ...(set?.axes?.length ? { variants: set.variants.map((variant) => variantLabel(set, variant)) } : {}),
-  };
-}
-
-function selectedRepairConflict(resolution, args) {
-  const index = integerOption(
-    args,
-    "--conflict",
-    resolution.conflicts.length - 1,
-  );
-  const selected = resolution.conflicts[index];
-  if (!selected) {
-    throw new SmallPenError(
-      "missing_repair_conflict",
-      "Selected Repair conflict does not exist",
-      { conflictCount: resolution.conflicts.length, index },
-    );
-  }
-  return { index, selected };
-}
-
-async function repairOperations(resolution, conflict, action, args) {
-  const choice = conflict.choices.find(
-    (candidate) => candidate.action === action,
-  );
-  if (!choice) {
-    throw new SmallPenError(
-      "repair_action_not_offered",
-      `Repair action is not offered for this conflict: ${action}`,
-      { action, choices: conflict.choices },
-    );
-  }
-  if (action === "remove-dependent-usage") {
-    return [
-      {
-        action,
-        referencePath: choice.referencePath,
-        type: "repair-reference",
-      },
-    ];
-  }
-  if (action === "select-instance-variant") {
-    // The closest variant unless --selection names another one.
-    const selected = option(args, "--selection");
-    const selection = selected
-      ? parseJson(selected, "invalid_repair_selection", {
-          option: "--selection",
-        })
-      : choice.selection;
-    if (choice.componentSetId) {
-      const instance = structuredClone(
-        resolution.product.domain.componentSets
-          .get(choice.componentSetId)
-          ?.variants.find(({ id }) => id === choice.variantId)?.nodes[
-          choice.nodeId
-        ]?.instance,
-      );
-      return [
-        {
-          changes: { instance: { ...instance, variant: selection } },
-          componentId: choice.componentSetId,
-          nodeId: choice.nodeId,
-          type: "update-component-node",
-          unset: [],
-          variantId: choice.variantId,
-        },
-      ];
-    }
-    return [
-      {
-        nodeId: choice.nodeId,
-        presentationId: choice.presentationId,
-        screenId: choice.screenId,
-        selection,
-        type: "select-instance-variant",
-      },
-    ];
-  }
-  if (action === "retarget-reference") {
-    const packageId = option(args, "--replacement-package-id");
-    const assetId = option(args, "--replacement-asset-id");
-    return [
-      {
-        action,
-        referencePath: choice.referencePath,
-        replacement: { assetId, packageId },
-        type: "repair-reference",
-      },
-    ];
-  }
-  if (action === "choose-foundation") {
-    const foundationPath = option(args, "--foundation");
-    const foundation = await openPackage(foundationPath);
-    if (foundation.manifest.role !== "foundation") {
-      throw new SmallPenError(
-        "dependency_not_foundation",
-        "Selected Package does not have the Foundation role",
-      );
-    }
-    const dependencyPath = relative(
-      dirname(resolution.product.locator),
-      foundation.locator,
-    );
-    if (
-      dependencyPath === "" ||
-      dependencyPath.startsWith("..") ||
-      isAbsolute(dependencyPath)
-    ) {
-      throw new SmallPenError(
-        "foundation_path_outside_workspace",
-        "Selected Foundation must stay inside the Product workspace",
-        { foundationPath: foundation.locator },
-      );
-    }
-    return [
-      {
-        dependency: {
-          packageId: foundation.manifest.packageId,
-          path: dependencyPath,
-        },
-        type: "set-foundation-dependency",
-      },
-    ];
-  }
-  if (action === "recreate-product-asset") {
-    const kind = option(args, "--asset-kind");
-    const assetPath = option(args, "--asset");
-    if (choice.assetKind && kind !== choice.assetKind) {
-      throw new SmallPenError(
-        "repair_asset_kind_mismatch",
-        `Repair requires a ${choice.assetKind} replacement`,
-        { actualKind: kind, expectedKind: choice.assetKind },
-      );
-    }
-    const asset = parseJson(
-      await readInputFile(assetPath, "--asset", "utf8"),
-      "invalid_recreated_asset_json",
-      { path: assetPath },
-    );
-    const create =
-      kind === "token"
-        ? { ...asset, type: "put-token" }
-        : {
-            componentSet: asset.componentSet ?? asset,
-            type: "put-component-set",
-          };
-    const assetId =
-      kind === "token" ? asset.tokenId : (asset.componentSet ?? asset).id;
-    return [
-      create,
-      {
-        action: "retarget-reference",
-        referencePath: choice.referencePath,
-        replacement: {
-          assetId,
-          packageId: resolution.product.manifest.packageId,
-        },
-        type: "repair-reference",
-      },
-    ];
-  }
-  throw new SmallPenError(
-    "unsupported_repair_action",
-    `Unsupported Repair action: ${action}`,
-  );
-}
-
-// SP-017: a reusable candidate says how to place it, by name: the element
-// to add to a page draw intent, with a legal variant chosen.
-function insertionAdvice(owner, product, component) {
-  if (!owner || owner.remote || component.kind !== "set") return undefined;
-  const set = owner.domain.componentSets.get(component.id);
-  const legal = set?.variants[0];
-  if (!legal) return undefined;
-  const props = Object.fromEntries(
-    (set.axes ?? [])
-      .filter((axis) => legal.selection?.[axis.id] !== undefined)
-      .map((axis) => [axis.name, legal.selection[axis.id]]),
-  );
-  return {
-    element: { use: set.name, ...(Object.keys(props).length ? { props } : {}) },
-    how: "Add this element to the children of a page draw intent; props pick the variant",
-    nextOperations: [{ argv: ["schema", "page-draw", "--json"], operation: "smallpen.schema" }],
-  };
-}
-
-// SP-018: deleting a shared Component is refused while known same-workspace
-// consumers still use it. Unknown offline consumers are out of scope and are
-// documented as such in the command help.
-async function checkExternalComponentConsumers(packagePath, operations) {
-  const componentIds = new Set();
-  for (const operation of operations) {
-    if (
-      operation?.type === "delete-component" ||
-      operation?.type === "delete-component-set"
-    ) {
-      if (typeof operation.componentId === "string") {
-        componentIds.add(operation.componentId);
-      }
-    }
-  }
-  if (componentIds.size === 0) return;
-  const target = await openPackage(packagePath);
-  if (target.manifest.role === "product") return;
-  const root = dirname(resolve(packagePath));
-  let siblings;
-  try {
-    siblings = (await readdir(root)).filter(
-      (name) =>
-        name.endsWith(".smallpen") &&
-        resolve(root, name) !== resolve(packagePath),
-    );
-  } catch {
-    return;
-  }
-  const scanUsages = (snapshot) => {
-    const usages = [];
-    for (const entry of snapshot.manifest.entries.screens) {
-      const screen = snapshot.entries[entry];
-      for (const presentation of screen.presentations ?? []) {
-        for (const node of Object.values(presentation.nodes ?? {})) {
-          const assetId =
-            node.instance?.component?.assetId ?? node.componentRef?.assetId;
-          if (
-            (node.componentId !== undefined &&
-              componentIds.has(node.componentId)) ||
-            (assetId !== undefined && componentIds.has(assetId))
-          ) {
-            usages.push({
-              nodeId: node.id,
-              presentationId: presentation.id,
-              screenId: screen.id,
-            });
-          }
-        }
-      }
-    }
-    return usages;
-  };
-  for (const sibling of siblings) {
-    const locator = join(root, sibling);
-    let consumer;
-    try {
-      consumer = await openPackage(locator);
-    } catch {
-      continue;
-    }
-    const declaresTarget = [
-      ...(consumer.manifest.dependencies ?? []),
-      ...(consumer.manifest.libraries ?? []),
-    ].some((dependency) => dependency.packageId === target.manifest.packageId);
-    if (!declaresTarget) continue;
-    for (const usage of scanUsages(consumer)) {
-      throw new SmallPenError(
-        "component_in_use_external",
-        `Component is still used by another workspace Package: ${consumer.manifest.packageId}`,
-        {
-          componentIds: [...componentIds].sort(),
-          consumerLocator: locator,
-          consumerPackageId: consumer.manifest.packageId,
-          nextOperations: [
-            {
-              argv: [
-                "apply",
-                locator,
-                "--batch",
-                "<batch.json removing or retargeting the dependent instance>",
-                "--json",
-              ],
-              operation: "smallpen.apply",
-              when: "before-retrying-the-deletion",
-            },
-          ],
-          usage,
-        },
-      );
-    }
-  }
-}
-
-// SP-038: every advertised Repair choice ships an owner-scoped, executable
-// command so an agent can act on the choice directly.
-function repairChoiceCommand(locator, productPackageId, conflictIndex, choice) {
-  const base = [
-    "repair",
-    locator,
-    "--conflict",
-    String(conflictIndex),
-    "--action",
-    choice.action,
-  ];
-  if (choice.action === "retarget-reference") {
-    // The broken reference's own owner cannot resolve it; default the
-    // replacement to a Product-owned replacement asset (SP-038-A).
-    base.push(
-      "--replacement-package-id",
-      productPackageId,
-      "--replacement-asset-id",
-      "<existing-replacement-asset-id>",
-    );
-  } else if (choice.action === "select-instance-variant") {
-    base.push("--selection", JSON.stringify(choice.selection));
-  } else if (choice.action === "choose-foundation") {
-    base.push("--foundation", "<path inside the workspace>");
-  } else if (choice.action === "recreate-product-asset") {
-    base.push(
-      "--asset-kind",
-      choice.assetKind ?? "token",
-      "--asset",
-      "<recreated-asset.json>",
-    );
-  }
-  base.push("--json");
-  return { argv: base };
-}
-
-// Stored settings the App cannot make, rewritten the App's way without a
-// visible change: texts stored as hug (text-sizing).
-const STORAGE_REPAIRS = ["text-sizing"];
-
-async function repairCommand(packagePath, args) {
-  const resolution = await resolveCliWorkspace(packagePath);
-  const action = option(args, "--action");
-  if (STORAGE_REPAIRS.includes(action) && resolution.status !== "ready")
-    throw new SmallPenError("repair_conflicts_first", `Resolve the package's conflicts before ${action}; run project repair without --action to list them`);
-  if (resolution.status === "ready") {
-    const product = resolution.workspace.product;
-    const textSizing = textSizingRepairOperations(product);
-    if (action === "text-sizing") {
-      if (!textSizing.count) return { action, changed: false, count: 0, revision: product.revision, status: "ready" };
-      const result = await trackedWrite(() =>
-        applyOperationBatch(product.locator, {
-          baseRevision: product.revision,
-          batchId: option(args, "--batch-id") ?? `repair_${randomUUID()}`,
-          operations: textSizing.operations,
-        }),
-      );
-      return {
-        action, count: textSizing.count, places: textSizing.places.length,
-        done: `${textSizing.count} text sizes in ${textSizing.places.length} pages and variants stored the App's way (hug is a text's grow type); the design looks the same`,
-        batchId: result.batchId, revision: result.revision, changed: result.changed,
-        inverseBatchPath: result.inverseBatchPath, status: "ready",
-      };
-    }
-    if (action !== undefined)
-      throw new SmallPenError("unknown_repair_action", `The package has no conflicts; the repairs it can take are ${STORAGE_REPAIRS.join(", ")}`, { actions: STORAGE_REPAIRS });
-    return {
-      packageId: product.manifest.packageId,
-      revision: product.revision,
-      status: "ready",
-      ...(textSizing.count ? { repairs: [{
-        action: "text-sizing", count: textSizing.count, places: textSizing.places.length,
-        message: `${textSizing.count} text sizes are stored as hug, which the App does not offer for a text; this stores them the App's way without a visible change`,
-        command: ["project", "repair", resolve(packagePath), "--action", "text-sizing", "--json"],
-      }] } : {}),
-    };
-  }
-  if (!option(args, "--action")) {
-    const locator = resolve(packagePath);
-    const staleInstances = workspaceStaleInstances(resolution);
-    return {
-      conflicts: resolution.conflicts.map((conflict, conflictIndex) => ({
-        ...conflict,
-        choices: (conflict.choices ?? []).map((choice) => ({
-          ...choice,
-          command: repairChoiceCommand(
-            locator,
-            resolution.product.manifest.packageId,
-            conflictIndex,
-            choice,
-          ),
-        })),
-      })),
-      packageId: resolution.product.manifest.packageId,
-      revision: resolution.product.revision,
-      ...(staleInstances.length > 0 ? { staleInstances } : {}),
-      status: "repair",
-    };
-  }
-  const { index, selected } = selectedRepairConflict(resolution, args);
-  const operations = await repairOperations(resolution, selected, action, args);
-  const result = await trackedWrite(() =>
-    applyOperationBatch(resolution.product.locator, {
-      baseRevision: resolution.product.revision,
-      batchId: option(args, "--batch-id") ?? `repair_${randomUUID()}`,
-      operations,
-    }),
-  );
-  const next = await resolveCliWorkspace(packagePath);
-  return {
-    action,
-    conflictIndex: index,
-    result,
-    status: next.status,
-    ...(next.status === "repair" ? { conflicts: next.conflicts } : {}),
-  };
-}
-
 function discoveryArguments(command, args) {
   const positional = [],
     options = [];
@@ -2580,8 +1318,9 @@ async function optionValuesFor(packagePath, args, items, { context, libraries })
   );
 }
 
+// tokens.css names group with dashes (spacing-4 is under spacing).
 function tokenUnder(path, prefix) {
-  return path === prefix || path.startsWith(`${prefix}.`);
+  return path === prefix || path.startsWith(`${prefix}-`) || path.startsWith(`${prefix}.`);
 }
 
 // Options a delegated read keeps: the theme, locale, paging and PNG output.
@@ -2602,29 +1341,34 @@ function lookPass(args) {
 }
 
 // The call without --as, to suggest another form of the same look.
+// The same target read another way: the file options of this read
+// (--output, --stdout) do not carry over.
 function lookAgain(args, as) {
   const out = [];
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--as") {
+    if (args[index] === "--as" || args[index] === "--output") {
       index += 1;
       continue;
     }
-    if (args[index] !== "--json") out.push(args[index]);
+    if (args[index] !== "--json" && args[index] !== "--stdout") out.push(args[index]);
   }
   return [{ argv: [...out, "--as", as, "--json"], operation: "smallpen.view" }];
 }
 
+// Every view reads the same way: what it shows is in text, whether an
+// outline, a spec or a wireframe.
 function lookResult(target, result, args, as) {
   const {
     nextOperations: _next,
     outline,
+    wireframe,
     format: _format,
     ...rest
   } = result;
   return {
     target,
     as,
-    ...(outline !== undefined ? { text: outline } : {}),
+    ...(outline !== undefined ? { text: outline } : wireframe !== undefined ? { text: wireframe } : {}),
     ...rest,
     nextOperations: lookAgain(args, as === "issues" ? "text" : "issues"),
   };
@@ -2788,7 +1532,7 @@ async function lookTokens(packagePath, args, workspace, prefix) {
       prefixes: [
         ...new Set(
           listEffectiveTokens(product, { context, foundation, libraries }).map(
-            (item) => item.token.path.split(".")[0],
+            (item) => item.token.path.split(/[.-]/)[0],
           ),
         ),
       ],
@@ -2917,6 +1661,26 @@ function findLocatedComponent({ product, foundation, libraries = [] }, name) {
   return undefined;
 }
 
+// Instances expose the descendants of their selected variants. Read their
+// names in the same expanded tree that specifications and exports use.
+function pageElementForRead(workspace, screen, presentation, element, rootId = presentation.rootId) {
+  const projection = projectScreen(workspace.product, screen.id, {
+    presentationId: presentation.id,
+    foundation: workspace.foundation,
+    libraries: workspace.libraries,
+  });
+  return findElement(projection.nodes, rootId, element, screen.name, { allowRoot: true });
+}
+
+function componentElementForRead(workspace, owner, set, variant, element) {
+  const nodes = projectComponentVariant(workspace.product, variant, {
+    owner: owner === workspace.product ? undefined : owner,
+    foundation: workspace.foundation,
+    libraries: workspace.libraries,
+  });
+  return findElement(nodes, variant.rootId, element, set.name, { allowRoot: true });
+}
+
 async function nameTargetArgs(packagePath, args, { every = false } = {}) {
   const page = option(args, "--page");
   const component = option(args, "--component");
@@ -2939,7 +1703,7 @@ async function nameTargetArgs(packagePath, args, { every = false } = {}) {
     const presentation = findPresentation(screen, platform);
     return [
       "--screen-id", screen.id, "--presentation-id", presentation.id,
-      ...(element !== undefined ? ["--node-id", findElement(presentation.nodes, presentation.rootId, element, screen.name)] : []),
+      ...(element !== undefined ? ["--node-id", pageElementForRead(workspace, screen, presentation, element)] : []),
     ];
   }
   if (component !== undefined) {
@@ -2947,7 +1711,7 @@ async function nameTargetArgs(packagePath, args, { every = false } = {}) {
     if (located)
       return [
         "--screen-id", located.screen.id, "--presentation-id", located.presentation.id, "--node-id",
-        element !== undefined ? findElement(located.presentation.nodes, located.component.mainNodeId, element, located.name) : located.component.mainNodeId,
+        element !== undefined ? pageElementForRead(workspace, located.screen, located.presentation, element, located.component.mainNodeId) : located.component.mainNodeId,
       ];
     const lookups = {
       foundation: workspace.foundation !== workspace.product ? workspace.foundation : undefined,
@@ -2960,7 +1724,7 @@ async function nameTargetArgs(packagePath, args, { every = false } = {}) {
     const variant = findVariant(set, variantName);
     return [
       "--component-id", set.id, ...owned, "--variant-id", variant.id,
-      ...(element !== undefined ? ["--node-id", findElement(variant.nodes, variant.rootId, element, set.name)] : []),
+      ...(element !== undefined ? ["--node-id", componentElementForRead(workspace, owner, set, variant, element)] : []),
     ];
   }
   return [];
@@ -3000,7 +1764,7 @@ async function lookCommand(packagePath, args) {
     const element = option(args, "--element");
     const ids = ["--screen-id", screen.id, "--presentation-id", presentation.id];
     if (element !== undefined)
-      ids.push("--node-id", findElement(presentation.nodes, presentation.rootId, element, screen.name));
+      ids.push("--node-id", pageElementForRead(workspace, screen, presentation, element));
     return lookAt(packagePath, args, ids, {
       page: screen.name,
       platform: presentation.platform ?? presentation.name,
@@ -3015,7 +1779,7 @@ async function lookCommand(packagePath, args) {
     if (located) {
       const element = option(args, "--element");
       const ids = ["--screen-id", located.screen.id, "--presentation-id", located.presentation.id, "--node-id",
-        element !== undefined ? findElement(located.presentation.nodes, located.component.mainNodeId, element, located.name) : located.component.mainNodeId];
+        element !== undefined ? pageElementForRead(workspace, located.screen, located.presentation, element, located.component.mainNodeId) : located.component.mainNodeId];
       return lookAt(packagePath, args, ids, { component: located.name, page: located.screen.name, ...(element !== undefined ? { element } : {}) });
     }
     const { owner, set } = findComponent(product, component, { foundation, libraries });
@@ -3044,13 +1808,18 @@ async function lookCommand(packagePath, args) {
     const label = variantLabel(set, variant);
     const ids = ["--component-id", set.id, ...owned, "--variant-id", variant.id];
     if (element !== undefined)
-      ids.push("--node-id", findElement(variant.nodes, variant.rootId, element, `${set.name} (${label})`));
-    return lookAt(packagePath, args, ids, {
+      ids.push("--node-id", componentElementForRead(workspace, owner, set, variant, element));
+    const reply = await lookAt(packagePath, args, ids, {
       component: set.name,
       ...(variantText !== undefined || element !== undefined ? { variant: label } : { variants: set.variants.length }),
       ...(element !== undefined ? { element } : {}),
       ...limits,
     });
+    // The whole component's spec: the main variant, then what each other
+    // variant changes, with values and Tokens, for writing its code.
+    if (as === "spec" && variantText === undefined && element === undefined && typeof reply.text === "string" && set.variants.length > 1)
+      reply.text = `${reply.text}\n${variantDifferences(set, (reference) => [product, foundation, ...libraries].filter(Boolean).map((owner) => owner.domain.tokens.get(reference?.assetId)?.path).find(Boolean))}`;
+    return reply;
   }
 
   if (token !== undefined || flag(args, "--tokens"))
@@ -3105,7 +1874,7 @@ async function lookCommand(packagePath, args) {
         parts.push(`== ${where(version)} ==\n${result.wireframe}`);
       }
       const text = parts.join("\n\n");
-      return { target, as, wireframe: text, lineCount: text.split("\n").length, nextOperations: lookAgain(args, "issues") };
+      return { target, as, text, lineCount: text.split("\n").length, nextOperations: lookAgain(args, "issues") };
     }
     if (as === "png") {
       const items = [];
@@ -3194,65 +1963,308 @@ function idNames(snapshots, ids) {
   return [...names];
 }
 
-// The point in time a revision stands for: after the batch that produced
-// it, or before the first batch that started from it.
-function revisionCut(histories, since) {
-  for (const history of histories) {
-    const produced = history.find((entry) => entry.revision === since);
-    if (produced) return { at: produced.committedAt, inclusive: false };
-    const started = history.find((entry) => entry.baseRevision === since);
-    if (started) return { at: started.committedAt, inclusive: true };
-  }
-  return null;
-}
-
-async function rebuildBefore(snapshot, history, cut) {
-  const newer = history.filter((entry) =>
-    cut.inclusive ? entry.committedAt >= cut.at : entry.committedAt > cut.at,
-  );
-  let old = snapshot;
-  let complete = true;
-  for (const entry of [...newer].reverse()) {
-    if (!entry.inverseBatch) {
-      if (entry.history?.status === "partial")
-        throw new SmallPenError("batch_history_unavailable", "The design was saved, but this earlier revision cannot be reconstructed from the bounded history cache", {
-          batchId: entry.batchId, revision: snapshot.revision, history: entry.history,
-          nextOperations: [{ argv: ["view", snapshot.locator, "--as", "spec", "--json"], operation: "smallpen.view" }],
-        });
-      complete = false;
-      break;
-    }
-    old = (
-      await prepareOperationBatch(old, {
-        ...entry.inverseBatch,
-        baseRevision: old.revision,
-      })
-    ).snapshot;
-  }
-  // A write that bypassed SmallPen leaves the newest recorded revision
-  // behind the files.
-  if (newer.length && newer.at(-1).revision !== snapshot.revision) complete = false;
-  return { old, edits: newer, complete };
-}
-
 // What each of the newest recorded writes changed in the design, by name:
 // step back one write at a time and compare. Keyed by the write's revision.
+// What each recent App or CLI write changed, by name: the files before and
+// after it are remembered revisions, so edits made to the files in between
+// (an agent editing HTML) do not hide what the write itself did.
 async function recentDesignChanges(snapshot, history, limit) {
   const result = new Map();
-  let newer = snapshot;
   const entries = [...history].sort((left, right) => String(right.committedAt).localeCompare(String(left.committedAt))).slice(0, limit);
   for (const entry of entries) {
-    if (!entry.inverseBatch || entry.revision !== newer.revision) break;
     try {
-      const older = (await prepareOperationBatch(newer, { ...entry.inverseBatch, baseRevision: newer.revision })).snapshot;
+      const [older, newer] = await Promise.all([
+        openRevisionSnapshot(snapshot, entry.baseRevision),
+        entry.revision === snapshot.revision ? snapshot : openRevisionSnapshot(snapshot, entry.revision),
+      ]);
+      if (!older || !newer) continue;
       result.set(entry.revision, designChanges(older, newer).map((change) =>
         [change.name, change.element].filter(Boolean).join(" / ")));
-      newer = older;
     } catch {
-      break;
+      // An unreadable revision leaves this write's ids as its description.
     }
   }
   return result;
+}
+
+// The rendering checks (text fit, bounds, overlaps, contrast) of the
+// selected pages and components, as check --render reports them. Targets are
+// named the way view names them.
+async function renderReport(packagePath, args, { named: publicNames = true } = {}) {
+  const targets = await nameTargetArgs(packagePath, args, { every: true });
+  const validateArgs = [...args, ...targets];
+  // A named page or component reads like the whole-package report;
+  // --full keeps every stored check.
+  const named = publicNames && !flag(args, "--full") &&
+    (option(args, "--page") !== undefined || option(args, "--component") !== undefined);
+  const report = await validateCommand(packagePath, validateArgs, { named });
+  // Sizes the preview cannot compute: one note, not one issue each.
+  const limits = (report.issues ?? []).filter((issue) => issue.code === "layout_projection_partial");
+  if (limits.length && !flag(args, "--full")) {
+    report.issues = report.issues.filter((issue) => issue.code !== "layout_projection_partial");
+    report.issueCount = (report.issueCount ?? limits.length) - limits.length;
+    if (!report.issueCount) report.visualStatus = "no-issues-found";
+    report.previewNote = `The local preview cannot compute some automatic sizes in ${limits.length} place${limits.length === 1 ? "" : "s"}; geometry there may differ in the App.`;
+  }
+  return report;
+}
+
+const CHECK_HELP = `SmallPen check
+Check a package's HTML, tokens.css and rules; accept what passes, reject what fails
+Usage: smallpen check <package> [--revert [--file PATH]...] [--render [--page P [--platform X]] [--component C [--variant V]] [--theme G/O]...] [--json] [--help]
+Prints one line per problem: file:line:column severity code message, with the fix.
+Every passing check (and every App save) is the accepted version. When files
+have errors, the changed files that keep the package valid are accepted and
+the files with errors are rejected (listed as "rejected PATH"). --revert puts
+the rejected files back to the accepted version and removes rejected new
+files; --file PATH limits that to the files you changed (several agents can
+edit at once). --render then lays out and draws the pages and components and
+adds text overflow, bounds, overlap and contrast problems, by element name.
+A copied package has no accepted version until its first passing check.
+--render checks the default theme options (or --theme); --all-themes checks
+every combination of options. Errors exit with code 1; warnings and
+rendering problems do not.`;
+
+// check is also the gate for an agent's direct edits: a passing check
+// accepts the files; with errors, the changed files that keep the package
+// valid are accepted and the ones with errors are rejected. --revert puts the
+// rejected files (or only those named by --file) back to the accepted version.
+async function checkCommand(args) {
+  if (flag(args, "--help")) {
+    process.stdout.write(`${CHECK_HELP}\n`);
+    return;
+  }
+  const packagePath = args[1];
+  if (!packagePath || packagePath.startsWith("--")) throw new SmallPenError("missing_package", "check needs a package path", { usage: "smallpen check <package> [--revert] [--render] [--json]" });
+  args = validateCommandArguments("check", args);
+  let root;
+  try {
+    root = await realpath(resolve(packagePath));
+  } catch (error) {
+    throw new SmallPenError("invalid_package_path", `Unable to open Package: ${error.message}`);
+  }
+  const checkOptions = {
+    locator: root,
+    inspectMedia: (bytes) => {
+      try {
+        const info = inspectMediaBytes(bytes);
+        return { mimeType: info.mimeType, width: info.width, height: info.height };
+      } catch {
+        return undefined;
+      }
+    },
+  };
+  const checkFiles = (files) => checkPackageFiles(files, checkOptions);
+  let files = await readPackageFiles(root);
+  let result = await checkFiles(files);
+  const accepted = await readAccepted(root);
+  const only = options(args, "--file").map((path) => path.replace(/^\.\//, ""));
+  let gate;
+  let reverted;
+  if (!result.ok && accepted) {
+    gate = await gateFiles(root, accepted, files, checkFiles);
+    if (flag(args, "--revert")) {
+      // Under the write lock, against the files as they are now.
+      reverted = await withPackageWriteLock(root, async () => {
+        const current = await readPackageFiles(root);
+        const now = await gateFiles(root, accepted, current, checkFiles);
+        const paths = now.rejected.map(({ path }) => path).filter((path) => !only.length || only.includes(path));
+        return revertFiles(root, accepted, paths);
+      });
+      files = await readPackageFiles(root);
+      result = await checkFiles(files);
+      gate = await gateFiles(root, accepted, files, checkFiles);
+    }
+  }
+  // The revision of these files, as every other command reports it, and
+  // remembered so `changes --since` can start from what was checked.
+  const revision = result.ok ? await rememberPackageFiles(root, files) : undefined;
+  // What passes is accepted: the whole package, or the changes that keep it
+  // valid when other files have errors.
+  let acceptedChanges = [];
+  try {
+    if (result.ok) {
+      acceptedChanges = accepted ? changedPaths(accepted, files) : [];
+      await writeAccepted(root, files);
+    } else if (gate?.accepted.length) {
+      acceptedChanges = gate.accepted;
+      await writeAccepted(root, gate.candidate);
+    }
+  } catch (error) {
+    process.emitWarning(`The accepted version was not updated: ${error.message}`, { code: "SMALLPEN_ACCEPTED_VERSION_WRITE_FAILED" });
+  }
+  const rejected = result.ok ? [] : (gate?.rejected ?? []);
+  // With rejected files, the accepted version (the good changes kept) has a
+  // revision of its own: changes --since can start from it.
+  const acceptedRevision = !result.ok && gate?.candidate ? await rememberPackageFiles(root, gate.candidate) : undefined;
+  // --render draws what the files describe; it needs files that read.
+  let render;
+  if (flag(args, "--render")) {
+    const pass = withoutOptions(args.slice(2), ["--render", "--json", "--revert", "--all-themes"], ["--file"]);
+    if (!result.ok) render = { skipped: "The files have errors; fix them before rendering" };
+    else if (!flag(args, "--all-themes")) render = await renderReport(root, ["validate", root, ...pass]);
+    else {
+      // Every combination of theme options, one render each; issues say
+      // which combination they come from.
+      const groups = themeSettings(await tokenWorkspace(root, ["check", root])).groups ?? [];
+      let combos = [[]];
+      for (const group of groups) combos = combos.flatMap((combo) => group.options.map((option) => [...combo, option]));
+      const runs = [];
+      for (const combo of combos)
+        runs.push({ combo, report: await renderReport(root, ["validate", root, ...withoutOptions(pass, [], ["--theme"]), ...combo.flatMap((theme) => ["--theme", theme])]) });
+      const label = (combo) => combo.join(" + ") || "defaults";
+      render = {
+        ...runs[0].report,
+        issueCount: runs.reduce((sum, run) => sum + (run.report.issueCount ?? 0), 0),
+        issues: runs.flatMap(({ combo, report }) => (report.issues ?? []).map((issue) => ({ ...issue, themes: label(combo) }))),
+        page: { hasMore: runs.some(({ report }) => report.page?.hasMore), total: runs.reduce((sum, run) => sum + (run.report.page?.total ?? 0), 0), offset: 0, limit: runs[0].report.page?.limit ?? 20 },
+        combinations: combos.map(label),
+        coverage: { ...runs[0].report.coverage, targetCount: runs.reduce((sum, run) => sum + (run.report.coverage?.targetCount ?? 0), 0) },
+      };
+    }
+  }
+  const renderProblems = render?.issueCount ?? 0;
+  // Rendering problems are reported for the agent to look at; only file
+  // and rule errors fail the check.
+  const ok = result.ok;
+  const revertArgv = ["check", root, "--revert"];
+  const gateReply = {
+    ...(acceptedChanges.length ? { accepted: acceptedChanges } : {}),
+    ...(rejected.length
+      ? {
+          rejected: rejected.map(({ path, change, issues }) => ({
+            path,
+            change,
+            errors: issues.length,
+            issues: issues.map(({ causedBy: _causedBy, details: _details, ...issue }) => issue),
+            ...(issues.some((issue) => issue.causedBy) ? { breaks: [...new Set(issues.map((issue) => issue.file).filter(Boolean))] } : {}),
+          })),
+          revert: {
+            argv: revertArgv,
+            note: "Puts the rejected files back to the last accepted version; add --file PATH to revert only the files you changed.",
+          },
+        }
+      : {}),
+    ...(reverted?.length ? { reverted } : {}),
+    ...(!result.ok && !accepted ? { note: "No accepted version yet: nothing to revert to. Fix the errors; the first passing check is accepted." } : {}),
+  };
+  if (flag(args, "--json")) {
+    printJson({
+      ok,
+      errors: result.errors,
+      warnings: result.warnings,
+      // With rejected files, the counts are of the accepted version, as the
+      // text says.
+      summary: rejected.length && gate?.summary ? gate.summary : result.summary,
+      ...(revision ? { revision } : {}),
+      ...(acceptedRevision ? { acceptedRevision } : {}),
+      issues: result.issues,
+      ...(Object.keys(gateReply).length ? { gate: { ...gateReply, ...(rejected.length && gate?.summary ? { acceptedSummary: gate.summary } : {}) } } : {}),
+      ...(render
+        ? {
+            render: render.skipped
+              ? render
+              : Object.fromEntries(Object.entries(render).filter(([key]) => !["revision", "productRevision", "outputBytes"].includes(key))),
+          }
+        : {}),
+    });
+  } else {
+    const issueKey = (issue) => `${issue.file}\0${issue.line}\0${issue.column}\0${issue.code}\0${issue.message}`;
+    // An error that another file's change causes says so on its own line,
+    // without a "did you mean" that would send the fix to the wrong file.
+    const causes = new Map();
+    for (const entry of rejected)
+      for (const issue of entry.issues)
+        if (issue.causedBy && issue.file !== issue.causedBy) causes.set(issueKey(issue), entry);
+    const shown = result.issues.map((issue) => {
+      const cause = causes.get(issueKey(issue));
+      if (!cause) return issue;
+      const message = issue.message.replace(/; (did you mean|Tokens like it|parts:).*$/, "");
+      return { ...issue, message: `${message} ← caused by the change to ${cause.path} (${cause.change}), which this check rejected; check --revert puts it back` };
+    });
+    const lines = shown.length ? `${formatIssues(shown)}\n` : "";
+    const shownIssues = new Set(result.issues.map(issueKey));
+    const gateLines = [
+      ...(reverted ?? []).map(({ path, action }) => `reverted ${path} (${action === "removed" ? "removed: it was new" : "restored the accepted version"})`),
+      ...rejected.flatMap(({ path, change, issues }) => {
+        const elsewhere = issues.some((issue) => issue.causedBy)
+          ? ` in ${[...new Set(issues.map((issue) => issue.file).filter(Boolean))].join(", ")}`
+          : "";
+        // Errors that show only once the other rejected files go back
+        // (a page using a Token from a rejected tokens.css) are listed here.
+        const unseen = issues.filter((issue) => !shownIssues.has(issueKey(issue)));
+        // A component file whose component got another name: say so, since
+        // the copies still use the old one.
+        const names = (text) => [...String(text ?? "").matchAll(/<sp-component\s[^>]*name="([^"]+)"/g)].map((match) => match[1]);
+        const before = path.startsWith("components/") && accepted ? names(accepted.text.get(path)) : [];
+        const after = path.startsWith("components/") ? names(files.get(path)) : [];
+        const gone = before.filter((name) => !after.includes(name));
+        const came = after.filter((name) => !before.includes(name));
+        const elsewhereNamed = (name) => [...files.keys()].find((other) => other !== path && other.startsWith("components/") && names(files.get(other)).includes(name));
+        const taken = came.length === 1 ? elsewhereNamed(came[0]) : undefined;
+        const renamed = gone.length === 1 && came.length === 1
+          ? taken
+            ? `; it renames ${gone[0]} to ${came[0]}, which ${taken} already defines: pick another name`
+            : `; it renames ${gone[0]} to ${came[0]}: write component="${came[0]}" in the copies, or keep the name`
+          : gone.length && change !== "deleted" ? `; it no longer defines ${gone.join(", ")}, which copies still use` : "";
+        return [
+          `rejected ${path} (${change}): causes ${issues.length} error${issues.length === 1 ? "" : "s"}${elsewhere}${renamed}${unseen.length ? ", with the other rejected files put back:" : ""}`,
+          ...(unseen.length ? formatIssues(unseen).split("\n").map((line) => `  ${line}`) : []),
+        ];
+      }),
+      ...acceptedChanges.map((path) => `accepted ${path}${files.has(path) ? accepted?.text.has(path) || accepted?.assets.has(path) ? "" : " (added)" : " (deleted)"}`),
+      ...(rejected.length ? [`Run smallpen check ${root} --revert to put the rejected files back to the last accepted version (--file PATH reverts only that file).`] : []),
+      ...(gateReply.note ? [gateReply.note] : []),
+    ].join("\n");
+    // Each line names the page version or variant, then the element.
+    const renderLines = [
+      ...(render?.issues ?? []).map((issue) => {
+        const place = [issue.themes ? `[${issue.themes}] ${issue.target ?? ""}`.trim() : issue.target, issue.where].filter(Boolean).join(": ");
+        const examples = issue.examples?.length ? ` For example ${issue.examples.join("; ")}.` : "";
+        // Repeats folded into this line, by name.
+        const also = issue.alsoAt?.length ? ` Also at: ${issue.alsoAt.join("; ")}.` : "";
+        return `render ${place ? `${place} ` : ""}${issue.code} ${issue.message ?? ""}${examples}${also}`.replace(/\s+/g, " ").trim();
+      }),
+      ...(render?.page?.hasMore
+        ? [`${render.issues.length} of ${render.page.total} rendering problems shown; next: smallpen check ${root} --render --offset ${render.page.offset + render.page.limit}${render.page.limit < 100 ? " --limit 100" : ""}`]
+        : []),
+    ].join("\n");
+    const counts = `${result.errors} error${result.errors === 1 ? "" : "s"}, ${result.warnings} warning${result.warnings === 1 ? "" : "s"}`;
+    // Which theme options the render used: the defaults unless --theme or
+    // --all-themes says otherwise.
+    const checkedUnder = render?.combinations
+      ? ` under ${render.combinations.length} theme combination${render.combinations.length === 1 ? "" : "s"}`
+      : render?.selection?.themes?.length ? ` under ${render.selection.themes.join(" + ")}${flag(args, "--theme") ? "" : " (defaults; --all-themes checks every combination)"}` : "";
+    const renderCount = render && !render.skipped ? `, ${renderProblems} rendering problem${renderProblems === 1 ? "" : "s"}${checkedUnder}` : "";
+    // With rejected files, the counts are of what was accepted.
+    const counted = rejected.length && gate?.summary ? gate.summary : result.summary;
+    const scope = `${rejected.length && gate?.summary ? "accepted version: " : ""}${counted.pages} pages (${counted.pageVersions} versions), ${counted.components} components (${counted.variants} variants), ${counted.tokens} Tokens${counted.unusedTokens ? ` (${counted.unusedTokens} not used by any page or component; token list --unused names them)` : ""}`;
+    // The revision changes --since starts from.
+    const revisionLine = revision ? `revision ${revision}\n` : acceptedRevision ? `accepted revision ${acceptedRevision}\n` : "";
+    process.stdout.write(`${lines}${gateLines ? `${gateLines}\n` : ""}${renderLines ? `${renderLines}\n` : ""}${render?.skipped ? `render skipped: ${render.skipped}\n` : ""}${ok ? "ok" : "failed"}: ${counts}${renderCount}; ${scope}\n${revisionLine}`);
+  }
+  if (!ok) process.exitCode = 1;
+}
+
+// args without some flags and some options with their values.
+// --output without an extension gets the file's own, as --evidence's
+// prefix does: shots/home -> shots/home.png.
+function withExtension(path, extension) {
+  if (path === undefined) return undefined;
+  return /\.[A-Za-z0-9]+$/.test(basename(path)) ? path : `${path}${extension}`;
+}
+
+function withoutOptions(args, flags, valued) {
+  const out = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (flags.includes(args[index])) continue;
+    if (valued.includes(args[index])) {
+      index += 1;
+      continue;
+    }
+    out.push(args[index]);
+  }
+  return out;
 }
 
 async function changesCommand(packagePath, args) {
@@ -3300,43 +2312,33 @@ async function changesCommand(packagePath, args) {
   }
   if (since === product.revision || since === foundation?.revision)
     return { ...revisions, since, changeCount: 0, text: "No design changes." };
-  const cut = revisionCut(histories, since);
-  if (!cut)
+  // Every revision a read or write reported is remembered with its files;
+  // compare that state with the current one, however the files changed.
+  const productThen = await openRevisionSnapshot(product, since);
+  if (!productThen)
     throw new SmallPenError(
       "unknown_revision",
-      "This revision is not in the recorded history; read the current design with view instead",
+      "This revision is not in the local history; read the current design with view instead",
       {
         historyWindow: revisions.historyWindow,
         nextOperations: [
-          { argv: ["changes", packagePath, "--json"], operation: "smallpen.changes" },
           { argv: ["view", packagePath, "--as", "text", "--json"], operation: "smallpen.view" },
         ],
       },
     );
-  const rebuilt = await Promise.all(
-    packages.map((snapshot, index) => rebuildBefore(snapshot, histories[index], cut)),
-  );
-  const [productThen, foundationThen] = rebuilt.map(({ old }) => old);
-  const changes = designChanges(productThen, product, {
-    beforeFoundation: foundation ? foundationThen : undefined,
-    afterFoundation: foundation,
-  });
-  if (foundation)
-    changes.push(
-      ...designChanges(foundationThen, foundation).filter(
-        (change) => change.kind === "component" || change.kind === "page",
-      ),
-    );
-  const edits = rebuilt.flatMap(({ edits }) => edits);
+  const changes = designChanges(productThen, product);
+  const edits = histories[0].filter((entry) => entry.baseRevision === since || entry.revision !== since);
   const by = {};
   for (const edit of edits) by[edit.source] = (by[edit.source] ?? 0) + 1;
+  const rebuilt = [{ complete: true }];
   const firstPage = changes.find((change) => change.kind === "page" && change.change !== "removed");
   const firstComponent = changes.find((change) => change.kind === "component" && change.change !== "removed");
   return {
     ...revisions,
     since,
-    edits: edits.length,
-    by,
+    // How many of these changes people saved in the App (the rest are file
+    // edits).
+    ...(by.app ? { appSaves: by.app } : {}),
     ...(rebuilt.every(({ complete }) => complete)
       ? {}
       : { note: "Some edits were not recorded by SmallPen; this list may miss them. Read the design with view to be sure." }),
@@ -3356,10 +2358,13 @@ async function changesCommand(packagePath, args) {
 
 // token export: resolved values as JSON, one file per option of a theme
 // group, or one file under the call's selected options and project defaults.
+// Nested JSON groups tokens.css names by their type prefix
+// (color-on-brand -> color: { "on-brand": ... }); other names nest by dots.
 function nestTokens(items) {
   const root = {};
   for (const { token, value } of items) {
-    const parts = token.path.split(".");
+    const typed = tokenTypeOfName(token.path);
+    const parts = typed ? [typed.prefix.slice(0, -1), typed.rest] : token.path.split(".");
     let at = root;
     for (const part of parts.slice(0, -1)) at = at[part] ??= {};
     at[parts.at(-1)] = value;
@@ -3413,156 +2418,33 @@ async function tokenExportCommand(packagePath, args) {
       .filter((item) => !type || item.token.type === type)
       .filter((item) => !prefix || tokenUnder(item.token.path, prefix))
       .sort((left, right) => left.token.path.localeCompare(right.token.path, "en", { numeric: true }));
-    const text = `${JSON.stringify(format === "flat" ? Object.fromEntries(items.map((item) => [item.token.path, item.value])) : nestTokens(items), null, 2)}\n`;
-    const file = join(directory, `${version.name.replace(/[^\w.-]+/g, "-")}.json`);
+    let text;
+    if (format === "css") {
+      // As tokens.css defines them under these options: :root's value, then
+      // each selected option's; an alias stays var(--name).
+      const selected = new Set(themeSettings(workspace).selection.themes);
+      const written = new Map();
+      for (const definition of listTokenDefinitions(workspace.product))
+        if (!definition.group || selected.has(`${definition.group}/${definition.option}`))
+          written.set(definition.token.name, definition.token);
+      const kept = new Set(items.map((item) => item.token.path));
+      const lines = [...written.values()].filter((token) => kept.has(token.name)).map((token) => tokenCssDeclaration(token.name, token.type, token.value));
+      text = `:root {\n${lines.join("\n")}\n}\n`;
+    } else text = `${JSON.stringify(format === "flat" ? Object.fromEntries(items.map((item) => [item.token.path, item.value])) : nestTokens(items), null, 2)}\n`;
+    const file = join(directory, `${version.name.replace(/[^\w.-]+/g, "-")}.${format === "css" ? "css" : "json"}`);
     await writeFile(file, text);
     files.push({ ...(version.themes[0] ? { option: version.themes[0] } : {}), file, tokens: items.length });
   }
   return {
     format,
     ...(by !== undefined ? { by } : {}),
-    // The theme options every file was resolved under.
-    themes: themeSettings(base).selection.themes,
+    // The other groups' options every file was resolved under; --by's
+    // group has one file per option.
+    themes: themeSettings(base).selection.themes.filter((theme) => by === undefined || theme.split("/")[0].toLowerCase() !== by.toLowerCase()),
     directory,
     files,
     revision: base.product.revision,
   };
-}
-
-// canvas list: every canvas with its rows (one per module, "Tasks / ..."
-// pages, in layout order) and their pages left to right, as the App shows
-// them. Links between pages are flow list's.
-async function canvasListCommand(packagePath) {
-  const snapshot = await openPackage(packagePath);
-  const screens = new Map(snapshot.manifest.entries.screens.map((entry) => [snapshot.entries[entry].id, snapshot.entries[entry]]));
-  const canvases = canvasLayout(snapshot.manifest, snapshot.entries, snapshot.runtime).map((canvas) => {
-    const rows = [];
-    for (const board of canvas.boards) {
-      const rowName = board.flow ? `${board.flow} row` : "Other pages";
-      let row = rows.find((item) => item.name === rowName);
-      if (!row) rows.push((row = { name: rowName, pages: [], platforms: [] }));
-      const name = screens.get(board.screenId).name;
-      if (!row.pages.includes(name)) row.pages.push(name);
-      if (!row.platforms.includes(board.platform)) row.platforms.push(board.platform);
-    }
-    return { name: canvas.name, rows };
-  });
-  const text = canvases
-    .map((canvas) => [`${canvas.name}`, ...canvas.rows.map((row) => `  ${row.name} [${row.platforms.join(", ")}]: ${row.pages.join(", ")}`)].join("\n"))
-    .join("\n");
-  return { canvases, text, revision: snapshot.revision };
-}
-
-// Packages next to this one that depend on it: Products of a Foundation,
-// or packages that use it as a Library. A delete here must not break them.
-async function dependentPackages(packagePath, snapshot) {
-  const folder = dirname(resolve(packagePath));
-  const found = [];
-  let names = [];
-  try {
-    names = await readdir(folder);
-  } catch {
-    return found;
-  }
-  for (const name of names) {
-    if (!name.endsWith(".smallpen") || resolve(folder, name) === resolve(packagePath)) continue;
-    try {
-      const other = await openPackage(resolve(folder, name));
-      const { packageId } = snapshot.manifest;
-      if (
-        other.manifest.dependencies?.some((dependency) => dependency.packageId === packageId) ||
-        other.manifest.libraries?.some((library) => library.packageId === packageId)
-      )
-        found.push(other);
-    } catch {
-      // Not a readable package: nothing to protect.
-    }
-  }
-  return found;
-}
-
-// The Foundation and Libraries a package's copies may come from.
-function workspaceLookups(workspace) {
-  return {
-    foundation: workspace.foundation !== workspace.product ? workspace.foundation : undefined,
-    libraries: workspace.libraries ?? [],
-  };
-}
-
-// The text says every start and link once; --full adds them as fields.
-async function flowListCommand(packagePath, args = []) {
-  const workspace = await readableWorkspace(packagePath);
-  const snapshot = workspace.product;
-  const { starts, links } = flowLinks(snapshot, workspaceLookups(workspace));
-  const named = {
-    starts: starts.map(({ page, platform, name }) => ({ page, platform, name })),
-    links: links.map(({ page, platform, element, on, action, to }) => ({ page, platform, element, on, action, ...(to ? { to } : {}) })),
-  };
-  return {
-    text: flowLinksText(named),
-    counts: { starts: starts.length, links: links.length },
-    ...(flag(args, "--full") ? named : {}),
-    revision: snapshot.revision,
-  };
-}
-
-// Name-based edits: each names its target the way outlines show it and
-// compiles to the operations the id-based commands write.
-const NAMED_EDITS = new Set([
-  "asset-delete",
-  "asset-set",
-  "component-delete",
-  "component-rename",
-  "flow-unlink",
-  "font-delete",
-  "media-delete",
-  "page-delete",
-  "page-rename",
-]);
-
-function namedEditIntent(command, args) {
-  const pick = (pairs) =>
-    Object.fromEntries(pairs.map(([key, name]) => [key, option(args, name)]).filter(([, value]) => value !== undefined));
-  if (command === "asset-set" || command === "asset-delete") {
-    const kind = option(args, "--color") !== undefined ? "colors" : "typographies";
-    const intent = { kind, name: option(args, kind === "colors" ? "--color" : "--typography") };
-    if (command === "asset-set") {
-      const raw = option(args, "--value");
-      intent.value = kind === "colors" ? raw : parseJson(raw, "invalid_typography");
-    }
-    return intent;
-  }
-  if (command === "media-delete") return { kind: "media", name: option(args, "--media") };
-  if (command === "font-delete") return { kind: "fonts", name: option(args, "--font"), ...pick([["variant", "--variant"]]) };
-  if (command === "flow-unlink") return pick([["from", "--from"], ["on", "--on"], ["to", "--to"], ["platform", "--platform"]]);
-  if (command.startsWith("component-")) return pick([["component", "--component"], ["element", "--element"], ["to", "--to"], ["variant", "--variant"]]);
-  return pick([["page", "--page"], ["to", "--to"], ["platform", "--platform"], ["element", "--element"]]);
-}
-
-async function namedEditOperations(command, snapshot, intent, packagePath) {
-  if (command === "page-rename") return pageRenameOperations(snapshot, intent);
-  if (command === "page-delete") return pageDeleteOperations(snapshot, intent);
-  if (command === "flow-unlink") return [flowUnlinkOperation(snapshot, intent, workspaceLookups(await readableWorkspace(packagePath)))];
-  if (command === "asset-set") return assetSetOperations(snapshot, intent);
-  if (command.endsWith("-delete") && !command.startsWith("component")) return assetDeleteOperations(snapshot, intent);
-  const workspace = await readableWorkspace(packagePath);
-  const lookups = {
-    foundation: workspace.foundation !== workspace.product ? workspace.foundation : undefined,
-    libraries: workspace.libraries ?? [],
-  };
-  return [
-    command === "component-rename"
-      ? componentRenameOperation(snapshot, intent, lookups)
-      : componentDeleteOperation(snapshot, intent, lookups),
-  ];
-}
-
-// A page version by name: {page, platform}.
-function versionName(snapshot, screenId, presentationId) {
-  const entry = snapshot.manifest.entries.screens.find((item) => snapshot.entries[item]?.id === screenId);
-  const screen = entry && snapshot.entries[entry];
-  const presentation = screen?.presentations.find(({ id }) => id === presentationId);
-  return screen ? { page: screen.name, ...(presentation ? { platform: presentation.platform ?? presentation.name } : {}) } : undefined;
 }
 
 // What a design selection is, by name: page and platform, or component and
@@ -3641,8 +2523,9 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
   // from design issues and every skipped layout check counted in coverage.
   const limits = issues.filter((issue) => issue.code === "layout_projection_partial");
   const notChecked = skipped.filter((skip) => skip.check !== "visual-intent");
-  const design = [...extraIssues, ...(only ? [] : packageNameIssues(workspace)), ...issues.filter((issue) => issue.code !== "layout_projection_partial")];
   const full = flag(args, "--full");
+  const found = [...extraIssues, ...(only ? [] : packageNameIssues(workspace)), ...issues.filter((issue) => issue.code !== "layout_projection_partial")];
+  const design = full ? found : foldFontFallbacks(found).map(publicIssue);
   const page = pageItems(design, pagination(args));
   return {
     packageId: product.manifest.packageId,
@@ -3702,6 +2585,65 @@ async function validateWholePackage(packagePath, args, workspace, resolution, on
   };
 }
 
+// A missing font or weight is one problem, not one per text: every text
+// that asks for it is drawn and measured with what the App has instead.
+function foldFontFallbacks(issues) {
+  const fonts = new Map();
+  const weights = new Map();
+  const rest = [];
+  for (const issue of issues) {
+    if (issue.code === "font_weight_substituted") {
+      const key = `${issue.family}\0${issue.requestedWeight}\0${issue.drawnWeight}`;
+      const group = weights.get(key) ?? { issue, texts: 0, targets: new Set(), examples: [] };
+      group.texts += 1;
+      group.targets.add(issue.target);
+      const example = [issue.target, issue.where].filter(Boolean).join(": ");
+      if (group.examples.length < 3 && !group.examples.includes(example)) group.examples.push(example);
+      weights.set(key, group);
+      continue;
+    }
+    if (issue.code !== "font_render_fallback") {
+      rest.push(issue);
+      continue;
+    }
+    const font = issue.requestedFont ?? issue.details?.requestedFont ?? "A font";
+    const group = fonts.get(font) ?? { texts: 0, targets: new Set(), examples: [], available: issue.availableFonts ?? ["Source Sans Pro (bundled)"] };
+    group.texts += 1;
+    group.targets.add(issue.target);
+    const example = [issue.target, issue.where].filter(Boolean).join(": ");
+    if (group.examples.length < 3 && !group.examples.includes(example)) group.examples.push(example);
+    fonts.set(font, group);
+  }
+  const folded = [...fonts].map(([font, group]) => ({
+    code: "font_render_fallback",
+    severity: "warning",
+    requestedFont: font,
+    texts: group.texts,
+    targets: group.targets.size,
+    examples: group.examples,
+    message: `${font} is not available, so ${group.texts} text${group.texts === 1 ? "" : "s"} in ${group.targets.size} page version${group.targets.size === 1 ? "" : "s"} and variant${group.targets.size === 1 ? "" : "s"} are drawn and measured with Source Sans Pro (text fit is checked with it). Put a ${font} TTF, OTF or WOFF file in assets/fonts/ and declare it with @font-face in tokens.css, or use an available font: ${group.available.join(", ")}.`,
+    nextOperations: [{ operation: "smallpen.help", argv: ["help", "rules", "format"] }],
+  }));
+  const weightIssues = [...weights.values()].map(({ issue, texts, targets, examples }) => ({
+    code: "font_weight_substituted",
+    severity: "warning",
+    family: issue.family,
+    requestedWeight: issue.requestedWeight,
+    drawnWeight: issue.drawnWeight,
+    texts,
+    targets: targets.size,
+    examples,
+    message: `${issue.family} has no ${issue.requestedWeight} weight, so ${texts} text${texts === 1 ? " is" : "s are"} drawn at ${issue.drawnWeight}; use a weight the font has, or add the ${issue.requestedWeight} file in assets/fonts/ with @font-face.`,
+  }));
+  return [...folded, ...weightIssues, ...rest];
+}
+
+// Issues read by name: element ids stay inside the tool.
+function publicIssue(issue) {
+  const { path: _path, nodeId: _nodeId, nodeIds: _nodeIds, ...rest } = issue;
+  return rest;
+}
+
 async function namedContextArgs(packagePath, args) {
   const workspace = await readableWorkspace(packagePath);
   const axes = [workspace.foundation, workspace.product].filter(Boolean).flatMap((snapshot) => [...snapshot.domain.contextAxes.values()]);
@@ -3727,40 +2669,6 @@ async function namedContextArgs(packagePath, args) {
   return out;
 }
 
-// page set / component set: the target by name, the fields from --set
-// FIELD=VALUE (a JSON value, else text) alongside --intent {"set": {...}}.
-async function setIntent(command, args) {
-  const file = option(args, "--intent");
-  const base = file ? parseJson(await readInputFile(file, "--intent", "utf8"), `invalid_${command.replace("-", "_")}_json`) : {};
-  if (!isRecord(base)) throw new SmallPenError("invalid_set", "--intent holds {\"set\": {...}}");
-  const set = Object.assign(Object.create(null), isRecord(base.set) ? base.set : {});
-  for (const assignment of options(args, "--set")) {
-    const at = assignment.indexOf("=");
-    if (at <= 0) throw new SmallPenError("invalid_set", `--set takes FIELD=VALUE, not ${assignment}`);
-    const raw = assignment.slice(at + 1);
-    let value = raw;
-    // {color.surface} is a Token; other JSON is a value; the rest is text.
-    if (!/^\{[^"{}]+\}$/.test(raw.trim()))
-      try {
-        value = JSON.parse(raw);
-      } catch {
-        value = raw;
-      }
-    const field = assignment.slice(0, at).trim();
-    if (Object.hasOwn(set, field) && canonicalJSON(set[field]) !== canonicalJSON(value))
-      throw new SmallPenError("conflicting_set_field", `Conflicting values for ${field}; give this field one value`, {
-        field, previous: set[field], received: value,
-      });
-    set[field] = value;
-  }
-  const target = command === "page-set"
-    ? { page: option(args, "--page") ?? base.page, platform: option(args, "--platform") ?? base.platform }
-    : { component: option(args, "--component") ?? base.component, variant: option(args, "--variant") ?? base.variant };
-  const element = option(args, "--element") ?? base.element;
-  const all = flag(args, "--all") || base.all === true ? true : undefined;
-  return Object.fromEntries(Object.entries({ ...target, element, all, set }).filter(([, value]) => value !== undefined));
-}
-
 // The stored nodes behind a selection (a page version or a variant): the
 // projection draws copies but keeps their overrides only here.
 function storedNodesOf(workspace, selection = {}) {
@@ -3779,36 +2687,22 @@ function storedNodesOf(workspace, selection = {}) {
 }
 
 // --token: one Token by name, or every Token under a name ("color").
+// A Token by name, or every Token under a name: --token radius matches
+// radius-base as tokens.css names it (--radius-base).
 function tokenNamed(path, wanted) {
   if (wanted === undefined) return true;
-  const name = String(wanted).trim().replace(/^\{|\}$/g, "");
-  return path === name || String(path).startsWith(`${name}.`);
+  const name = String(wanted).trim().replace(/^\{|\}$/g, "").replace(/^var\(--|\)$/g, "").replace(/^--/, "");
+  return tokenUnder(String(path), name);
 }
 
-// project show: counts in the words the commands use.
-function projectSummary(snapshot) {
-  const summary = packageSummary(snapshot);
-  const pages = snapshot.manifest.entries.screens.map((entry) => snapshot.entries[entry]);
-  const sets = [...snapshot.domain.componentSets.values()];
-  const { starts, links } = flowLinks(snapshot);
-  return {
-    name: summary.name,
-    role: summary.role,
-    revision: summary.revision,
-    counts: {
-      pages: pages.length,
-      pageVersions: pages.reduce((total, page) => total + page.presentations.length, 0),
-      components: sets.length + snapshot.domain.locatedComponents.size,
-      variants: sets.reduce((total, set) => total + set.variants.length, 0),
-      tokens: summary.counts.tokens,
-      tokenValues: summary.counts.tokenValues,
-      themeOptions: listTokenThemes(snapshot).length,
-      links: links.length,
-      starts: starts.length,
-      elements: summary.counts.nodes,
-    },
-    dependencies: (snapshot.manifest.dependencies ?? []).map((dependency) => dependency.path ?? dependency.name ?? dependency.packageId),
-    next: "view PACKAGE for pages, components and Tokens by name; --full for the stored data",
+// Progress for a person at a terminal: one line rewritten in place. An
+// agent reading the output gets the result only.
+function terminalProgress(verb) {
+  if (!process.stderr.isTTY) return () => {};
+  return (event) => {
+    if ((event.event === "target" || event.event === "page") && event.target)
+      process.stderr.write(`\r\x1b[2K${verb} ${event.completed + 1}/${event.total} ${event.target}`);
+    else if (event.event === "finished") process.stderr.write("\r\x1b[2K");
   };
 }
 
@@ -3830,7 +2724,7 @@ async function runChecks(workspace, jobs, args) {
     })), {
       timeoutMs: Number(option(args, "--target-timeout") ?? 30_000),
       signal: controller.signal,
-      progress: event => process.stderr.write(JSON.stringify(event) + "\n"),
+      progress: terminalProgress("checking"),
     });
     if (outcome.interrupted) process.exitCode = 130;
     return outcome;
@@ -4065,7 +2959,7 @@ async function main(args) {
   args = routed.args;
   publicSurface =
     Boolean(routed.route) ||
-    ["view", "export", "validate", "changes"].includes(args[0]);
+    ["init", "check", "view", "export", "changes"].includes(args[0]);
   const globalVersion = args[0] === "--version";
   if (args[0] === "--version") args = ["version", ...args.slice(1)];
   if (args[0] === "-h") args = ["--help", ...args.slice(1)];
@@ -4101,18 +2995,18 @@ async function main(args) {
       if (path.length >= 2 && COMMAND_GROUPS[path[0]]) [topic, section] = [path[0], path.slice(1).join(" ")];
     }
     const full = flag(args, "--full");
-    const value = helpTopic(topic, section, { full });
+    const value = helpWithInput(topic, section, { full });
     // A grouped action's full help is its engine's text, under its path.
     const route = topic && section && COMMAND_GROUPS[topic] && !groupDefinition(topic, section) ? groupRoute(topic, section) : undefined;
     const fullTopic = route ? route.engine : !COMMAND_GROUPS[topic] && !["workflow", "rules", "skills"].includes(topic) ? topic : undefined;
     if (flag(args, "--json"))
       printJson(
         full && fullTopic
-          ? { ...commandContract(route ? route.name : fullTopic), guidance: commandGuidance(fullTopic, route) }
+          ? { ...commandContract(route ? route.name : fullTopic), guidance: commandGuidance(fullTopic, route), ...(value.input ? { input: value.input } : {}) }
           : value,
       );
-    else if (full && fullTopic) printHelp(fullTopic, { full, route });
-    else printBriefHelp(topic, section, { full });
+    else if (full && fullTopic) printHelp(fullTopic, { full, route, input: value.input });
+    else printBriefHelp(topic, section, { full, value });
     return;
   }
   if (command === "version") {
@@ -4158,10 +3052,6 @@ async function main(args) {
       .update(
         canonicalJSON({
           capabilities: SMALLPEN_FORMAT_CAPABILITIES,
-          operations:
-            SMALLPEN_FORMAT_CAPABILITIES.canonicalWrite.operationTypes.map(
-              (type) => schemaTopic("operation", type),
-            ),
           schema: await readFile(
             new URL("./schema.mjs", import.meta.url),
             "utf8",
@@ -4215,14 +3105,19 @@ async function main(args) {
     });
     return;
   }
+  if (command === "check") {
+    await checkCommand(args);
+    return;
+  }
   // Only grouped commands and the shared ones are public: an engine name
   // typed directly ("apply", "inspect") points to its grouped path.
   if (
     !routed.route &&
     COMMAND_NAMES.includes(command) &&
-    !["view", "changes", "export", "validate", "help", "schema", "version"].includes(command)
+    !["init", "view", "changes", "export", "help", "schema", "version"].includes(command)
   ) {
-    const path = publicArgv([command]);
+    // validate became check --render.
+    const path = command === "validate" ? ["check", "--render"] : publicArgv([command]);
     throw new SmallPenError(
       "unknown_command",
       `Unknown command: ${command}${path[0] !== command ? `; use smallpen ${path.join(" ")}` : ""}`,
@@ -4267,9 +3162,13 @@ async function main(args) {
   if (publicSurface && options(args, "--context").length) args = await namedContextArgs(packagePath, args);
   // export and validate name their target as view does; the engines below
   // take the IDs those names stand for.
-  const namedTargets = command === "export" || command === "validate"
-    ? await nameTargetArgs(packagePath, args, { every: command === "validate" })
-    : [];
+  if (command === "export" && option(args, "--format") === "html") {
+    printJson(await htmlExportCommand(packagePath, args));
+    return;
+  }
+  if (command === "export" && args.includes("--canvas"))
+    throw new SmallPenError("unsupported_canvas_export_format", "--canvas exports an HTML review; use --format html, or view --canvas for other canvas outputs");
+  const namedTargets = command === "export" ? await nameTargetArgs(packagePath, args) : [];
   // A whole component has the same visual scope as view. Explicit variants,
   // elements and low-level ID targets keep their native definition exports.
   if (publicSurface && command === "export" && option(args, "--component") !== undefined &&
@@ -4293,8 +3192,7 @@ async function main(args) {
       }
     }
   }
-  if (command === "export" || command === "validate")
-    args = [...args, ...namedTargets];
+  if (command === "export") args = [...args, ...namedTargets];
   if (command === "export" && flag(args, "--evidence")) {
     if (option(args, "--format") !== "png")
       throw new SmallPenError("missing_png_format", "--evidence requires --format png");
@@ -4302,347 +3200,6 @@ async function main(args) {
     return;
   }
 
-  if (command === "themes") {
-    const workspace = await tokenWorkspace(packagePath, args);
-    const settings = themeSettings(workspace, { full: flag(args, "--full") });
-    const groups = pageItems(settings.groups, pagination(args));
-    printJson({
-      ...settings,
-      groups: flag(args, "--full") ? settings.groups : groups.items,
-      page: groups.page,
-      packageId: workspace.product.manifest.packageId,
-      ...workspaceRevisions(
-        workspace.product,
-        workspace.foundation,
-        workspace.libraries,
-      ),
-      nextOperations: [
-        { argv: ["help", "theme", "--json"], operation: "smallpen.help" },
-      ],
-    });
-    return;
-  }
-  if (command === "canvas-list") {
-    printJson(await canvasListCommand(packagePath));
-    return;
-  }
-  if (command === "flow-list") {
-    printJson(await flowListCommand(packagePath, args));
-    return;
-  }
-  if (NAMED_EDITS.has(command) || (command === "flow-start" && flag(args, "--remove"))) {
-    const intent = command === "flow-start" ? { page: option(args, "--page"), platform: option(args, "--platform"), remove: true } : namedEditIntent(command, args);
-    // A workspace in Repair takes no edits until its dependency is fixed.
-    await readableWorkspace(packagePath);
-    const snapshot = await openPackage(packagePath);
-    const batchId = option(args, "--batch-id") ?? `${command}_${randomUUID()}`;
-    const cliIntent = { command, intent };
-    if (
-      option(args, "--batch-id") &&
-      !["--dry-run", "--explain", "--diff"].some((arg) => flag(args, arg))
-    ) {
-      const recorded = await replayRecordedBatch(
-        packagePath,
-        { baseRevision: snapshot.revision, batchId, operations: [], cliIntent },
-        { rebuilt: true },
-      );
-      if (recorded) {
-        printJson(await writeReply(recorded, args));
-        return;
-      }
-    }
-    const operations =
-      command === "flow-start"
-        ? [flowStartRemoveOperation(snapshot, intent.page, intent.platform)]
-        : await namedEditOperations(command, snapshot, intent, packagePath);
-    if (command === "component-delete") {
-      // Copies in this package first, then in packages that depend on it.
-      checkNotUsedElsewhere([snapshot], operations, snapshot, { here: true });
-      checkNotUsedElsewhere(await dependentPackages(packagePath, snapshot), operations, snapshot);
-    }
-    printJson(
-      await applyBatch(
-        packagePath,
-        { baseRevision: snapshot.revision, batchId, operations, cliIntent, ...renameNumbering(command) },
-        args,
-      ),
-    );
-    return;
-  }
-  if (["component-define", "page-draw", "page-set", "component-set", "page-move", "canvas-rename", "canvas-put", "flow-link", "flow-start"].includes(command)) {
-    // Elements, components and pages by name: the planners build node
-    // tables and IDs; text is measured with the renderer's fonts.
-    const intent =
-      command === "flow-link"
-        ? Object.fromEntries(
-            [["from", "--from"], ["to", "--to"], ["on", "--on"], ["action", "--action"], ["platform", "--platform"]]
-              .map(([key, flagName]) => [key, option(args, flagName)])
-              .filter(([, value]) => value !== undefined),
-          )
-        : command === "flow-start"
-          ? { page: option(args, "--page"), ...(option(args, "--platform") ? { platform: option(args, "--platform") } : {}) }
-          : command === "canvas-rename"
-            ? { canvas: option(args, "--canvas"), to: option(args, "--to") }
-          : command === "canvas-put"
-            ? { page: option(args, "--page"), canvas: option(args, "--canvas") }
-          : command === "page-set" || command === "component-set"
-            ? await setIntent(command, args)
-          : command === "page-move"
-            ? {
-                page: option(args, "--page"),
-                platform: option(args, "--platform"),
-                element: option(args, "--element"),
-                direction: option(args, "--direction"),
-                // One place unless --steps says more.
-                steps: option(args, "--steps") === undefined ? 1 : Math.max(1, Number(option(args, "--steps"))),
-              }
-            : parseJson(
-              await readInputFile(option(args, "--intent"), "--intent", "utf8"),
-              `invalid_${command.replace("-", "_")}_json`,
-            );
-    const workspace = await readableWorkspace(packagePath);
-    const snapshot = await openPackage(packagePath);
-    const batchId = option(args, "--batch-id") ?? `${command}_${randomUUID()}`;
-    const cliIntent = { command, intent };
-    if (
-      option(args, "--batch-id") &&
-      !["--dry-run", "--explain", "--diff", "--preview"].some((arg) => flag(args, arg))
-    ) {
-      const recorded = await replayRecordedBatch(
-        packagePath,
-        { baseRevision: snapshot.revision, batchId, operations: [], cliIntent },
-        { rebuilt: true },
-      );
-      if (recorded) {
-        printJson(await writeReply(recorded, args));
-        return;
-      }
-    }
-    const lookups = {
-      foundation: workspace.foundation !== workspace.product ? workspace.foundation : undefined,
-      libraries: workspace.libraries ?? [],
-    };
-    let operations;
-    let flowTarget;
-    if (command === "page-move" && intent.element === undefined) {
-      // A whole page moves in its business flow's row on the canvas.
-      const screen = findPage(snapshot, intent.page);
-      operations = [reorderPageOperation(snapshot.manifest, snapshot.entries, screen.id, intent.direction, intent.steps, snapshot.runtime)];
-    } else if (command === "page-move") {
-      operations = [elementMoveOperation(snapshot, intent)];
-    } else if (command === "canvas-rename") {
-      operations = [renameCanvasOperation(snapshot.manifest, snapshot.entries, intent.canvas, intent.to)];
-    } else if (command === "canvas-put") {
-      const screen = findPage(snapshot, intent.page);
-      operations = [placePageOnCanvas(snapshot.manifest, snapshot.entries, screen.id, intent.canvas)];
-    } else if (["component-define", "page-draw", "page-set", "component-set"].includes(command)) {
-      // Plan once with estimated text sizes, measure every text with the
-      // renderer, then plan again with the measured sizes.
-      // Variants share node ids, so sizes are kept per tree, in the order
-      // the planner asks for them.
-      const trees = [];
-      const measured = [];
-      // A text that fills its slot is measured again at the slot's width,
-      // where it wraps: "id@width" -> height, asked for by the planner.
-      const wraps = [];
-      const asked = [];
-      let calls = 0;
-      // The App's flex sizing rules, so the CLI stores what the App would.
-      const fixSizing = await layoutSizingRules();
-      const plan = () => {
-        calls = 0;
-        return ({ "component-define": componentDefineOperation, "page-draw": pageDrawOperation, "page-set": pageSetOperation, "component-set": componentSetOperation })[command](
-          snapshot,
-          intent,
-          {
-            ...lookups,
-            fixSizing,
-            measure: (tree) => {
-              const index = calls++;
-              trees[index] ??= tree;
-              const size = (id) => measured[index]?.get(id);
-              size.wrapped = (id, width) => {
-                const key = `${id}@${Math.round(width)}`;
-                const known = wraps[index]?.get(key);
-                if (!known) (asked[index] ??= new Map()).set(key, { id, width: Math.round(width), node: tree.nodes[id] });
-                return known;
-              };
-              return size;
-            },
-          },
-        );
-      };
-      plan();
-      for (const [index, tree] of trees.entries()) {
-        measured[index] = new Map();
-        // Texts that fill or hug their slot are measured on one line: their
-        // natural width; fixed-width texts wrap at their width.
-        const texts = Object.fromEntries(
-          [
-            ...Object.entries(tree.nodes).filter(([, node]) => node.type === "TEXT"),
-            ...Object.entries(tree.probes ?? {}),
-          ].map(([id, node]) => {
-            // A text bound to a string Token is measured with its longest
-            // translation.
-            const longest = tree.measureTexts?.[id];
-            const measured = longest ? { ...node, text: longest } : node;
-            return [
-              id,
-              ["fill", "auto"].includes(node["layout-item-h-sizing"])
-                ? { ...measured, growType: "auto-width" }
-                : measured,
-            ];
-          }),
-        );
-        if (!Object.keys(texts).length) continue;
-        const metrics = await measureProjectionText(
-          workspace.product,
-          { nodes: texts, rootId: Object.keys(texts)[0] },
-          { foundation: lookups.foundation, libraries: lookups.libraries },
-        );
-        for (const item of metrics.items)
-          if (!item.missingGlyphs?.length)
-            measured[index].set(item.nodeId, { width: Math.ceil(item.width), height: Math.ceil(item.height) });
-      }
-      operations = [plan()];
-      if (asked.some((requests) => requests?.size)) {
-        for (const [index, requests] of asked.entries()) {
-          if (!requests?.size) continue;
-          wraps[index] = new Map();
-          const texts = Object.fromEntries([...requests].map(([key, { id, width, node }]) => {
-            const longest = trees[index].measureTexts?.[id];
-            return [key, { ...node, id: key, text: longest ?? node.text, width, growType: "auto-height", "layout-item-h-sizing": "fix" }];
-          }));
-          const metrics = await measureProjectionText(
-            workspace.product,
-            { nodes: texts, rootId: Object.keys(texts)[0] },
-            { foundation: lookups.foundation, libraries: lookups.libraries },
-          );
-          for (const item of metrics.items)
-            if (!item.missingGlyphs?.length) wraps[index].set(item.nodeId, { height: Math.ceil(item.height) });
-        }
-        operations = [plan()];
-      }
-      // A page drawn onto a named canvas is placed there (made if new).
-      if (command === "page-draw" && intent.canvas !== undefined)
-        operations.push(placePageOnCanvas(snapshot.manifest, snapshot.entries, operations[0].screen.id, intent.canvas));
-    } else {
-      const flowIntent =
-        command === "flow-link"
-          ? flowLinkIntent(snapshot, intent, lookups)
-          : flowStartIntent(snapshot, intent.page, () => {
-              const hex = createHash("sha256").update(`${batchId}\0start`).digest("hex");
-              return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-            }, intent.platform);
-      operations = interactionIntentOperations(snapshot, flowIntent);
-      // Say which page version the link or start went to.
-      flowTarget = versionName(snapshot, flowIntent.screenId, flowIntent.presentationId);
-    }
-    const preview = flag(args, "--preview") ? async (candidate, dependencies, batch) => {
-      const workspace = { ...selectTokenThemes(defaultTokenWorkspace({ product: candidate, foundation: dependencies.foundation }), options(args, "--theme")), libraries: dependencies.libraries ?? [] };
-      const screen = findPage(workspace.product, intent.page);
-      const presentation = findPresentation(screen, intent.platform ?? "desktop");
-      const rendered = await designCommand(packagePath, [
-        "export", packagePath, "--screen-id", screen.id, "--presentation-id", presentation.id,
-        "--format", "png", "--evidence",
-        ...options(args, "--context").flatMap(value => ["--context", value]),
-        ...(option(args, "--scale") !== undefined ? ["--scale", option(args, "--scale")] : []),
-      ], undefined, workspace);
-      const batchPath = await writeAtomic(artifactPath("preview-batch", "json"), canonicalJSON(batch));
-      return {
-        ...rendered, baseRevision: batch.baseRevision, candidateRevision: candidate.revision, batchPath,
-        apply: { argv: ["advanced", "apply", packagePath, "--batch", batchPath, "--json"],
-          note: "Applies this exact candidate; refuses if the Package changed after preview. Temporary artifacts expire after 30 minutes." },
-      };
-    } : undefined;
-    const written = await applyBatch(
-      packagePath,
-      { baseRevision: snapshot.revision, batchId, operations, cliIntent, ...renameNumbering(command) },
-      args,
-      preview,
-    );
-    printJson(flowTarget ? { target: flowTarget, ...written } : written);
-    return;
-  }
-  if (NAMED_TOKEN_WRITES.has(command)) {
-    // Name-based writes compile to the existing operations in one atomic
-    // batch; a retried batch ID replays the recorded result.
-    const intent =
-      command === "token-set"
-        ? parseJson(
-            await readInputFile(option(args, "--intent"), "--intent", "utf8"),
-            "invalid_token_set_json",
-          )
-        : {
-            themes: options(args, "--theme"),
-            group: option(args, "--group"),
-            to: option(args, "--to"),
-            path: option(args, "--path"),
-          };
-    // A workspace in Repair takes no edits until its dependency is fixed.
-    await readableWorkspace(packagePath);
-    const snapshot = await openPackage(packagePath);
-    const batchId = option(args, "--batch-id") ?? `${command}_${randomUUID()}`;
-    const cliIntent = { command, intent };
-    if (
-      option(args, "--batch-id") &&
-      !["--dry-run", "--explain", "--diff"].some((arg) => flag(args, arg))
-    ) {
-      const recorded = await replayRecordedBatch(
-        packagePath,
-        { baseRevision: snapshot.revision, batchId, operations: [], cliIntent },
-        { rebuilt: true },
-      );
-      if (recorded) {
-        printJson(await writeReply(recorded, args));
-        return;
-      }
-    }
-    let operations = [];
-    if (command.startsWith("theme-")) {
-      const [theme] = intent.themes;
-      const steps =
-        command === "theme-add"
-          ? themeAddIntents(snapshot, intent.themes)
-          : command === "theme-rename"
-            ? [themeRenameIntent(snapshot, { theme, group: intent.group, to: intent.to })]
-            : command === "theme-default"
-              ? [themeDefaultIntent(snapshot, theme)]
-              : [themeDeleteIntent(snapshot, { theme, group: intent.group })];
-      // Each step reads the group as the previous step leaves it.
-      let working = snapshot;
-      for (const step of steps) {
-        const stepOperations = await themeIntentOperations(working, step);
-        working = (
-          await prepareOperationBatch(working, {
-            baseRevision: working.revision,
-            batchId: `${batchId}_plan_${operations.length}`,
-            operations: stepOperations,
-          })
-        ).snapshot;
-        operations.push(...stepOperations);
-      }
-    } else if (command === "token-delete") {
-      operations = tokenDeleteOperations(snapshot, intent.path);
-      checkNotUsedElsewhere(await dependentPackages(packagePath, snapshot), operations, snapshot);
-    } else {
-      let index = 0;
-      operations = tokenSetOperations(snapshot, intent, () =>
-        `tok_${createHash("sha256")
-          .update(canonicalJSON({ batchId, intent, index: index++ }))
-          .digest("hex")
-          .slice(0, 32)}`,
-      );
-    }
-    printJson(
-      await applyBatch(
-        packagePath,
-        { baseRevision: snapshot.revision, batchId, operations, cliIntent, ...renameNumbering(command) },
-        args,
-      ),
-    );
-    return;
-  }
   if (command === "export") {
     if (option(args, "--format") !== "png" && flag(args, "--base64"))
       throw new SmallPenError("missing_png_format", "--base64 requires --format png");
@@ -4660,219 +3217,6 @@ async function main(args) {
 
   if (command === "init") {
     printJson(await initializeCommand(packagePath, args));
-    return;
-  }
-  if (command === "migrate-themes") {
-    printJson(
-      await trackedWrite(() =>
-        migrateThemesByCopy(packagePath, option(args, "--output")),
-      ),
-    );
-    return;
-  }
-  if (command === "import-draft") {
-    const inputPath = option(args, "--input");
-    const kind = option(args, "--kind") ?? "figma";
-    const input = await readInputFile(inputPath, "--input");
-    printJson(
-      await trackedWrite(() =>
-        importDraft({
-          ...(kind === "figma"
-            ? { html: input.toString("utf8") }
-            : { bytes: new Uint8Array(input) }),
-          kind,
-          output: packagePath,
-          packageId: option(args, "--package-id") ?? "pkg_figma_draft",
-        }),
-      ),
-    );
-    return;
-  }
-  if (command === "import-tokens") {
-    const inputPath = option(args, "--input");
-    const document = parseJson(
-      await readInputFile(inputPath, "--input", "utf8"),
-      "invalid_import_json",
-      { path: inputPath },
-    );
-    const { product: snapshot } = await tokenWorkspace(packagePath, args);
-    const selection = options(args, "--select");
-    const result = importTokens(snapshot, document, {
-      selection: selection.length > 0 ? selection : undefined,
-      setName: option(args, "--set-name"),
-    });
-    const full = flag(args, "--full");
-    const review = {
-      diff: full
-        ? result.diff
-        : Object.fromEntries(
-            Object.entries(result.diff).map(([group, actions]) => [
-              group,
-              group === "summary"
-                ? actions
-                : Object.fromEntries(
-                    Object.entries(actions).map(([action, rows]) => [
-                      action,
-                      {
-                        total: rows.length,
-                        items: rows.slice(0, 20).map((row) =>
-                          typeof row === "string"
-                            ? row
-                            : {
-                                id: row.id,
-                                name:
-                                  row.name ??
-                                  row.after?.name ??
-                                  row.before?.name,
-                                set: row.set,
-                                path: row.path,
-                                fields: row.fields,
-                              },
-                        ),
-                      },
-                    ]),
-                  ),
-            ]),
-          ),
-      previousLibraryId: result.previousLibraryId,
-      warnings: full ? result.warnings : result.warnings.slice(0, 20),
-      warningCount: result.warnings.length,
-    };
-    if (!flag(args, "--apply")) {
-      printJson({
-        ...review,
-        packageId: snapshot.manifest.packageId,
-        revision: snapshot.revision,
-        dryRun: true,
-        library: full
-          ? result.library
-          : {
-              id: result.library.id,
-              setCount: result.library.sets.length,
-              tokenCount: result.library.sets.reduce(
-                (count, set) => count + set.tokens.length,
-                0,
-              ),
-              themeCount: result.library.themes.length,
-            },
-      });
-      return;
-    }
-    printJson({
-      ...(await applyBatch(
-        packagePath,
-        {
-          baseRevision: snapshot.revision,
-          batchId:
-            option(args, "--batch-id") ?? `import_tokens_${randomUUID()}`,
-          operations: result.operations,
-        },
-        args,
-      )),
-      ...review,
-    });
-    return;
-  }
-  if (command === "draft-diff") {
-    const afterPath = option(args, "--after");
-    printJson(
-      diffDrafts(
-        draftFromSnapshot(await openPackage(packagePath)),
-        draftFromSnapshot(await openPackage(afterPath)),
-      ),
-    );
-    return;
-  }
-  if (command === "draft-compile") {
-    const draftPath = option(args, "--draft");
-    const selectionsPath = option(args, "--selections");
-    const selections = parseJson(
-      await readInputFile(selectionsPath, "--selections", "utf8"),
-      "invalid_draft_selections_json",
-      { path: selectionsPath },
-    );
-    printJson(
-      compileDraftMerge(
-        await openPackage(packagePath),
-        draftFromSnapshot(await openPackage(draftPath)),
-        selections,
-        { batchId: option(args, "--batch-id") },
-      ),
-    );
-    return;
-  }
-  if (command === "validate") {
-    // A named page or component reads like the whole-package report;
-    // --full keeps every stored check.
-    const named = publicSurface && !flag(args, "--full") &&
-      (option(args, "--page") !== undefined || option(args, "--component") !== undefined);
-    const report = await validateCommand(packagePath, args, { named });
-    // Sizes the preview cannot compute: one note, not one issue each.
-    const limits = (report.issues ?? []).filter((issue) => issue.code === "layout_projection_partial");
-    if (limits.length && !flag(args, "--full")) {
-      report.issues = report.issues.filter((issue) => issue.code !== "layout_projection_partial");
-      report.issueCount = (report.issueCount ?? limits.length) - limits.length;
-      if (!report.issueCount) report.visualStatus = "no-issues-found";
-      report.previewNote = `The local preview cannot compute some automatic sizes in ${limits.length} place${limits.length === 1 ? "" : "s"}; geometry there may differ in the App.`;
-    }
-    printJson(report);
-    return;
-  }
-  if (command === "inspect") {
-    const snapshot = await openPackage(packagePath);
-    printJson(
-      flag(args, "--full")
-        ? { revision: snapshot.revision, ...inspect(snapshot) }
-        : projectSummary(snapshot),
-    );
-    return;
-  }
-  if (command === "list") {
-    const snapshot = await openPackage(packagePath);
-    const kind = option(args, "--kind") ?? "all";
-    const offset = integerOption(args, "--offset");
-    const limit = integerOption(args, "--limit");
-    const all = listDomain(snapshot, kind)
-      .sort((left, right) =>
-        compareText(String(left.item.id ?? ""), String(right.item.id ?? "")),
-      );
-    // A page version reads as its page and platform; its own name is often
-    // just "desktop".
-    const pageNames = new Map(snapshot.manifest.entries.screens.map((entry) => [snapshot.entries[entry].id, snapshot.entries[entry].name]));
-    // page list: each page by name with its platforms.
-    if (routed.route?.name === "page list" && !flag(args, "--full")) {
-      const pages = snapshot.manifest.entries.screens.map((entry) => snapshot.entries[entry]);
-      printJson({
-        pages: pages.slice(offset, offset + limit).map((screen) => ({
-          name: screen.name,
-          platforms: screen.presentations.map((presentation) => presentation.platform ?? presentation.name),
-        })),
-        page: { hasMore: offset + limit < pages.length, limit, offset, total: pages.length },
-        revision: snapshot.revision,
-      });
-      return;
-    }
-    printJson({
-      items: all.slice(offset, offset + limit).map(({ group, item }) => {
-        const summary = flag(args, "--full") ? item : discoverySummary(item);
-        const screen = group === "screens" ? snapshot.manifest.entries.screens.map((entry) => snapshot.entries[entry]).find(({ id }) => id === item.id) : undefined;
-        const value = group === "presentations" && pageNames.has(item.screenId)
-          ? { page: pageNames.get(item.screenId), ...summary }
-          : screen
-            ? { ...summary, platforms: screen.presentations.map((presentation) => presentation.platform ?? presentation.name) }
-            : summary;
-        return routed.route?.name === "page list" ? value : { group, item: value };
-      }),
-      kind,
-      page: {
-        hasMore: offset + limit < all.length,
-        limit,
-        offset,
-        total: all.length,
-      },
-      packageId: snapshot.manifest.packageId,
-      revision: snapshot.revision,
-    });
     return;
   }
   if (command === "tokens") {
@@ -4898,23 +3242,34 @@ async function main(args) {
       const group = option(args, "--group");
       const all = snapshots.flatMap((snapshot) =>
         listTokenDefinitions(snapshot, { group }),
-      ).filter((item) => tokenNamed(item.token?.path, option(args, "--token")));
-      const page = pageItems(all, pagination(args));
+      ).filter((item) => tokenNamed(item.token?.path ?? item.token?.name, option(args, "--token")));
+      // Each definition as tokens.css writes it: its block and its value,
+      // an alias as var(--name).
+      const asWritten = (item) => {
+        const { description, name, type, value } = item.token ?? {};
+        const alias = typeof value === "string" ? /^\{([^}]+)\}$/.exec(value) : null;
+        return {
+          block: item.group ? `:root[data-${item.group}="${item.option}"]` : ":root",
+          token: { name, type, value: alias ? `var(--${alias[1]})` : value, ...(description ? { description } : {}) },
+        };
+      };
+      const page = pageItems(all.map(asWritten), pagination(args));
       printJson({
         mode: "definitions",
         items:
           flag(args, "--full") &&
           !args.includes("--limit") &&
           !args.includes("--offset")
-            ? all
+            ? all.map(asWritten)
             : page.items,
         page: page.page,
         packageId: product.manifest.packageId,
         ...workspaceRevisions(product, foundation, libraries),
+        // Tokens change in tokens.css; the classes that use them are listed here.
         nextOperations: [
           {
-            operation: "smallpen.schema",
-            argv: ["schema", "token-set", "--json"],
+            operation: "smallpen.help",
+            argv: ["help", "rules", "classes", "--json"],
           },
         ],
       });
@@ -4931,11 +3286,14 @@ async function main(args) {
     );
     const context = contextSelection(args);
     const requestedType = option(args, "--type");
+    // How often pages and components use each Token, by name.
+    const uses = tokenUseCounts(Object.values(product.entries));
     const all = listEffectiveTokens(product, {
       context,
       foundation,
       libraries,
-    }).filter((item) => (!requestedType || item.token.type === requestedType) && tokenNamed(item.token.path, option(args, "--token")));
+    }).filter((item) => (!requestedType || item.token.type === requestedType) && tokenNamed(item.token.path, option(args, "--token")) &&
+      (!flag(args, "--unused") || (uses.get(item.token.path) ?? 0) === 0));
     const page = pageItems(all, pagination(args));
     const paginated =
       !flag(args, "--full") ||
@@ -4966,6 +3324,7 @@ async function main(args) {
             ...(optionValues.has(item.token.path)
               ? { values: optionValues.get(item.token.path) }
               : {}),
+            uses: uses.get(item.token.path) ?? 0,
           })),
       ...(paginated ? { page: page.page } : {}),
       labels: tokenLabels(option(args, "--locale") ?? defaultLocale()),
@@ -4974,483 +3333,6 @@ async function main(args) {
       ...workspaceRevisions(product, foundation, libraries),
     });
     return;
-  }
-  if (command === "search-tokens") {
-    const { foundation, libraries, product } = await tokenWorkspace(
-      packagePath,
-      args,
-    );
-    const query = option(args, "--query");
-    const requestedType = option(args, "--type");
-    const valueSearch = searchValue(args);
-    const type = requestedType ?? valueSearch.type;
-    const limit = integerOption(args, "--limit");
-    printJson({
-      ...searchEffectiveTokens(product, {
-        ...valueSearch,
-        allThemes: flag(args, "--all-themes"),
-        ...(options(args, "--theme").length > 0
-          ? { themeMode: "explicit" }
-          : {}),
-        ...(options(args, "--context").length > 0
-          ? { context: contextSelection(args) }
-          : {}),
-        foundation,
-        libraries,
-        limit,
-        query,
-        type,
-      }),
-      packageId: product.manifest.packageId,
-      ...workspaceRevisions(product, foundation, libraries),
-    });
-    return;
-  }
-  if (command === "catalog") {
-    const { foundation, libraries, product } = await tokenWorkspace(
-      packagePath,
-      args,
-    );
-    const catalog = createCatalog(product, {
-      context: contextSelection(args),
-      foundation,
-      libraries,
-    });
-    const page = pageItems(
-      catalog.components.map((component) =>
-        catalogItemSummary(component, [product, foundation, ...libraries]),
-      ),
-      pagination(args),
-    );
-    printJson({
-      ...(flag(args, "--full")
-        ? catalog
-        : {
-            packageId: catalog.packageId,
-            role: catalog.role,
-            components: page.items,
-            page: page.page,
-            counts: Object.fromEntries(
-              Object.entries(catalog)
-                .filter(([, value]) => Array.isArray(value))
-                .map(([key, value]) => [key, value.length]),
-            ),
-            outputDetail: {
-              omitted: [
-                "tokens",
-                "effectiveTokens",
-                "tokenInventory",
-                "contexts",
-                "scenarios",
-                "screens",
-                "requirements",
-              ],
-              fullOption: "--full",
-            },
-          }),
-      ...workspaceRevisions(product, foundation, libraries),
-      warnings: (await resolveCliWorkspace(packagePath)).warnings ?? [],
-    });
-    return;
-  }
-  if (command === "search-components") {
-    const query = option(args, "--query");
-    const limit = integerOption(args, "--limit");
-    const { foundation, libraries, product } = await tokenWorkspace(
-      packagePath,
-      args,
-    );
-    const catalog = createCatalog(product, { foundation, libraries });
-    const normalized = query.trim().toLowerCase();
-    const matches = catalog.components.filter((component) =>
-      [component.id, component.name, component.category, component.description]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(normalized)),
-    );
-    printJson({
-      items: matches.slice(0, limit).map((component) => {
-        const owner = [product, foundation, ...libraries].find(
-          (snapshot) => snapshot?.manifest.packageId === component.packageId,
-        );
-        // view resolves the Foundation and Libraries from the searched
-        // package, so the next read names it, not the owner (a URL).
-        const argv = [
-          "view",
-          resolve(packagePath),
-          "--component",
-          component.name,
-          "--json",
-        ];
-        const command = ["smallpen", ...argv]
-          .map((argument) =>
-            /^[A-Za-z0-9_./-]+$/.test(argument)
-              ? argument
-              : `'${argument.replaceAll("'", "'\\''")}'`,
-          )
-          .join(" ");
-        const insertion = insertionAdvice(owner, product, component);
-        return {
-          ...(flag(args, "--full")
-            ? component
-            : catalogItemSummary(component, [owner])),
-          nextOperations: [{ argv, command, operation: "smallpen.component" }],
-          ...(insertion ? { recommendedInsertion: insertion } : {}),
-        };
-      }),
-      packageId: product.manifest.packageId,
-      query,
-      total: matches.length,
-      ...workspaceRevisions(product, foundation, libraries),
-    });
-    return;
-  }
-  if (command === "effective-token" || command === "explain-token") {
-    const { foundation, libraries, product } = await tokenWorkspace(
-      packagePath,
-      args,
-    );
-    const reference = tokenReference(args, product, [foundation, ...libraries]);
-    const context = contextSelection(args);
-    const result =
-      command === "explain-token"
-        ? explainEffectiveToken(product, reference, {
-            context,
-            foundation,
-            libraries,
-          })
-        : resolveEffectiveToken(product, reference, {
-            context,
-            foundation,
-            libraries,
-          });
-    if (!result) {
-      throw new SmallPenError("missing_token", "Token is not available", {
-        reference,
-      });
-    }
-    printJson({
-      ...result,
-      ...workspaceRevisions(product, foundation, libraries),
-    });
-    return;
-  }
-  if (command === "impact") {
-    const { foundation, libraries, product } = await tokenWorkspace(
-      packagePath,
-      args,
-    );
-    const tokenId = option(args, "--token-id");
-    const tokenPath = option(args, "--path");
-    const requestedPackageId = option(args, "--package-id");
-    if ((tokenId === undefined) === (tokenPath === undefined)) {
-      throw new SmallPenError(
-        "missing_token_reference",
-        "impact requires exactly one of --token-id or --path",
-      );
-    }
-    const matches = [product, foundation, ...libraries]
-      .filter(Boolean)
-      .filter(
-        (snapshot) =>
-          requestedPackageId === undefined ||
-          snapshot.manifest.packageId === requestedPackageId,
-      )
-      .flatMap((snapshot) => {
-        const token = tokenId
-          ? snapshot.domain.tokens.get(tokenId)
-          : [...snapshot.domain.tokens.values()].find(
-              (candidate) => candidate.path === tokenPath,
-            );
-        return token ? [{ snapshot, token }] : [];
-      });
-    if (matches.length === 0) {
-      throw new SmallPenError("missing_token", "Token is not available", {
-        packageId: requestedPackageId,
-        tokenId,
-        path: tokenPath,
-      });
-    }
-    if (matches.length > 1) {
-      throw new SmallPenError(
-        "ambiguous_token_reference",
-        "Token exists in more than one Package; specify --package-id",
-        {
-          packageIds: matches.map(
-            ({ snapshot }) => snapshot.manifest.packageId,
-          ),
-          tokenId,
-          path: tokenPath,
-        },
-      );
-    }
-    const [{ snapshot: owner, token }] = matches;
-    printJson({
-      locations: tokenImpact(product, token.id, owner.manifest.packageId),
-      ownerRevision: owner.revision,
-      packageId: owner.manifest.packageId,
-      ...workspaceRevisions(product, foundation, libraries),
-      token: { id: token.id, path: token.path, type: token.type },
-    });
-    return;
-  }
-  if (command === "apply") {
-    const batchPath = option(args, "--batch");
-    const batch = parseJson(
-      await readInputFile(batchPath, "--batch", "utf8"),
-      "invalid_batch_json",
-      { path: batchPath },
-    );
-    if (!isRecord(batch)) {
-      throw new SmallPenError(
-        "invalid_batch",
-        "Operation Batch must be a JSON object",
-        { path: batchPath },
-      );
-    }
-    if (Array.isArray(batch.operations)) {
-      batch.operations.forEach((operation, index) => {
-        if (isRecord(operation)) checkOperationShape(operation, index);
-      });
-    }
-    await checkExternalComponentConsumers(packagePath, batch.operations ?? []);
-    printJson(await applyBatch(packagePath, batch, args));
-    return;
-  }
-  if (command === "assets") {
-    const { product } = await readableWorkspace(packagePath);
-    const items = listAssets(product, {
-      kind: option(args, "--kind"),
-    }).filter(
-      ({ kind }) =>
-        routed.route?.name !== "advanced style list" ||
-        option(args, "--kind") !== undefined ||
-        ["colors", "typographies"].includes(kind),
-    );
-    printJson({
-      packageId: product.manifest.packageId,
-      revision: product.revision,
-      ...pageItems(items, pagination(args)),
-    });
-    return;
-  }
-  if (command === "import-media") {
-    const mediaPath = option(args, "--file");
-    const bytes = new Uint8Array(await readInputFile(mediaPath, "--file"));
-    const inspected = inspectMedia(bytes);
-    const mediaId = `media_${randomUUID()}`;
-    const name = option(args, "--name") ?? mediaPath.split(/[\\/]/).pop();
-    // Names do not repeat: a media file is found by its name.
-    const mediaFolder = option(args, "--media-path") ?? "";
-    const fullName = (folder, base) => [folder, base].filter(Boolean).join("/").toLowerCase();
-    const taken = listAssets(await openPackage(packagePath), { kind: "media" })
-      .find(({ asset }) => fullName(asset.path, asset.name) === fullName(mediaFolder, name));
-    if (taken)
-      throw new SmallPenError("duplicate_name", `A media file is already named ${[taken.asset.path, taken.asset.name].filter(Boolean).join("/")}; delete it with asset media delete or choose another --name`, { kind: "media", name });
-    const print = await trackedWrite(() =>
-      importMedia(packagePath, {
-        bytes,
-        height: inspected.height,
-        id: mediaId,
-        mimeType: inspected.mimeType,
-        name,
-        path: option(args, "--media-path") ?? "",
-        width: inspected.width,
-      }),
-    );
-    printJson(
-      await writeReply(
-        {
-          batchId: print.result.batchId,
-          changedFiles: print.result.changedFiles,
-          descriptor: print.descriptor,
-          inverseBatch: print.result.inverseBatch,
-          revision: print.result.revision,
-        },
-        args,
-      ),
-    );
-    return;
-  }
-  if (command === "import-font") {
-    const fontPath = option(args, "--file");
-    const family = option(args, "--family");
-    const bytes = new Uint8Array(await readInputFile(fontPath, "--file"));
-    const signatureTtf = bytes[0] === 0x00 && bytes[1] === 0x01;
-    const signatureOtf = bytes[0] === 0x4f && bytes[1] === 0x54;
-    const signatureWoff =
-      bytes[0] === 0x77 &&
-      bytes[1] === 0x4f &&
-      bytes[2] === 0x46 &&
-      bytes[3] === 0x46;
-    const signatureWoff2 =
-      bytes[0] === 0x77 &&
-      bytes[1] === 0x4f &&
-      bytes[2] === 0x46 &&
-      bytes[3] === 0x32;
-    const files = {};
-    if (signatureTtf) {
-      inspectFont(bytes, "font/ttf");
-      files.ttf = { bytes, mimeType: "font/ttf" };
-    } else if (signatureOtf) {
-      inspectFont(bytes, "font/otf");
-      files.otf = { bytes, mimeType: "font/otf" };
-    } else if (signatureWoff2) {
-      inspectFont(bytes, "font/woff2");
-      files.woff2 = { bytes, mimeType: "font/woff2" };
-      throw new SmallPenError(
-        "unsupported_font_conversion",
-        "WOFF2 cannot be converted without a WOFF2 decoder; supply TTF, OTF, or WOFF",
-        { mimeType: "font/woff2" },
-      );
-    } else if (signatureWoff) {
-      inspectFont(bytes, "font/woff");
-      files.woff = { bytes, mimeType: "font/woff" };
-    } else {
-      inspectFont(bytes, undefined);
-    }
-    // A family imported again gains a variant: fonts are found by family name.
-    const family_ = listAssets(await openPackage(packagePath), { kind: "fonts" })
-      .find(({ asset }) => String(asset.family).toLowerCase() === String(family).toLowerCase());
-    const fontId = family_?.asset.id ?? `font_${randomUUID()}`;
-    const style = option(args, "--style") ?? "normal";
-    const weight = integerOption(args, "--weight");
-    const variantId = `fvar_${randomUUID()}`;
-    const { result, variant } = await trackedWrite(() =>
-      importFontVariant(packagePath, {
-        family: family_?.asset.family ?? family,
-        files,
-        fontId,
-        id: variantId,
-        name: option(args, "--name") ?? fontVariantName(weight, style),
-        style,
-        weight,
-      }),
-    );
-    printJson(
-      await writeReply(
-        {
-          batchId: result.batchId,
-          changedFiles: result.changedFiles,
-          family: family_?.asset.family ?? family,
-          variant: variant.name,
-          files: variant.files,
-          fontId,
-          inverseBatch: result.inverseBatch,
-          revision: result.revision,
-          variantId: variant.id,
-        },
-        args,
-      ),
-    );
-    return;
-  }
-  if (command === "library-refresh") {
-    const resolution = await resolveCliWorkspace(packagePath);
-    if (resolution.status !== "ready") {
-      throw new SmallPenError(
-        "repair_required",
-        "SmallPen workspace requires Repair",
-        { conflicts: resolution.conflicts },
-      );
-    }
-    const { libraries, product } = resolution.workspace;
-    const selector = option(args, "--library");
-    const declared = (product.manifest.libraries ?? []).filter(
-      (library) => library.source?.type === "url",
-    );
-    const selected = selector
-      ? declared.find(
-          (library) =>
-            library.packageId === selector || library.source.url === selector,
-        )
-      : declared[0];
-    if (!selected) {
-      throw new SmallPenError(
-        "missing_library_source",
-        "No declared URL Library matches --library",
-        {
-          declaredIds: declared.map((library) => library.packageId),
-          selector,
-        },
-      );
-    }
-    const before = libraries.find(
-      (library) => library.manifest.packageId === selected.packageId,
-    );
-    const refreshed = await openRemoteLibrary(selected.source.url, {
-      cacheRoot: defaultLibraryCacheRoot(),
-      expectedPackageId: selected.packageId,
-      refresh: true,
-    });
-    printJson({
-      after: {
-        cache: refreshed.remote.cache,
-        packageId: refreshed.manifest.packageId,
-        revision: refreshed.revision,
-        // A failed fetch with a verified cache reports "stale": keep the reason.
-        warning: refreshed.remote.warning,
-      },
-      before: before
-        ? { packageId: before.manifest.packageId, revision: before.revision }
-        : undefined,
-      packageId: selected.packageId,
-      revision: product.revision,
-      sourceUrl: selected.source.url,
-    });
-    return;
-  }
-  if (command === "watch") {
-    // Validate before clamping: Number("abc") is NaN and would poll nonstop.
-    const interval = Math.max(100, integerOption(args, "--interval"));
-    // Default is unlimited: watch without --max-events must keep observing
-    // (SP-041-A caught a fallback of 1 that exited after the first event).
-    const maxEvents = integerOption(args, "--max-events");
-    if (maxEvents === 0) {
-      throw new SmallPenError(
-        "invalid_integer_option",
-        "--max-events requires an integer from 1 through 10000",
-        { maximum: 10_000, name: "--max-events", value: "0" },
-      );
-    }
-    const emit = (payload) =>
-      process.stdout.write(`${JSON.stringify(payload)}\n`);
-    // The last emitted state: an unchanged invalid state is not repeated
-    // every poll, and recovery reports the revision again even when it is
-    // the one before the Package became invalid.
-    let previous;
-    let events = 0;
-    process.on("SIGINT", () => process.exit(0));
-    for (;;) {
-      try {
-        const snapshot = await openPackage(packagePath);
-        if (`revision:${snapshot.revision}` !== previous) {
-          previous = `revision:${snapshot.revision}`;
-          events += 1;
-          emit({
-            event: "revision",
-            packageId: snapshot.manifest.packageId,
-            revision: snapshot.revision,
-          });
-          if (maxEvents !== undefined && events >= maxEvents) return;
-        }
-      } catch (error) {
-        const invalid = {
-          code: error instanceof SmallPenError ? error.code : "internal_error",
-          event: "invalid",
-          message: error instanceof Error ? error.message : String(error),
-        };
-        if (`invalid:${invalid.code}:${invalid.message}` !== previous) {
-          previous = `invalid:${invalid.code}:${invalid.message}`;
-          events += 1;
-          emit(invalid);
-          if (maxEvents !== undefined && events >= maxEvents) return;
-        }
-      }
-      await delay(interval);
-    }
-  }
-  if (command === "repair") {
-    printJson(await repairCommand(packagePath, args));
   }
 }
 
@@ -5515,162 +3397,6 @@ function errorDetails(error, args) {
         "Read this command's parameter schema and correct the option before retrying. No operation was applied.",
     };
   }
-  if (
-    ["invalid_entry_json", "invalid_manifest_json"].includes(error?.code) &&
-    typeof details.packagePath === "string"
-  ) {
-    return {
-      ...details,
-      entryPath: resolve(details.packagePath, details.entry ?? "manifest.json"),
-      nextOperations: [
-        {
-          argv: ["validate", details.packagePath, "--json"],
-          operation: "smallpen.validate",
-          when: "after-restoring-valid-json",
-        },
-      ],
-      recovery:
-        "Preserve the damaged file, then restore known-good valid JSON at entryPath. After restoring it, execute the validation argv. Validation does not repair or rewrite invalid JSON.",
-    };
-  }
-  if (error?.code === "missing_component_id" && typeof args[1] === "string") {
-    const remote = /^https?:\/\//.test(args[1]);
-    return {
-      ...details,
-      nextOperations: [
-        ...(!remote
-          ? [
-              {
-                argv: [
-                  "list",
-                  resolve(args[1]),
-                  "--kind",
-                  "components",
-                  "--json",
-                ],
-                operation: "smallpen.list",
-              },
-            ]
-          : []),
-        { argv: ["component", "--help"], operation: "smallpen.help" },
-      ],
-      recovery: remote
-        ? "Supply --component-id from a linked Product's search-components result and retain that result's owner locator. component --help describes the detail command; list does not accept URL locators."
-        : "List this owner Package's Component Sets, then retry component with the selected --component-id and the same Package path.",
-    };
-  }
-  if (
-    args[0] === "init" &&
-    [
-      "invalid_initialization_answer_json",
-      "invalid_initialization_answer",
-    ].includes(error?.code) &&
-    typeof details.questionId === "string"
-  ) {
-    const retry = [...args];
-    retry[1] = resolve(retry[1]);
-    const stateIndex = retry.indexOf("--state");
-    if (stateIndex !== -1)
-      retry[stateIndex + 1] = resolve(retry[stateIndex + 1]);
-    let replaced = false;
-    for (let index = 2; index < retry.length; index += 1) {
-      if (
-        retry[index] === "--answer" &&
-        retry[index + 1]?.startsWith(`${details.questionId}=`)
-      ) {
-        retry[index + 1] = `${details.questionId}=<JSON>`;
-        replaced = true;
-      }
-    }
-    if (!replaced) retry.push("--answer", `${details.questionId}=<JSON>`);
-    if (!retry.includes("--json")) retry.push("--json");
-    if (!retry.includes("--locale")) retry.push("--locale", defaultLocale());
-    return {
-      ...details,
-      nextOperations: [{ argv: retry, operation: "smallpen.init.answer" }],
-      recovery:
-        "Replace <JSON> with a valid JSON answer and execute the retry argv.",
-    };
-  }
-  if (error?.code === "stale_revision") {
-    const locator =
-      typeof args[1] === "string" ? resolve(args[1]) : "<package>";
-    const commands = [
-      ...(typeof details.baseRevision === "string" && details.baseRevision.length ? [{
-        argv: ["changes", locator, "--since", details.baseRevision, "--json"],
-        explanation:
-          "Read changes since the candidate's base revision. If history is unavailable, use the current view instead.",
-      }] : []),
-      {
-        argv: ["view", locator, "--json"],
-        explanation:
-          "Locate the affected targets, then read their current specifications before rebuilding a scoped edit or a fresh preview. Preserve concurrent edits.",
-      },
-    ];
-    const remainingIntent = Array.isArray(details.nextOperations)
-      ? details.nextOperations.find(
-          (operation) => operation.operation === "smallpen.apply.replay-intent",
-        )?.args?.operations
-      : undefined;
-    return {
-      ...details,
-      ...(remainingIntent
-        ? {
-            remainingIntentCount: remainingIntent.length,
-            ...(flag(args, "--full") ? { remainingIntent } : {}),
-          }
-        : {}),
-      commands,
-      nextOperations: commands.map(({ argv }) => ({
-        argv, operation: `smallpen.${argv[0]}`,
-      })),
-      recovery:
-        "The write was rejected atomically; nothing was applied. Read changes and current affected specifications, then rebuild only the intended fields with a new unique batchId or review a fresh page preview. Retained operations are the rejected intent, not an approved retry. Do not make an old snapshot current by changing only baseRevision.",
-    };
-  }
-  if (error?.code === "missing_local_asset" && isRecord(details.reference)) {
-    const locator =
-      typeof args[1] === "string" ? resolve(args[1]) : "<package>";
-    const assetId = details.reference.assetId;
-    const isToken = typeof assetId === "string" && assetId.startsWith("tok_");
-    const commands = [
-      {
-        argv: details.tokenPath
-          ? ["token", "impact", locator, "--path", details.tokenPath, "--json"]
-          : ["view", locator, "--as", "issues", "--json"],
-        explanation: details.tokenPath ? "List every element that still binds this token, by name." : "Find the elements that still use it.",
-      },
-      {
-        argv: [
-          "apply",
-          locator,
-          "--batch",
-          "<batch.json with one clear-token-binding operation per impacted location>",
-          "--json",
-        ],
-        explanation:
-          "Build the clear-token-binding batch against the current revision with a new unique batchId in the JSON, run this apply, then retry the token removal as another apply --batch with its own new batchId.",
-      },
-    ];
-    return {
-      ...details,
-      commands,
-      nextOperations: [
-        {
-          argv: commands[0].argv,
-          operation: details.tokenPath ? "smallpen.token.impact" : "smallpen.view",
-        },
-        {
-          argv: commands[1].argv,
-          operation: "smallpen.apply",
-          when: "after-clearing-live-references",
-        },
-      ],
-      recovery: isToken
-        ? "The removal was rejected atomically because the token is still referenced. List the live bindings, then clear each binding with a clear-token-binding batch JSON (current baseRevision, new unique batchId in the JSON) via apply --batch, and retry the removal the same way."
-        : "The removal was rejected atomically because the asset is still referenced. Remove or retarget the referencing usage with an apply --batch whose JSON carries the current baseRevision and a new unique batchId, then retry.",
-    };
-  }
   if (error?.code === "unknown_command") {
     return {
       ...details,
@@ -5685,26 +3411,11 @@ function errorDetails(error, args) {
   return details;
 }
 
-// A write that removes a Token still bound fails naming only its id; the
-// recovery names it, so token impact --path can list where it is used.
-async function nameMissingToken(error, args) {
-  const assetId = error?.details?.reference?.assetId;
-  if (error?.code !== "missing_local_asset" || typeof assetId !== "string" || typeof args?.[1] !== "string") return;
-  try {
-    const before = await openPackage(args[1]);
-    const token = before.domain.tokens.get(assetId);
-    if (token) error.details = { ...error.details, tokenPath: token.path };
-  } catch {
-    // The package cannot be read: keep the id.
-  }
-}
-
 const cliArgs = process.argv.slice(2);
 let executionArgs = cliArgs;
 let publicSurface = false;
 main(cliArgs)
   .catch(async (error) => {
-    await nameMissingToken(error, executionArgs);
     printJson({
       error: {
         code: error instanceof SmallPenError ? error.code : "internal_error",

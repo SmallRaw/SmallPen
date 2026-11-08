@@ -6401,6 +6401,10 @@ msgstr "共享資料庫"
 msgid "workspace.libraries.shared-library-btn"
 msgstr "連接資料庫"
 
+#: src/app/main/smallpen/ui/libraries.cljs
+msgid "workspace.libraries.smallpen.standalone"
+msgstr "這個包是獨立的。要重用另一個包的元件或 Token，把它的檔案（components/、tokens.css、assets/）複製到這個包裡。"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs:552
 msgid "workspace.libraries.text.mixed-tokens"
 msgstr "混合 tokens"
@@ -8953,35 +8957,6 @@ msgstr "自動儲存的版本將保留 %s 天。"
 msgid "workspace.assets.tokens"
 msgstr "權杖"
 
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.add-source"
-msgstr "新增資源庫來源"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.foundation"
-msgstr "基礎庫"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.local-help"
-msgstr "建議使用專案附近的相對路徑。仍可連接專案目錄外的檔案，但移動檔案後可能失效。"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.local-path"
-msgstr "本機路徑"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.remote-help"
-msgstr "URL 會始終作為資源庫來源；SmallPen 會保留經過驗證的本機快照，用於加速載入和離線使用。"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.remote-url"
-msgstr "遠端 URL"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.tokens"
-msgid_plural "workspace.libraries.smallpen.tokens"
-msgstr[0] "%s 個令牌"
-
 #: src/app/main/ui/workspace/sidebar/history.cljs:144
 msgid "workspace.undo.entry.multiple.token"
 msgstr "權杖"
@@ -9370,10 +9345,6 @@ msgstr "審閱後套件已變更，請重新審閱檔案後再套用。"
 #: src/app/main/smallpen/dse.cljs
 msgid "smallpen.dse.create-component-failed"
 msgstr "無法建立元件，未做任何修改。"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.browse"
-msgstr "瀏覽…"
 
 #: src/app/main/smallpen/home.cljs:236
 msgid "smallpen.home.empty-subtitle"

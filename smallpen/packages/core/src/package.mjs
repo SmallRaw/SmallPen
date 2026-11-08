@@ -42,6 +42,7 @@ import {
 } from "./tokens-domain.mjs";
 import { activeTokenSetIds, productFoundationThemeIds } from "./token-themes.mjs";
 import { checkOperationShadows } from "./shadows.mjs";
+import { mergeInstanceOverrides } from "./named-targets.mjs";
 
 const ENTRY_KINDS = SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.entryKinds;
 const NODE_TYPES = new Set(
@@ -76,6 +77,11 @@ const OPTIONAL_NODE_FIELDS = new Set([
   "layout-item-align-self",
   "layout-item-absolute",
   "layout-item-z-index",
+  "layout-grid-dir",
+  "layout-grid-rows",
+  "layout-grid-columns",
+  "layout-grid-cells",
+  "layout-justify-items",
   "constraints-h",
   "constraints-v",
   "fixed-scroll",
@@ -1833,6 +1839,10 @@ function validateNodeChange(field, value, nodeId) {
         { path, value },
       );
     }
+  } else if (field === "layout-grid-rows" || field === "layout-grid-columns") {
+    validateGridTracks(value, path);
+  } else if (field === "layout-grid-cells") {
+    validateGridCells(value, path);
   } else if (
     ["layout-gap", "layout-padding", "layout-item-margin"].includes(field)
   ) {
@@ -1923,6 +1933,40 @@ function scalar(value) {
     typeof value === "number" ||
     typeof value === "string"
   );
+}
+
+// Grid tracks as Penpot keeps them: {type, value}; fr shares are flex.
+const GRID_TRACK_TYPES = ["auto", "fixed", "flex", "percent"];
+function validateGridTracks(value, path) {
+  if (!Array.isArray(value)) fail("invalid_node_layout", `${path} must be an array of tracks; ${received(value)}`);
+  for (const [index, track] of value.entries()) {
+    if (!isRecord(track) || !GRID_TRACK_TYPES.includes(track.type)) {
+      failEnum("invalid_node_layout", `${path}[${index}].type`, track?.type, GRID_TRACK_TYPES);
+    }
+    if (track.value !== undefined && track.value !== null && !(Number.isFinite(track.value) && track.value >= 0)) {
+      fail("invalid_node_layout", `${path}[${index}].value must be a non-negative number; ${received(track.value)}`);
+    }
+  }
+}
+
+// Grid cells by id, each naming the children it holds by node id.
+const GRID_CELL_FIELDS = new Set(["align-self", "area-name", "column", "column-span", "id", "justify-self", "position", "row", "row-span", "shapes"]);
+function validateGridCells(value, path) {
+  if (!isRecord(value)) fail("invalid_node_layout", `${path} must be an object of cells; ${received(value)}`);
+  for (const [key, cell] of Object.entries(value)) {
+    const cellPath = `${path}.${key}`;
+    if (!isRecord(cell)) fail("invalid_node_layout", `${cellPath} must be an object`);
+    const unknown = Object.keys(cell).find((field) => !GRID_CELL_FIELDS.has(field));
+    if (unknown) fail("invalid_node_layout", `${cellPath}.${unknown} is not a grid cell field`);
+    for (const field of ["row", "column", "row-span", "column-span"]) {
+      if (!Number.isSafeInteger(cell[field]) || cell[field] < 1) {
+        fail("invalid_node_layout", `${cellPath}.${field} must be a whole number from 1; ${received(cell[field])}`);
+      }
+    }
+    if (!Array.isArray(cell.shapes) || cell.shapes.some((shape) => typeof shape !== "string")) {
+      fail("invalid_node_layout", `${cellPath}.shapes must be an array of node ids`);
+    }
+  }
 }
 
 function validateInteractionAction(actionValue, path, nodes) {
@@ -2829,7 +2873,28 @@ function validateAssetReferences(manifest, entries) {
 // hashed.
 const verifiedBlobPaths = new WeakMap();
 
-async function validateBlobValues(manifest, entries, values) {
+// trusted: a blob map the reader built from files it already identified
+// (by hash, size and type); its bytes load on first use, so opening a
+// package never reads or hashes fonts and images.
+async function validateBlobValues(manifest, entries, values, trusted) {
+  if (trusted) {
+    for (const entry of manifest.entries.assets) {
+      const descriptors = [
+        ...entries[entry].media.map((media) => ["Media", media.id, media]),
+        ...entries[entry].fonts.flatMap((font) =>
+          font.variants.flatMap((variant) =>
+            Object.values(variant.files).map((file) => ["Font", `${font.id}/${variant.id}`, file]),
+          ),
+        ),
+      ];
+      for (const [kind, id, descriptor] of descriptors) {
+        if (!trusted.has(descriptor.blob)) {
+          fail(`missing_${kind.toLowerCase()}_blob`, `${kind} blob is missing: ${descriptor.blob}`, { blob: descriptor.blob, id, kind });
+        }
+      }
+    }
+    return trusted;
+  }
   const blobs = new Map();
   const hashes = new Map();
   const descriptors = [];
@@ -3908,11 +3973,11 @@ async function createRuntime(manifest, entries, domain, locator, options = {}) {
           const value = variant.selection?.[axis.id];
           return value === undefined || value === null
             ? null
-            : `${axis.name}=${value}`;
+            : `${axis.name}: ${value}`;
         })
         .filter((part) => part !== null);
       return parts.length > 0
-        ? `${set.name} · ${parts.join(", ")}`
+        ? `${set.name} · ${parts.join("; ")}`
         : (set.name ?? "Component");
     };
     const families = [];
@@ -4180,7 +4245,9 @@ export function listPackageEntries(manifestValue) {
   };
 }
 
-export async function loadPackageFromValues(locator, values) {
+// options.revision: the revision the reader computed from the package files;
+// without it the revision hashes the canonical values.
+export async function loadPackageFromValues(locator, values, options = {}) {
   if (!(values instanceof Map)) {
     fail("invalid_package_values", "Canonical Package values must be a Map");
   }
@@ -4189,7 +4256,8 @@ export async function loadPackageFromValues(locator, values) {
   }
   const { manifest } = listPackageEntries(values.get("manifest.json"));
   const entries = {};
-  const canonicalFiles = new Map([["manifest.json", canonicalJSON(manifest)]]);
+  const fileRevision = options.revision;
+  const canonicalFiles = new Map(fileRevision ? [] : [["manifest.json", canonicalJSON(manifest)]]);
   const screenIds = new Set();
   if (manifest.entries.assets.length > 1) {
     fail(
@@ -4232,7 +4300,7 @@ export async function loadPackageFromValues(locator, values) {
         validateTokenLibrary(value, entry);
       }
       entries[entry] = value;
-      canonicalFiles.set(entry, canonicalJSON(value));
+      if (!fileRevision) canonicalFiles.set(entry, canonicalJSON(value));
     }
   }
   const contexts = parseContextEntries(manifest, entries);
@@ -4264,7 +4332,7 @@ export async function loadPackageFromValues(locator, values) {
   validateDesignReferences(manifest, entries, domain);
   validateAppliedTokenReferences(manifest, entries, domain);
   validateAssetReferences(manifest, entries);
-  const blobs = await validateBlobValues(manifest, entries, values);
+  const blobs = await validateBlobValues(manifest, entries, values, options.blobs);
   if (
     manifest.entries.screens.length > 0 &&
     (!manifest.defaultScreenId ||
@@ -4287,7 +4355,7 @@ export async function loadPackageFromValues(locator, values) {
     domain,
     locator,
     manifest,
-    revision: await hashCanonicalFiles(canonicalFiles),
+    revision: fileRevision ?? await hashCanonicalFiles(canonicalFiles),
     runtime: await createRuntime(manifest, entries, domain, locator),
   };
 }
@@ -4661,7 +4729,7 @@ function applySetActiveTokenThemes(snapshot, operation, inverseOperations) {
       "missing_token_theme",
       `Token Theme does not exist: ${missingPaths[0]}. Themes: ${validThemes.join(", ") || "(none)"}` +
         (foundationUnloaded
-          ? ". Foundation themes can be selected only when the write loads the Foundation (smallpen apply on the Product does)"
+          ? ". Foundation themes can be selected only when the write loads the Foundation"
           : ""),
       { paths: missingPaths, validThemes },
     );
@@ -6588,9 +6656,16 @@ function overrideSourceNode(snapshot, instance, sourcePath, depth = 0) {
   if (node) return node;
   for (const nested of Object.values(variant.nodes)) {
     if (nested.instance && sourcePath.startsWith(`${nested.id}__`)) {
+      const overrides = Object.fromEntries(Object.entries(instance.overrides ?? {})
+        .filter(([path]) => path.startsWith(`${nested.id}__`) && path.endsWith(":variant"))
+        .map(([path, value]) => [path.slice(nested.id.length + 2), value]));
       return overrideSourceNode(
         snapshot,
-        nested.instance,
+        {
+          ...nested.instance,
+          variant: { ...nested.instance.variant, ...instance.overrides?.[`${nested.id}:variant`] },
+          overrides: mergeInstanceOverrides(nested.instance.overrides, overrides),
+        },
         sourcePath.slice(nested.id.length + 2),
         depth + 1,
       );
@@ -6977,7 +7052,7 @@ function numberNewRepeats(before, candidate, changedFiles) {
   for (const { entry, set } of sets)
     for (const variant of set.variants ?? []) {
       const old = beforeSets.get(set.id)?.variants?.find(({ id }) => id === variant.id);
-      const label = (set.axes ?? []).map((axis) => `${axis.name}=${variant.selection?.[axis.id]}`).join(", ");
+      const label = (set.axes ?? []).map((axis) => `${axis.name}: ${variant.selection?.[axis.id]}`).join("; ");
       siblings(variant.nodes, old?.nodes, entry, label ? `${set.name} (${label})` : set.name);
     }
   if (Array.isArray(candidate.manifest.canvases)) {

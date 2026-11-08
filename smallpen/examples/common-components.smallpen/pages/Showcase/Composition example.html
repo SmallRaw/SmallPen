@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Composition example</title>
+  <link rel="stylesheet" href="../../tokens.css">
+</head>
+<body data-name="Workspace / composed page" class="w-[840px] h-[620px] bg-demo-canvas rounded-base">
+  <sp-use component="Title" data-name="Title instance" class="left-[24px] top-[24px] w-[320px] h-[76px]"></sp-use>
+  <sp-use component="Badge" props="Tone: success" data-name="Badge instance" class="left-[690px] top-[46px] w-[108px] h-[32px]"></sp-use>
+  <sp-use component="Input" props="State: focus" data-name="Input instance" class="left-[24px] top-[132px] w-[320px] h-[104px]"></sp-use>
+  <sp-use component="Button" data-name="Save button" class="left-[24px] top-[256px] w-[152px] h-[44px]">
+    <p data-name="Label">Save changes</p>
+  </sp-use>
+  <sp-use component="Dialog" props="Kind: form" data-name="Dialog instance" class="left-[424px] top-[132px] w-[392px] h-[300px]"></sp-use>
+  <p data-name="Components above are reused here as instances." class="left-[24px] top-[502px] w-[740px] h-[19px] text-demo-ink type-demo-label">Components above are reused here as instances.</p>
+  <p data-name="Save changes is a local label override; the component still says Continue." class="left-[24px] top-[536px] w-[740px] h-[19px] text-demo-muted type-demo-label">Save changes is a local label override; the component still says Continue.</p>
+</body>
+</html>

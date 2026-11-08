@@ -16,6 +16,7 @@ import { openPackage, renderProjection } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
+import { componentEntry, onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SCREEN = "scr_design_system";
@@ -25,10 +26,8 @@ const LABEL = "node_card_instance_idle__node_card_idle_label";
 const LABEL_TEXT = "node_card_idle_label:text";
 
 async function fixtureValues() {
-  const fixture = join(here, "fixtures", "design-system.smallpen");
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const fixture = join(here, "fixtures", "model", "design-system");
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
@@ -56,7 +55,7 @@ function projectedNodes(snapshot) {
 }
 
 function instanceNode(snapshot) {
-  return snapshot.entries["screens/screen.json"].presentations[0].nodes[
+  return onlyScreen(snapshot).presentations[0].nodes[
     INSTANCE
   ];
 }
@@ -507,7 +506,7 @@ test("an instance label bound to a string Token shows its value and a person's e
       library.sets
         .find(({ id }) => id === "tset_color_light")
         .tokens.push({ description: "", id: "tok_label_text", name: "text.card.label", type: "string", value: "Open card" });
-      instanceNode({ entries: { "screens/screen.json": values.get("screens/screen.json") } }).instance.overrides = {
+      values.get("screens/screen.json").presentations[0].nodes[INSTANCE].instance.overrides = {
         "node_card_idle_label:tokenBindings": { text: { assetId: "tok_label_text", packageId: "pkg_design_system" } },
       };
     }),
@@ -607,7 +606,7 @@ test("set-remote-synced is accepted as Penpot sync bookkeeping", async () => {
 test("an override may target a Component node added earlier in the batch", async () => {
   const before = await product();
   const componentSet = structuredClone(
-    before.entries["components/components.json"].componentSets[0],
+    componentEntry(before).componentSets[0],
   );
   const variant = componentSet.variants[0];
   variant.nodes.node_card_idle_badge = {

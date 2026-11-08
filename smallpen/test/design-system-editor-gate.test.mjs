@@ -13,27 +13,20 @@ import { canonicalJSON } from "@smallpen/core";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 import { applyOperationBatch, openPackage } from "@smallpen/local-package";
 
+import { readModelEntry, tokenEntry, writeModelPackage } from "./helpers/named.mjs";
 import {
-  buildEditorFoundationValues,
   buildEditorPackageValues,
   EDITOR_NESTED_NODES,
 } from "./fixtures/design-system-editor-fixture.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-async function writePackage(dir, values) {
-  for (const [entry, value] of values) {
-    const path = join(dir, entry);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify(value, null, 2));
-  }
-}
+const writePackage = (dir, values) => writeModelPackage(dir, values);
 
 async function editorPackage() {
   const parent = await mkdtemp(join(tmpdir(), "smallpen-dse-gate-"));
   const packagePath = join(parent, "editor.smallpen");
   await writePackage(packagePath, buildEditorPackageValues());
-  await writePackage(`${parent}/canvas-shared.smallpen`, buildEditorFoundationValues());
   const snapshot = await openPackage(packagePath);
   return { packagePath, parent, snapshot };
 }
@@ -110,7 +103,7 @@ test("runtime carries design-system refs for every supported token type", async 
     );
     assert.ok(archivedRef, "archived Cell state missing from the catalog");
     assert.ok(
-      !snapshot.entries["tokens/canvas.json"].activeSetIds.includes(
+      !tokenEntry(snapshot).activeSetIds.includes(
         archivedRef.setId,
       ),
       "archived status must follow the active Set combination",
@@ -242,55 +235,6 @@ test("runtime carries design-system refs for every supported token type", async 
   }
 });
 
-test("page refs preserve canonical rootIds and empty presentations", async () => {
-  const parent = await mkdtemp(join(tmpdir(), "smallpen-dse-page-roots-"));
-  const packagePath = join(parent, "editor.smallpen");
-  try {
-    const values = buildEditorPackageValues();
-    const home = values.get("screens/canvas-page-home.json");
-    const presentation = home.presentations[0];
-    presentation.nodes.node_second_root = {
-      children: [],
-      height: 40,
-      id: "node_second_root",
-      name: "Second root",
-      type: "RECTANGLE",
-      width: 80,
-      x: 900,
-      y: 0,
-    };
-    presentation.rootIds = [presentation.rootId, "node_second_root"];
-    home.presentations.push({
-      ...structuredClone(presentation),
-      id: "pres_empty",
-      name: "Empty",
-      nodes: {},
-      rootId: null,
-      rootIds: [],
-    });
-    await writePackage(packagePath, values);
-    await writePackage(
-      `${parent}/canvas-shared.smallpen`,
-      buildEditorFoundationValues(),
-    );
-
-    const snapshot = await openPackage(packagePath);
-    const pages = snapshot.runtime.designSystemRefs.pages;
-    const multi = pages.find(
-      (page) =>
-        page.screenId === home.id && page.presentationId === presentation.id,
-    );
-    const empty = pages.find(
-      (page) => page.screenId === home.id && page.presentationId === "pres_empty",
-    );
-    assert.deepEqual(multi.rootIds, presentation.rootIds);
-    assert.deepEqual(empty.rootIds, []);
-    assert.equal(empty.nodeCount, 0);
-  } finally {
-    await rm(parent, { recursive: true, force: true });
-  }
-});
-
 test("token specimen fill edit writes the Cell, undo restores it", async () => {
   const { packagePath, parent, snapshot } = await editorPackage();
   try {
@@ -325,17 +269,13 @@ test("token specimen fill edit writes the Cell, undo restores it", async () => {
     );
 
     const applied = await applyOperationBatch(packagePath, batch);
-    const written = JSON.parse(
-      await readFile(join(packagePath, "tokens/canvas.json"), "utf8"),
-    );
+    const written = await readModelEntry(packagePath, "tokens/canvas.json");
     const lightSet = written.sets.find((set) => set.id === "tset_canvas_color_light");
     assert.equal(
       lightSet.tokens.find((token) => token.id === COLOR_TOKEN_ID).value,
       "#22c55e",
     );
-    const manifest = JSON.parse(
-      await readFile(join(packagePath, "manifest.json"), "utf8"),
-    );
+    const manifest = await readModelEntry(packagePath, "manifest.json");
     assert.equal(manifest.entries.screens.length, 2, "canonical screens drifted");
 
     // Undo replays the committed inverse batch against the new revision.
@@ -344,9 +284,7 @@ test("token specimen fill edit writes the Cell, undo restores it", async () => {
       ...applied.inverseBatch,
       baseRevision: opened.revision,
     });
-    const undone = JSON.parse(
-      await readFile(join(packagePath, "tokens/canvas.json"), "utf8"),
-    );
+    const undone = await readModelEntry(packagePath, "tokens/canvas.json");
     const undoneSet = undone.sets.find((set) => set.id === "tset_canvas_color_light");
     assert.equal(
       undoneSet.tokens.find((token) => token.id === COLOR_TOKEN_ID).value,
@@ -368,12 +306,7 @@ test("component family tree edits write the component definition", async () => {
         candidate.variantId === "var_canvas_button_primary",
     );
     assert.ok(family, "Button primary family missing from the catalog");
-    const componentsProbe = JSON.parse(
-      await readFile(
-        join(packagePath, snapshot.manifest.entries.components[0]),
-        "utf8",
-      ),
-    );
+    const componentsProbe = await readModelEntry(packagePath, snapshot.manifest.entries.components[0]);
     const probeSet = componentsProbe.componentSets.find(
       (candidate) => candidate.id === family.componentSetId,
     );
@@ -476,9 +409,7 @@ test("component family tree edits write the component definition", async () => {
 
     const applied = await applyOperationBatch(packagePath, batch);
     const componentsEntry = snapshot.manifest.entries.components[0];
-    const component = JSON.parse(
-      await readFile(join(packagePath, componentsEntry), "utf8"),
-    );
+    const component = await readModelEntry(packagePath, componentsEntry);
     const set = component.componentSets.find(
       (candidate) => candidate.id === family.componentSetId,
     );
@@ -494,9 +425,7 @@ test("component family tree edits write the component definition", async () => {
       ...applied.inverseBatch,
       baseRevision: opened.revision,
     });
-    const undone = JSON.parse(
-      await readFile(join(packagePath, componentsEntry), "utf8"),
-    );
+    const undone = await readModelEntry(packagePath, componentsEntry);
     const undoneVariant = undone.componentSets
       .find((candidate) => candidate.id === family.componentSetId)
       .variants.find((candidate) => candidate.id === family.variantId);
@@ -505,128 +434,6 @@ test("component family tree edits write the component definition", async () => {
       undoneVariant.nodes[labelNodeId].text,
       probeVariant.nodes[labelNodeId].text,
     );
-  } finally {
-    await rm(parent, { recursive: true, force: true });
-  }
-});
-
-test("located component board edits write the source node (DSE-R11)", async () => {
-  const { packagePath, parent, snapshot } = await editorPackage();
-  try {
-    // Create a located component over the nested Home container (the same
-    // commit the ordinary create-component flow produces).
-    const mainNodeId = "node_editor_nested";
-    const pageId =
-      snapshot.runtime.pages.scr_canvas_home.pres_canvas_home_desktop;
-    const mainRuntimeId =
-      snapshot.runtime.nodes.scr_canvas_home.pres_canvas_home_desktop[
-        mainNodeId
-      ];
-    assert.ok(mainRuntimeId, "main node runtime id missing");
-    const createBatch = compilePenpotChanges(snapshot, {
-      changes: [
-        {
-          annotation: null,
-          id: "c1000000-0000-4000-8000-0000000000c1",
-          "main-instance-id": mainRuntimeId,
-          "main-instance-page": pageId,
-          name: "Nested Component",
-          path: "Layouts",
-          type: "add-component",
-        },
-        {
-          id: mainRuntimeId,
-          operations: [
-            {
-              attr: "component-id",
-              type: "set",
-              val: "c1000000-0000-4000-8000-0000000000c1",
-            },
-            {
-              attr: "component-file",
-              type: "set",
-              val: snapshot.runtime.file,
-            },
-            { attr: "component-root", type: "set", val: true },
-            { attr: "main-instance", type: "set", val: true },
-          ],
-          "page-id": pageId,
-          type: "mod-obj",
-        },
-      ],
-      commitId: "dse-gate-located-create",
-    });
-    await applyOperationBatch(packagePath, createBatch);
-
-    // Re-open: the located component enters the FULL family catalog and its
-    // main tree maps on the generated page.
-    const reopened = await openPackage(packagePath);
-    const refs = reopened.runtime.designSystemRefs;
-    const located = refs.families.find((family) => family.kind === "located");
-    assert.ok(located, "located component missing from families");
-    assert.equal(located.label, "Nested Component");
-    assert.equal(located.mainNodeId, mainNodeId);
-    assert.ok(located.nodeCount >= 3, "main tree not fully cataloged");
-    assert.equal(
-      reopened.runtime.reverseDesignSystem[mainRuntimeId]?.kind,
-      "located-component-node",
-    );
-
-    // A board edit of the copy translates to the source node on its own
-    // screen, and board moves stay rejected.
-    const designSystemPage = reopened.runtime.designSystemPage;
-    const fillBatch = compilePenpotChanges(reopened, {
-      changes: [
-        modObject(
-          mainRuntimeId,
-          [
-            {
-              type: "set",
-              attr: "fills",
-              val: [{ "fill-color": "#0ea5e9", "fill-opacity": 1 }],
-            },
-          ],
-          designSystemPage,
-        ),
-      ],
-      commitId: "dse-gate-located-fill",
-    });
-    const update = fillBatch.operations.find(
-      (operation) => operation.type === "update-presentation-node",
-    );
-    assert.ok(update, "board fill edit lost its source update");
-    assert.equal(update.screenId, "scr_canvas_home");
-    assert.equal(update.presentationId, "pres_canvas_home_desktop");
-    assert.equal(update.nodeId, mainNodeId);
-    assert.equal(update.changes.fills?.[0]?.color, "#0ea5e9");
-
-    assert.throws(
-      () =>
-        compilePenpotChanges(reopened, {
-          changes: [
-            modObject(
-              mainRuntimeId,
-              [{ type: "set", attr: "x", val: 12 }],
-              designSystemPage,
-            ),
-          ],
-          commitId: "dse-gate-located-move",
-        }),
-      (error) => error.code === "design_system_layout_locked",
-      "board moves must not write the source layout",
-    );
-
-    // The write really lands on the source node.
-    await applyOperationBatch(packagePath, fillBatch);
-    const screens = reopened.manifest.entries.screens;
-    const screenPath = screens.find((entry) =>
-      JSON.stringify(entry).includes("canvas-page-home"),
-    );
-    const screen = JSON.parse(await readFile(join(packagePath, screenPath), "utf8"));
-    const home = screen.presentations.find(
-      (candidate) => candidate.id === "pres_canvas_home_desktop",
-    );
-    assert.equal(home.nodes[mainNodeId].fills[0].color, "#0ea5e9");
   } finally {
     await rm(parent, { recursive: true, force: true });
   }
@@ -694,7 +501,7 @@ test("ordinary page edits keep the normal update path", async () => {
     const screen = snapshot.manifest.entries.screens.find(
       (entry) => snapshot.entries[entry].id === "scr_canvas_home",
     );
-    const home = JSON.parse(await readFile(join(packagePath, screen), "utf8"));
+    const home = await readModelEntry(packagePath, screen);
     const presentation = home.presentations[0];
     const pathNode = EDITOR_NESTED_NODES.node_editor_nested_path;
     const pathRuntimeId = snapshot.runtime.nodes["scr_canvas_home"][presentation.id][pathNode.id];
@@ -728,11 +535,8 @@ test("ordinary page edits keep the normal update path", async () => {
 // ambiguous targets without partial writes.
 
 async function readStrokeToken(packagePath) {
-  const written = JSON.parse(
-    await readFile(join(packagePath, "tokens/canvas.json"), "utf8"),
-  );
-  const strokeSet = written.sets.find((set) => set.id === "tset_canvas_stroke");
-  return strokeSet.tokens.find((token) => token.id === STROKE_TOKEN_ID).value;
+  const written = await readModelEntry(packagePath, "tokens/canvas.json");
+  return written.sets.flatMap((set) => set.tokens).find((token) => token.id === STROKE_TOKEN_ID).value;
 }
 
 test("token specimen native stroke edit writes the width Cell, undo restores it", async () => {
@@ -982,11 +786,8 @@ test("a height edit with a ride-along position op writes the Cell, pure moves st
 });
 
 async function readShadowToken(packagePath) {
-  const written = JSON.parse(
-    await readFile(join(packagePath, "tokens/canvas.json"), "utf8"),
-  );
-  const effectSet = written.sets.find((set) => set.id === "tset_canvas_effect");
-  return effectSet.tokens.find((token) => token.id === SHADOW_TOKEN_ID).value;
+  const written = await readModelEntry(packagePath, "tokens/canvas.json");
+  return written.sets.flatMap((set) => set.tokens).find((token) => token.id === SHADOW_TOKEN_ID).value;
 }
 
 test("token specimen native shadow array edit writes the effect Cell, undo restores it", async () => {
@@ -1059,8 +860,9 @@ test("token specimen native shadow array edit writes the effect Cell, undo resto
       ...applied.inverseBatch,
       baseRevision: opened.revision,
     });
+    // tokens.css stores colors as hex, so the restored value reads as hex.
     assert.deepEqual(await readShadowToken(packagePath), {
-      color: "rgba(0, 0, 0, 0.24)",
+      color: "#0000003d",
       offsetX: 0,
       offsetY: 2,
       blur: 4,
@@ -1161,11 +963,11 @@ test("unsupported shadow edits are rejected without partial writes", async () =>
 
 async function readCanonicalFiles(packagePath, snapshot) {
   const files = new Map([
-    ["manifest.json", JSON.parse(await readFile(join(packagePath, "manifest.json"), "utf8"))],
+    ["manifest.json", await readModelEntry(packagePath, "manifest.json")],
   ]);
   for (const entries of Object.values(snapshot.manifest.entries)) {
     for (const entry of entries) {
-      files.set(entry, JSON.parse(await readFile(join(packagePath, entry), "utf8")));
+      files.set(entry, await readModelEntry(packagePath, entry));
     }
   }
   return files;
@@ -1257,12 +1059,7 @@ test("the generated page never persists: every write class lands in its source, 
         candidate.variantId === "var_canvas_button_primary",
     );
     assert.ok(family, "Button primary family missing");
-    const componentsProbe = JSON.parse(
-      await readFile(
-        join(packagePath, snapshot.manifest.entries.components[0]),
-        "utf8",
-      ),
-    );
+    const componentsProbe = await readModelEntry(packagePath, snapshot.manifest.entries.components[0]);
     const probeVariant = componentsProbe.componentSets
       .find((set) => set.id === family.componentSetId)
       .variants.find((variant) => variant.id === family.variantId);
@@ -1404,9 +1201,7 @@ test("the generated page never persists: every write class lands in its source, 
       changed.sort(),
       [
         snapshot.manifest.entries.components[0],
-        snapshot.manifest.entries.screens.find((entry) =>
-          entry.endsWith("canvas-page-home.json"),
-        ),
+        snapshot.manifest.entries.screens.find((entry) => snapshot.entries[entry].name === "Home"),
         snapshot.manifest.entries.tokens[0],
       ].sort(),
       "canonical diff must contain exactly the three intended source entries",
@@ -1421,7 +1216,7 @@ test("the generated page never persists: every write class lands in its source, 
     );
     const homeAfter = after.get(
       snapshot.manifest.entries.screens.find((entry) =>
-        entry.endsWith("canvas-page-home.json"),
+        snapshot.entries[entry].name === "Home",
       ),
     );
     assert.equal(
@@ -1523,25 +1318,18 @@ test("external canonical updates rebuild the board with stable ids and fresh val
 const COVERAGE_SET_ID = "tset_reference_coverage";
 const COVERAGE_SET_NAME = "reference/coverage";
 
-// One Cell per canonical type the editor fixture does not carry yet, plus an
-// unknown-type Cell that must be diagnosed instead of silently dropped. The
+// One Cell per tokens.css type the editor fixture does not carry yet. The
 // set is ACTIVE but claimed by no Token Domain, so it must appear in EVERY
 // valid Workbench Combination view.
 function coverageTokens() {
   return [
     ["tok_coverage_boolean", "flag", "boolean", true],
-    ["tok_coverage_dimensions", "box", "dimensions", 120],
     ["tok_coverage_font_family", "family", "font-family", "Inter"],
     ["tok_coverage_font_size", "size", "font-size", 24],
     ["tok_coverage_font_weight", "weight", "font-weight", 700],
     ["tok_coverage_letter_spacing", "tracking", "letter-spacing", 1.5],
-    ["tok_coverage_number", "count", "number", 12],
     ["tok_coverage_opacity", "veil", "opacity", 0.42],
-    ["tok_coverage_other", "config", "other", '{"theme":{"dark":true},"steps":[1,2]}'],
-    ["tok_coverage_rotation", "tilt", "rotation", -30],
     ["tok_coverage_string", "label", "string", "Hello 覆盖"],
-    ["tok_coverage_text_case", "case", "text-case", "uppercase"],
-    ["tok_coverage_text_decoration", "decoration", "text-decoration", "underline"],
   ].map(([id, name, type, value]) => ({
     description: `Coverage Cell ${name} (${type})`,
     id,
@@ -1564,231 +1352,13 @@ async function coveragePackage() {
     tokens: coverageTokens(),
   });
   library.activeSetIds.push(COVERAGE_SET_ID);
-  // An ARCHIVED set: neither active nor claimed by any Token Domain — its
-  // Cell must still materialize (archived band), never be hidden.
-  library.sets.push({
-    description: "Archived Cells covered by no combination",
-    id: "tset_reference_archived",
-    name: "reference/archived",
-    tokens: [
-      {
-        description: "Archived color Cell",
-        id: "tok_reference_archived_color",
-        name: "legacy.color",
-        type: "color",
-        value: "#cccccc",
-      },
-    ],
-  });
   values.set(libraryEntry, library);
   const parent = await mkdtemp(join(tmpdir(), "smallpen-dse-coverage-"));
   const packagePath = join(parent, "coverage.smallpen");
   await writePackage(packagePath, values);
-  await writePackage(`${parent}/canvas-shared.smallpen`, buildEditorFoundationValues());
   const snapshot = await openPackage(packagePath);
   return { packagePath, parent, snapshot, libraryEntry };
 }
-
-test("combination-aware refs materialize every Cell x valid Combination and catalog the 20 canonical types (DSE-R17/R18)", async () => {
-  const { parent, snapshot } = await coveragePackage();
-  try {
-    const refs = snapshot.runtime.designSystemRefs;
-    // device{Mobile,Desktop} x mode{Light,Dark} = 4 source-declared combos.
-    assert.equal(refs.combinations.length, 4);
-    assert.deepEqual(
-      new Set(refs.combinations.map((combo) => combo.id)).size,
-      4,
-      "combination ids must be unique and stable",
-    );
-    for (const combo of refs.combinations) {
-      assert.ok(combo.label.length > 0, "every combination needs a label");
-      assert.ok(Array.isArray(combo.setIds) && combo.setIds.length > 0);
-    }
-
-    // The 20-type catalog: exactly the canonical types, no 21st entry, no
-    // empty-type hiding, plus a diagnosis for the unknown type.
-    assert.equal(refs.types.length, 20);
-    const typeByName = new Map(refs.types.map((entry) => [entry.type, entry]));
-    assert.equal(typeByName.get("color").cells, 9);
-    assert.equal(typeByName.get("boolean").cells, 1);
-    assert.equal(typeByName.get("spacing").cells, 4);
-    // Unknown type input cannot reach the library at all: the canonical
-    // boundary rejects it with a precise diagnostic (R18 未知输入诊断).
-    const badValues = buildEditorPackageValues();
-    const badLibrary = badValues.get([...badValues.keys()].find((entry) => entry.startsWith("tokens/")));
-    badLibrary.sets.push({
-      description: "bad type",
-      id: "tset_reference_bad",
-      name: "reference/bad",
-      tokens: [{ description: "", id: "tok_reference_bad", name: "weird", type: "hypertype", value: 1 }],
-    });
-    const badDir = await mkdtemp(join(tmpdir(), "smallpen-dse-bad-"));
-    try {
-      const badPath = join(badDir, "bad.smallpen");
-      await writePackage(badPath, badValues);
-      await assert.rejects(
-        () => openPackage(badPath),
-        (error) => error.code === "unsupported_token_type",
-        "unknown token types must be rejected at the canonical boundary",
-      );
-    } finally {
-      await rm(badDir, { recursive: true, force: true });
-    }
-
-    // color/light Cells live in the two Light combinations; the coverage set
-    // (active, unclaimed by any domain) appears in ALL four; archived Cells
-    // (covered by no combination and not active) still get a specimen in the
-    // archived band.
-    const lightCombos = refs.combinations.filter((combo) =>
-      combo.setIds.includes("tset_canvas_color_light"),
-    );
-    assert.equal(lightCombos.length, 2);
-    const colorKeys = refs.specimenKeysByToken[COLOR_TOKEN_ID];
-    assert.equal(colorKeys.length, lightCombos.length);
-    const coverageKeys = refs.specimenKeysByToken.tok_coverage_number;
-    assert.equal(coverageKeys.length, 4, "active unclaimed Cells observe every combination");
-    const archivedSpecimen = Object.values(refs.specimens).find(
-      (candidate) => candidate.combinationId === null,
-    );
-    assert.ok(archivedSpecimen, "archived Cells keep a specimen in the archived band");
-    assert.equal(archivedSpecimen.tokenId, "tok_reference_archived_color");
-    assert.equal(archivedSpecimen.status, "archived");
-
-    // Every specimen maps back to its token cell through the reverse map,
-    // with per-combination ids distinct from each other.
-    for (const key of [...colorKeys, ...coverageKeys]) {
-      const spec = refs.specimens[key];
-      assert.equal(
-        snapshot.runtime.reverseDesignSystem[spec.shape]?.kind,
-        "token-cell",
-        `specimen ${key} must be a write target`,
-      );
-    }
-    assert.notEqual(
-      refs.specimens[colorKeys[0]].shape,
-      refs.specimens[colorKeys[1]].shape,
-      "combination specimens of one Cell are distinct shapes",
-    );
-  } finally {
-    await rm(parent, { recursive: true, force: true });
-  }
-});
-
-test("every canonical type has a real write path on the panorama (DSE-R19~R24/R26)", async () => {
-  const { packagePath, parent, snapshot } = await coveragePackage();
-  try {
-    const pageId = snapshot.runtime.designSystemPage;
-    const edit = (tokenId, attr, val, extra = []) =>
-      compilePenpotChanges(snapshot, {
-        changes: [
-          modObject(
-            specimen(snapshot, tokenId).shape,
-            [{ type: "set", attr, val }, ...extra],
-            pageId,
-          ),
-        ],
-        commitId: `dse-gate-${tokenId}`,
-      });
-
-    // Shape-bound attribute edits.
-    const cases = [
-      ["tok_coverage_opacity", "opacity", 42, 0.42],
-      ["tok_coverage_rotation", "rotation", -30, -30],
-      ["tok_coverage_dimensions", "width", 96, 96],
-      ["tok_coverage_dimensions", "height", 96, 96],
-      ["tok_coverage_font_size", "font-size", 32, 32],
-      ["tok_coverage_letter_spacing", "letter-spacing", 4, 4],
-      ["tok_coverage_font_family", "font-family", "Sourcesanspro", "Sourcesanspro"],
-      ["tok_coverage_font_weight", "font-weight", "800", 800],
-      ["tok_coverage_text_case", "text-transform", "lowercase", "lowercase"],
-      ["tok_coverage_text_decoration", "text-decoration", "line-through", "line-through"],
-    ];
-    for (const [tokenId, attr, val, expected] of cases) {
-      const batch = edit(tokenId, attr, val);
-      const op = batch.operations.find((candidate) => candidate.type === "set-token-value");
-      assert.ok(op, `${attr} edit must compile for ${tokenId}`);
-      assert.equal(op.tokenId, tokenId);
-      assert.equal(op.value, expected, `${attr} value translation for ${tokenId}`);
-    }
-
-    // Scalar value cards: text content edits parse and validate per type.
-    const scalarCases = [
-      ["tok_coverage_string", "NEW 字面值", "NEW 字面值"],
-      ["tok_coverage_number", " 42.5 ", 42.5],
-      ["tok_coverage_boolean", "false", false],
-      ["tok_coverage_other", '{"k":[1,2]}', '{"k":[1,2]}'],
-    ];
-    for (const [tokenId, text, expected] of scalarCases) {
-      const batch = edit(tokenId, "content", {
-        type: "root",
-        children: [{ type: "paragraph-set", children: [{ type: "paragraph", children: [{ type: "text", text }] }] }],
-      });
-      const op = batch.operations.find((candidate) => candidate.type === "set-token-value");
-      assert.ok(op, `content edit must compile for ${tokenId}`);
-      assert.deepEqual(op.value, expected, `scalar parse for ${tokenId}`);
-    }
-
-    // Invalid scalar values fail BEFORE any write happens.
-    for (const [tokenId, bad] of [
-      ["tok_coverage_boolean", "true-ish"],
-      ["tok_coverage_number", "abc"],
-      ["tok_coverage_other", "{broken"],
-    ]) {
-      assert.throws(
-        () =>
-          edit(tokenId, "content", {
-            type: "root",
-            children: [{ type: "paragraph-set", children: [{ type: "paragraph", children: [{ type: "text", text: bad }] }] }],
-          }),
-        (error) => error.details?.code === "design_system_token_value_invalid" || error.code === "design_system_token_value_invalid",
-        `invalid ${tokenId} value must be rejected`,
-      );
-    }
-
-    // The Token inspector path: a full token-value rewrite (typography
-    // record) compiles to one set-token-value.
-    const typographyBatch = edit("tok_canvas_typography_desktop_heading", "token-value", {
-      fontFamily: "Inter",
-      fontId: "gfont-inter",
-      fontSize: 40,
-      fontWeight: 700,
-      lineHeight: 1.4,
-    });
-    const typographyOp = typographyBatch.operations.find(
-      (candidate) => candidate.type === "set-token-value",
-    );
-    assert.ok(typographyOp, "typography token-value edit must compile");
-    assert.equal(typographyOp.value.fontSize, 40);
-    assert.equal(typographyOp.value.fontWeight, 700);
-
-    // A real applied batch writes the coverage Cell and Undo restores it.
-    const applied = await applyOperationBatch(packagePath, edit("tok_coverage_opacity", "opacity", 80));
-    const written = JSON.parse(
-      await readFile(packagePath + "/tokens/canvas.json", "utf8"),
-    );
-    const coverageSet = written.sets.find((set) => set.id === COVERAGE_SET_ID);
-    assert.equal(
-      coverageSet.tokens.find((token) => token.id === "tok_coverage_opacity").value,
-      0.8,
-    );
-    const opened = await openPackage(packagePath);
-    await applyOperationBatch(packagePath, {
-      ...applied.inverseBatch,
-      baseRevision: opened.revision,
-    });
-    const undone = JSON.parse(
-      await readFile(packagePath + "/tokens/canvas.json", "utf8"),
-    );
-    const undoneSet = undone.sets.find((set) => set.id === COVERAGE_SET_ID);
-    assert.equal(
-      undoneSet.tokens.find((token) => token.id === "tok_coverage_opacity").value,
-      0.42,
-      "undo must restore the coverage Cell",
-    );
-  } finally {
-    await rm(parent, { recursive: true, force: true });
-  }
-});
 
 test("alias Cells keep attribute edits locked but rewrite the expression via the token-value path (DSE-R26)", async () => {
   const { parent, snapshot } = await coveragePackage();

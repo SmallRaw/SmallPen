@@ -13,14 +13,15 @@ import { inflateSync } from "node:zlib";
 
 import { listPackageEntries, loadPackageFromValues } from "@smallpen/core";
 import { createEvidence } from "@smallpen/local-package";
+import { readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 const BACKGROUND = [244, 244, 245];
 const INK = [29, 78, 216];
 
 async function renderPaths(paths) {
-  const manifest = JSON.parse(await readFile(join(fixture, "manifest.json"), "utf8"));
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));

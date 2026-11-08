@@ -26,19 +26,19 @@ async function run(args, expected = 0) {
 async function project(t) {
   const root = await mkdtemp(join(tmpdir(), "smallpen-token-export-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const created = await run(["project", "init", join(root, "app")]);
+  const created = await run(["init", join(root, "app")]);
   return { root, path: created.packages.package.path };
 }
 
-test("token export advertises only JSON data formats", async () => {
+test("token export advertises JSON and CSS custom properties", async () => {
   const schema = await run(["schema", "command", "token", "export"]);
-  assert.deepEqual(schema.parameters.tokenFormat.values, ["json", "flat"]);
+  assert.deepEqual(schema.parameters.tokenFormat.values, ["json", "flat", "css"]);
 });
 
-for (const format of ["css", "ts"]) {
+for (const format of ["ts"]) {
   test(`token export refuses ${format} before writing any files`, async (t) => {
     const { root, path } = await project(t);
-    const revision = (await run(["project", "show", path])).revision;
+    const revision = (await run(["check", path])).revision;
     const output = join(root, "output");
     const result = await run(
       ["token", "export", path, "--format", format, "--output", output],
@@ -46,26 +46,17 @@ for (const format of ["css", "ts"]) {
     );
     assert.equal(result.error.code, "unknown_token_format");
     await assert.rejects(access(output), { code: "ENOENT" });
-    assert.equal((await run(["project", "show", path])).revision, revision);
+    assert.equal((await run(["check", path])).revision, revision);
   });
 }
 
 for (const format of [undefined, "flat"]) {
   test(`token export retains ${format ?? "default nested JSON"} values and selection`, async (t) => {
     const { root, path } = await project(t);
-    const file = join(root, "tokens.json");
     await writeFile(
-      file,
-      JSON.stringify({
-        tokens: [
-          { name: "color.surface", type: "color", value: "#ffffff" },
-          { name: "space.md", type: "spacing", value: 16 },
-          { name: "text.title", type: "string", value: "Tasks" },
-          { name: "flag.sidebar", type: "boolean", value: false },
-        ],
-      }),
+      join(path, "tokens.css"),
+      ':root {\n  --color-surface: #ffffff;\n  --spacing-md: 16px;\n  --string-title: "Tasks";\n  --flag-sidebar: false;\n}\n',
     );
-    await run(["token", "set", path, "--intent", file]);
     const result = await run([
       "token",
       "export",
@@ -76,20 +67,20 @@ for (const format of [undefined, "flat"]) {
     ]);
     assert.equal(result.format, format ?? "json");
     assert.equal(basename(result.files[0].file), "tokens.json");
-    assert.deepEqual(result.themes, ["Theme/Default"]);
+    assert.deepEqual(result.themes, []);
     const actual = JSON.parse(await readFile(result.files[0].file, "utf8"));
     const expected =
       format === "flat"
         ? {
-            "color.surface": "#ffffff",
-            "space.md": 16,
-            "text.title": "Tasks",
-            "flag.sidebar": false,
+            "color-surface": "#ffffff",
+            "spacing-md": 16,
+            "string-title": "Tasks",
+            "flag-sidebar": false,
           }
         : {
             color: { surface: "#ffffff" },
-            space: { md: 16 },
-            text: { title: "Tasks" },
+            spacing: { md: 16 },
+            string: { title: "Tasks" },
             flag: { sidebar: false },
           };
     assert.deepEqual(actual, expected);

@@ -16,12 +16,13 @@ import {
   pruneUnresolvableTokens,
   resolveEffectiveToken,
 } from "@smallpen/core";
+import { readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 async function fixtureValues(name = "roundtrip.smallpen") {
-  const root = join(here, "fixtures", name);
-  const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
+  const root = join(here, "fixtures", "model", String(name).replace(/\.smallpen$/, ""));
+  const manifest = await readModelEntry(root, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(root, entry), "utf8")));

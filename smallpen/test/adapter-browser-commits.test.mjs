@@ -16,21 +16,20 @@ import {
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
+import { readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SCREEN = "scr_design_system";
 const PRESENTATION = "pres_desktop";
 const SWATCH = "node_swatch_primary";
 
-const EXAMPLE = join(here, "..", "examples", "common-components.smallpen");
+const EXAMPLE = join(here, "fixtures", "model", "common-components");
 
 async function served(
-  fixture = join(here, "fixtures", "design-system.smallpen"),
+  fixture = join(here, "fixtures", "model", "design-system"),
   edit = undefined,
 ) {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
@@ -228,10 +227,8 @@ test("centered flex content that overflows projects where Penpot put it", async 
 });
 
 test("a copy dropped from Assets moves with its children in the same session", async () => {
-  const example = join(here, "..", "examples", "common-components.smallpen");
-  const manifest = JSON.parse(
-    await readFile(join(example, "manifest.json"), "utf8"),
-  );
+  const example = EXAMPLE;
+  const manifest = await readModelEntry(example, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(example, entry), "utf8")));

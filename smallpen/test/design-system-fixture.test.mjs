@@ -18,17 +18,18 @@ import {
 const execFileAsync = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "design-system.smallpen");
+const fixtureModel = join(here, "fixtures", "model", "design-system");
 const repositoryRoot = join(here, "..", "..");
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
 
 async function fixtureValues() {
   const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
+    await readFile(join(fixtureModel, "manifest.json"), "utf8"),
   );
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
-    values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
+    values.set(entry, JSON.parse(await readFile(join(fixtureModel, entry), "utf8")));
   }
   return values;
 }
@@ -36,11 +37,12 @@ async function fixtureValues() {
 test("design-system fixture is a legal package with fixed readable ids", async () => {
   const { stdout } = await execFileAsync(
     process.execPath,
-    [cli, "validate", fixture, "--json"],
+    [cli, "check", fixture, "--render", "--json"],
     { cwd: join(here, "..") },
   );
   const validated = JSON.parse(stdout);
-  assert.equal(validated.status, "valid");
+  assert.equal(validated.ok, true);
+  assert.equal(validated.render.status, "valid");
   // Replies leave out ids; the stored manifest is checked below.
   assert.equal(validated.packageId, undefined);
 
@@ -136,18 +138,16 @@ test("resolved values follow the active Light combination", async () => {
 });
 
 test("fixture screen content is ordinary design data, not a system sheet", async () => {
-  const screen = JSON.parse(
-    await readFile(join(fixture, "screens", "screen.json"), "utf8"),
-  );
-  const presentation = screen.presentations[0];
-  assert.equal(presentation.nodes.node_canvas.name, "Fixture Canvas");
+  const page = await readFile(join(fixture, "pages", "Design System Fixture.html"), "utf8");
   // No generated workbench decorations are stored: only fixture-authored
-  // nodes (swatches from DSP-001-A, instances + negative control from B).
-  assert.deepEqual(presentation.nodes.node_canvas.children, [
-    "node_swatch_primary",
-    "node_swatch_radius",
-    "node_card_instance_idle",
-    "node_card_instance_pressed",
-    "node_card_hardcoded",
+  // elements (swatches from DSP-001-A, instances + negative control from B).
+  const names = [...page.matchAll(/^  <[^>]*data-name="([^"]+)"/gm)].map((match) => match[1]);
+  assert.deepEqual(names, [
+    "Primary Swatch",
+    "Radius Swatch",
+    "Card instance / idle",
+    "Card instance / pressed",
+    "Hardcoded Radius Control",
   ]);
+  assert.match(page, /<body data-name="Fixture Canvas"/);
 });

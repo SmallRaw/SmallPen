@@ -261,6 +261,7 @@ function humanValue(type, value) {
 class PageBuilder {
   constructor(options) {
     this.labels = DESIGN_SYSTEM_LABELS[designSystemLabelLocale(options.locale)];
+    this.translatesAxes = designSystemLabelLocale(options.locale) !== "en";
     this.nodes = {};
     this.runtimeIds = {};
     this.seed = options.seed ?? "design-system";
@@ -274,8 +275,10 @@ class PageBuilder {
   }
 
   axisLabel(value) {
+    // Property names and values read as the file writes them; another
+    // language translates the common ones.
     const key = AXIS_LABEL_KEYS[value];
-    return key ? this.label(key) : String(value);
+    return key && this.translatesAxes ? this.label(key) : String(value);
   }
 
   add(node, { role = "decoration", runtimeId, ...meta } = {}) {

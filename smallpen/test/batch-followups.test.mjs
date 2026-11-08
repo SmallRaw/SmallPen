@@ -49,7 +49,6 @@ async function acmeWithInstance(context) {
   await writeFile(join(root, "answers.json"), JSON.stringify(INIT_ANSWERS_EXAMPLE));
   const init = await runCli(
     [
-      "project",
       "init",
       "acme",
       "--answers",
@@ -84,29 +83,6 @@ async function acmeWithInstance(context) {
   };
 }
 
-test("an override path is checked against a Foundation component", async (context) => {
-  const { foundation, product } = await acmeWithInstance(context);
-  const override = (overridePath) => ({
-    baseRevision: product.revision,
-    batchId: "override",
-    operations: [{ ...OPERATION_SCHEMAS["set-instance-override"].example, overridePath }],
-  });
-  await assert.rejects(
-    prepareOperationBatch(product, override("node_button_lable:text"), { foundation }),
-    (error) => error.code === "missing_component_override_target",
-  );
-  await assert.rejects(
-    prepareOperationBatch(product, override("node_button_root:text"), { foundation }),
-    (error) => error.code === "component_override_type_mismatch",
-  );
-  const valid = await prepareOperationBatch(
-    product,
-    override("node_button_label:text"),
-    { foundation },
-  );
-  assert.notEqual(valid.snapshot.revision, product.revision);
-});
-
 test("font fallback diagnostics name both fonts as structured details", async () => {
   const example = await openPackage(join(here, "..", "examples", "common-components.smallpen"));
   const render = await renderProjection(example, { rootId: "root", nodes: {
@@ -124,37 +100,3 @@ test("font fallback diagnostics name both fonts as structured details", async ()
   assert.equal(fallback.message, "Renderer substituted Source Sans Pro for Missing Fixture Sans");
 });
 
-test("many writes to one token file keep one restore in the inverse batch", async (context) => {
-  const { foundation: initialized } = await acmeWithInstance(context);
-  const putToken = (name) => ({
-    definition: {
-      $extensions: { smallpen: { id: `tok_color_${name}` } },
-      $type: "color",
-      $value: "#123456",
-    },
-    filePath: "tokens/extra.json",
-    path: `color.${name}`,
-    tokenId: `tok_color_${name}`,
-    type: "put-token",
-  });
-  // The init token file is a token library (sets); a DTCG file takes put-token.
-  const { snapshot: foundation } = await prepareOperationBatch(initialized, {
-    baseRevision: initialized.revision,
-    batchId: "first-token",
-    operations: [putToken("zero")],
-  });
-  const prepared = await prepareOperationBatch(foundation, {
-    baseRevision: foundation.revision,
-    batchId: "many-tokens",
-    operations: ["one", "two", "three", "four"].map(putToken),
-  });
-  assert.deepEqual(
-    prepared.result.inverseBatch.operations.map(({ entry, type }) => [type, entry]),
-    [["restore-canonical-entry", "tokens/extra.json"]],
-  );
-  const restored = await prepareOperationBatch(
-    prepared.snapshot,
-    prepared.result.inverseBatch,
-  );
-  assert.equal(restored.snapshot.revision, foundation.revision);
-});

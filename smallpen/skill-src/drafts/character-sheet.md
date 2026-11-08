@@ -27,6 +27,6 @@ Use the caller's CLI path or `smallpen` on PATH. Discover the needed operation w
 
 Read named frame outlines or wireframes first to check organization. Inspect character images with image-capable tools to verify proportions, costume, palette and identity across views. CLI geometry checks cannot prove character consistency; a text-only model must not claim that visual review.
 
-For each view or region, use the same target and any explicit `--theme GROUP/OPTION` combination for `view`, `validate` and `export`. Otherwise use project defaults. No previous CLI or App selection is carried over. Read actual selection and skipped coverage.
+For each view or region, use the same target and any explicit `--theme GROUP/OPTION` combination for `view`, `check --render` and `export`. Otherwise use project defaults. No previous CLI or App selection is carried over. Read actual selection and skipped coverage.
 
 Deliver one package, a named view index and the needed individual files. Use `--output` for retained exports in one directory. Include the overview only when useful or requested. Report missing views or unresolved consistency issues. Do not claim to have completed a comic, animated performance or video from a character reference sheet. No other SmallPen skill must be installed.

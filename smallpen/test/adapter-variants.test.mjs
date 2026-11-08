@@ -13,6 +13,7 @@ import {
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 // Commits recorded from Penpot's native variant UI on the Components page
 // (and a copy's variant switch on a screen) of two Packages: the Flowboard
@@ -25,10 +26,8 @@ const recordedText = await readFile(
 );
 
 async function load(name) {
-  const fixture = join(here, "fixtures", name);
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const fixture = join(here, "fixtures", "model", String(name).replace(/\.smallpen$/, ""));
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
@@ -85,7 +84,7 @@ function componentSet(snapshot, setId) {
 }
 
 function instance(snapshot, nodeId) {
-  return snapshot.entries["screens/first-design.json"].presentations[0].nodes[nodeId]
+  return onlyScreen(snapshot).presentations[0].nodes[nodeId]
     .instance;
 }
 

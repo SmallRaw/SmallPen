@@ -10,14 +10,13 @@ import {
   prepareOperationBatch,
 } from "@smallpen/core";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -123,7 +122,7 @@ test("Penpot gradient fills and strokes apply and reverse exactly", async () => 
 
   const prepared = await prepareOperationBatch(snapshot, batch);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.deepEqual(node.fills, batch.operations[0].changes.fills);
   assert.deepEqual(node.strokes, batch.operations[0].changes.strokes);
@@ -205,7 +204,7 @@ test("Penpot rotation and flips ignore only their derived matrices", async () =>
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(node.flipX, true);
   assert.equal(node.rotation, 330);

@@ -10,14 +10,13 @@ import {
   prepareOperationBatch,
 } from "@smallpen/core";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -99,7 +98,7 @@ test("plain multiline text content compiles, applies, and reverses", async () =>
 
   const prepared = await prepareOperationBatch(snapshot, batch);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(node.text, "Updated 👩🏽‍💻\n第二行");
   assert.equal(node.growType, "auto-height");
@@ -181,7 +180,7 @@ test("a new Penpot text shape keeps its runtime identity", async () => {
   });
   const added = await prepareOperationBatch(snapshot, batch);
   const node =
-    added.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes[
+    onlyScreen(added.snapshot).presentations[0].nodes[
       nodeId
     ];
   assert.equal(node.type, "TEXT");
@@ -244,7 +243,7 @@ test("uniform Penpot typography becomes vendor-neutral textStyle", async () => {
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   assert.deepEqual(
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle.textStyle,
     batch.operations[0].changes.textStyle,
   );
@@ -280,7 +279,7 @@ test("Penpot unset text styles inherit instead of entering Canonical data", asyn
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(node.text, "Reset text transform");
   assert.equal(node.textStyle, undefined);
@@ -319,7 +318,7 @@ test("mixed text styles become explicit text blocks and runs", async () => {
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   assert.deepEqual(
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle.textBlocks,
     batch.operations[0].changes.textBlocks,
   );
@@ -376,7 +375,7 @@ test("text typed into a shape created in the same commit is saved", async () => 
   });
   const added = await prepareOperationBatch(snapshot, batch);
   const node =
-    added.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes[
+    onlyScreen(added.snapshot).presentations[0].nodes[
       nodeId
     ];
   assert.equal(node.type, "TEXT");
@@ -412,7 +411,7 @@ test("the recorded quick-typing Penpot commit saves its text", async () => {
     compilePenpotChanges(snapshot, JSON.parse(recorded)),
   );
   const node =
-    saved.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(saved).presentations[0].nodes
       .node_b85335c7618580fe8008b8fc70fcfb6c;
   assert.equal(node.type, "TEXT");
   assert.equal(node.text, "Hello 世界");

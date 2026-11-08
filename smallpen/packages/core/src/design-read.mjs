@@ -537,7 +537,18 @@ function readingOrder(children) {
       Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y) > 1;
   };
   if (children.some((child, index) => children.slice(index + 1).some((other) => overlap(child, other)))) return children;
-  return [...children].sort((a, b) => box(a).y - box(b).y || box(a).x - box(b).x);
+  // Rows first: boxes whose heights overlap share a row (texts centred in a
+  // row start at different y), read left to right.
+  const rows = [];
+  for (const child of [...children].sort((a, b) => box(a).y - box(b).y)) {
+    const top = box(child).y, bottom = top + box(child).height;
+    const row = rows.find((entry) => Math.min(entry.bottom, bottom) - Math.max(entry.top, top) > 1);
+    if (row) {
+      row.items.push(child);
+      row.bottom = Math.max(row.bottom, bottom);
+    } else rows.push({ top, bottom, items: [child] });
+  }
+  return rows.flatMap((row) => row.items.sort((a, b) => box(a).x - box(b).x));
 }
 
 export function wireframeLayers(root) {
@@ -628,10 +639,9 @@ function wireframeMarkerPosition(
 ) {
   const rows = grid.length;
   const columns = grid[0].length;
-  const preferredRow = Math.min(
-    bounds.bottom,
-    bounds.top + (bounds.bottom - bounds.top >= 2 ? 1 : 0),
-  );
+  // On the box's own top edge ("+[05]----+"), so a marker reads as its
+  // box's even when a child box starts at the same corner.
+  const preferredRow = bounds.top;
   const preferredColumn = Math.min(
     Math.max(0, columns - text.length),
     bounds.left + (bounds.right - bounds.left >= text.length + 1 ? 1 : 0),
@@ -741,44 +751,6 @@ export function asciiWireframe(tree) {
     layerIndex,
     "",
   ].join("\n");
-}
-
-function semanticValues(value, path, result) {
-  if (Array.isArray(value)) {
-    value.forEach((child, index) =>
-      semanticValues(child, `${path}[${index}]`, result),
-    );
-  } else if (value && typeof value === "object") {
-    for (const [name, child] of Object.entries(value).sort(([left], [right]) =>
-      compareStrings(left, right),
-    )) {
-      if (
-        name === "revision" ||
-        name === "productRevision" ||
-        name === "foundationRevision"
-      ) continue;
-      semanticValues(child, path ? `${path}.${name}` : name, result);
-    }
-  } else {
-    result.set(path, JSON.stringify(value));
-  }
-}
-
-export function diffSemanticTrees(before, after) {
-  const beforeValues = new Map();
-  const afterValues = new Map();
-  semanticValues(before, "", beforeValues);
-  semanticValues(after, "", afterValues);
-  return [...new Set([...beforeValues.keys(), ...afterValues.keys()])]
-    .sort()
-    .flatMap((path) => {
-      const beforeValue = beforeValues.get(path);
-      const afterValue = afterValues.get(path);
-      if (beforeValue === afterValue) return [];
-      if (beforeValue === undefined) return [{ after: afterValue, kind: "added", path }];
-      if (afterValue === undefined) return [{ before: beforeValue, kind: "removed", path }];
-      return [{ after: afterValue, before: beforeValue, kind: "changed", path }];
-    });
 }
 
 export function readDesignView(product, options = {}) {

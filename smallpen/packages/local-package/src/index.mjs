@@ -3,15 +3,7 @@ export {
   LocalWorkspaceSession,
   reconcilePackageViewState,
 } from "./local-workspace-session.mjs";
-export {
-  localLibraryLocator,
-  openWorkspace,
-  resolveWorkspace,
-} from "./workspace.mjs";
-export {
-  defaultLibraryCacheRoot,
-  openRemoteLibrary,
-} from "./remote-library.mjs";
+export { openWorkspace, resolveWorkspace } from "./workspace.mjs";
 export {
   createEvidence,
   measureProjectionText,
@@ -19,21 +11,37 @@ export {
 } from "./render.mjs";
 export { layoutSizingRules, renderAppProjection } from "./render-shared.mjs";
 export { inspectProjection } from "./layout-inspection.mjs";
+export { exportHtmlReview, htmlReviewTargets } from "./html-review.mjs";
 export { batchHistoryPath, defaultHistoryCacheRoot } from "./history-cache.mjs";
 export {
-  decodeFigmaClipboard,
-  importDraft,
-  writeDraftPackage,
-} from "./draft-import.mjs";
+  acceptPackageFiles,
+  changedPaths,
+  gateFiles,
+  isPackagePath,
+  readAccepted,
+  revertFiles,
+  writeAccepted,
+} from "./check-gate.mjs";
 export {
+  blankPackageFiles,
   createBlankPackage,
   initializeBlankWorkspace,
-  initializeWorkspace,
 } from "./initialize.mjs";
-export { migrateThemesByCopy } from "./migrate-themes.mjs";
+export {
+  filesRevision,
+  LazyBlobMap,
+  openRevisionSnapshot,
+  packageIdOf,
+  packageRevision,
+  readPackageFiles,
+  rememberPackageFiles,
+  snapshotFromFiles,
+  statPackageFiles,
+} from "./html-store.mjs";
 export {
   BATCH_HISTORY_LIMITS,
   applyOperationBatch,
+  withPackageWriteLock,
   deleteFontFamily,
   deleteFontVariant,
   importFontVariant,

@@ -13,16 +13,17 @@ import { createEvidence } from "@smallpen/local-package";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixtureModel = join(here, "fixtures", "model", "roundtrip");
 const words = "The quick brown fox jumps over the lazy dog ";
 
 async function fixtureValues() {
   const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
+    await readFile(join(fixtureModel, "manifest.json"), "utf8"),
   );
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
-    values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
+    values.set(entry, JSON.parse(await readFile(join(fixtureModel, entry), "utf8")));
   }
   return values;
 }
@@ -154,11 +155,11 @@ test("a 200k character text renders inside a 192MB heap", async () => {
     import { join } from "node:path";
     const { listPackageEntries, loadPackageFromValues } = await import(${JSON.stringify(import.meta.resolve("@smallpen/core"))});
     const { createEvidence } = await import(${JSON.stringify(import.meta.resolve("@smallpen/local-package"))});
-    const fixture = ${JSON.stringify(fixture)};
-    const manifest = JSON.parse(await readFile(join(fixture, "manifest.json"), "utf8"));
+    const fixtureModel = ${JSON.stringify(fixtureModel)};
+    const manifest = JSON.parse(await readFile(join(fixtureModel, "manifest.json"), "utf8"));
     const values = new Map([["manifest.json", manifest]]);
     for (const entry of listPackageEntries(manifest).entries) {
-      values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
+      values.set(entry, JSON.parse(await readFile(join(fixtureModel, entry), "utf8")));
     }
     const nodes = values.get("screens/roundtrip.json").presentations[0].nodes;
     nodes.node_rectangle = ${JSON.stringify(textNode("", { growType: "auto-width" }))};

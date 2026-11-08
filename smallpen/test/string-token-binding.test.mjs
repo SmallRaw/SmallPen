@@ -10,12 +10,13 @@ import {
   projectEffectiveSnapshot,
 } from "@smallpen/core";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 async function fixtureValues() {
-  const manifest = JSON.parse(await readFile(join(fixture, "manifest.json"), "utf8"));
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
@@ -59,7 +60,7 @@ async function languageSnapshot(active) {
 }
 
 const nodeOf = (snapshot) =>
-  snapshot.entries["screens/roundtrip.json"].presentations[0].nodes.node_rectangle;
+  onlyScreen(snapshot).presentations[0].nodes.node_rectangle;
 
 test("text and visibility follow string and boolean Tokens under the selected language", async () => {
   const english = nodeOf(projectEffectiveSnapshot(await languageSnapshot("theme_en")));

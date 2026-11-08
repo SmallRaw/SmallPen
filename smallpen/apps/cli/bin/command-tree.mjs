@@ -8,227 +8,19 @@ import {
 const action = (engine, purpose, extra = {}) => ({ engine, purpose, ...extra });
 
 // Public command paths specialize the existing contracts and run the same
-// engines. Every action names things the way outlines show them; only
-// advanced apply (the undo batches writes return) and project repair (the
-// choices it offers) carry IDs.
+// engines. Every action is a read and names things the way outlines show
+// them; designs change by editing the package's HTML files.
 export const COMMAND_GROUPS = {
-  project: {
-    purpose: "Create, inspect and maintain a project",
-    actions: {
-      init: action("init", "Create a blank package or workspace"),
-      show: action("inspect", "Read the package name, revision and counts"),
-      list: action("list", "Locate project objects by kind"),
-      watch: action("watch", "Watch package revision changes"),
-      repair: action("repair", "Inspect conflicts or apply an offered repair"),
-      migrate: action("migrate-themes", "Copy a package with migrated themes"),
-    },
-  },
   token: {
-    purpose: "Read and edit design values, theme groups, options and defaults",
-    groups: {
-      theme: {
-        purpose:
-          "Read and edit Token theme groups, options and project defaults",
-      },
-    },
+    purpose: "Resolved Token values per theme, and Token exports for application code (edit tokens.css to change Tokens)",
     actions: {
       list: action(
         "tokens",
-        "Read resolved Tokens; --definitions reads stored option values",
+        "Read resolved Tokens and the theme options; --definitions reads each option block's stored values",
       ),
-      show: action(
-        "effective-token",
-        "Resolve one Token for the supplied themes",
-      ),
-      search: action("search-tokens", "Find reusable Tokens"),
-      explain: action("explain-token", "Explain one Token's value and sources"),
-      set: action(
-        "token-set",
-        "Create or change Tokens by name, with default and per-option values",
-        { topic: "token-set" },
-      ),
-      delete: action(
-        "token-delete",
-        "Delete a Token by name: --path color.brand; bound Tokens are protected",
-      ),
-      impact: action("impact", "Locate bindings of one Token"),
       export: action(
         "token-export",
-        "Export resolved Token values as JSON: --type string --by Language writes one file per option (English.json, Chinese.json)",
-      ),
-      import: action("import-tokens", "Review or apply a Token import"),
-      "theme list": action(
-        "themes",
-        "Read groups, options and defaults; --theme selects values for this call only",
-      ),
-      "theme add": action(
-        "theme-add",
-        "Add options by full name: --theme Viewport/Desktop --theme Viewport/Mobile",
-      ),
-      "theme rename": action(
-        "theme-rename",
-        "Rename an option (--theme Viewport/Desktop --to Web) or a group (--group Viewport --to Platform)",
-      ),
-      "theme default": action(
-        "theme-default",
-        "Make an option its group's default: --theme Viewport/Mobile",
-      ),
-      "theme delete": action(
-        "theme-delete",
-        "Delete an option (--theme Viewport/Tablet) or a group (--group Viewport)",
-      ),
-    },
-  },
-  canvas: {
-    purpose:
-      "Arrange pages on canvases; the CLI lays every canvas out (one row per module: Tasks / ... pages)",
-    actions: {
-      list: action("canvas-list", "List canvases, their rows and pages"),
-      rename: action(
-        "canvas-rename",
-        "Rename a canvas: --canvas Pages --to App",
-      ),
-      put: action(
-        "canvas-put",
-        'Put a page on a canvas: --page "Tasks / Board" --canvas Reviews',
-      ),
-    },
-  },
-  component: {
-    purpose: "Find and edit components and their variants",
-    actions: {
-      list: action("catalog", "List reusable components"),
-      search: action("search-components", "Find reusable components"),
-      define: action(
-        "component-define",
-        "Define or redefine a component by name: base elements, properties, variant changes",
-        { topic: "component-define" },
-      ),
-      set: action(
-        "component-set",
-        "Change an element's fields without defining again: --element Label --variant Style=ghost --set fontSize=16 (--all for every variant)",
-        { topic: "component-fields" },
-      ),
-      rename: action(
-        "component-rename",
-        'Rename a component: --component Button --to "Action button"',
-      ),
-      delete: action(
-        "component-delete",
-        "Delete a component, or one variant: --component Button [--variant Style=ghost]; used components are protected",
-      ),
-    },
-  },
-  page: {
-    purpose:
-      "Draw and arrange pages from named elements and component instances",
-    actions: {
-      list: action("list", "List pages", { fixed: ["--kind", "screens"] }),
-      draw: action(
-        "page-draw",
-        "Draw a page or one container from named elements and component instances",
-        { topic: "page-draw" },
-      ),
-      set: action(
-        "page-set",
-        "Change one element's fields (or the page's) without drawing again: --element Card --set width=320 --set fill={color.surface}",
-        { topic: "page-set" },
-      ),
-      move: action(
-        "page-move",
-        "Move an element up, down, left or right; the CLI picks coordinates and avoids overlaps",
-      ),
-      rename: action(
-        "page-rename",
-        'Rename a page: --page "Tasks / List" --to Overview',
-      ),
-      delete: action(
-        "page-delete",
-        "Delete a page, a platform version (--platform) or an element (--element)",
-      ),
-    },
-  },
-  asset: {
-    purpose: "Import and manage media and font files",
-    groups: {
-      media: { purpose: "Import and manage media files" },
-      font: { purpose: "Import and manage font families and file variants" },
-    },
-    actions: {
-      "media list": action("assets", "List media", {
-        fixed: ["--kind", "media"],
-      }),
-      "media import": action("import-media", "Import a media file"),
-      "media delete": action(
-        "media-delete",
-        "Delete a media file by name: --media Logos/Mark",
-      ),
-      "font list": action("assets", "List fonts", {
-        fixed: ["--kind", "fonts"],
-      }),
-      "font import": action("import-font", "Import a font file"),
-      "font delete": action(
-        "font-delete",
-        "Delete a font family, or one variant: --font Inter [--variant Bold]",
-      ),
-    },
-  },
-  flow: {
-    purpose: "Read and set prototype starts and element links by name",
-    actions: {
-      list: action(
-        "flow-list",
-        "List starts and links by page and element name",
-      ),
-      link: action(
-        "flow-link",
-        'Link an element to a page: --from "Page / Element" --to Page [--platform desktop] [--on click] [--action navigate|overlay|back]',
-      ),
-      start: action(
-        "flow-start",
-        "Make a page the start of a prototype flow: --page Page [--platform desktop]; --remove stops it",
-      ),
-      unlink: action(
-        "flow-unlink",
-        'Remove an element\'s links: --from "Page / Element" [--to Page] [--on click]',
-      ),
-    },
-  },
-  advanced: {
-    purpose:
-      "Use atomic batches, draft imports, remote libraries and App styles",
-    groups: {
-      style: {
-        purpose:
-          "Manage existing App color and typography assets; use token for design values",
-      },
-    },
-    actions: {
-      "style list": action("assets", "List App color and typography assets", {
-        overrides: { kind: { values: ["colors", "typographies"] } },
-      }),
-      "style set": action(
-        "asset-set",
-        "Create or change an App style by name: --color Brand/Primary --value \"#1f6feb\", or --typography Text/Body --value '{...}'",
-      ),
-      "style delete": action(
-        "asset-delete",
-        "Delete an App style by name: --color Brand/Primary or --typography Text/Body",
-      ),
-      apply: action(
-        "apply",
-        "Apply an explicit revision-guarded atomic batch, such as the undo batch a write returns",
-        { topic: "batch" },
-      ),
-      "import-draft": action("import-draft", "Import a separate Draft package"),
-      "draft-diff": action("draft-diff", "Compare two Drafts"),
-      "draft-compile": action(
-        "draft-compile",
-        "Compile selected Draft fields into a batch",
-      ),
-      "library-refresh": action(
-        "library-refresh",
-        "Refresh a declared URL Library",
+        "Export Token values for application code: --by GROUP writes one file per option (any group, e.g. --by color); --type limits the types; --format json|flat|css",
       ),
     },
   },
@@ -260,13 +52,9 @@ for (const [group, { actions }] of Object.entries(COMMAND_GROUPS)) {
 }
 
 export const PUBLIC_COMMANDS = [
-  ...Object.entries(COMMAND_GROUPS).map(([command, { purpose }]) => ({
-    command,
-    purpose,
-  })),
-  ...["view", "changes", "export", "validate", "help", "schema", "version"].map(
-    (command) => ({ command, purpose: COMMAND_CONTRACTS[command].purpose }),
-  ),
+  ...["init", "check", "view", "export", "changes"].map((command) => ({ command, purpose: COMMAND_CONTRACTS[command].purpose })),
+  ...Object.entries(COMMAND_GROUPS).map(([command, { purpose }]) => ({ command, purpose })),
+  ...["help", "schema", "version"].map((command) => ({ command, purpose: COMMAND_CONTRACTS[command].purpose })),
 ];
 
 export function groupRoute(group, actionName) {
@@ -408,33 +196,8 @@ export function routeCommand(argv) {
 }
 
 const ALIASES = {
-  init: ["project", "init"],
-  inspect: ["project", "show"],
-  list: ["project", "list"],
-  watch: ["project", "watch"],
-  repair: ["project", "repair"],
-  "migrate-themes": ["project", "migrate"],
-  theme: ["token", "theme"],
-  themes: ["token", "theme", "list"],
   tokens: ["token", "list"],
-  "effective-token": ["token", "show"],
-  "explain-token": ["token", "explain"],
-  "search-tokens": ["token", "search"],
-  impact: ["token", "impact"],
-  "import-tokens": ["token", "import"],
-  catalog: ["component", "list"],
   "token-export": ["token", "export"],
-  "search-components": ["component", "search"],
-  assets: ["advanced", "style", "list"],
-  "import-media": ["asset", "media", "import"],
-  "import-font": ["asset", "font", "import"],
-  media: ["asset", "media"],
-  font: ["asset", "font"],
-  apply: ["advanced", "apply"],
-  "import-draft": ["advanced", "import-draft"],
-  "draft-diff": ["advanced", "draft-diff"],
-  "draft-compile": ["advanced", "draft-compile"],
-  "library-refresh": ["advanced", "library-refresh"],
 };
 
 export function publicArgv(argv) {

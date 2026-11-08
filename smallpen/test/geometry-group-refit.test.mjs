@@ -16,9 +16,10 @@ import {
 } from "@smallpen/core";
 import { createEvidence } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 function rect(id, x, color) {
   return {
@@ -36,9 +37,7 @@ function rect(id, x, color) {
 
 // Board at (50, 50); group at board-relative (50, 50), so page (100, 100).
 async function groupSnapshot() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
@@ -118,7 +117,7 @@ async function apply(snapshot, changes, commitId) {
   const prepared = await prepareOperationBatch(snapshot, batch);
   return {
     batch,
-    nodes: prepared.snapshot.entries["screens/roundtrip.json"].presentations[0]
+    nodes: onlyScreen(prepared.snapshot).presentations[0]
       .nodes,
     snapshot: prepared.snapshot,
   };

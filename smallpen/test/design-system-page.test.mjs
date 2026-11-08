@@ -296,8 +296,9 @@ test("a family card captions its axes once and each sample by what differs", () 
   };
   const page = buildDesignSystemPage(refs, {}, { locale: "en" });
   const texts = Object.values(page.nodes).filter((node) => node.type === "TEXT").map((node) => node.text);
-  assert.ok(texts.some((text) => text.startsWith("Style: Primary / Secondary\n")));
-  assert.ok(texts.includes("Primary") && texts.includes("Secondary"), "the first sample names its own values");
+  // In English the values read as the file writes them.
+  assert.ok(texts.some((text) => text.startsWith("Style: primary / secondary\n")));
+  assert.ok(texts.includes("primary") && texts.includes("secondary"), "the first sample names its own values");
   assert.ok(texts.includes("Composite · 1"));
   const placeholders = roleNodes(page, "component-sample");
   assert.deepEqual(placeholders.map((node) => node.designSystem.sample).sort(), [0, 1]);
@@ -312,7 +313,7 @@ test("transparent component captions name every property without relying on samp
   const choices = [{ style: "primary", size: "md" }, { style: "secondary", size: "sm" },
     { style: "primary", size: "sm" }, { style: "secondary", size: "md" }];
   const componentSamples = samples(axes, choices, () => ({ width: 74, height: 33 }));
-  for (const [locale, styles] of [["en", ["Primary", "Secondary"]], ["zh_cn", ["主要", "次要"]], ["zh_hant", ["主要", "次要"]]]) {
+  for (const [locale, styles] of [["en", ["primary", "secondary"]], ["zh_cn", ["主要", "次要"]], ["zh_hant", ["主要", "次要"]]]) {
     const options = { only: "components", transparentComponents: true, locale };
     const complete = buildDesignSystemPage({ componentSamples }, {}, { ...options, allVariantsOf: new Set(["cmp_test"]) });
     assert.deepEqual(roleNodes(complete, "caption").map((node) => node.text),
@@ -328,7 +329,7 @@ test("transparent component captions name every property without relying on samp
   }
   const normal = buildDesignSystemPage({ componentSamples }, {}, { allVariantsOf: new Set(["cmp_test"]) });
   assert.deepEqual(roleNodes(normal, "caption").map((node) => node.text),
-    ["Primary · md", "Secondary · sm", "sm", "Secondary"], "normal App captions keep their existing format");
+    ["primary · md", "secondary · sm", "sm", "secondary"], "normal App captions keep their format, values as the file writes them");
 });
 
 test("transparent captions include the theme on baseline and changed samples", () => {
@@ -614,74 +615,3 @@ test("export --design-system draws the page, and refuses a page beside it", asyn
   }
 });
 
-test("a Product's page shows the Foundation Component Sets its Screens use, read-only", async (context) => {
-  const { mkdtemp, rm } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  const { tmpdir } = await import("node:os");
-  const { createInitializationState, createWorkspaceRuntime, prepareOperationBatch } = await import("@smallpen/core");
-  const { initializeWorkspace, openPackage } = await import("@smallpen/local-package");
-  const { compilePenpotChanges } = await import("@smallpen/penpot-adapter");
-  const { INIT_ANSWERS_EXAMPLE } = await import("../apps/cli/bin/schema.mjs");
-  const root = await mkdtemp(join(tmpdir(), "smallpen-ds-product-"));
-  context.after(() => rm(root, { force: true, recursive: true }));
-  const state = createInitializationState({ ...INIT_ANSWERS_EXAMPLE, foundationChoice: "create-new" });
-  const paths = await initializeWorkspace(join(root, "acme"), state.proposal, { confirmed: true });
-  const foundation = await openPackage(paths.foundationPath);
-  const product = await openPackage(paths.productPath);
-  const alone = await createWorkspaceRuntime(product, { foundation });
-  assert.equal(alone.designSystemRefs.componentSamples.length, 0, "an unused Foundation set stays off the page");
-
-  const button = foundation.domain.componentSets.get("cmp_button");
-  const screen = product.entries[product.manifest.entries.screens[0]];
-  const presentation = screen.presentations[0];
-  const prepared = await prepareOperationBatch(
-    product,
-    {
-      baseRevision: product.revision,
-      batchId: "ds-product-instance",
-      operations: [{
-        node: {
-          children: [],
-          height: button.variants[0].nodes[button.variants[0].rootId].height,
-          id: "node_cta",
-          instance: {
-            component: { assetId: "cmp_button", packageId: foundation.manifest.packageId },
-            variant: button.variants[0].selection,
-          },
-          name: "Call to action",
-          type: "INSTANCE",
-          width: button.variants[0].nodes[button.variants[0].rootId].width,
-          x: 0,
-          y: 0,
-        },
-        parentId: presentation.rootId,
-        presentationId: presentation.id,
-        screenId: screen.id,
-        type: "add-presentation-node",
-      }],
-    },
-    { foundation },
-  );
-  const runtime = await createWorkspaceRuntime(prepared.snapshot, { foundation });
-  const samples = runtime.designSystemRefs.componentSamples;
-  assert.ok(samples.length >= button.variants.length);
-  assert.ok(samples.every((sample) => sample.componentSetId === "cmp_button" && sample.readOnly === true));
-  assert.ok(samples.every((sample) => Object.values(sample.sources).every((source) =>
-    source.readOnly === true && source.ownerPackageId === foundation.manifest.packageId)));
-  const own = new Set(foundation.runtime.designSystemRefs.componentSamples.flatMap((sample) => Object.values(sample.runtimeNodes)));
-  assert.ok(samples.every((sample) => Object.values(sample.runtimeNodes).every((id) => !own.has(id))),
-    "the Product's page has its own shape ids");
-
-  const page = buildDesignSystemPage(runtime.designSystemRefs, runtime.designSystem, { locale: "en" });
-  assert.ok(roleNodes(page, "component-sample").length > 0);
-
-  const snapshot = { ...prepared.snapshot, runtime };
-  const target = Object.values(samples[0].runtimeNodes)[0];
-  assert.throws(
-    () => compilePenpotChanges(snapshot, {
-      changes: [{ id: target, operations: [{ attr: "opacity", type: "set", val: 0.5 }], "page-id": runtime.designSystemPage, type: "mod-obj" }],
-      commitId: "ds-product-readonly",
-    }),
-    (error) => error.code === "foundation_components_read_only",
-  );
-});

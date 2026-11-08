@@ -17,9 +17,10 @@ import {
   projectScreen,
 } from "@smallpen/core";
 import { createEvidence } from "@smallpen/local-package";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 function rect(id, box, extra = {}) {
   return {
@@ -118,7 +119,7 @@ function flexNodes() {
 }
 
 async function snapshotWith(instances, extraNodes = {}) {
-  const manifest = JSON.parse(await readFile(join(fixture, "manifest.json"), "utf8"));
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
@@ -235,7 +236,7 @@ for (const direction of ["row", "column"])
           "layout-item-h-sizing": "fill", "layout-item-v-sizing": "fill",
         }],
       ]);
-      const canvas = snapshot.entries["screens/roundtrip.json"].presentations[0].nodes.node_canvas;
+      const canvas = onlyScreen(snapshot).presentations[0].nodes.node_canvas;
       Object.assign(canvas, { layout: "flex", "layout-flex-dir": direction,
         "layout-padding": { p1: 24, p2: 24, p3: 24, p4: 24 } });
       for (const [width, height] of [[720, 120], [480, 96], [720, 120]]) {
@@ -302,7 +303,7 @@ test("a missing variant draws the closest one and names the Axis value no varian
   const snapshot = await snapshotWith([
     ["node_bad", "cmp_probe", { height: 60, width: 100, x: 20, y: 20 }],
   ]);
-  const nodes = snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+  const nodes = onlyScreen(snapshot).presentations[0].nodes;
   nodes.node_bad.instance.variant = { axis_kind: "huge" };
   const projection = projectScreen(snapshot, "scr_roundtrip");
   assert.equal(projection.nodes.node_bad.type, "INSTANCE");
@@ -311,5 +312,5 @@ test("a missing variant draws the closest one and names the Axis value no varian
   assert.equal(diagnostic.instanceId, "node_bad");
   // Named for the agent: the copy, its component, the value it lost and the
   // variant it is drawn with meanwhile.
-  assert.match(diagnostic.message, /uses .+ with Kind=huge, which it no longer has; it is drawn as Kind=base/);
+  assert.match(diagnostic.message, /uses .+ with Kind: huge, which it no longer has; it is drawn as Kind: base/);
 });

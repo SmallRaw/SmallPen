@@ -1,0 +1,15 @@
+<sp-component name="Button" props="Style: primary | secondary | ghost | danger; Size: sm | md">
+  <div class="w-[96px] h-[32px] bg-brand-base rounded-md">
+    <p data-name="Label" class="w-[96px] h-[32px] text-brand-onbrand type-label text-center align-middle">Button</p>
+  </div>
+  <sp-variant when="Style: secondary" class="bg-bg-surface border-width-thin border-border-strong">
+    <p data-name="Label" class="text-text-primary"></p>
+  </sp-variant>
+  <sp-variant when="Style: ghost" class="bg-none">
+    <p data-name="Label" class="text-brand-base"></p>
+  </sp-variant>
+  <sp-variant when="Style: danger" class="bg-danger-base"></sp-variant>
+  <sp-variant when="Size: md" class="w-[112px] h-[40px]">
+    <p data-name="Label" class="w-[112px] h-[40px]"></p>
+  </sp-variant>
+</sp-component>

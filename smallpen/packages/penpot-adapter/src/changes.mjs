@@ -1047,9 +1047,50 @@ function compileAttribute(operation, attr, value, node, snapshot) {
     operation.changes[field] = structuredClone(value);
     return;
   }
+  if (attr === "layout-grid-rows" || attr === "layout-grid-columns") {
+    if (value === null || value === undefined) {
+      operation.changes[attr] = null;
+      return;
+    }
+    if (!Array.isArray(value) || value.some((track) => !isRecord(track))) {
+      fail("invalid_penpot_layout", `Penpot ${attr} must be an array of tracks`, { attr, value });
+    }
+    operation.changes[attr] = value.map((track) => ({
+      type: String(track.type),
+      ...(track.value === undefined || track.value === null ? {} : { value: track.value }),
+    }));
+    return;
+  }
+  if (attr === "layout-grid-cells") {
+    if (value === null || value === undefined) {
+      operation.changes[attr] = null;
+      return;
+    }
+    if (!isRecord(value)) fail("invalid_penpot_layout", "Penpot layout-grid-cells must be an object of cells", { attr });
+    // Cells name their children by App id; the package names them by node id.
+    const nodeIdOf = (runtimeId) => {
+      const key = String(runtimeId);
+      return snapshot.runtime.reverseNodes?.[key]?.nodeId ??
+        snapshot.runtime.reverseComponentNodes?.[key]?.nodeId ??
+        snapshot.addedNodeIds?.get(key) ??
+        runtimeNodeId(key);
+    };
+    operation.changes[attr] = Object.fromEntries(Object.entries(value).map(([id, cell]) => {
+      if (!isRecord(cell)) fail("invalid_penpot_layout", "A Penpot grid cell must be an object", { attr, id });
+      const out = {};
+      for (const field of ["id", "row", "column", "row-span", "column-span", "position", "align-self", "justify-self", "area-name"]) {
+        if (cell[field] !== undefined && cell[field] !== null) out[field] = typeof cell[field] === "number" ? cell[field] : String(cell[field]);
+      }
+      out.shapes = (cell.shapes ?? []).map(nodeIdOf);
+      return [String(id), out];
+    }));
+    return;
+  }
   const layoutFields = new Set([
     "layout",
     "layout-flex-dir",
+    "layout-grid-dir",
+    "layout-justify-items",
     "layout-gap-type",
     "layout-gap",
     "layout-align-items",
@@ -1272,6 +1313,11 @@ function compileAttribute(operation, attr, value, node, snapshot) {
     "show-content",
   ]);
   if (booleanFields.has(attr)) {
+    // Penpot clears these by removing them (unmask drops :masked-group).
+    if (value === null || value === undefined) {
+      if (Object.hasOwn(node, attr)) operation.changes[attr] = null;
+      return;
+    }
     if (typeof value !== "boolean") {
       fail("invalid_node_boolean", `Penpot ${attr} must be a boolean`, {
         attr,
@@ -6833,6 +6879,31 @@ function isEmptyMove(change) {
   );
 }
 
+// Turning a board into a grid sets its children's order with a "shapes"
+// attribute on the board itself; that is a reorder of the same children.
+function childOrderAsReorder(changes) {
+  const out = [];
+  for (const change of changes) {
+    const operations = Array.isArray(change?.operations) ? change.operations : [];
+    const order = normalizeType(change?.type) === "mod-obj"
+      ? operations.find((operation) => operation?.attr === "shapes" && normalizeType(operation?.type) === "set")
+      : undefined;
+    if (!order) {
+      out.push(change);
+      continue;
+    }
+    const rest = operations.filter((operation) => operation !== order);
+    if (rest.length) out.push({ ...change, operations: rest });
+    out.push({
+      type: "reorder-children",
+      "page-id": change["page-id"],
+      "parent-id": change.id,
+      shapes: Array.isArray(order.val) ? order.val : [],
+    });
+  }
+  return out;
+}
+
 export function compilePenpotChanges(snapshotValue, commit, options = {}) {
   let snapshot = {
     ...snapshotValue,
@@ -6844,7 +6915,7 @@ export function compilePenpotChanges(snapshotValue, commit, options = {}) {
   if (typeof commit.commitId !== "string" || commit.commitId.length === 0) {
     fail("invalid_penpot_commit", "Penpot commit must contain a commitId");
   }
-  const shiftedChanges = commit.changes.map((change) =>
+  const shiftedChanges = childOrderAsReorder(commit.changes).map((change) =>
     withoutLayoutOffset(snapshot, change),
   );
   // Native variants: a variant switch on a copy, and every structural edit

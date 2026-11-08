@@ -1,18 +1,20 @@
 # smallpen
 
-Command-line interface for SmallPen, a local-file design workspace built on
-strict `.smallpen` directory packages. It reads, validates, renders, and
-edits packages through typed Operation Batches, with JSON output for agents.
+Command-line interface for SmallPen, a local-file design workspace. A
+`.smallpen` package is a folder of HTML files that agents edit directly; the
+CLI checks and renders them, resolves Tokens, exports deliverables and reports
+what people changed in the App. Replies are JSON for agents.
 
 Requires Node.js 24 or newer.
 
 ```sh
 npm install -g smallpen@alpha
 smallpen --help
-# Guided: answer each returned question with its continuation command.
 smallpen init ./workspace --json
-smallpen validate ./workspace/product.smallpen --json
-smallpen render ./workspace/product.smallpen --output product.png --json
+# edit the HTML files, then:
+smallpen check ./workspace/workspace.smallpen
+smallpen check ./workspace/workspace.smallpen --render
+smallpen view ./workspace/workspace.smallpen --page Home --as png --json
 ```
 
 Every command has its own help: `smallpen <command> --help`.

@@ -23,6 +23,7 @@ import {
   sfntToWoff,
 } from "@smallpen/local-package";
 import * as conversion from "../packages/local-package/src/font-convert.mjs";
+import { seedLegacyIds } from "./helpers/named.mjs";
 
 const fontId = "font_formatprobe",
   variantId = "fvar_formatprobe";
@@ -123,6 +124,7 @@ async function example(context, format, bytes) {
   context.after(() => rm(root, { recursive: true, force: true }));
   const path = join(root, "probe.smallpen");
   await cp(fixture, path, { recursive: true });
+  await seedLegacyIds(path, "roundtrip");
   await importFontVariant(path, {
     family: "Format Probe",
     fontId,
@@ -132,22 +134,16 @@ async function example(context, format, bytes) {
     style: "normal",
     files: { [format]: { bytes, mimeType: `font/${format}` } },
   });
-  const screenPath = join(path, "screens/roundtrip.json");
-  const screen = JSON.parse(await readFile(screenPath, "utf8"));
-  Object.assign(screen.presentations[0].nodes.node_rectangle, {
-    type: "TEXT",
-    text: "AAA AAA AAA",
-    growType: "auto-height",
-    textStyle: {
-      fontFamily: "Format Probe",
-      fontId,
-      fontVariantId: "normal-400",
-      fontWeight: 400,
-      fontStyle: "normal",
-      fontSize: 24,
-    },
-  });
-  await writeFile(screenPath, JSON.stringify(screen));
+  // The page uses the font: the rectangle becomes a text in Format Probe.
+  const pagePath = join(path, "pages", "Round Trip.html");
+  const page = await readFile(pagePath, "utf8");
+  await writeFile(
+    pagePath,
+    page.replace(
+      /<div data-shape="rectangle" data-name="Editable Rectangle"[^>]*><\/div>/,
+      '<p data-name="Editable Rectangle" class="left-[80px] top-[96px] w-[240px] font-[Format_Probe] font-[400] text-[24px]">AAA AAA AAA</p>',
+    ),
+  );
   return { root, path, snapshot: await openPackage(path) };
 }
 
@@ -160,7 +156,7 @@ test("a single TTF, OTF or WOFF opens and feeds the same native bytes to App and
     const { path, snapshot } = await example(context, format, bytes);
     const library = snapshot.entries[snapshot.manifest.entries.assets[0]];
     assert.deepEqual(Object.keys(library.fonts[0].variants[0].files), [format]);
-    const beforeBlobs = (await readdir(join(path, "blobs"))).sort();
+    const beforeBlobs = (await readdir(join(path, "assets", "fonts"))).sort();
     const rendered = await renderProjection(
       snapshot,
       projectScreen(snapshot, "scr_roundtrip"),
@@ -184,7 +180,7 @@ test("a single TTF, OTF or WOFF opens and feeds the same native bytes to App and
       await service.close();
     }
     assert.equal((await openPackage(path)).revision, snapshot.revision);
-    assert.deepEqual((await readdir(join(path, "blobs"))).sort(), beforeBlobs);
+    assert.deepEqual((await readdir(join(path, "assets", "fonts"))).sort(), beforeBlobs);
   }
 });
 
@@ -250,31 +246,3 @@ test("the disposable font cache repairs damage, bounds storage and survives an u
   );
 });
 
-test("legacy dual-format variants keep their original blobs and revision", async (context) => {
-  const { path, snapshot } = await example(context, "otf", otf);
-  const entry = snapshot.manifest.entries.assets[0];
-  const library = structuredClone(snapshot.entries[entry]);
-  const bytes = sfntToWoff(otf, "font/otf"),
-    sha256 = await sha256Hex(bytes),
-    blob = `blobs/${sha256}`;
-  library.fonts[0].variants[0].files.woff = {
-    blob,
-    sha256,
-    byteLength: bytes.length,
-    mimeType: "font/woff",
-  };
-  await writeFile(join(path, blob), bytes);
-  await writeFile(join(path, entry), JSON.stringify(library));
-  const legacy = await openPackage(path);
-  const rendered = await renderProjection(
-    legacy,
-    projectScreen(legacy, "scr_roundtrip"),
-  );
-  assert.ok(rendered.bytes.length > 8);
-  const reopened = await openPackage(path);
-  assert.equal(reopened.revision, legacy.revision);
-  assert.deepEqual(
-    Object.keys(reopened.entries[entry].fonts[0].variants[0].files).sort(),
-    ["otf", "woff"],
-  );
-});

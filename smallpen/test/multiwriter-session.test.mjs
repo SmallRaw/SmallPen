@@ -17,9 +17,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { seedLegacyIds } from "./helpers/named.mjs";
 import {
   applyOperationBatch,
-  importMedia,
   LocalPackageBackend,
   LocalWorkspaceSession,
   openPackage,
@@ -42,33 +42,10 @@ async function tempRoot(context) {
   return { closeLater: (close) => closers.push(close), root };
 }
 
-async function editJson(path, edit) {
-  const value = JSON.parse(await readFile(path, "utf8"));
-  edit(value);
-  await writeFile(path, JSON.stringify(value));
-}
-
-async function copyPackage(root, name, edit = () => {}, source = fixture) {
+async function copyPackage(root, name, source = fixture) {
   const packagePath = join(root, name);
   await cp(source, packagePath, { recursive: true });
-  await editJson(join(packagePath, "manifest.json"), edit);
-  return packagePath;
-}
-
-async function productWorkspace(root) {
-  const foundationPath = await copyPackage(root, "foundation.smallpen", (manifest) => {
-    manifest.name = "Foundation";
-    manifest.packageId = "pkg_foundation";
-  });
-  const productPath = await copyPackage(root, "product.smallpen", (manifest) => {
-    manifest.dependencies = [
-      { packageId: "pkg_foundation", path: "foundation.smallpen" },
-    ];
-    manifest.name = "Product";
-    manifest.packageId = "pkg_product";
-    manifest.role = "product";
-  });
-  return { foundationPath, productPath };
+  return seedLegacyIds(packagePath, "roundtrip");
 }
 
 function opacityBatch(revision, opacity, batchId) {
@@ -123,78 +100,42 @@ test("a steady stream of external writes still reaches the Background", async (c
   assert.ok(seen > 0, "no external revision was reported while writes continued");
 });
 
-test("an in-place blob edit leaves the ready state for Repair", async (context) => {
+test("an asset file edited in place is a new revision, not a broken package", async (context) => {
   const { closeLater, root } = await tempRoot(context);
   const packagePath = (await openPackage(await copyPackage(root, "blob.smallpen"))).locator;
   const pixel = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
     "base64",
   );
-  const { descriptor } = await importMedia(packagePath, {
-    bytes: new Uint8Array(pixel),
-    height: 1,
-    id: "media_pixel",
-    mimeType: "image/png",
-    name: "Pixel",
-    width: 1,
-  });
+  await mkdir(join(packagePath, "assets"), { recursive: true });
+  await writeFile(join(packagePath, "assets", "pixel.png"), pixel);
+  const page = join(packagePath, "pages", "Round Trip.html");
+  await writeFile(page, (await readFile(page, "utf8")).replace("</body>", '  <img data-name="Pixel" src="../assets/pixel.png" class="w-[1px] h-[1px]">\n</body>'));
   // Fingerprints that contain timestamps from the last two seconds are never
   // trusted (coarse file system clocks); let the fresh files settle.
   await delay(2100);
   const backend = new LocalPackageBackend();
   closeLater(() => backend.close());
-  await backend.open(packagePath);
+  const opened = await backend.open(packagePath);
   await backend.refresh();
   assert.equal(await backend.refresh(), backend.snapshot);
 
-  const handle = await open(join(packagePath, descriptor.blob), "r+");
+  const handle = await open(join(packagePath, "assets", "pixel.png"), "r+");
   try {
     await handle.write(Buffer.from([pixel[20] ^ 0xff]), 0, 1, 20);
   } finally {
     await handle.close();
   }
 
-  assert.equal(await backend.refresh(), undefined);
-  assert.equal(backend.status.state, "repair");
-  assert.equal(backend.status.error.code, "media_blob_hash_mismatch");
+  const refreshed = await backend.refresh();
+  assert.ok(refreshed, "the edited asset is read again");
+  assert.notEqual(refreshed.revision, opened.revision);
+  assert.equal(backend.status.state, "ready");
 });
 
-test("a Product whose Foundation is unreadable at open recovers once it is fixed", async (context) => {
+test("closing the workspace while a Package opens leaves no Package watching", async (context) => {
   const { closeLater, root } = await tempRoot(context);
-  const { foundationPath, productPath } = await productWorkspace(root);
-  const screenPath = join(foundationPath, "screens", "roundtrip.json");
-  const screen = await readFile(screenPath, "utf8");
-  await writeFile(screenPath, screen.slice(0, 40));
-  const workspace = new LocalWorkspaceSession();
-  closeLater(() => workspace.closeAll());
-  const events = [];
-  workspace.subscribe((event) => events.push(event));
-
-  const product = await workspace.open(productPath);
-  assert.equal(product.status.state, "repair");
-  assert.equal(workspace.packages.length, 1);
-
-  await writeFile(screenPath, screen);
-
-  await waitFor(() => workspace.describe(product.locator).status.state === "ready");
-  assert.equal(workspace.activeLocator, product.locator);
-  assert.ok(
-    workspace.packages.some(({ packageId }) => packageId === "pkg_foundation"),
-    "the fixed Foundation is opened so its later edits reach the Product",
-  );
-  assert.ok(
-    events.some(
-      (event) =>
-        event.type === "package-dependency-changed" &&
-        event.locator === product.locator &&
-        event.status.state === "ready",
-    ),
-  );
-});
-
-test("closing the workspace while a Product opens leaves no Package watching", async (context) => {
-  const { closeLater, root } = await tempRoot(context);
-  const { productPath } = await productWorkspace(root);
+  const productPath = await copyPackage(root, "opening.smallpen");
   const watchers = () =>
     process.getActiveResourcesInfo().filter((type) => type === "FSEventWrap").length;
   const before = watchers();
@@ -202,8 +143,8 @@ test("closing the workspace while a Product opens leaves no Package watching", a
   // Should this test fail, still release what leaked so the file can exit.
   closeLater(() => workspace.closeAll());
 
-  // The Product is registered before its Foundation opens, so closeAll()
-  // runs while the open still has a Package to add.
+  // The Package is registered before it finishes opening, so closeAll()
+  // runs while the open is still in flight.
   const opening = workspace.open(productPath).catch((error) => error);
   while (workspace.packages.length === 0) {
     await new Promise((resolve) => setImmediate(resolve));
@@ -213,85 +154,6 @@ test("closing the workspace while a Product opens leaves no Package watching", a
 
   assert.deepEqual(workspace.packages, []);
   await waitFor(() => watchers() === before);
-});
-
-test("a Product retargeted outside the Background follows its new Foundation", async (context) => {
-  const { closeLater, root } = await tempRoot(context);
-  const { foundationPath, productPath } = await productWorkspace(root);
-  const movedPath = join(root, "moved-foundation.smallpen");
-  await cp(foundationPath, movedPath, { recursive: true });
-  const workspace = new LocalWorkspaceSession();
-  closeLater(() => workspace.closeAll());
-  const events = [];
-  workspace.subscribe((event) => events.push(event));
-  const product = await workspace.open(productPath);
-
-  await applyOperationBatch(product.locator, {
-    baseRevision: product.snapshot.revision,
-    batchId: "retarget_foundation",
-    operations: [
-      {
-        dependency: { packageId: "pkg_foundation", path: "moved-foundation.smallpen" },
-        type: "set-foundation-dependency",
-      },
-    ],
-  });
-  const moved = (await openPackage(movedPath)).locator;
-  await waitFor(() => workspace.packages.some(({ locator }) => locator === moved));
-
-  const edited = await applyOperationBatch(
-    moved,
-    opacityBatch((await openPackage(moved)).revision, 0.3, "moved_foundation_edit"),
-  );
-
-  await waitFor(
-    () => workspace.describe(product.locator).status.foundationRevision === edited.revision,
-  );
-  // The Product may resolve the new revision from disk (through its own
-  // retarget event) before the moved Foundation's watcher reports the edit.
-  await waitFor(() =>
-    events.some(
-      (event) =>
-        event.type === "package-dependency-changed" &&
-        event.locator === product.locator &&
-        event.dependencyLocator === moved,
-    ),
-  );
-});
-
-test("a Library change reaches Products that use it through their Foundation", async (context) => {
-  const { closeLater, root } = await tempRoot(context);
-  const sharedPath = join(root, "dsp-shared.smallpen");
-  await cp(join(fixtures, "dsp-shared.smallpen"), sharedPath, { recursive: true });
-  await cp(join(fixtures, "design-system.smallpen"), join(root, "design-system.smallpen"), {
-    recursive: true,
-  });
-  const productPath = await copyPackage(root, "product.smallpen", (manifest) => {
-    manifest.dependencies = [
-      { packageId: "pkg_design_system", path: "design-system.smallpen" },
-    ];
-    manifest.packageId = "pkg_product";
-    manifest.role = "product";
-  });
-  const workspace = new LocalWorkspaceSession();
-  closeLater(() => workspace.closeAll());
-  const product = await workspace.open(productPath);
-  assert.equal(product.status.state, "ready");
-  const libraryRevision = () =>
-    workspace
-      .describe(product.locator)
-      .workspace.libraries.find(({ manifest }) => manifest.packageId === "pkg_dsp_shared")
-      ?.revision;
-  const before = libraryRevision();
-  assert.ok(before);
-
-  await editJson(join(sharedPath, "screens", "shared.json"), (screen) => {
-    screen.name = "Edited shared screen";
-  });
-  const after = (await openPackage(sharedPath)).revision;
-  assert.notEqual(after, before);
-
-  await waitFor(() => libraryRevision() === after);
 });
 
 test("the next write removes files left by a writer killed mid-commit", async (context) => {
@@ -324,105 +186,3 @@ test("the next write removes files left by a writer killed mid-commit", async (c
   assert.equal((await openPackage(packagePath)).revision.length, 64);
 });
 
-test("watch reports an invalid Package once and its recovery again", async (context) => {
-  const { closeLater, root } = await tempRoot(context);
-  const packagePath = await copyPackage(root, "watched.smallpen");
-  const manifestPath = join(packagePath, "manifest.json");
-  const manifest = await readFile(manifestPath, "utf8");
-  const replaceManifest = async (contents) => {
-    const replacement = join(root, "manifest-replacement.json");
-    await writeFile(replacement, contents);
-    await rename(replacement, manifestPath);
-  };
-  const child = spawn(
-    process.execPath,
-    [cli, "project", "watch", packagePath, "--interval", "100", "--json"],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  const stopped = new Promise((resolve) => child.once("close", resolve));
-  closeLater(async () => {
-    child.kill("SIGKILL");
-    await stopped;
-  });
-  const lines = [];
-  let buffered = "";
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    buffered += chunk;
-    const complete = buffered.split("\n");
-    buffered = complete.pop();
-    lines.push(...complete.filter(Boolean).map((line) => JSON.parse(line)));
-  });
-
-  await waitFor(() => lines.length === 1, 10000);
-  const initial = lines[0];
-  assert.equal(initial.event, "revision");
-
-  // Each replacement is one state. An in-place write can also expose an
-  // empty file, which correctly produces a different invalid diagnostic.
-  await replaceManifest(manifest.slice(0, 20));
-  await waitFor(() => lines.some(({ event }) => event === "invalid"));
-  // Several more polls observe the same invalid state.
-  await delay(500);
-  await replaceManifest(manifest);
-  await waitFor(() => lines.at(-1).event === "revision");
-
-  assert.deepEqual(
-    lines.map(({ event }) => event),
-    ["revision", "invalid", "revision"],
-  );
-  assert.equal(lines.at(-1).revision, initial.revision);
-});
-
-test("watch reports distinct invalid states during an in-place write before recovery", async (context) => {
-  const { closeLater, root } = await tempRoot(context);
-  const packagePath = await copyPackage(root, "partial-write.smallpen");
-  const manifestPath = join(packagePath, "manifest.json");
-  const manifest = await readFile(manifestPath, "utf8");
-  const child = spawn(
-    process.execPath,
-    [cli, "project", "watch", packagePath, "--interval", "100", "--json"],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  const stopped = new Promise((resolve) => child.once("close", resolve));
-  closeLater(async () => {
-    child.kill("SIGKILL");
-    await stopped;
-  });
-  const lines = [];
-  let buffered = "";
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    buffered += chunk;
-    const complete = buffered.split("\n");
-    buffered = complete.pop();
-    lines.push(...complete.filter(Boolean).map((line) => JSON.parse(line)));
-  });
-
-  await waitFor(() => lines.length === 1, 10000);
-  // Hold each phase until the watcher observes it; this reproduces the
-  // truncate/write race without depending on the host's disk timing.
-  const handle = await open(manifestPath, "w");
-  try {
-    await waitFor(() => lines.length === 2);
-    await handle.writeFile(manifest.slice(0, 20));
-    await waitFor(() => lines.length === 3);
-  } finally {
-    await handle.close();
-  }
-  assert.equal(lines[1].code, "invalid_manifest_json");
-  assert.equal(lines[2].code, "invalid_manifest_json");
-  assert.notEqual(lines[1].message, lines[2].message);
-  await delay(500);
-  assert.equal(lines.length, 3, "the unchanged invalid state is not repeated");
-
-  const replacement = join(root, "recovered-manifest.json");
-  await writeFile(replacement, manifest);
-  await rename(replacement, manifestPath);
-  await waitFor(() => lines.at(-1).event === "revision");
-  assert.deepEqual(
-    lines.map(({ event }) => event),
-    ["revision", "invalid", "invalid", "revision"],
-  );
-  assert.equal(lines.at(-1).revision, lines[0].revision);
-});

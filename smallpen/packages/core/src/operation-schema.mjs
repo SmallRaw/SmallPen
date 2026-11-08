@@ -1247,7 +1247,7 @@ function matchesType(value, type) {
 }
 
 // One-line shape of an operation for error messages.
-export function operationShape(type) {
+function operationShape(type) {
   const schema = OPERATION_SCHEMAS[type];
   return Object.entries(schema.fields)
     .map(([name, spec]) => `${name}${spec.required ? "" : "?"}: ${spec.type}`)

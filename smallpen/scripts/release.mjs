@@ -257,61 +257,28 @@ export async function verifyManifest(dir, commit, includeWeb = false) {
 // Renders text and a WebP image with the installed CLI: the packed tree must
 // carry the bundled fonts and the WebP decoder, not only the JavaScript.
 export async function smokeRender(cli, temp) {
+  // The package is written as files, the way an agent writes one: a WebP in
+  // assets/, a page that places it and a bold text, then check.
   const packagePath = join(temp, "render-smoke.smallpen");
   await cp(join(root, "test/fixtures/roundtrip.smallpen"), packagePath, {
     recursive: true,
   });
-  const imported = JSON.parse(
-    run(
-      process.execPath,
+  await mkdir(join(packagePath, "assets"), { recursive: true });
+  await cp(join(root, "test/fixtures/quadrant-lossy.webp"), join(packagePath, "assets/smoke.webp"));
+  const pagePath = join(packagePath, "pages/Round Trip.html");
+  const page = await readFile(pagePath, "utf8");
+  await writeFile(
+    pagePath,
+    page.replace(
+      "</body>",
       [
-        cli,
-        "asset",
-        "media",
-        "import",
-        packagePath,
-        "--file",
-        join(root, "test/fixtures/quadrant-lossy.webp"),
-        "--name",
-        "Smoke",
-        // The smoke edits stored JSON directly, so it needs the media id.
-        "--full",
-        "--json",
-      ],
-      temp,
+        '  <img data-name="Smoke" src="../assets/smoke.webp" class="left-[80px] top-[240px] w-[240px] h-[120px]">',
+        '  <p data-name="Smoke text" class="left-[400px] top-[96px] w-[200px] text-[#111827] text-[32px] font-[700] leading-[1.2]">Smoke</p>',
+        "</body>",
+      ].join("\n"),
     ),
   );
-  const screenPath = join(packagePath, "screens/roundtrip.json");
-  const screen = await json(screenPath);
-  const nodes = screen.presentations[0].nodes;
-  nodes.node_rectangle.fills = [
-    { mediaRef: imported.descriptor.id, type: "image" },
-  ];
-  nodes.node_canvas.children.push("node_smoke_text");
-  nodes.node_smoke_text = {
-    children: [],
-    fills: [{ color: "#111827", type: "solid" }],
-    height: 40,
-    id: "node_smoke_text",
-    name: "Smoke text",
-    text: "Smoke",
-    textStyle: {
-      fontFamily: "sourcesanspro",
-      fontId: "sourcesanspro",
-      fontSize: 32,
-      fontStyle: "normal",
-      fontWeight: 700,
-      letterSpacing: 0,
-      lineHeight: 1.2,
-      textAlign: "left",
-      verticalAlign: "top",
-    },
-    type: "TEXT",
-    width: 200,
-    x: 400,
-    y: 96,
-  };
-  await save(screenPath, screen);
+  run(process.execPath, [cli, "check", packagePath, "--json"], temp);
   const evidence = JSON.parse(
     run(
       process.execPath,
@@ -476,14 +443,14 @@ async function smoke(dir, commit) {
         process.execPath,
         [
           cli,
-          "validate",
+          "check",
           join(root, "test/fixtures/roundtrip.smallpen"),
           "--json",
         ],
         temp,
       ),
     );
-    assert.equal(validated.status, "valid");
+    assert.equal(validated.ok, true);
     await smokeRender(cli, temp);
   } finally {
     if (server) {

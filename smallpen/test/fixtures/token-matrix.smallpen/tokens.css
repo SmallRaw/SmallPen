@@ -1,0 +1,63 @@
+:root {
+}
+
+:root[data-device="mobile"] {
+  --spacing-page: 13px;
+  --size-panel: 12px;
+  --radius-card: 18px;
+  --text-font-size-body: 16px;
+}
+
+:root[data-device="web"] {
+  --spacing-page: 24px;
+  --size-panel: 640px;
+  --radius-card: 18px;
+  --text-font-size-body: 16px;
+}
+
+:root[data-device="desktop"] {
+  --spacing-page: 32px;
+  --size-panel: 720px;
+  --radius-card: 18px;
+  --text-font-size-body: 16px;
+}
+
+:root[data-mode="light"] {
+  --color-accent: #f4f4f6;
+  --color-accent-foreground: #ffffff;
+  --color-background: #ffffff;
+  --color-border: #ebebef;
+  --color-card: #ffffff;
+  --color-card-border: #f0f0f0aa;
+  --color-card-foreground-foreground: #000000;
+  --color-chart-1: #e76e50;
+  --color-chart-2: #2a9d90;
+}
+
+:root[data-mode="dark"] {
+  --color-accent: #262626;
+  --color-accent-foreground: #fafafa;
+  --color-background: #0a0a0a;
+  --color-border: #262626;
+  --color-card: #171717;
+  --color-card-border: #292929;
+  --color-card-foreground-foreground: #fafafa;
+  --color-chart-1: #2662d9;
+  --color-chart-2: #2eb88a;
+}
+
+:root[data-theme="soft"] {
+  --color-brand-accent: #7c6df2;
+}
+
+:root[data-theme="vivid"] {
+  --color-brand-accent: #f23ae5;
+}
+
+:root[data-language="x"] {
+  --font-body: "Noto Sans SC";
+}
+
+:root[data-language="english"] {
+  --font-body: "Inter";
+}

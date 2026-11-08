@@ -18,6 +18,7 @@ import { openPackage } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
+import { copyLegacyFixture, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const recordedText = await readFile(
@@ -39,10 +40,8 @@ const CANONICAL_NODE_FIELDS = new Set([
 ]);
 
 async function product() {
-  const fixture = join(here, "fixtures", "design-system.smallpen");
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const fixture = join(here, "fixtures", "model", "design-system");
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
@@ -74,7 +73,10 @@ async function commit(snapshot, value) {
 }
 
 function nodes(snapshot) {
-  return snapshot.entries["screens/screen.json"].presentations[0].nodes;
+  const screen = snapshot.manifest.entries.screens
+    .map((entry) => snapshot.entries[entry])
+    .find((candidate) => candidate.id === SCREEN);
+  return screen.presentations[0].nodes;
 }
 
 function runtimeId(snapshot, nodeId) {
@@ -404,10 +406,8 @@ test("deleting a freshly dropped Instance before a reload deletes it", async (co
     await service?.close();
     await rm(root, { force: true, recursive: true });
   });
-  for (const name of ["design-system.smallpen", "dsp-shared.smallpen"]) {
-    await cp(join(here, "fixtures", name), join(root, name), {
-      recursive: true,
-    });
+  for (const name of ["design-system", "dsp-shared"]) {
+    await copyLegacyFixture(name, join(root, `${name}.smallpen`));
   }
   service = await serveLocalPackage({
     packagePath: join(root, "design-system.smallpen"),

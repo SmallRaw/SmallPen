@@ -15,6 +15,7 @@ import test from "node:test";
 
 import { serveLocalPackage } from "@smallpen/background";
 import { servePenpotFrontend } from "@smallpen/web";
+import { seedLegacyIds, setPackageId } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
@@ -22,12 +23,8 @@ const fixture = join(here, "fixtures", "roundtrip.smallpen");
 async function copyFixture(parent, name, packageId) {
   const packagePath = join(parent, `${name}.smallpen`);
   await cp(fixture, packagePath, { recursive: true });
-  if (packageId) {
-    const manifestPath = join(packagePath, "manifest.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.packageId = packageId;
-    await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-  }
+  if (packageId) await setPackageId(packagePath, packageId);
+  await seedLegacyIds(packagePath, "roundtrip");
   return packagePath;
 }
 

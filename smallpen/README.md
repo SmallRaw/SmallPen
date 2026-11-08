@@ -6,11 +6,11 @@ It does not require PostgreSQL, Valkey, MinIO, LDAP, a collaboration server, MCP
 
 ## File and session model
 
-- One `.smallpen` directory is one independent Canonical Package with one `manifest.json` and explicitly indexed entries.
-- A Product may reference exactly one same-workspace Foundation by permanent Package ID and relative path.
+- One `.smallpen` directory is one independent Canonical Package: a folder of HTML files. `index.html` names it and holds theme defaults, `tokens.css` holds Tokens and theme options, `components/*.html` the components, `pages/<Module>/<Page>[.mobile|.tablet].html` the pages, and `assets/` images and fonts. [HTML-FORMAT.md](docs/HTML-FORMAT.md) specifies the format.
+- Agents design by editing these files and running `smallpen check`; the App writes its edits back to the same files in their canonical form. Names are identity; a system cache keeps ids stable across renames.
 - Opening several packages creates several locators, sessions, and Package Tabs. It never merges files or builds a synthetic multi-root package.
 - CLI calls never inherit those UI sessions: every package, selector, Context, target, and operation is explicit and no current selection survives across calls.
-- Every write is a complete typed Operation Batch against `baseRevision`. The full candidate is validated before an atomic filesystem replacement.
+- An App save is a typed Operation Batch against `baseRevision`; the candidate files are encoded and checked in memory before an atomic replacement. Agent edits go through the `check` gate: passing changes are accepted, files with errors are rejected and can be reverted.
 - External valid revisions reload automatically. Invalid or incompatible state retains the last valid read-only projection and enters Repair.
 - Local Undo/Redo applies inverse Operation Batches; stale writers are rejected instead of overwriting newer work. An external revision clears Undo/Redo, because its entries target content that no longer exists; the workspace shows a notice when it drops any.
 
@@ -29,7 +29,8 @@ Those upstream Penpot features remain unchanged outside the SmallPen profile.
 ## Runtime boundaries
 
 - `packages/core/` is browser-safe business logic: strict validation, dependency and Context resolution, deterministic projections, Discovery Guides, Catalog, comparisons, and Operation preparation.
-- `packages/local-package/` owns local reads, atomic writes, watching, multi-package sessions, Draft import, rendering, evidence, and commit serialization.
+- `packages/core/src/html-format/` reads and writes the HTML files: one strict parser, one class vocabulary, one encoder; `check` reports each problem with file, line and column.
+- `packages/local-package/` owns local reads (text in memory, asset bytes on demand), atomic writes, watching, multi-package sessions, rendering, evidence, and commit serialization.
 - `packages/penpot-adapter/` maps supported completed Penpot changes to typed SmallPen Operations.
 - `apps/cli/` is the complete public Agent surface and never starts Web or Background.
 - `apps/background/` exposes session-scoped local HTTP services used by the Penpot adapter.
@@ -274,26 +275,31 @@ artifacts require a new build. npm cannot atomically publish five packages,
 so a failed run can leave some dependencies published; versions are never
 overwritten or automatically unpublished.
 
-Run `node apps/cli/bin/smallpen.mjs --help` for the object groups and shared
-commands. Expand one step at a time:
+Agents read, search and edit the package files themselves. The CLI does only
+what needs its parser or renderer:
 
 ```sh
-smallpen help token
-smallpen help token show
-smallpen schema command token show --json
-smallpen token show PACKAGE --path color.brand
+smallpen init ./acme --json                       # blank package
+smallpen check PACKAGE                            # after every edit; the gate
+smallpen check PACKAGE --revert [--file PATH]     # put rejected files back
+smallpen check PACKAGE --render [--page P]        # plus rendering checks
+smallpen view PACKAGE --page P --as png|spec|wireframe
+smallpen export PACKAGE --format png|html|spec ...
+smallpen changes PACKAGE --since REVISION         # what people changed in the App
+smallpen token list PACKAGE [--theme G/O]         # resolved Token values
 ```
 
-Project, Token, component, page, canvas, asset and prototype flow commands use
-`OBJECT [GROUP] ACTION PACKAGE`. Theme settings are under `token theme`;
-colors, typography and font choice are Token values. Media and font files are
-under `asset media` and `asset font`. `view`, `export` and
-`validate` are the shared design reads, exports and checks. Advanced batches,
-drafts, remote libraries and the App's separate color/typography styles are
-under `advanced`. Previous flat commands return the corresponding grouped path.
+`check` is the gate for direct edits. A passing check (or an App save) is the
+accepted version, kept in the system cache. When files have errors, the
+changed files that keep the package valid are accepted and the files with
+errors are rejected; an error in an unchanged file is pinned on the shared
+file (tokens.css, index.html, a component, an asset) whose change caused it.
+`check --revert` puts the rejected files back to the accepted version and
+removes rejected new files, under the package write lock; `--file PATH` limits
+that to one agent's files when several agents edit one package.
 
-Font imports store one original TTF, OTF or WOFF per weight/style. Each format
-works alone; old multi-format variants remain readable. App and CLI use the
+A font is one TTF, OTF or WOFF file per weight/style in `assets/fonts/`,
+declared with `@font-face` in `tokens.css`. App and CLI use the
 same native font resource loader. Browser WOFF and native SFNT are derived
 without rebuilding glyphs, in a content-keyed system cache outside the Package,
 beside the history cache. The cache retains at most 128 MiB;
@@ -312,16 +318,14 @@ materials and character boards remain drafts for later work. See
 [CLI and Skill responsibilities](docs/CLI-SKILLS.md).
 
 
-`token theme list` frequently reads groups/options/defaults. Unspecified groups use
+`token list` reads resolved values and the theme groups/options. Unspecified groups use
 project defaults; explicit `--theme GROUP/OPTION` only selects that call. The
 App and CLI share those rules. CLI reads never change App selection or save a
-combination. `token set` writes Tokens by name and `token theme add|rename|default|
-delete` edit options named `Group/Option`; no IDs or token Sets are needed.
+combination. Tokens and options are edited in `tokens.css`; a project default
+is the `data-GROUP` attribute on `index.html`'s `<html>`.
 
-Dimensions have the same meaning in `draw` and `set`, including component
-copies: a number or `px` fixes the axis, a Token keeps a binding, `fill` needs
-a row/column parent, and `hug` follows content. A direct size edit replaces
-the old mode, binding and override on that axis; other fields stay.
+Sizes follow the App's rules in the files too: `w-[n]` or a size Token fixes
+an axis, `w-full` fills a flex parent's room, and `w-fit` hugs content.
 
 `view` looks at anything by name (`--page`, `--component`, `--token`,
 `--canvas`). Three design outputs serve different tasks:
@@ -345,7 +349,7 @@ shared solve, `export --format png --evidence --output REVIEW` writes
 `REVIEW.png`, `REVIEW.spec.txt`, `REVIEW.wireframe.txt` and `REVIEW.json`.
 The fingerprint includes native geometry, themes, dependency revisions,
 rendering runtime and font/media bytes. PNG scale is independent of layout.
-`validate` checks every version of a page or variant of a component unless one
+`check --render` checks every version of a page or variant of a component unless one
 is named. It writes JSON progress lines to stderr (total, current target and
 completed count), keeping the final JSON result on stdout. Each target has a
 30-second limit; use `--target-timeout MILLISECONDS` to change it. A timeout
@@ -353,11 +357,9 @@ names the target and lets later targets continue. Ctrl+C returns exit code
 130 with completed findings and the remaining targets in coverage. A partial
 or interrupted run does not certify the untested targets. Read skipped coverage.
 
-No command takes an ID except `advanced apply` (an exact batch, such as the
-undo batch a write returns; `schema operation TYPE` documents its operations)
-and `project repair`. Writes use the same atomic engine and revision checks.
-Choose `--batch-id` before retryable writes; reverse edits are explicit new
-writes, not history rollback.
+No command takes an ID. App saves use one atomic engine with revision checks:
+they encode the design in memory, check the result, then replace only the
+files that changed; files the package does not know are never deleted.
 
 `changes` reports `historyWindow`: the oldest retained revision, newest
 revision, record count and `incompleteBatches`. History and batch replay retain
@@ -375,10 +377,9 @@ by App and CLI. Copies and moved projects start separate histories. After
 7 days without writes, the next cache access clears its old files. OS cache
 cleanup can also discard them; read the current design when a revision has
 left the window. `SMALLPEN_HISTORY_CACHE_DIR` overrides the cache root for
-test environments. Opening an older writable project automatically migrates
-its adjacent `.batches.json` file into the cache; its design revision stays
-unchanged. If an older App recreates that file, the next access merges it
-with cached history under the project write lock.
+test environments. Every revision a read, a check or a save reports is
+remembered with its files, so `changes --since` compares files however they
+changed: in the App, in an editor or by an agent.
 
 The cache stores each inverse once and reconstructs its duplicate guidance
 when replaying a confirmation. The next write also compacts older records.
@@ -387,9 +388,8 @@ still receives the full inverse, and the cache retains the retry receipt
 without it. The write reports `history.status=partial`,
 `reason=inverse_exceeds_capacity` and `replayRetained=true`. Retrying the batch
 replays that receipt without writing again; it cannot recover the uncached
-inverse. `changes --since` returns `batch_history_unavailable` if rebuilding
-that revision would cross this gap. Read the current design instead of
-treating unavailable history as no changes. App Undo/Redo still uses the
+inverse. `changes --since` still works, because it compares remembered
+revisions rather than replaying inverses. App Undo/Redo still uses the
 inverse received by its current session.
 
 Unreadable history stays recoverable as `batches.json.unreadable-UUID.bak`
@@ -405,23 +405,6 @@ retains deliverables outside that temporary tree.
 
 See [CLI reference](CLI-AI-TOPIC.md) for the command groups, selectors, writes,
 prototype interactions and output rules.
-
-## Figma Draft workflow
-
-Import always creates a new independent Draft package. Figma structured clipboard HTML is decoded from its embedded Kiwi schema; FRAME, RECTANGLE, TEXT, Component Set, Component, and Instance semantics are preserved where supported. SVG and PNG are explicit flat IMAGE fallbacks. Provenance and every known loss are stored in the Draft manifest.
-
-```sh
-node apps/cli/bin/smallpen.mjs import-draft ./workspace/import-1.smallpen \
-  --kind figma --input clipboard.html --package-id pkg_figma_draft --json
-
-node apps/cli/bin/smallpen.mjs draft-diff ./workspace/import-1.smallpen \
-  --after ./workspace/import-2.smallpen --json
-
-node apps/cli/bin/smallpen.mjs draft-compile ./workspace/product.smallpen \
-  --draft ./workspace/import-2.smallpen --selections selections.json --json
-```
-
-Reimport writes another Draft file and never overwrites Product or Foundation. `draft-compile` emits, but does not apply, an Operation Batch for explicitly selected matching nodes and fields. Review that batch, then pass it to `apply`; normal stale-revision protection still applies.
 
 ## Evidence
 
@@ -440,6 +423,37 @@ Temporary artifacts may also be removed by the OS;
 use `--output` or `--inverse-out` for records that must survive cleanup.
 
 The CLI `evidence` command returns a PNG and evidence from the same deterministic projection; `--output PREFIX` exports them as `PREFIX.png` and `PREFIX.json`. JSON includes the Package ID, revision/package hash, resolved selector, render hash, viewport, node-to-image regions, Semantic Tree, and renderer diagnostics. Evidence is suitable for an external Review workflow; it does not add comments or approval state to `.smallpen`.
+
+Export an offline review directly from the Package's pages and declared prototype
+connections:
+
+```sh
+node apps/cli/bin/smallpen.mjs export ./product.smallpen --format html \
+  --canvas Pages --output ./review --json
+```
+
+Open `review/index.html` from the filesystem. The review groups pages by module,
+searches names and versions, shows native PNGs, and links each page's specification,
+wireframe and JSON evidence. Every page version in the selected canvas is included;
+`--page NAME` includes all of that page's versions unless `--platform` selects one.
+Without either selector, the Package must have exactly one canvas. `--theme` and
+`--context` choose one combination for this call; export never expands all theme
+combinations or changes the Package revision.
+
+Hotspots use visible native geometry from the same solve as each page's artifacts.
+Only declared click/navigation to exported page roots and previous-page actions
+run. Overlays, other triggers, multiple actions on one source, targets outside the
+selected scope and unavailable/hidden geometry are reported as unresolved in the
+manifest; their positions or behavior are never guessed. This is a design review,
+with no business input, data saving, recording or production application code.
+`manifest.json` records scope, page/version/link counts, revisions, layout hashes
+and artifact hashes. Output must be a new or empty directory outside source
+Packages; existing files are never cleared. `index.html` is written last, so a
+failed render leaves no completed review entry point.
+Each page runs in an isolated native worker that is terminated before the next
+page, so long reviews do not retain WASM font/shape caches across pages. JSON
+progress lines go to stderr; stdout retains the final receipt. The included
+project default page opens first, then declared prototype starts are the fallback.
 
 An image-capable client should open the current artifact or decode explicitly
 requested bytes and verify the PNG's SHA-256 against `renderHash`, keeping its

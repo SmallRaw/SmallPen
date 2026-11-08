@@ -319,26 +319,6 @@ test("native measurement ignores unrelated canonical pages and variants", async 
   assert.equal(result.snapshot.status, "resolved");
 });
 
-test("a component root retains hug sizing when its children change after authoring", async () => {
-  const { componentDefineOperation } = await import("../packages/core/src/simple-design.mjs");
-  const product = await openPackage(fixture);
-  const { componentSet } = componentDefineOperation(product, {
-    name: "Actions",
-    base: { width: 326, height: "hug", layout: "column", gap: 8, children: [
-      { name: "Button", width: 326, height: 36 },
-      { name: "Hint", text: "Keep modified files", width: "fill", height: "hug", fontSize: 16, lineHeight: 1.25 },
-    ] },
-  });
-  const variant = componentSet.variants[0];
-  const root = variant.nodes[variant.rootId];
-  assert.equal(root.height, 64, "seed size before selecting a larger control Token");
-  Object.values(variant.nodes).find(node => node.name === "Button").height = 44;
-  const result = await inspectProjection(product, { nodes: variant.nodes, rootId: variant.rootId, context: {} });
-  assert.ok(Math.abs(result.snapshot.nodes[root.id].bounds.height - 72) < 0.01);
-  assert.equal(root["layout-item-v-sizing"], "auto");
-  assert.equal(root.height, 64, "measurement does not rewrite the authored seed");
-});
-
 test("nested hug layout settles despite subpixel WASM rounding", async () => {
   // Reduced from the Medium failure to 15 generic boxes and a bundled font.
   // At 0.0001px tolerance, f32 resize noise oscillates for all nine passes.

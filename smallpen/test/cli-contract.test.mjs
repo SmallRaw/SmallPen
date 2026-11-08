@@ -22,6 +22,7 @@ import {
   publicArgv,
 } from "../apps/cli/bin/command-tree.mjs";
 import { COMMAND_NAMES, commandGuidance } from "../apps/cli/bin/help.mjs";
+import { seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen-check.cjs");
@@ -74,6 +75,7 @@ async function packageCopy(context, name = "app.smallpen") {
   });
   const packagePath = join(root, name);
   await cp(fixture, packagePath, { recursive: true });
+  await seedLegacyIds(packagePath, "roundtrip");
   return { packagePath, root };
 }
 
@@ -81,13 +83,13 @@ const canDropWriteAccess =
   process.platform !== "win32" && process.getuid?.() !== 0;
 
 test(
-  "reads succeed on a read-only location and writes fail typed",
+  "reads and check succeed on a read-only location",
   {
     skip: !canDropWriteAccess,
   },
   async (context) => {
     const { packagePath, root } = await packageCopy(context);
-    const { revision } = await json(["validate", packagePath, "--json"]);
+    await json(["check", packagePath, "--render", "--json"]);
     // No lock directory exists yet and none can be created.
     await rm(join(root, ".app.smallpen.write-lock"), {
       force: true,
@@ -95,60 +97,15 @@ test(
     });
     await chmod(root, 0o555);
 
-    for (const command of [
-      ["validate"],
-      ["project", "show"],
+    for (const [command, ...rest] of [
+      ["check"],
+      ["check", "--render"],
       ["view"],
-      ["project", "list"],
+      ["token list"],
     ]) {
-      const result = await runCli([...command, packagePath, "--json"]);
-      assert.equal(result.code, 0, `${command.join(" ")}: ${result.stdout}`);
+      const result = await runCli([...command.split(" "), packagePath, ...rest, "--json"]);
+      assert.equal(result.code, 0, `${command}: ${result.stdout}`);
     }
-    const batchPath = join(
-      tmpdir(),
-      `smallpen-ro-${process.pid}-${Date.now()}.json`,
-    );
-    context.after(() => rm(batchPath, { force: true }));
-    await writeFile(
-      batchPath,
-      JSON.stringify({
-        baseRevision: revision,
-        batchId: "batch_read_only",
-        operations: [
-          {
-            node: {
-              children: [],
-              height: 20,
-              id: "node_read_only",
-              name: "Read only",
-              type: "RECTANGLE",
-              width: 20,
-              x: 10,
-              y: 10,
-            },
-            parentId: "node_canvas",
-            presentationId: "pres_desktop",
-            screenId: "scr_roundtrip",
-            type: "add-presentation-node",
-          },
-        ],
-      }),
-    );
-    const preview = await json([
-      "advanced",
-      "apply",
-      packagePath,
-      "--batch",
-      batchPath,
-      "--dry-run",
-      "--json",
-    ]);
-    assert.equal(preview.dryRun, true);
-    const error = await failure(
-      ["advanced", "apply", packagePath, "--batch", batchPath, "--json"],
-      "package_not_writable",
-    );
-    assert.equal(error.details.packagePath, await realpath(packagePath));
     assert.deepEqual(await readdir(root), ["app.smallpen"]);
   },
 );
@@ -156,7 +113,7 @@ test(
 test("reading a mistyped package path creates nothing", async (context) => {
   const { root } = await packageCopy(context);
   await failure(
-    ["project", "show", join(root, "typo", "nested", "app.smallpen"), "--json"],
+    ["check", join(root, "typo", "nested", "app.smallpen"), "--json"],
     "invalid_package_path",
   );
   await failure(
@@ -168,23 +125,15 @@ test("reading a mistyped package path creates nothing", async (context) => {
 
 test("list order and pages do not depend on the host locale", async (context) => {
   const { packagePath, root } = await packageCopy(context);
-  const intentPath = join(root, "tokens.json");
   await writeFile(
-    intentPath,
-    JSON.stringify({
-      tokens: ["b", "ab", "aa"].map((name) => ({
-        name: `space.${name}`,
-        type: "number",
-        value: 16,
-      })),
-    }),
+    join(packagePath, "tokens.css"),
+    `:root {\n${["b", "ab", "aa"].map((name) => `  --spacing-${name}: 16px;`).join("\n")}\n}\n`,
   );
-  await json(["token", "set", packagePath, "--intent", intentPath, "--json"]);
   const outputs = [];
   for (const locale of ["en_US.UTF-8", "da_DK.UTF-8", "tr_TR.UTF-8"]) {
     const env = { LANG: locale, LC_ALL: locale };
     const result = await runCli(
-      ["project", "list", packagePath, "--kind", "tokens", "--json"],
+      ["token", "list", packagePath, "--json"],
       env,
     );
     assert.equal(result.code, 0, result.stdout);
@@ -192,118 +141,22 @@ test("list order and pages do not depend on the host locale", async (context) =>
   }
   // List order is the stable code-unit order of identities, never a
   // locale collation.
-  const items = JSON.parse(outputs[0]).items.map(({ item }) => item);
-  assert.deepEqual(items.map(({ path }) => path).sort(), [
-    "space.aa",
-    "space.ab",
-    "space.b",
-  ]);
-  const ids = items.map(({ id }) => id);
-  assert.deepEqual(ids, [...ids].sort());
+  const paths = JSON.parse(outputs[0]).items.map(({ token }) => token.path);
+  assert.deepEqual(paths, ["spacing-aa", "spacing-ab", "spacing-b"]);
   assert.equal(outputs[1], outputs[0]);
   assert.equal(outputs[2], outputs[0]);
 });
 
-test("missing, unreadable, and non-object inputs fail typed", async (context) => {
-  const { packagePath, root } = await packageCopy(context);
-  await failure(["asset", "media", "import", packagePath, "--json"], "missing_media_file");
-  await failure(
-    ["asset", "font", "import", packagePath, "--family", "Work", "--json"],
-    "missing_font_file",
-  );
-  for (const [command, option] of [
-    [["advanced", "apply"], "--batch"],
-    [["page", "draw"], "--intent"],
-    [["token", "set"], "--intent"],
-    [["component", "define"], "--intent"],
-    [["token", "import"], "--input"],
-    [["asset", "media", "import"], "--file"],
-  ]) {
-    const error = await failure(
-      [...command, packagePath, option, join(root, "absent.json"), "--json"],
-      "unreadable_input_file",
-    );
-    assert.equal(error.details.option, option);
-    assert.equal(error.details.reason, "ENOENT");
-  }
-  const nullBatch = join(root, "null.json");
-  await writeFile(nullBatch, "null");
-  await failure(
-    ["advanced", "apply", packagePath, "--batch", nullBatch, "--json"],
-    "invalid_batch",
-  );
-  await failure(
-    ["project", "init", join(root, "workspace"), "--answers", nullBatch, "--json"],
-    "invalid_initialization_answers_json",
-  );
-});
-
-test("media writes return an inverse batch that apply can execute", async (context) => {
-  const { packagePath, root } = await packageCopy(context);
-  const imported = await json([
-    "asset", "media", "import",
-    packagePath,
-    "--file",
-    jpegPath,
-    "--name",
-    "Logos/Quadrant",
-    "--json",
-  ]);
-  const importedInverse = JSON.parse(
-    await readFile(imported.inverseBatchPath, "utf8"),
-  );
-  assert.equal(importedInverse.baseRevision, imported.revision);
-
-  const removed = await json([
-    "asset", "media", "delete",
-    packagePath,
-    "--media",
-    "Logos/Quadrant",
-    "--json",
-  ]);
-  const removedInverse = JSON.parse(
-    await readFile(removed.inverseBatchPath, "utf8"),
-  );
-  assert.equal(removedInverse.baseRevision, removed.revision);
-  const undoPath = join(root, "undo.json");
-  await writeFile(undoPath, JSON.stringify(removedInverse));
-  const restored = await json([
-    "advanced",
-    "apply",
-    packagePath,
-    "--batch",
-    undoPath,
-    "--json",
-  ]);
-  assert.equal(restored.revision, imported.revision);
-});
-
-test("search-components insertion advice is deterministic", async () => {
-  const product = join(here, "fixtures", "design-system.smallpen");
-  const args = [
-    "component",
-    "search",
-    product,
-    "--query",
-    "a",
-    "--full",
-    "--json",
-  ];
-  const first = await runCli(args);
-  assert.equal(first.code, 0, first.stdout);
-  assert.match(first.stdout, /"recommendedInsertion":\{"element":\{"use":"Card"/);
-  assert.equal((await runCli(args)).stdout, first.stdout);
-});
 
 test("a single-value option given twice is rejected, repeatable ones are not", async (context) => {
   const { packagePath } = await packageCopy(context);
   const error = await failure(
-    ["project", "list", packagePath, "--kind", "tokens", "--kind", "screens", "--json"],
+    ["view", packagePath, "--as", "text", "--as", "png", "--json"],
     "duplicate_option",
   );
-  assert.equal(error.details.option, "--kind");
+  assert.equal(error.details.option, "--as");
   const result = await runCli([
-    "token", "theme", "list",
+    "token", "list",
     packagePath,
     "--theme",
     "Theme/Default",
@@ -314,13 +167,6 @@ test("a single-value option given twice is rejected, repeatable ones are not", a
   assert.doesNotMatch(result.stdout, /duplicate_option/);
 });
 
-test("watch rejects --max-events 0 instead of emitting an event", async (context) => {
-  const { packagePath } = await packageCopy(context);
-  await failure(
-    ["project", "watch", packagePath, "--max-events", "0", "--json"],
-    "invalid_integer_option",
-  );
-});
 
 test("every option in a command's usage is accepted and help matches replay", async (context) => {
   // Output options take the value "v" as a relative path, so probe from a
@@ -375,31 +221,11 @@ test("every option in a command's usage is accepted and help matches replay", as
   );
   assert.deepEqual(unaccepted.flat(), []);
 
-  // Every previewable write documents --explain and --diff in its usage.
-  assert.match(commandGuidance("apply").split("Purpose:")[0], /--explain/);
-  assert.match(commandGuidance("apply").split("Purpose:")[0], /--diff/);
+  // No public route writes: the package changes by editing its files.
   const writes = routes.filter(({ contract }) =>
     Object.values(commandContract(contract).parameters).some(
-      ({ option }) => option === "--confirm-unmatched",
+      ({ option }) => option === "--confirm-unmatched" || option === "--intent" || option === "--batch",
     ),
   );
-  assert.ok(writes.length > 10, "write routes found");
-  for (const { argv } of writes) {
-    const usage = (await runCli(["help", ...argv])).stdout;
-    assert.match(usage, /--explain/, argv.join(" "));
-    assert.match(usage, /--diff/, argv.join(" "));
-  }
-  const apply = (await runCli(["advanced", "apply", "--help", "--full"])).stdout;
-  assert.doesNotMatch(apply, /do not provide cross-process deduplication/);
-  assert.match(apply, /alreadyApplied/);
-  for (const [command, optionName] of [
-    [["asset", "font", "import"], "--media-path"],
-    [["advanced", "library-refresh"], "--interval"],
-    [["advanced", "library-refresh"], "--max-events"],
-  ]) {
-    await failure(
-      [...command, "/nonexistent/x.smallpen", optionName, "v"],
-      "unknown_option",
-    );
-  }
+  assert.deepEqual(writes.map(({ argv }) => argv.join(" ")), []);
 });

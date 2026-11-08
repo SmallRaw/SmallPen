@@ -12,22 +12,16 @@ import {
 } from "@smallpen/core";
 import {
   createEvidence,
-  decodeFigmaClipboard,
-  openRemoteLibrary,
 } from "@smallpen/local-package";
+import { readModelEntry } from "./helpers/named.mjs";
 
-import {
-  ByteBuffer,
-  decodeBinarySchema,
-  encodeBinarySchema,
-} from "../packages/local-package/src/kiwi-runtime.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 const localPackageRoot = join(here, "..", "packages", "local-package");
 
 async function fixtureValues(edit = () => {}) {
-  const manifest = JSON.parse(await readFile(join(fixture, "manifest.json"), "utf8"));
+  const manifest = await readModelEntry(fixture, "manifest.json");
   edit(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
@@ -36,207 +30,9 @@ async function fixtureValues(edit = () => {}) {
   return values;
 }
 
-async function rejectsWith(promise, code) {
-  let caught;
-  try {
-    await promise;
-  } catch (error) {
-    caught = error;
-  }
-  assert.equal(caught?.code, code, caught?.stack);
-  return caught;
-}
-
 // --- Remote Library requests (M5) -----------------------------------------
 
-async function remoteFetch(handler) {
-  const values = await fixtureValues((manifest) => {
-    manifest.packageId = "pkg_remote_library";
-  });
-  return async (url, init) => {
-    const response = await handler(new URL(url), init);
-    if (response) return response;
-    const value = values.get(new URL(url).pathname.replace(/^\/library\//, ""));
-    return value === undefined
-      ? new Response("missing", { status: 404 })
-      : new Response(JSON.stringify(value), { status: 200 });
-  };
-}
-
-test("Remote Libraries follow same-origin redirects only (M5)", async () => {
-  const sameOrigin = await openRemoteLibrary("https://design.example/old/", {
-    fetchImpl: await remoteFetch((url, init) => {
-      assert.equal(init.redirect, "manual");
-      if (url.pathname.startsWith("/old/")) {
-        return new Response(null, {
-          headers: { location: url.pathname.replace("/old/", "/library/") },
-          status: 302,
-        });
-      }
-      return undefined;
-    }),
-    refresh: true,
-  });
-  assert.equal(sameOrigin.manifest.packageId, "pkg_remote_library");
-
-  await rejectsWith(
-    openRemoteLibrary("https://design.example/library/", {
-      fetchImpl: await remoteFetch(() =>
-        new Response(null, {
-          headers: { location: "http://169.254.169.254/latest/meta-data" },
-          status: 301,
-        }),
-      ),
-      refresh: true,
-    }),
-    "remote_library_redirect",
-  );
-});
-
-test("Remote Library bodies are streamed against the size limit (M5)", async () => {
-  let pulled = 0;
-  const chunk = new Uint8Array(1024 * 1024);
-  const endless = () =>
-    new Response(
-      new ReadableStream({
-        pull(controller) {
-          pulled += 1;
-          controller.enqueue(chunk);
-        },
-      }),
-      { status: 200 },
-    );
-  await rejectsWith(
-    openRemoteLibrary("https://design.example/library/", {
-      fetchImpl: endless,
-      refresh: true,
-    }),
-    "remote_library_too_large",
-  );
-  // Reading stops right after the 50 MB limit instead of buffering it all.
-  assert.ok(pulled <= 53, `pulled ${pulled} chunks`);
-});
-
-test("Remote Library errors never echo response text (M5)", async () => {
-  const error = await rejectsWith(
-    openRemoteLibrary("https://design.example/library/", {
-      fetchImpl: async () => new Response("secret-session-token {", { status: 200 }),
-      refresh: true,
-    }),
-    "invalid_remote_library",
-  );
-  assert.doesNotMatch(JSON.stringify({ details: error.details, message: error.message }), /secret/);
-});
-
-test("Remote Library requests time out (M5)", async () => {
-  await rejectsWith(
-    openRemoteLibrary("https://design.example/library/", {
-      fetchImpl: (_url, init) =>
-        new Promise((_resolve, reject) => {
-          init.signal.addEventListener("abort", () => reject(init.signal.reason));
-        }),
-      refresh: true,
-      requestTimeoutMs: 50,
-    }),
-    "remote_library_timeout",
-  );
-});
-
 // --- Kiwi clipboard schema (M6) -------------------------------------------
-
-test("a hostile 5-byte Kiwi schema is rejected instead of over-reading (M6)", () => {
-  // A varuint definition count of 2^32-1 with no bytes left to back it.
-  const hostile = new Uint8Array([0xff, 0xff, 0xff, 0xff, 0x0f]);
-  assert.throws(() => decodeBinarySchema(new ByteBuffer(hostile)), /exceeds the message/);
-  // One definition whose name string is never terminated.
-  assert.throws(
-    () => decodeBinarySchema(new ByteBuffer(new Uint8Array([1, 65, 66, 67, 68]))),
-    /Unterminated string|ends before/,
-  );
-  const reader = new ByteBuffer(new Uint8Array([0x80]));
-  assert.throws(() => reader.readVarUint(), /ends before/);
-});
-
-function kiwiClipboardHtml(definitions, data) {
-  const schemaBytes = deflateSync(
-    encodeBinarySchema({ definitions, package: null }),
-  );
-  const dataBytes = deflateSync(data);
-  const payload = new Uint8Array(20 + schemaBytes.length + dataBytes.length);
-  const view = new DataView(payload.buffer);
-  payload.set(new TextEncoder().encode("fig-kiwi"), 0);
-  view.setUint32(8, 101, true);
-  view.setUint32(12, schemaBytes.length, true);
-  payload.set(schemaBytes, 16);
-  view.setUint32(16 + schemaBytes.length, dataBytes.length, true);
-  payload.set(dataBytes, 20 + schemaBytes.length);
-  const meta = Buffer.from("{}").toString("base64");
-  return `(figmeta)${meta}(/figmeta)(figma)${Buffer.from(payload).toString("base64")}(/figma)`;
-}
-
-const kiwiField = (name, type, value, isArray = false) => ({
-  isArray,
-  isDeprecated: false,
-  name,
-  type,
-  value,
-});
-
-test("Kiwi values that consume no bytes cannot exhaust memory", async () => {
-  // An array of field-less structs: every element decodes from zero bytes.
-  // At 120 million elements (a 155 KB clipboard) this used to abort the
-  // process with a fatal out-of-memory error.
-  const length = 10_000_000;
-  const head = new ByteBuffer();
-  head.writeVarUint(1);
-  head.writeVarUint(length);
-  head.writeVarUint(0);
-  const data = new Uint8Array(head.length + length);
-  data.set(head.toUint8Array());
-  await assert.rejects(
-    decodeFigmaClipboard(
-      kiwiClipboardHtml(
-        [
-          { fields: [], kind: "STRUCT", name: "Empty" },
-          {
-            fields: [kiwiField("nodeChanges", "Empty", 1, true)],
-            kind: "MESSAGE",
-            name: "Message",
-          },
-        ],
-        data,
-      ),
-    ),
-    { code: "invalid_figma_clipboard", message: /too many values/ },
-  );
-  // Struct fields carry no tag: a chain of structs with two fields each
-  // decodes 2^40 objects from a two-byte message.
-  const depth = 40;
-  const chain = Array.from({ length: depth }, (_, index) => ({
-    fields:
-      index === depth - 1
-        ? []
-        : [kiwiField("a", `S${index + 1}`, 0), kiwiField("b", `S${index + 1}`, 0)],
-    kind: "STRUCT",
-    name: `S${index}`,
-  }));
-  await assert.rejects(
-    decodeFigmaClipboard(
-      kiwiClipboardHtml(
-        [
-          ...chain,
-          {
-            fields: [kiwiField("root", "S0", 1)],
-            kind: "MESSAGE",
-            name: "Message",
-          },
-        ],
-        new Uint8Array([1, 0]),
-      ),
-    ),
-    { code: "invalid_figma_clipboard", message: /too many values/ },
-  );
-});
 
 // --- Raster decode limits (M7) --------------------------------------------
 

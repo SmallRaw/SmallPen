@@ -1,13 +1,9 @@
 {
-  "revision": "93d940de88e1c92d2e757d1e445663d1d4b0ab0d60bbcfd01c16684d6e25c935",
+  "revision": "ead063ebb9a17abc408cd6753a2a5f54c3f2329e672eae085a15b3cb0df2a4fc",
   "status": "valid",
   "packageId": "pkg_design_system",
   "activeCombination": [
-    "radius/md",
-    "color/Light",
-    "spacing/md",
-    "typography/md",
-    "alias/demo"
+    "color/light"
   ],
   "supportedTokenTypes": [
     "boolean",

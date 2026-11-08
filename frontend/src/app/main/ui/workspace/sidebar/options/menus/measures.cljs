@@ -73,6 +73,9 @@
     :circle  generic-options
     :frame   frame-options
     :group   generic-options
+    ;; SmallPen <img> elements are image shapes; a selection that mixes
+    ;; one with other shapes reaches this table.
+    :image   rect-options
     :path    generic-options
     :rect    rect-options
     :svg-raw generic-options

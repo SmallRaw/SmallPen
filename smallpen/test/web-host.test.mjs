@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { startWebHost } from "../apps/web/src/host.mjs";
+import { seedLegacyIds } from "./helpers/named.mjs";
 
 async function start(t, packageSelected = false) {
   const root = await realpath(
@@ -24,6 +25,7 @@ async function start(t, packageSelected = false) {
     packagePath,
     { recursive: true },
   );
+  await seedLegacyIds(packagePath, "roundtrip");
   await mkdir(join(root, "Folder"));
   await writeFile(join(root, "private.txt"), "not a directory");
   const frontendRoot = join(root, "frontend");
@@ -109,7 +111,7 @@ test("directory browsing rejects foreign origins and invalid paths", async (t) =
 
 test("opening and editing through the Web service saves the original package", async (t) => {
   const { host, packagePath, root } = await start(t);
-  const before = await readFile(join(packagePath, "manifest.json"), "utf8");
+  const before = await readFile(join(packagePath, "pages", "Round Trip.html"), "utf8");
   const opened = await post(host, "/desktop/open-package", {
     locator: packagePath,
   });
@@ -119,7 +121,7 @@ test("opening and editing through the Web service saves the original package", a
   const state = JSON.parse(await readFile(join(root, "state.json"), "utf8"));
   assert.equal(state.recentPackages[0].locator, packagePath);
   assert.equal(
-    await readFile(join(packagePath, "manifest.json"), "utf8"),
+    await readFile(join(packagePath, "pages", "Round Trip.html"), "utf8"),
     before,
   );
   const overview = await fetch(`${host.backgroundUrl}/v1/ui/overview`).then(
@@ -143,10 +145,8 @@ test("opening and editing through the Web service saves the original package", a
     }),
   });
   assert.equal(edited.status, 200, JSON.stringify(await edited.json()));
-  const screen = JSON.parse(
-    await readFile(join(packagePath, "screens/roundtrip.json"), "utf8"),
-  );
-  assert.equal(screen.presentations[0].nodes.node_rectangle.opacity, 0.72);
+  const page = await readFile(join(packagePath, "pages", "Round Trip.html"), "utf8");
+  assert.match(page, /data-name="Editable Rectangle"[^>]*opacity-\[0\.72\]/);
 });
 
 test("a package argument opens the selected original directly", async (t) => {

@@ -1111,6 +1111,33 @@
               (dtcg-shadow record)))
           records)))
 
+(defn- project-grid-track
+  "A Package grid track {type, value} as a Penpot track."
+  [{:keys [type value]}]
+  (cond-> {:type (keyword type)}
+    (some? value) (assoc :value value)))
+
+(defn- project-grid-cells
+  "Package grid cells name their children by node id; Penpot cells by
+  shape id, keyed by cell id."
+  [snapshot node-path cells]
+  (into {}
+        (map (fn [[cell-key {:keys [id row column row-span column-span position
+                                    align-self justify-self area-name shapes]}]]
+               (let [cell-id (uuid/parse (or id (name cell-key)))]
+                 [cell-id
+                  (cond-> {:id cell-id
+                           :row row
+                           :column column
+                           :row-span (or row-span 1)
+                           :column-span (or column-span 1)
+                           :position (keyword (or position "auto"))
+                           :align-self (keyword (or align-self "auto"))
+                           :justify-self (keyword (or justify-self "auto"))
+                           :shapes (mapv #(node-runtime-id snapshot node-path %) shapes)}
+                    (some? area-name) (assoc :area-name area-name))])))
+        cells))
+
 (defn- project-node
   [snapshot components node-path plugin-data-fn origins nodes parents root-ids node]
   (let [{:keys [appliedTokens penpotAppliedTokens backgroundBlur blend-mode blur children componentId
@@ -1119,6 +1146,8 @@
                 grids height hide-fill-on-export hide-in-viewer id interactions
                 layout layout-align-content layout-align-items
                 layout-flex-dir layout-gap layout-gap-type layout-item-absolute
+                layout-grid-dir layout-grid-rows layout-grid-columns layout-grid-cells
+                layout-justify-items
                 layout-item-align-self layout-item-h-sizing layout-item-margin
                 layout-item-margin-type layout-item-max-h layout-item-max-w
                 layout-item-min-h layout-item-min-w layout-item-v-sizing
@@ -1262,6 +1291,22 @@
 
        (some? layout-align-content)
        (assoc :layout-align-content (keyword layout-align-content))
+
+       (some? layout-grid-dir)
+       (assoc :layout-grid-dir (keyword layout-grid-dir))
+
+       (some? layout-justify-items)
+       (assoc :layout-justify-items (keyword layout-justify-items))
+
+       (some? layout-grid-rows)
+       (assoc :layout-grid-rows (mapv project-grid-track layout-grid-rows))
+
+       (some? layout-grid-columns)
+       (assoc :layout-grid-columns (mapv project-grid-track layout-grid-columns))
+
+       (some? layout-grid-cells)
+       (assoc :layout-grid-cells
+              (project-grid-cells snapshot node-path layout-grid-cells))
 
        (some? layout-wrap-type)
        (assoc :layout-wrap-type (keyword layout-wrap-type))

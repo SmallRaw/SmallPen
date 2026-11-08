@@ -21,7 +21,7 @@ export const TOKEN_VALUE_SHAPES = Object.freeze({
   dimensions: { example: 16, shape: "number (px)" },
   "font-family": {
     example: "Source Sans Pro",
-    shape: "string; only Source Sans Pro is bundled, import other families with smallpen font import",
+    shape: "string; only Source Sans Pro is bundled; other families need a file in assets/fonts/ and an @font-face rule",
   },
   "font-size": { example: 16, shape: "number (px), not a string" },
   "font-weight": { example: 700, shape: "number or string" },
@@ -437,7 +437,7 @@ export function tokenNameCollisions(name, tokens, exceptId) {
   );
 }
 
-// Every colliding pair of a Package, for `smallpen validate`.
+// Every colliding pair of a Package, for `smallpen check`.
 export function packageTokenNameCollisions(manifest, entries) {
   const tokens = listTokenNames(manifest, entries);
   const byName = new Map();

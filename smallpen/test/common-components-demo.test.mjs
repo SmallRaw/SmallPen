@@ -11,7 +11,7 @@ import { buildCommonComponentsDemo } from "../scripts/build-common-components-de
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
 
 async function fixture() {
-  const root = new URL("./fixtures/design-system.smallpen/", import.meta.url);
+  const root = new URL("./fixtures/model/design-system/", import.meta.url);
   const manifest = JSON.parse(
     await readFile(new URL("manifest.json", root), "utf8"),
   );

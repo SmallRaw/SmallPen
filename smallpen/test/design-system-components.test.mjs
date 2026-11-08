@@ -14,16 +14,15 @@ import {
   loadPackageFromValues,
   projectScreen,
 } from "@smallpen/core";
+import { readModelEntry } from "./helpers/named.mjs";
 
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "design-system.smallpen");
-const sharedFixture = join(here, "fixtures", "dsp-shared.smallpen");
+const fixture = join(here, "fixtures", "model", "design-system");
+const sharedFixture = join(here, "fixtures", "model", "dsp-shared");
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -33,9 +32,7 @@ async function fixtureValues() {
 }
 
 async function sharedValues() {
-  const manifest = JSON.parse(
-    await readFile(join(sharedFixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(sharedFixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {

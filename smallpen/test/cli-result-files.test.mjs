@@ -19,6 +19,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { openPackage } from "@smallpen/local-package";
+import { onlyScreen, renameInPage, seedLegacyIds } from "./helpers/named.mjs";
 
 const cli = fileURLToPath(
   new URL("../apps/cli/bin/smallpen.mjs", import.meta.url),
@@ -40,13 +41,13 @@ test("large full results use unique searchable files in one folder; stdout is ex
   t.after(() => rm(root, { recursive: true, force: true }));
   const packagePath = join(root, "app.smallpen");
   await cp(fixture, packagePath, { recursive: true });
-  const screenPath = join(packagePath, "screens/roundtrip.json");
-  const screen = JSON.parse(await readFile(screenPath, "utf8"));
+  await seedLegacyIds(packagePath, "roundtrip");
   const argv = ["view", packagePath, ...page, "--full", "--json"];
   let previous;
+  let current = "Editable Rectangle";
   for (const marker of ["First\n", "Second\n"]) {
-    screen.presentations[0].nodes.node_rectangle.name = marker.repeat(8000);
-    await writeFile(screenPath, JSON.stringify(screen));
+    await renameInPage(packagePath, "Round Trip.html", current, marker.repeat(8000));
+    current = marker.repeat(8000);
     const reply = await run(argv, root);
     assert.ok(Buffer.byteLength(reply.stdout) <= 8192);
     assert.equal(reply.stdout, JSON.stringify(reply.value) + "\n");
@@ -90,57 +91,6 @@ test("cleanup stays inside managed scratch files and honors the native temporary
   assert.ok((await readdir(folder)).includes("user-notes.txt"));
 });
 
-test("temporary directory failures report committed writes instead of authorizing retries", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "smallpen-tmp-write-failure-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const packagePath = join(root, "app.smallpen");
-  await cp(fixture, packagePath, { recursive: true });
-  const before = await openPackage(packagePath);
-  const input = join(root, "batch.json");
-  await writeFile(
-    input,
-    JSON.stringify({
-      batchId: "write-before-result-failure",
-      baseRevision: before.revision,
-      operations: [
-        {
-          type: "update-node",
-          screenId: "scr_roundtrip",
-          nodeId: "node_rectangle",
-          changes: { name: "Large name ".repeat(8000) },
-        },
-      ],
-    }),
-  );
-  const missingTemp = join(root, "nonexistent-system-tmp");
-  const env = {
-    ...process.env,
-    TMPDIR: missingTemp,
-    TEMP: missingTemp,
-    TMP: missingTemp,
-  };
-  await assert.rejects(
-    promisify(execFile)(
-      process.execPath,
-      [cli, "advanced", "apply", packagePath, "--batch", input, "--full", "--json"],
-      { cwd: root, env },
-    ),
-    (error) => {
-      const reply = JSON.parse(error.stdout);
-      assert.equal(reply.error.code, "artifact_directory_unavailable");
-      assert.equal(reply.error.writeState, "committed");
-      return true;
-    },
-  );
-  const after = await openPackage(packagePath);
-  assert.notEqual(after.revision, before.revision);
-  assert.equal(
-    after.entries["screens/roundtrip.json"].presentations[0].nodes
-      .node_rectangle.name,
-    "Large name ".repeat(8000),
-  );
-});
-
 test(
   "temporary output rejects a symlinked CLI directory without touching its target",
   { skip: process.platform === "win32" },
@@ -178,16 +128,13 @@ test(
   },
 );
 
-test("large layout text is searchable as exact LF text and large help stays outside stdout", async (t) => {
+test("large layout text is searchable as exact LF text", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-text-files-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const packagePath = join(root, "app.smallpen");
   await cp(fixture, packagePath, { recursive: true });
-  const screenPath = join(packagePath, "screens/roundtrip.json");
-  const screen = JSON.parse(await readFile(screenPath, "utf8"));
-  screen.presentations[0].nodes.node_rectangle.name =
-    "Large layout name ".repeat(8000);
-  await writeFile(screenPath, JSON.stringify(screen));
+  await seedLegacyIds(packagePath, "roundtrip");
+  await renameInPage(packagePath, "Round Trip.html", "Editable Rectangle", "Large layout name ".repeat(8000));
   const reply = (
     await run(
       ["view", packagePath, ...page, "--as", "wireframe", "--full", "--json"],
@@ -196,23 +143,10 @@ test("large layout text is searchable as exact LF text and large help stays outs
   ).value;
   const complete = JSON.parse(await readFile(reply.resultFile.path, "utf8"));
   const text = await readFile(reply.resultFile.text.path, "utf8");
-  assert.equal(text, complete.wireframe);
+  assert.equal(text, complete.text);
   assert.ok(text.includes("Large layout name ".repeat(8000)));
   assert.ok(text.includes("\n"));
   assert.equal(text.includes("\r"), false);
-  const help = await promisify(execFile)(
-    process.execPath,
-    [cli, "advanced", "apply", "--help", "--full"],
-    { cwd: root },
-  );
-  assert.ok(Buffer.byteLength(help.stdout) <= 8192);
-  // The complete manual is larger than 8 KiB, so stdout names its file.
-  assert.match(help.stdout, /^Complete text: /, help.stdout);
-  const helpPath = help.stdout.split("\n")[0].replace("Complete text: ", "");
-  assert.match(
-    await readFile(helpPath, "utf8"),
-    /Common output and error contract/,
-  );
 });
 
 test("PNG exports use random names in one folder and survive subsequent calls", async (t) => {
@@ -243,7 +177,7 @@ test("PNG exports use random names in one folder and survive subsequent calls", 
 
 test("ordinary CLI exposes no Code Mode command", async () => {
   const reply = await run(["help", "--json"]);
-  assert.ok(reply.value.commands.some(({ command }) => command === "project"));
+  assert.ok(reply.value.commands.some(({ command }) => command === "check"));
   assert.equal(
     reply.value.commands.some(({ command }) => command === "code"),
     false,
@@ -269,56 +203,6 @@ test("caller-owned exports cannot use the CLI scratch tree, including path alias
     );
     assert.deepEqual(await readFile(first.output), before);
   }
-});
-
-test("large render diagnostics remain visible as counts and partial coverage", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "smallpen-render-summary-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const packagePath = join(root, "app.smallpen");
-  await cp(fixture, packagePath, { recursive: true });
-  const screenPath = join(packagePath, "screens/roundtrip.json");
-  const screen = JSON.parse(await readFile(screenPath, "utf8"));
-  const presentation = screen.presentations[0];
-  const ids = Array.from({ length: 60 }, (_, index) => `node_grid_${index}`);
-  presentation.nodes[presentation.rootId].children.push(...ids);
-  for (const [index, id] of ids.entries())
-    presentation.nodes[id] = {
-      id,
-      name: `Grid ${index}`,
-      type: "FRAME",
-      layout: "grid",
-      children: [],
-      x: 0,
-      y: 0,
-      width: 20,
-      height: 20,
-    };
-  await writeFile(screenPath, JSON.stringify(screen));
-  const reply = (await run(png(packagePath), root)).value;
-  // Sixty native grid layouts are solved without stale JS preview warnings.
-  const limits = reply.diagnostics.find(({ code }) => code === "layout_projection_partial");
-  assert.equal(limits, undefined, JSON.stringify(reply.diagnostics));
-  assert.equal(reply.layout.status, "resolved");
-  assert.equal(reply.resultFile, undefined, "the counted note keeps the reply small");
-  const replacements = new Map(
-    ids.map((id) => [id, `${id}_${"x".repeat(1000)}`]),
-  );
-  for (const [oldId, id] of replacements) {
-    presentation.nodes[id] = { ...presentation.nodes[oldId], id };
-    delete presentation.nodes[oldId];
-  }
-  presentation.nodes[presentation.rootId].children = presentation.nodes[
-    presentation.rootId
-  ].children.map((id) => replacements.get(id) ?? id);
-  await writeFile(screenPath, JSON.stringify(screen));
-  const validated = (await run(["validate", packagePath, "--json"], root))
-    .value;
-  // Checking the whole package keeps its reply small: sizes the preview
-  // cannot compute are one note, skipped checks are counted by kind.
-  assert.equal(validated.previewNote, undefined);
-  assert.ok(validated.outputBytes < 8128, `${validated.outputBytes} bytes`);
-  assert.equal(validated.coverage.skippedCount, validated.coverage.skipped.reduce((sum, { count }) => sum + count, 0));
-  assert.ok(validated.coverage.skipped.every(({ count }) => count > 0));
 });
 
 test("old CLI files are removed after 30 minutes; fresh, active and unrelated files remain", async (t) => {

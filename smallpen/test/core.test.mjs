@@ -7,17 +7,15 @@ import test from "node:test";
 import {
   listPackageEntries,
   loadPackageFromValues,
-  pageDrawOperation,
   prepareOperationBatch,
 } from "@smallpen/core";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -65,10 +63,10 @@ test("Core prepares a typed batch without mutating its input snapshot", async ()
   });
 
   const beforeNode =
-    before.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(before).presentations[0].nodes
       .node_rectangle;
   const afterNode =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(beforeNode.opacity, 1);
   assert.equal(afterNode.opacity, 0.5);
@@ -110,19 +108,6 @@ test("a batch that leaves the same state reports no changed files or undo work",
     assert.deepEqual(prepared.result.affectedIds, []);
     assert.deepEqual(prepared.result.inverseBatch.operations, []);
   }
-});
-
-test("a mixed batch lists only files whose final content changes", async () => {
-  const before = await loadPackageFromValues("memory://roundtrip.smallpen", await fixtureValues());
-  const added = pageDrawOperation(before, { page: "Added", children: [] });
-  const prepared = await prepareOperationBatch(before, {
-    baseRevision: before.revision, batchId: "mixed-changes",
-    operations: [
-      { type: "put-screen", entry: "screens/roundtrip.json", screen: before.entries["screens/roundtrip.json"] },
-      added,
-    ],
-  });
-  assert.deepEqual(prepared.result.changedFiles, ["manifest.json", "screens/added.json"]);
 });
 
 test("Core enforces the Foundation and Product dependency contract", async () => {

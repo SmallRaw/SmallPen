@@ -8,12 +8,25 @@ const RENDERER_FAILURE = /panic|wasm|render_failed|validation_worker_failed/;
 // WASM memory only grows, so a worker is replaced after jobsPerWorker
 // targets, and a target the renderer failed on is tried once more in a
 // fresh worker.
+// A package's asset bytes load from disk on first use (LazyBlobMap). A worker
+// gets a structured clone, which holds only the bytes loaded so far, so
+// images and fonts are read once here before any worker starts.
+function withLoadedBlobs(workspace) {
+  const load = (snapshot) => (snapshot?.blobs ? { ...snapshot, blobs: new Map(snapshot.blobs) } : snapshot);
+  return {
+    ...workspace,
+    product: load(workspace.product),
+    foundation: load(workspace.foundation),
+    ...(workspace.libraries ? { libraries: workspace.libraries.map(load) } : {}),
+  };
+}
+
 export async function runValidationJobs(workspace, jobs, {
   timeoutMs = 30_000, signal, progress = () => {}, jobsPerWorker = 12,
   workerUrl = new URL("./validation-worker.mjs", import.meta.url),
 } = {}) {
   const results = [];
-  let worker, served = 0;
+  let worker, served = 0, loaded;
   const emit = (event, extra = {}) => progress({
     type: "validation-progress", event, total: jobs.length, completed: results.length, ...extra,
   });
@@ -21,7 +34,8 @@ export async function runValidationJobs(workspace, jobs, {
   try {
     const runOne = job => {
       if (!worker) {
-        worker = new Worker(workerUrl, { workerData: workspace });
+        loaded ??= withLoadedBlobs(workspace);
+        worker = new Worker(workerUrl, { workerData: loaded });
         served = 0;
       }
       served += 1;

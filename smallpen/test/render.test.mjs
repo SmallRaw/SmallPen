@@ -8,6 +8,7 @@ import { inflateSync } from "node:zlib";
 import { stableRuntimeUuid, loadPackageFromValues } from "@smallpen/core";
 import { createEvidence } from "@smallpen/local-package";
 import { openPackage } from "@smallpen/local-package";
+import { onlyScreen } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
@@ -81,7 +82,7 @@ test("the local renderer rejects unsafe output sizes before allocation", async (
 
 test("the local renderer rasterizes glyph outlines and ellipse silhouettes", async () => {
   const product = await openPackage(fixture);
-  const presentation = product.entries["screens/roundtrip.json"].presentations[0];
+  const presentation = onlyScreen(product).presentations[0];
   presentation.nodes.node_canvas.children.push("node_text", "node_ellipse");
   presentation.nodes.node_text = {
     children: [],
@@ -149,7 +150,7 @@ test("the local renderer wraps bounded text without losing words or explicit lin
     for (const scale of [1, 2]) {
       await context.test(`${growType ?? "default"} ${textAlign}/${verticalAlign} at ${scale}x`, async () => {
         const product = await openPackage(fixture);
-        const presentation = product.entries["screens/roundtrip.json"].presentations[0];
+        const presentation = onlyScreen(product).presentations[0];
         const node = {
           children: [],
           fills: [{ color: "#111827", type: "solid" }],
@@ -195,7 +196,7 @@ test("text decorations draw visible lines across each aligned text line", async 
       await context.test(`${textDecoration} at ${scale}x`, async () => {
         const product = await openPackage(fixture);
         const node =
-          product.entries["screens/roundtrip.json"].presentations[0].nodes
+          onlyScreen(product).presentations[0].nodes
             .node_rectangle;
         Object.assign(node, {
           fills: [{ color: "#111827", type: "solid" }],
@@ -299,7 +300,7 @@ test("rich text inherits block styles and applies run typography and paint", asy
       async () => {
         const product = await openPackage(fixture);
         const node =
-          product.entries["screens/roundtrip.json"].presentations[0].nodes
+          onlyScreen(product).presentations[0].nodes
             .node_rectangle;
         const baseStyle = {
           fontFamily: "sourcesanspro",
@@ -353,7 +354,7 @@ test("rich text inherits block styles and applies run typography and paint", asy
     async () => {
       const product = await openPackage(fixture);
       const node =
-        product.entries["screens/roundtrip.json"].presentations[0].nodes
+        onlyScreen(product).presentations[0].nodes
           .node_rectangle;
       Object.assign(node, {
         fills: [{ color: "#111827", type: "solid" }],
@@ -402,7 +403,7 @@ test("rich text preserves plain kerning, wrapping, and blank lines across run bo
   for (const scale of [1, 2]) {
     const product = await openPackage(fixture);
     const node =
-      product.entries["screens/roundtrip.json"].presentations[0].nodes
+      onlyScreen(product).presentations[0].nodes
         .node_rectangle;
     Object.assign(node, {
       fills: [{ color: "#111827", type: "solid" }],
@@ -443,7 +444,7 @@ test("rich text preserves plain kerning, wrapping, and blank lines across run bo
 
 test("the local renderer reserves one em for a fallback symbol", async () => {
   const product = await openPackage(fixture);
-  const presentation = product.entries["screens/roundtrip.json"].presentations[0];
+  const presentation = onlyScreen(product).presentations[0];
   presentation.nodes.node_canvas.children.push("node_symbol_text");
   presentation.nodes.node_symbol_text = {
     children: [],
@@ -483,7 +484,7 @@ test("the local renderer reserves one em for a fallback symbol", async () => {
 test("the local renderer clamps oversized rectangle radii to pill geometry", async () => {
   const product = await openPackage(fixture);
   const node =
-    product.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(product).presentations[0].nodes
       .node_rectangle;
   node.cornerRadius = 999;
   node.fills = [{ color: "#2563eb", type: "solid" }];
@@ -521,7 +522,7 @@ test("rectangle strokes retain all four straight edges at their requested width"
       for (const scale of [1, 2]) {
         await t.test(`radius ${JSON.stringify(cornerRadius)}, width ${width}, scale ${scale}`, async () => {
           const product = await openPackage(fixture);
-          const node = product.entries["screens/roundtrip.json"].presentations[0].nodes.node_rectangle;
+          const node = onlyScreen(product).presentations[0].nodes.node_rectangle;
           Object.assign(node, {
             cornerRadius,
             fills: [{ color: "#2563eb", type: "solid" }],
@@ -597,7 +598,7 @@ test("the local renderer rasterizes qualified SVG Media references", async () =>
   library.blobs.set(blob, svg);
   library.runtime.media.media_test_svg = await stableRuntimeUuid(library.manifest.packageId, "media", "media_test_svg");
   const node =
-    product.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(product).presentations[0].nodes
       .node_rectangle;
   node.type = "IMAGE";
   node.mediaRef = {
@@ -641,7 +642,7 @@ test("evidence identity includes the Foundation revision", async () => {
 
 test("Semantic evidence regions include nested rotation transforms", async () => {
   const product = await openPackage(fixture);
-  const screen = product.entries["screens/roundtrip.json"];
+  const screen = onlyScreen(product);
   screen.presentations[0].nodes.node_rectangle.rotation = 90;
   const bundle = await createEvidence(product, {
     scale: 1,

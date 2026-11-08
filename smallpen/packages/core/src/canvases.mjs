@@ -10,28 +10,16 @@
 import { fail } from "./errors.mjs";
 import { isRecord, stableId } from "./internal.mjs";
 
-export const DEFAULT_CANVAS_NAME = "Pages";
-export const DEFAULT_CANVAS_ID = "cnv_pages";
+const DEFAULT_CANVAS_NAME = "Pages";
+const DEFAULT_CANVAS_ID = "cnv_pages";
 const ROW_GAP = 160; // between the platform rows of one flow
 const FLOW_GAP = 480; // between business flows
 const BOARD_GAP = 120; // between pages in a row
-
-function slug(text) {
-  const ascii = String(text).normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  if (!/[^\x00-\x7f]/.test(String(text))) return ascii || "x";
-  let hash = 0x811c9dc5;
-  for (const unit of new TextEncoder().encode(String(text))) hash = Math.imul(hash ^ unit, 0x01000193) >>> 0;
-  return [ascii, `u${hash.toString(16).padStart(8, "0")}`].filter(Boolean).join("_");
-}
 
 // The business flow a page belongs to: its module, or "" for none.
 export function pageFlowName(screen) {
   const parts = String(screen.name ?? "").split(" / ");
   return parts.length > 1 && parts[0].trim() ? parts[0].trim() : "";
-}
-
-export function defaultCanvasId(name) {
-  return `cnv_${slug(name)}`;
 }
 
 export function validateCanvases(value, screenIds) {
@@ -203,55 +191,3 @@ export function explicitCanvases(manifest, entries) {
 
 // --- by name, for the CLI ---------------------------------------------------
 
-function canvasByName(canvases, name) {
-  const found = canvases.find((canvas) => canvas.name.toLowerCase() === String(name).trim().toLowerCase());
-  return found;
-}
-
-// The canvas list with a page placed on a named canvas (made when missing),
-// at the end of its flow. screenId may be a page drawn in the same batch.
-export function placePageOnCanvas(manifest, entries, screenId, canvasName) {
-  const canvases = explicitCanvases(manifest, entries).map((canvas) => ({
-    ...canvas,
-    screens: canvas.screens.filter((id) => id !== screenId),
-  }));
-  let target = canvasByName(canvases, canvasName);
-  if (!target) {
-    target = { id: defaultCanvasId(canvasName), name: String(canvasName).trim(), screens: [] };
-    while (canvases.some((canvas) => canvas.id === target.id)) target.id = `${target.id}_2`;
-    canvases.push(target);
-  }
-  target.screens.push(screenId);
-  return { canvases, type: "put-canvases" };
-}
-
-export function renameCanvasOperation(manifest, entries, name, to) {
-  const canvases = explicitCanvases(manifest, entries);
-  const canvas = canvasByName(canvases, name);
-  if (!canvas)
-    fail("unknown_canvas", `No canvas ${name}`, { canvases: canvases.map((item) => item.name) });
-  if (!String(to ?? "").trim()) fail("invalid_canvas_name", "--to names the new name");
-  // A name already taken is numbered by the batch, as in the App.
-  canvas.name = String(to).trim();
-  return { canvases, type: "put-canvases" };
-}
-
-// A page one or more places left or right in its business flow's row.
-export function reorderPageOperation(manifest, entries, screenId, direction, steps = 1, runtime) {
-  if (direction !== "left" && direction !== "right")
-    fail("move_across_layout", "A page moves left or right within its business flow; its flow is the part of its name before \" / \"");
-  const layout = canvasLayout(manifest, entries, runtime);
-  const canvas = layout.find((item) => item.boards.some((board) => board.screenId === screenId));
-  const flow = canvas.boards.find((board) => board.screenId === screenId).flow;
-  const row = [...new Set(canvas.boards.filter((board) => board.flow === flow).map((board) => board.screenId))];
-  const from = row.indexOf(screenId);
-  const to = Math.max(0, Math.min(row.length - 1, from + (direction === "left" ? -steps : steps)));
-  if (to === from) fail("nothing_to_move_past", `The page is already ${direction === "left" ? "first" : "last"} in its flow`);
-  row.splice(from, 1);
-  row.splice(to, 0, screenId);
-  const canvases = explicitCanvases(manifest, entries);
-  const target = canvases.find((item) => item.id === canvas.id);
-  let index = 0;
-  target.screens = target.screens.map((id) => (row.includes(id) ? row[index++] : id));
-  return { canvases, type: "put-canvases" };
-}

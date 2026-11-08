@@ -1,0 +1,25 @@
+<sp-component name="Dialog" props="Kind: confirm | form">
+  <div class="w-[392px] h-[300px] bg-surface rounded-base">
+    <sp-use component="Title" props="Level: dialog" data-name="Title instance" class="left-[20px] top-[16px] w-[320px] h-[76px]">
+      <p data-name="Heading">Publish changes?</p>
+    </sp-use>
+    <sp-use component="Input" data-name="Input instance" class="left-[20px] top-[100px] w-[320px] h-[104px] hidden"></sp-use>
+    <p data-name="Message" class="left-[36px] top-[120px] w-[320px] h-[19px] text-demo-ink type-demo-label">Your team will see the updated workspace.</p>
+    <sp-use component="Button" props="Style: secondary" data-name="Cancel button" class="left-[36px] top-[232px] w-[152px] h-[44px]">
+      <p data-name="Label">Cancel</p>
+    </sp-use>
+    <sp-use component="Button" data-name="Confirm button" class="left-[204px] top-[232px] w-[152px] h-[44px]">
+      <p data-name="Label">Publish</p>
+    </sp-use>
+  </div>
+  <sp-variant when="Kind: form">
+    <sp-use data-name="Title instance" props="Level: dialog">
+      <p data-name="Heading">Invite a teammate</p>
+    </sp-use>
+    <div data-name="Input instance" class="shown"></div>
+    <p data-name="Message" class="hidden"></p>
+    <sp-use data-name="Confirm button">
+      <p data-name="Label">Send invite</p>
+    </sp-use>
+  </sp-variant>
+</sp-component>

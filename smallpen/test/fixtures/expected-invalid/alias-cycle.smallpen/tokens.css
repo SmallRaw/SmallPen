@@ -1,0 +1,4 @@
+:root {
+  --radius-a: var(--radius-b);
+  --radius-b: var(--radius-a);
+}
