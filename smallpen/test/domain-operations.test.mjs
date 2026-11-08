@@ -11,20 +11,22 @@ import {
   prepareOperationBatch,
 } from "@smallpen/core";
 import { applyOperationBatch, openPackage } from "@smallpen/local-package";
+import { onlyScreen, seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixtureModel = join(here, "fixtures", "model", "roundtrip");
 
 async function fixtureValues() {
   const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
+    await readFile(join(fixtureModel, "manifest.json"), "utf8"),
   );
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
     values.set(
       entry,
-      JSON.parse(await readFile(join(fixture, entry), "utf8")),
+      JSON.parse(await readFile(join(fixtureModel, entry), "utf8")),
     );
   }
   return values;
@@ -209,7 +211,7 @@ test("one typed domain batch creates every new entry and its inverse restores th
   assert.equal(prepared.snapshot.domain.scenarios.has("scn_button_idle"), true);
   assert.equal(prepared.snapshot.domain.requirements.has("req_activate"), true);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(node.name, "Updated by domain Operation");
   assert.deepEqual(node.tokenBindings.fill, {
@@ -333,12 +335,12 @@ test("Token, Component Variant, instance selection, and Repair Operations are re
     2,
   );
   assert.deepEqual(
-    changed.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(changed.snapshot).presentations[0].nodes
       .node_domain_instance.instance.variant,
     { axis_state: "pressed" },
   );
   assert.equal(
-    changed.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(changed.snapshot).presentations[0].nodes
       .node_rectangle.tokenBindings.fill.assetId,
     "tok_accent",
   );
@@ -369,6 +371,7 @@ test("invalid domain batches leave the source Snapshot and filesystem unchanged"
   const parent = await mkdtemp(join(tmpdir(), "smallpen-domain-atomic-"));
   const packagePath = join(parent, "domain.smallpen");
   await cp(fixture, packagePath, { recursive: true });
+  await seedLegacyIds(packagePath, "roundtrip");
   const opened = await openPackage(packagePath);
   await assert.rejects(
     applyOperationBatch(packagePath, {
@@ -390,20 +393,53 @@ test("the filesystem adapter commits a multi-entry domain batch atomically and u
   const parent = await mkdtemp(join(tmpdir(), "smallpen-domain-write-"));
   const packagePath = join(parent, "domain.smallpen");
   await cp(fixture, packagePath, { recursive: true });
+  await seedLegacyIds(packagePath, "roundtrip");
   const before = await openPackage(packagePath);
-  const applied = await applyOperationBatch(
-    packagePath,
-    domainBatch(before.revision),
+  const files = async () => Object.fromEntries(
+    await Promise.all(["tokens.css", "pages/Round Trip.html"].map(async (file) => [file, await readFile(join(packagePath, file), "utf8")])),
   );
+  const filesBefore = await files();
+  const button = componentSet();
+  button.axes[0].role = "configuration";
+  button.axes[0].domain = ["idle"];
+  const applied = await applyOperationBatch(packagePath, {
+    baseRevision: before.revision,
+    batchId: "batch_domain_files",
+    operations: [
+      {
+        setId: "tset_base",
+        token: { description: "", id: "tok_brand", name: "color-brand", type: "color", value: "#6750a4" },
+        type: "put-set-token",
+      },
+      { componentSet: button, type: "put-component-set" },
+      {
+        changes: { name: "Updated by domain Operation" },
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "update-node",
+      },
+      {
+        binding: { assetId: "tok_brand", packageId: before.manifest.packageId },
+        field: "fill",
+        nodeId: "node_rectangle",
+        screenId: "scr_roundtrip",
+        type: "set-token-binding",
+      },
+    ],
+  });
+  assert.deepEqual([...applied.changedFiles].sort(), ["components/components.html", "pages/Round Trip.html", "tokens.css"]);
+  const written = await files();
+  assert.match(written["tokens.css"], /--color-brand: #6750a4;/);
+  assert.match(written["pages/Round Trip.html"], /data-name="Updated by domain Operation"[^>]*class="[^"]*bg-brand/);
+  assert.match(await readFile(join(packagePath, "components", "components.html"), "utf8"), /<sp-component name="Button"/);
   const changed = await openPackage(packagePath);
   assert.equal(changed.domain.tokens.has("tok_brand"), true);
   assert.equal(changed.domain.componentSets.has("cmp_button"), true);
-  assert.equal(changed.domain.requirements.has("req_activate"), true);
   assert.equal(changed.revision, applied.revision);
   const undone = await applyOperationBatch(packagePath, applied.inverseBatch);
   assert.equal(undone.revision, before.revision);
+  assert.deepEqual(await files(), filesBefore);
   const restored = await openPackage(packagePath);
-  assert.deepEqual(restored.manifest, before.manifest);
   assert.deepEqual(restored.entries, before.entries);
 });
 
@@ -632,7 +668,7 @@ test("remove-dependent-usage Repair can clear a binding before Token deletion", 
   });
   assert.equal(repaired.snapshot.domain.tokens.has("tok_brand"), false);
   assert.deepEqual(
-    repaired.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(repaired.snapshot).presentations[0].nodes
       .node_rectangle.tokenBindings,
     {},
   );

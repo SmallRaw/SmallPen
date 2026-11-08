@@ -16,8 +16,9 @@ import {
   inspectionReport,
   inspectionText,
 } from "../apps/cli/bin/inspection-output.mjs";
+import { onlyScreen } from "./helpers/named.mjs";
 
-const fixture = new URL("fixtures/variant-acme.smallpen/", import.meta.url);
+const fixture = new URL("fixtures/model/variant-acme/", import.meta.url);
 const ref = (assetId) => ({ assetId, packageId: "pkg_acme" });
 
 async function example(edit = () => {}) {
@@ -51,7 +52,7 @@ async function example(edit = () => {}) {
 async function report(product, target = {}) {
   const workspace = { product, libraries: [] };
   const design = await resolveDesignLayout(workspace, selectedDesign(workspace, {}, target));
-  const stored = product.entries["screens/first-design.json"].presentations[0].nodes;
+  const stored = onlyScreen(product).presentations[0].nodes;
   return inspectionReport(workspace, design, { components: componentLookup(workspace), stored, full: true });
 }
 

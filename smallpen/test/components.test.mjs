@@ -14,9 +14,11 @@ import {
 } from "@smallpen/core";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 import { applyOperationBatch, openPackage } from "@smallpen/local-package";
+import { onlyScreen, seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixtureModel = join(here, "fixtures", "model", "roundtrip");
 
 const componentId = "cmp_55555555555545558555555555555555";
 const componentRuntimeId = "55555555-5555-4555-8555-555555555555";
@@ -63,12 +65,12 @@ function rectangle(id, overrides = {}) {
 
 async function fixtureValues() {
   const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
+    await readFile(join(fixtureModel, "manifest.json"), "utf8"),
   );
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
-    values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
+    values.set(entry, JSON.parse(await readFile(join(fixtureModel, entry), "utf8")));
   }
   return values;
 }
@@ -303,7 +305,7 @@ test("component copy overrides persist touched groups and reverse exactly", asyn
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const copy =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes[
+    onlyScreen(prepared.snapshot).presentations[0].nodes[
       copyChildId
     ];
 
@@ -385,7 +387,7 @@ test("a complete Penpot instance tree compiles and keeps every source link", asy
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const nodes =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+    onlyScreen(prepared.snapshot).presentations[0].nodes;
 
   assert.deepEqual(
     {
@@ -480,7 +482,7 @@ test("an external Penpot instance tree retains its Library and source links", as
   );
   const prepared = await prepareOperationBatch(snapshot, batch);
   const nodes =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+    onlyScreen(prepared.snapshot).presentations[0].nodes;
 
   assert.deepEqual(nodes[instanceId].componentId, {
     assetId: componentId,
@@ -561,7 +563,7 @@ test("an external Component Set copy is written as a domain Instance of the sele
   );
   const prepared = await prepareOperationBatch(snapshot, batch);
   const root =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes[
+    onlyScreen(prepared.snapshot).presentations[0].nodes[
       instanceId
     ];
 
@@ -672,7 +674,7 @@ test("Penpot Component creation updates its node, entry, manifest, and inverse",
     componentRuntimeId,
   );
   assert.equal(
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_canvas.type,
     "COMPONENT",
   );
@@ -746,7 +748,7 @@ test("Penpot Component metadata updates and unused deletion reverse exactly", as
     false,
   );
   assert.deepEqual(
-    removed.snapshot.entries["screens/roundtrip.json"].presentations[0].rootIds,
+    onlyScreen(removed.snapshot).presentations[0].rootIds,
     [],
   );
 
@@ -853,37 +855,26 @@ test("deleting a Component with live instances is rejected atomically", async ()
     (error) => error?.code === "component_in_use",
   );
   assert.equal(
-    snapshot.entries["screens/roundtrip.json"].presentations[0].nodes[masterId]
+    onlyScreen(snapshot).presentations[0].nodes[masterId]
       .type,
     "COMPONENT",
   );
 });
 
-test("the local package transaction physically removes a deleted Component entry", async (context) => {
+test("a page element made a Component in the App is refused before anything is written", async (context) => {
   const parent = await mkdtemp(join(tmpdir(), "smallpen-component-delete-"));
   const packagePath = join(parent, "component.smallpen");
   await cp(fixture, packagePath, { recursive: true });
+  await seedLegacyIds(packagePath, "roundtrip");
   context.after(() => rm(parent, { force: true, recursive: true }));
 
   const before = await openPackage(packagePath);
-  const created = await applyOperationBatch(
-    packagePath,
-    compilePenpotChanges(before, componentCreationCommit(before)),
+  const pageFile = join(packagePath, "pages", "Round Trip.html");
+  const pageBefore = await readFile(pageFile, "utf8");
+  await assert.rejects(
+    applyOperationBatch(packagePath, compilePenpotChanges(before, componentCreationCommit(before))),
+    (error) => error.code === "unsupported_in_html_format" && /components\/\*\.html/.test(error.message),
   );
-  const entry = `components/${componentId}.json`;
-  await access(join(packagePath, entry));
-
-  const opened = await openPackage(packagePath);
-  const removed = await applyOperationBatch(packagePath, {
-    ...created.inverseBatch,
-    baseRevision: opened.revision,
-  });
-  assert.deepEqual(removed.deletedFiles, [entry]);
-  await assert.rejects(access(join(packagePath, entry)), {
-    code: "ENOENT",
-  });
-  const manifest = JSON.parse(
-    await readFile(join(packagePath, "manifest.json"), "utf8"),
-  );
-  assert.deepEqual(manifest.entries.components, []);
+  assert.equal(await readFile(pageFile, "utf8"), pageBefore);
+  assert.equal((await openPackage(packagePath)).revision, before.revision);
 });

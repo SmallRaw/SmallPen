@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { canonicalJSON } from "@smallpen/core";
 import { batchHistoryPath, replayRecordedBatch } from "@smallpen/local-package";
+import { seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "../apps/cli/bin/smallpen.mjs");
@@ -43,7 +44,8 @@ async function packageCopy(context) {
   context.after(() => rm(root, { recursive: true, force: true }));
   const packagePath = join(root, "acme.smallpen");
   await cp(fixture, packagePath, { recursive: true });
-  const { value } = await run(["project", "show", packagePath, "--json"]);
+  await seedLegacyIds(packagePath, "variant-acme");
+  const { value } = await run(["check", packagePath, "--json"]);
   return { root, packagePath, revision: value.revision };
 }
 
@@ -72,14 +74,8 @@ test("one command schema describes only canonical selectors, values and defaults
     "issues",
     "spec",
   ]);
-  const operation = (
-    await run(["schema", "operation", "update-component-node", "--json"])
-  ).value;
-  assert.equal(operation.contractRevision, value.contractRevision);
-  assert.ok(operation.fields.componentId.required);
-  assert.equal(operation.fields.componentId.aliases, undefined);
-  assert.equal(operation.fields.componentSetId, undefined);
-  assert.equal(operation.example.operations[0].componentId, "cmp_button");
+  // Batch operations are the App's; agents edit files, so they have no schema.
+  assert.equal((await run(["schema", "operation", "update-component-node", "--json"], 1)).value.error.code, "unknown_schema_topic");
 });
 
 test("name selectors work and ID selectors fail before reading a package", async () => {
@@ -94,9 +90,9 @@ test("name selectors work and ID selectors fail before reading a package", async
     [["view"], "--context-profile-id", "ctx_default"],
     [["view"], "--format", "wireframe"],
     [["export"], "--component-id", "cmp_button"],
-    [["validate"], "--node-id", "node_button_root"],
-    [["validate"], "--all", undefined],
-    [["token", "show"], "--token-id", "tok_x"],
+    [["check"], "--node-id", "node_button_root"],
+    [["check"], "--all", undefined],
+    [["token", "list"], "--token-id", "tok_x"],
   ]) {
     const error = (
       await run(
@@ -139,7 +135,7 @@ test("schema names stay exact while ordinary CLI help/version flags are supporte
     assert.equal(error.code, "unknown_schema_topic");
   }
   const guide = (await run(["help", "--json"])).value;
-  assert.ok(guide.commands.some(({ command }) => command === "project"));
+  assert.ok(guide.commands.some(({ command }) => command === "check"));
   const help = await run(["-h"]);
   assert.match(help.stdout, /Usage:/);
   assert.match(
@@ -162,7 +158,7 @@ test("command errors include bounded input facts and an executable schema lookup
       "bad",
     ],
     [
-      ["project", "list", "/missing.smallpen", "--limit", "101"],
+      ["token", "list", "/missing.smallpen", "--limit", "101"],
       "invalid_integer_option",
       "limit",
       "101",
@@ -173,7 +169,6 @@ test("command errors include bounded input facts and an executable schema lookup
       "output",
       null,
     ],
-    [["advanced", "apply", "/missing.smallpen"], "missing_batch", "batch", null],
   ]) {
     const { value, bytes } = await run([...argv, "--json"], 1);
     assert.equal(value.error.code, code);
@@ -192,7 +187,7 @@ test("command errors include bounded input facts and an executable schema lookup
 
 test("missing variants, elements and versions list the valid names", async () => {
   for (const [argv, code, list, valid] of [
-    [["--component", "Chip", "--variant", "typo"], "unknown_variant", "variants", "Tone=brand"],
+    [["--component", "Chip", "--variant", "typo"], "unknown_variant", "variants", "Tone: brand"],
     [["--component", "Chip", "--element", "Missing"], "unknown_element", "elements", "Label"],
     [["--page", "Home", "--platform", "typo"], "unknown_platform", "platforms", "mobile"],
     [["--page", "Nope"], "unknown_page", "pages", "Home"],
@@ -219,156 +214,9 @@ test("missing variants, elements and versions list the valid names", async () =>
   ).value;
   assert.deepEqual(element.target, {
     component: "Chip",
-    variant: "Tone=brand",
+    variant: "Tone: brand",
     element: "Label",
   });
-});
-
-test("canonical component batches retry idempotently and return canonical undo", async (context) => {
-  const { root, packagePath, revision } = await packageCopy(context);
-  const batchPath = join(root, "edit.json");
-  const operation = {
-    type: "update-component-node",
-    componentId: "cmp_button",
-    variantId: "var_button_default",
-    nodeId: "node_button_root",
-    changes: { width: 160 },
-  };
-  const batch = {
-    baseRevision: revision,
-    batchId: "contract-component-edit",
-    operations: [operation],
-  };
-  await writeFile(batchPath, JSON.stringify(batch));
-  const first = (
-    await run(["advanced", "apply", packagePath, "--batch", batchPath, "--json"])
-  ).value;
-  assert.equal(first.changed, true);
-  const ledger = JSON.parse(
-    await readFile(await batchHistoryPath(packagePath), "utf8"),
-  );
-  const hash = createHash("sha256")
-    .update(canonicalJSON({ baseRevision: revision, operations: [operation] }))
-    .digest("hex");
-  assert.equal(ledger[batch.batchId].identityHash, hash);
-  const retry = (
-    await run(["advanced", "apply", packagePath, "--batch", batchPath, "--json"])
-  ).value;
-  assert.equal(retry.alreadyApplied, true);
-  assert.equal(retry.revision, first.revision);
-  const view = (
-    await run(["view", packagePath, "--component", "Button", "--json"])
-  ).value;
-  assert.equal(view.target.component, "Button");
-  assert.equal(view.selection.componentId, undefined);
-  assert.match(view.text, /COMPONENT 160×40/);
-  const undo = JSON.parse(await readFile(first.inverseBatchPath, "utf8"));
-  assert.ok(
-    undo.operations.every(
-      (operation) => !Object.hasOwn(operation, "componentSetId"),
-    ),
-  );
-  await writeFile(batchPath, JSON.stringify(undo));
-  await run(["advanced", "apply", packagePath, "--batch", batchPath, "--json"]);
-  assert.equal(
-    (await run(["project", "show", packagePath, "--json"])).value.revision,
-    revision,
-  );
-});
-
-test("old component fields are unknown input and leave the package unchanged", async (context) => {
-  const { root, packagePath, revision } = await packageCopy(context);
-  const batchPath = join(root, "old-field.json");
-  for (const type of [
-    "update-component-node",
-    "delete-variant",
-    "delete-component-set",
-    "put-variant",
-  ]) {
-    for (const includeCanonical of [false, true]) {
-      await writeFile(
-        batchPath,
-        JSON.stringify({
-          baseRevision: revision,
-          batchId: "old-field",
-          operations: [
-            {
-              type,
-              componentSetId: "cmp_button",
-              ...(includeCanonical ? { componentId: "cmp_button" } : {}),
-              ...(type === "update-component-node"
-                ? {
-                    variantId: "var_button_default",
-                    nodeId: "node_button_root",
-                    changes: { width: 160 },
-                  }
-                : {}),
-              ...(type === "delete-variant"
-                ? { variantId: "var_button_default" }
-                : {}),
-              ...(type === "put-variant"
-                ? {
-                    variant: {
-                      id: "var_probe",
-                      selection: {},
-                      rootId: "node_root",
-                      nodes: {
-                        node_root: {
-                          id: "node_root",
-                          type: "FRAME",
-                          children: [],
-                          width: 160,
-                          height: 40,
-                        },
-                      },
-                    },
-                  }
-                : {}),
-            },
-          ],
-        }),
-      );
-      const error = (
-        await run(["advanced", "apply", packagePath, "--batch", batchPath, "--json"], 1)
-      ).value.error;
-      assert.equal(error.code, "unknown_operation_field");
-      assert.equal(error.details.path, "operations[0].componentSetId");
-      assert.equal(error.details.suggestion, "componentId");
-      assert.equal(error.writeState, "not-applied");
-      assert.equal(
-        (await run(["project", "show", packagePath, "--json"])).value.revision,
-        revision,
-      );
-    }
-  }
-});
-
-test("retry identity uses the current contract without legacy ledger fallback", async (context) => {
-  const { root, packagePath, revision } = await packageCopy(context);
-  const batchPath = join(root, "ledger.json");
-  const batch = {
-    baseRevision: revision,
-    batchId: "current-identity",
-    operations: [
-      {
-        type: "update-component-node",
-        componentId: "cmp_button",
-        variantId: "var_button_default",
-        nodeId: "node_button_root",
-        changes: { width: 160 },
-      },
-    ],
-  };
-  await writeFile(batchPath, JSON.stringify(batch));
-  await run(["advanced", "apply", packagePath, "--batch", batchPath, "--json"]);
-  const ledgerPath = await batchHistoryPath(packagePath);
-  const ledger = JSON.parse(await readFile(ledgerPath, "utf8"));
-  delete ledger[batch.batchId].identityHash;
-  await writeFile(ledgerPath, JSON.stringify(ledger));
-  const error = (
-    await run(["advanced", "apply", packagePath, "--batch", batchPath, "--json"], 1)
-  ).value.error;
-  assert.equal(error.code, "batch_id_conflict");
 });
 
 test("recorded confirmations still enforce the current operation fields", async (context) => {
@@ -411,39 +259,9 @@ test("recorded confirmations still enforce the current operation fields", async 
       error.details.field === "componentSetId",
   );
   assert.equal(
-    (await run(["project", "show", packagePath, "--json"])).value.revision,
+    (await run(["check", packagePath, "--json"])).value.revision,
     revision,
   );
-});
-
-test("Token value errors identify the write input rather than an internal file path", async (context) => {
-  const { root, packagePath, revision } = await packageCopy(context);
-  const batchPath = join(root, "token.json");
-  await writeFile(
-    batchPath,
-    JSON.stringify({
-      baseRevision: revision,
-      batchId: "missing-token-value",
-      operations: [
-        {
-          type: "put-set-token",
-          setId: "tset_base",
-          token: { id: "tok_probe", name: "color.probe", type: "color" },
-        },
-      ],
-    }),
-  );
-  const error = (
-    await run(
-      ["advanced", "apply", packagePath, "--batch", batchPath, "--dry-run", "--json"],
-      1,
-    )
-  ).value.error;
-  assert.equal(error.code, "invalid_token_value");
-  assert.equal(error.details.path, "operations[0].token.value");
-  assert.equal(error.details.received, null);
-  assert.match(error.details.expected, /color/);
-  assert.equal(error.writeState, "not-applied");
 });
 
 test("all commands have a small parameter contract and inherited names fail typed", async () => {
@@ -470,21 +288,14 @@ test("all commands have a small parameter contract and inherited names fail type
   );
 });
 
-test("malformed JSON and repeated assignment keys fail before any workspace read", async () => {
+test("repeated single-value options and removed options fail before any workspace read", async () => {
   for (const [argv, code] of [
     [
-      [
-        "view",
-        "/missing.smallpen",
-        "--context",
-        "axis_device=mobile",
-        "--context",
-        "axis_device=desktop",
-      ],
+      ["view", "/missing.smallpen", "--as", "text", "--as", "png"],
       "duplicate_option",
     ],
     [
-      ["project", "init", "/missing-workspace", "--answer", "projectKind={bad}"],
+      ["init", "/missing-workspace", "--answer", "projectKind={bad}"],
       "unknown_option",
     ],
   ]) {
@@ -511,184 +322,23 @@ test("long invalid values preserve a small actionable diagnostic", async () => {
   ]);
 });
 
-test("canonical component ids remain present in previews and Token reuse advice", async (context) => {
-  const { root, packagePath, revision } = await packageCopy(context);
-  const batchPath = join(root, "component-advice.json");
-  await writeFile(
-    batchPath,
-    JSON.stringify({
-      baseRevision: revision,
-      batchId: "component-advice",
-      operations: [
-        {
-          type: "update-component-node",
-          componentId: "cmp_button",
-          variantId: "var_button_default",
-          nodeId: "node_button_root",
-          changes: { fills: [{ type: "solid", color: "#6750a4" }] },
-        },
-      ],
-    }),
-  );
-  const result = (
-    await run([
-      "advanced",
-      "apply",
-      packagePath,
-      "--batch",
-      batchPath,
-      "--explain",
-      "--json",
-    ])
-  ).value;
-  assert.equal(result.explain[0].target.componentId, "cmp_button");
-  assert.ok(
-    result.warnings.length,
-    "same Token reuse advice must survive the target rename",
-  );
-});
-
-test("command schemas describe search requirements and conditional option combinations", async () => {
+test("command schemas describe their limits, and removed commands have none", async () => {
   const schema = async (name) =>
     (await run(["schema", "command", name, "--json"])).value;
-  const components = await schema("search-components");
-  assert.equal(components.parameters.query.required, true);
-  assert.equal(components.parameters.query.nonBlank, true);
-  assert.equal(components.parameters.query.default, undefined);
-  assert.equal(components.parameters.limit.minimum, 1);
-  const tokens = await schema("search-tokens");
-  assert.deepEqual(tokens.atLeastOne, [["query", "type", "value", "color"]]);
-  assert.equal(tokens.parameters.query.nonBlank, true);
-  assert.equal(tokens.parameters.limit.minimum, 1);
-  assert.ok(tokens.parameters.type.values.includes("color"));
-  assert.ok(
-    tokens.conflictsWith.some((fields) => fields.join() === "color,value"),
-  );
-  assert.ok(
-    tokens.conflictsWith.some((fields) => fields.join() === "allThemes,theme"),
-  );
-  assert.deepEqual(tokens.parameters.type.valuesWhen, [
-    { when: ["color"], values: ["color"] },
-  ]);
-  for (const command of ["effective-token", "explain-token", "impact"]) {
-    assert.equal((await schema(command)).parameters.path.required, true);
-  }
   for (const command of ["view", "export"]) {
     assert.equal((await schema(command)).parameters.scale.maximum, 8);
   }
-  const repair = await schema("repair");
-  assert.ok(
-    repair.requires.some(
-      ({ field, when }) =>
-        field === "foundation" && when.action === "choose-foundation",
-    ),
-  );
-  assert.deepEqual(repair.parameters.assetKind.valuesWhen, [
-    {
-      when: { action: "recreate-product-asset" },
-      values: ["token", "component"],
-    },
-  ]);
+  assert.equal((await schema("check")).parameters.render.type, "boolean");
+  for (const removed of ["repair", "search-components", "search-tokens", "impact", "validate"]) {
+    assert.equal((await run(["schema", "command", removed, "--json"], 1)).value.error.code, "unknown_schema_command", removed);
+  }
 });
 
 test("command-specific constraints fail with recovery facts before opening a package", async () => {
   for (const [command, options, code, field] of [
-    [["component", "search"], [], "missing_component_search", "query"],
-    [
-      ["component", "search"],
-      ["--query", "   "],
-      "missing_component_search",
-      "query",
-    ],
-    [
-      ["component", "search"],
-      ["--query", "button", "--limit", "0"],
-      "invalid_component_search_limit",
-      "limit",
-    ],
-    [["token", "search"], [], "missing_token_search", "query"],
-    [["token", "search"], ["--query", ""], "missing_token_search", "query"],
-    [["token", "search"], ["--query", "   "], "missing_token_search", "query"],
-    [
-      ["token", "search"],
-      ["--query", "color", "--limit", "0"],
-      "invalid_token_search_limit",
-      "limit",
-    ],
-    [
-      ["token", "search"],
-      ["--color", "#ffffff", "--value", "16"],
-      "ambiguous_token_search_value",
-      "color",
-    ],
-    [
-      ["token", "search"],
-      ["--query", "color", "--all-themes", "--theme", "Theme/Dark"],
-      "conflicting_theme_options",
-      "allThemes",
-    ],
-    [
-      ["token", "search"],
-      ["--color", "#ffffff", "--type", "spacing"],
-      "conflicting_token_search_type",
-      "type",
-    ],
-    [["token", "search"], ["--type", "invalid"], "invalid_token_type", "type"],
-    [["advanced", "apply"], ["--batch", ""], "missing_batch", "batch"],
-    [["asset", "media", "import"], ["--file", ""], "missing_media_file", "file"],
-    [["token", "show"], [], "missing_token_path", "path"],
-    [["token", "explain"], [], "missing_token_path", "path"],
-    [["token", "impact"], [], "missing_token_path", "path"],
     [["view"], ["--scale", "9"], "invalid_render_scale", "scale"],
     [["export"], ["--scale", "9"], "invalid_render_scale", "scale"],
-    [
-      ["project", "repair"],
-      ["--action", "retarget-reference"],
-      "missing_repair_replacement",
-      "replacementPackageId",
-    ],
-    [
-      ["project", "repair"],
-      [
-        "--action",
-        "retarget-reference",
-        "--replacement-package-id",
-        "pkg_acme",
-      ],
-      "missing_repair_replacement",
-      "replacementAssetId",
-    ],
-    [
-      ["project", "repair"],
-      ["--action", "choose-foundation"],
-      "missing_foundation_path",
-      "foundation",
-    ],
-    [
-      ["project", "repair"],
-      ["--action", "recreate-product-asset", "--asset-kind", "token"],
-      "missing_recreated_asset",
-      "asset",
-    ],
-    [
-      ["project", "repair"],
-      ["--action", "recreate-product-asset", "--asset", "asset.json"],
-      "missing_recreated_asset",
-      "assetKind",
-    ],
-    [
-      ["project", "repair"],
-      [
-        "--action",
-        "recreate-product-asset",
-        "--asset",
-        "asset.json",
-        "--asset-kind",
-        "invalid",
-      ],
-      "missing_recreated_asset",
-      "assetKind",
-    ],
+    [["token", "list"], ["--limit", "101"], "invalid_integer_option", "limit"],
   ]) {
     const { value, bytes } = await run(
       [...command, "/missing.smallpen", ...options, "--json"],
@@ -708,64 +358,17 @@ test("command-specific constraints fail with recovery facts before opening a pac
   }
 });
 
-test("search limits and zero-item pagination retain their distinct valid behavior", async () => {
-  const list = (
-    await run([
-      "project",
-      "list",
-      fixture,
-      "--kind",
-      "components",
-      "--limit",
-      "0",
-      "--json",
-    ])
-  ).value;
-  assert.deepEqual(list.items, []);
-  assert.equal(list.page.limit, 0);
-  assert.ok(list.page.total > 0);
-  const components = (
-    await run([
-      "component",
-      "search",
-      fixture,
-      "--query",
-      "button",
-      "--limit",
-      "1",
-      "--json",
-    ])
-  ).value;
-  assert.equal(components.items.length, 1);
-  const tokens = (
-    await run([
-      "token",
-      "search",
-      fixture,
-      "--color",
-      "#6750a4",
-      "--type",
-      "color",
-      "--limit",
-      "1",
-      "--json",
-    ])
-  ).value;
-  assert.ok(tokens.items.length <= 1);
-  for (const query of ["", "   "]) {
-    const error = (
-      await run(["token", "search", fixture, "--query", query, "--json"], 1)
-    ).value.error;
-    assert.equal(error.code, "missing_token_search");
-    assert.equal(error.details.field, "query");
-    assert.equal(error.details.received, query);
-  }
+test("zero-item pagination keeps its total", async () => {
+  const tokens = (await run(["token", "list", fixture, "--limit", "0", "--json"])).value;
+  assert.deepEqual(tokens.items, []);
+  assert.equal(tokens.page.limit, 0);
+  assert.ok(tokens.page.total > 0);
 });
 
 test("missing positional paths use the same actionable parameter errors", async () => {
   for (const [command, code, field] of [
     [["view"], "missing_package", "package"],
-    [["project", "init"], "missing_workspace", "workspace"],
+    [["init"], "missing_workspace", "workspace"],
   ]) {
     const error = (await run([...command, "--json"], 1)).value.error;
     assert.equal(error.details.command, command.join(" "));

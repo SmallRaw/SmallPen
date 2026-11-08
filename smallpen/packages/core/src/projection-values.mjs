@@ -107,8 +107,10 @@ function assign(node, field, value) {
     node["layout-gap"] = gap;
     return;
   }
+  // fill is the first fill's color, as the App applies a color Token; the
+  // layers under it stay.
   if (field === "fill") {
-    node.fills = [{ color: value, type: "solid" }];
+    node.fills = [{ color: value, type: "solid" }, ...(Array.isArray(node.fills) ? node.fills.slice(1) : [])];
     return;
   }
   const side = { strokeWidthTop: "widthTop", strokeWidthRight: "widthRight", strokeWidthBottom: "widthBottom", strokeWidthLeft: "widthLeft" }[field];

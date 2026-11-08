@@ -4,17 +4,11 @@ import test from "node:test";
 import {
   asciiWireframe,
   createCatalog,
-  createCompareView,
-  createDiscoveryGuide,
   createSemanticTree,
-  diffSemanticTrees,
   findComponentVariant,
   loadPackageFromValues,
-  projectDesignView,
   projectScenario,
   projectScreen,
-  readDesignView,
-  resolveDesignView,
 } from "@smallpen/core";
 
 function entries(overrides = {}) {
@@ -461,104 +455,6 @@ test("nested Component instances expand recursively and reject cycles", async ()
   assert.throws(
     () => projectScreen(product, "scr_home", { foundation: cyclicFoundation }),
     (error) => error?.code === "component_instance_cycle",
-  );
-});
-
-test("Default Design View, Discovery, semantic, wireframe, and Compare share one projection", async () => {
-  const foundation = await loadPackageFromValues(
-    "memory://foundation.smallpen",
-    foundationValues(),
-  );
-  const product = await loadPackageFromValues(
-    "memory://product.smallpen",
-    productValues(),
-  );
-  const resolved = resolveDesignView(product, { foundation });
-  assert.deepEqual(resolved.selection, {
-    context: {},
-    presentationId: "pres_home_desktop",
-    screenId: "scr_home",
-    viewFormat: "structure",
-  });
-  const projection = projectDesignView(product, resolved, { foundation });
-  const semantic = createSemanticTree(product, projection, {
-    selection: resolved.selection,
-  });
-  assert.equal(semantic.root.name, "Home");
-  assert.equal(semantic.root.children[0].component.assetId, "cmp_button");
-  assert.match(
-    asciiWireframe(semantic),
-    /\[02\] INSTANCE "Continue"$/m,
-  );
-  assert.deepEqual(diffSemanticTrees(semantic, structuredClone(semantic)), []);
-
-  const discovery = createDiscoveryGuide(product, resolved, {
-    foundation,
-    locale: "zh-TW",
-  });
-  assert.ok(
-    discovery.entries.some(
-      ({ id, kind }) => id === "pres_home_mobile" && kind === "presentation",
-    ),
-  );
-  assert.ok(
-    discovery.entries.some(
-      ({ id, kind }) => id === "scn_home_signed_in" && kind === "scenario",
-    ),
-  );
-  assert.ok(
-    discovery.entries.every(
-      ({ command, copyableCommand, nextOperation, selectorParameters }) =>
-        command.operation === "smallpen.read" &&
-        copyableCommand.startsWith("smallpen read-view") &&
-        nextOperation === "smallpen.read" &&
-        Array.isArray(selectorParameters),
-    ),
-  );
-  const scenarioResolved = resolveDesignView(product, {
-    foundation,
-    selector: {
-      scenarioId: "scn_home_signed_in",
-      viewFormat: "semantic",
-    },
-  });
-  const scenarioDiscovery = createDiscoveryGuide(product, scenarioResolved, {
-    foundation,
-  });
-  const wireframeCommand = scenarioDiscovery.entries.find(
-    ({ id, kind }) => id === "wireframe" && kind === "view-format",
-  ).copyableCommand;
-  assert.match(wireframeCommand, /--scenario-id scn_home_signed_in/);
-  assert.match(wireframeCommand, /--presentation-id pres_home_desktop/);
-  assert.match(wireframeCommand, /--screen-id scr_home/);
-  const mobileCommand = scenarioDiscovery.entries.find(
-    ({ id, kind }) => id === "pres_home_mobile" && kind === "presentation",
-  ).copyableCommand;
-  assert.doesNotMatch(mobileCommand, /--scenario/);
-  assert.match(mobileCommand, /--format semantic/);
-
-  const read = readDesignView(product, {
-    foundation,
-    selector: { scenarioId: "scn_home_signed_in", viewFormat: "semantic" },
-  });
-  assert.equal(read.selection.scenarioId, "scn_home_signed_in");
-  assert.equal(read.result.root.children[0].visible, false);
-
-  const compare = createCompareView(
-    product,
-    [
-      { presentationId: "pres_home_desktop" },
-      { presentationId: "pres_home_mobile" },
-    ],
-    { foundation },
-  );
-  assert.deepEqual(
-    compare.items.map(({ selection }) => selection.presentationId),
-    ["pres_home_desktop", "pres_home_mobile"],
-  );
-  assert.throws(
-    () => createCompareView(product, [{ presentationId: "pres_home_desktop" }]),
-    (error) => error?.code === "invalid_compare_count",
   );
 });
 

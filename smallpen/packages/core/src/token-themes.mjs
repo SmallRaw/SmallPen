@@ -52,7 +52,7 @@ export function defaultTokenWorkspace({ product, foundation }) {
   return { product: view, foundation: foundation === product ? view : foundationView };
 }
 
-export function themePath(theme) {
+function themePath(theme) {
   return `${theme.group}/${theme.name}`;
 }
 
@@ -116,7 +116,7 @@ function invalidThemeArgument(value, valid) {
 
 // Resolves theme paths ("Group/Name") against the themes a read can select.
 // Each group may be named once, as Penpot activates one theme per group.
-export function resolveThemeSelection(product, foundation, themePaths) {
+function resolveThemeSelection(product, foundation, themePaths) {
   const themes = listTokenThemes(product, foundation);
   const valid = [...new Set(themes.map(({ path }) => path))];
   const groups = [...new Set(themes.map(({ group }) => group))];
@@ -138,7 +138,7 @@ export function resolveThemeSelection(product, foundation, themePaths) {
           : `Unknown token theme ${value}. ` +
               (valid.length > 0
                 ? `Themes: ${valid.join(", ")}`
-                : "This Package has no token themes; create them with put-token-set and put-token-theme (smallpen schema theme)"),
+                : "This Package has no theme groups; add :root[data-GROUP=\"option\"] blocks to tokens.css (smallpen help rules format)"),
         {
           ...(known ? { group } : { validGroups: groups }),
           theme: value,
@@ -272,50 +272,6 @@ export function activeTokenSetIds(library) {
           .flatMap(({ setIds }) => setIds)
       : library.activeSetIds,
   );
-}
-
-// Writes that still work but use a superseded form. Themes are token sets +
-// themes; a contextValues theme is not visible in Penpot's token manager.
-export function formatWarningsForBatch(batch) {
-  const warnings = [];
-  for (const [operationIndex, operation] of (batch?.operations ?? []).entries()) {
-    const themeAxes =
-      operation?.type === "put-context-file" && Array.isArray(operation.contextFile?.axes)
-        ? operation.contextFile.axes.filter((axis) => axis?.kind === "theme")
-        : [];
-    if (themeAxes.length > 0) {
-      warnings.push({
-        code: "theme_context_axis_deprecated",
-        message:
-          `put-context-file declares the theme-kind Context Axis ${themeAxes.map(({ id }) => id).join(", ")}. ` +
-          "Themes are token sets and themes (put-token-set, put-token-theme; smallpen schema theme); " +
-          "Context Axes are for viewport, density, locale and other non-token choices. The write was accepted.",
-        nextOperations: [{ args: ["schema", "theme"], operation: "smallpen.schema" }],
-        operationIndex,
-        severity: "warning",
-      });
-    }
-    const contextValues =
-      operation?.type === "put-token"
-        ? operation.definition?.$extensions?.smallpen?.contextValues
-        : undefined;
-    if (!Array.isArray(contextValues) || contextValues.length === 0) continue;
-    warnings.push({
-      code: "context_values_deprecated",
-      message:
-        `put-token ${operation.tokenId} uses $extensions.smallpen.contextValues, which are deprecated for ` +
-        "themes and do not show in Penpot's token manager. Put the base value in a token set and each " +
-        "theme's value in a theme set with the same token name (put-set-token), and activate them with " +
-        "put-token-theme / set-active-token-themes. See: smallpen schema theme. The write was accepted.",
-      nextOperations: [
-        { args: ["schema", "theme"], operation: "smallpen.schema" },
-      ],
-      operationIndex,
-      severity: "warning",
-      tokenId: operation.tokenId,
-    });
-  }
-  return warnings;
 }
 
 // The token sets a Design System combination observes, as

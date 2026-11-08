@@ -1,12 +1,18 @@
-# Common components review package
+# Common components package
 
-`common-components.smallpen` extends the previous review package without changing it. It stores canonical Tokens, component definitions and an ordinary composed screen; the Design System sheet is generated at load time, never saved as a second copy of those shapes.
+`common-components.smallpen` is a complete SmallPen package written in the
+HTML format ([HTML-FORMAT.md](../docs/HTML-FORMAT.md)). Open any file in an
+editor: `tokens.css` holds the Tokens and their Light and Dark options,
+`components/<Name>.html` one component each and
+`pages/Showcase/*.html` the pages. The Design
+System sheet is drawn from these files when the package opens; it is never
+saved as a second copy.
 
 ## Contents
 
 | Family | Source variants | Light + Dark samples |
 | --- | ---: | ---: |
-| Card (existing) | 2 | 4 |
+| Card | 2 | 4 |
 | Button | 3 styles × 4 contents × 4 states = 48 | 96 |
 | Title | page / section / dialog = 3 | 6 |
 | Input | default / focus / error = 3 | 6 |
@@ -14,25 +20,27 @@
 | Dialog | confirm / form = 2 | 4 |
 | Total | 61 | 122 |
 
-Button contents are text-only, leading icon, trailing icon and icon-only. States are default, hover, pressed and disabled. These are drawn state specimens, not executable browser controls. Dialog is a real composite of Title, Input and Button instances. Added colors and typography are Token-bound and resolve separately for Light and Dark. Existing Card definitions are preserved, including their existing literal fills.
+Button contents are text only, leading icon, trailing icon and icon only.
+States are default, hover, pressed and disabled; they are drawn states, not
+working browser controls. Dialog is built from Title, Input and Button
+copies. Colors and type use Tokens and resolve separately in Light and Dark.
 
-`Composition example · Desktop` is an ordinary screen containing instances of the same definitions. Its Save changes button uses a local text override; the Button source still says Continue. Pages is the composition overview, not another component family.
+`pages/Showcase/Composition example.html` is an ordinary page made of copies
+of the same components. Its Save button overrides the Label part; the Button
+component still says Continue. Text uses the bundled Source Sans Pro, so
+`check --render` measures it with the font the App draws.
 
-## Rebuild and serve
+## Try it
 
-From `smallpen/`, with an existing Design System fixture/review package:
+From `smallpen/`, work on a copy so the example stays as it is:
 
 ```sh
-node scripts/build-common-components-demo.mjs SOURCE_PACKAGE NEW_DESTINATION
-node apps/cli/bin/smallpen.mjs validate NEW_DESTINATION --json
-node e2e/_serve-dse-delivery.mjs NEW_DESTINATION 43129
+cp -R examples/common-components.smallpen /tmp/demo.smallpen
+node apps/cli/bin/smallpen.mjs check /tmp/demo.smallpen --render
+node apps/cli/bin/smallpen.mjs view /tmp/demo.smallpen --page "Showcase/Composition example"
+node apps/cli/bin/smallpen.mjs export /tmp/demo.smallpen --page "Showcase/Composition example" --format png --output /tmp/demo.png
 ```
 
-The builder validates before writing and refuses to overwrite an existing destination. The demo assumes the base fixture's color/light, color/dark, radius/md and typography/md Token IDs. No dependencies are installed.
-
-## Verification (2026-09-22)
-
-- Package validation: valid, no warnings.
-- SmallPen suite: 434 tests passed, no failures.
-- Browser: composed screen and Light/Dark form Dialog render with complete nested text/fields/buttons.
-- Fixed Web conversion of nested component definitions and generated samples; canonical entries remain unchanged by projection. Generated sheet edits retain the occurrence-aware mapping. Derived children on the separate native Components page do not acquire unsafe direct canonical write mappings.
+Edit a file, run `check` again, and `check --revert` puts back any file it
+rejects. To open the copy in the App, see the Browser editor section of the
+[README](../README.md).

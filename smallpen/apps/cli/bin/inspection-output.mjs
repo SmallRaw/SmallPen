@@ -37,6 +37,13 @@ export function inspectionCoverage(coverage) {
 }
 
 export function inspectionTree(design, { full = false } = {}) {
+  // Children in reading order, as the file writes them: a flex row or
+  // column and a grid store their first child last.
+  const reading = (node) => {
+    const raw = design.projection.nodes[node.id];
+    const forward = (raw?.layout === "flex" && !String(raw["layout-flex-dir"] ?? "row").endsWith("reverse")) || raw?.layout === "grid";
+    return forward ? [...node.children].reverse() : node.children;
+  };
   const visit = (node) => ({
     ...node,
     children:
@@ -45,7 +52,7 @@ export function inspectionTree(design, { full = false } = {}) {
       (design.projection.nodes[node.id]?.type === "INSTANCE" ||
         design.projection.nodes[node.id]?.instance)
         ? []
-        : node.children.map(visit),
+        : reading(node).map(visit),
   });
   return { ...design.tree, root: visit(design.tree.root) };
 }
@@ -84,6 +91,19 @@ export function inspectionReport(
     });
   };
   index(design.tree.root);
+  // A grid child's cell, from its parent's cells.
+  const gridCellOf = (node) => {
+    const parent = parents.get(node.id) && projection.nodes[parents.get(node.id).id];
+    if (parent?.layout !== "grid") return {};
+    const cell = Object.values(parent["layout-grid-cells"] ?? {}).find((entry) => (entry.shapes ?? []).includes(node.id));
+    if (!cell) return {};
+    return {
+      gridCell: {
+        row: cell.row, column: cell.column, rowSpan: cell["row-span"] ?? 1, columnSpan: cell["column-span"] ?? 1,
+        alignSelf: cell["align-self"] ?? "auto", justifySelf: cell["justify-self"] ?? "auto",
+      },
+    };
+  };
   const ancestry = (node) => {
     const result = [];
     for (
@@ -114,7 +134,7 @@ export function inspectionReport(
         role: "definition",
         variant: (set?.axes ?? [])
           .filter((axis) => variant?.selection?.[axis.id] !== undefined)
-          .map((axis) => `${axis.name}=${variant.selection[axis.id]}`),
+          .map((axis) => `${axis.name}: ${variant.selection[axis.id]}`),
         overrides: [],
         overridesKnown: Boolean(source),
         ...(source
@@ -159,11 +179,12 @@ export function inspectionReport(
       for (const [key, value] of Object.entries((stored[copy.id] ?? copy).instance?.overrides ?? {})) {
         const path = key.slice(0, key.lastIndexOf(":"));
         const target = path === copy.sourceNodeId ? copy.id : `${copy.id}__${path}`;
+        const field = key.slice(key.lastIndexOf(":") + 1);
         const item = {
           element: target === raw.id ? source?.name ?? "component element"
             : variant?.nodes?.[path]?.name ?? projection.nodes[target]?.name ?? "component element",
-          field: key.slice(key.lastIndexOf(":") + 1),
-          value,
+          field,
+          value: readableOverride(field, value),
         };
         // The instance summary includes edits inside it. A field's source
         // depends only on overrides that target that exact projected node.
@@ -191,10 +212,17 @@ export function inspectionReport(
           (name !== "tokenBindings" || Object.keys(placed[name] ?? {}).length > 0) &&
           JSON.stringify(placed[name]) !== JSON.stringify(source[name])
         ) {
+          // Token bindings differ field by field: the ones the copy shares
+          // with its component are not overrides.
+          const changed = name === "tokenBindings"
+            ? Object.fromEntries(Object.entries(placed[name]).filter(([key, value]) =>
+              JSON.stringify(value) !== JSON.stringify(source[name]?.[key])))
+            : placed[name];
+          if (name === "tokenBindings" && Object.keys(changed).length === 0) continue;
           const item = {
             element: source.name,
             field: name,
-            value: placed[name],
+            value: readableOverride(name, changed),
           };
           overrides.push(item);
           fieldOverrides.push(item);
@@ -206,7 +234,7 @@ export function inspectionReport(
       element: source?.name ?? "unknown source element",
       variant: (set?.axes ?? [])
         .filter((axis) => selection[axis.id] !== undefined)
-        .map((axis) => `${axis.name}=${selection[axis.id]}`),
+        .map((axis) => `${axis.name}: ${selection[axis.id]}`),
       overrides,
       fieldOverrides,
       // A located App copy may lack its full source chain. Absence of
@@ -310,8 +338,8 @@ export function inspectionReport(
       (item) =>
         item.element === component.element &&
         (keys.includes(item.field) ||
-          (name === "fill" && item.field === "fills") ||
-          (name === "stroke" && item.field === "strokes") ||
+          (/^fill\d*$/.test(name) && item.field === "fills") ||
+          (/^stroke\d*$/.test(name) && item.field === "strokes") ||
           (name === "gap" && item.field === "layout-gap") ||
           (name.startsWith("padding") && item.field === "layout-padding") ||
           (name.startsWith("margin") && item.field === "layout-item-margin") ||
@@ -338,6 +366,15 @@ export function inspectionReport(
   const metrics = new Map(
     (design.render?.textMetrics ?? []).map((item) => [item.nodeId, item]),
   );
+  // Override values by name: Token bindings as Token names, links as the
+  // pages they open.
+  const readableOverride = (field, value) => {
+    if (field === "tokenBindings" && value && typeof value === "object")
+      return Object.fromEntries(Object.entries(value).map(([name, reference]) =>
+        [name, reference && typeof reference === "object" ? token(reference).path : reference]));
+    if (field === "interactions" && Array.isArray(value)) return value.map(interactionRule);
+    return value;
+  };
   const interactionRule = (rule) => {
     const destination = rule.destination ?? rule.target;
     const location =
@@ -369,7 +406,19 @@ export function inspectionReport(
         : {}),
       ...(rule.url ? { url: rule.url } : {}),
       ...(rule.delay !== undefined ? { delay: rule.delay } : {}),
+      ...(rule["overlay-pos-type"] ? { position: rule["overlay-pos-type"] === "manual" ? `manual ${rule["overlay-position"]?.x ?? 0}px ${rule["overlay-position"]?.y ?? 0}px` : rule["overlay-pos-type"] } : {}),
+      ...(rule["position-relative-to"] ? { relativeTo: relativeName(rule["position-relative-to"]) } : {}),
+      ...(rule["close-click-outside"] ? { closeOutside: true } : {}),
+      ...(rule["background-overlay"] ? { backdrop: true } : {}),
+      ...(rule["preserve-scroll"] ? { preserveScroll: true } : {}),
+      ...(rule.animation ? { animation: animationText(rule.animation) } : {}),
     };
+  };
+  // An overlay's place by name: the page, or the element it is relative to.
+  const relativeName = (runtimeId) => {
+    const target = workspace.product.runtime.reverseNodes?.[runtimeId];
+    const node = target && projection.nodes[target.nodeId];
+    return node ? (target.nodeId === design.tree.root.id ? "page" : node.name) : "an element";
   };
   const nodes = layers.map(({ node, depth, index }) => {
     const raw = projection.nodes[node.id];
@@ -417,7 +466,7 @@ export function inspectionReport(
       layout = {
         type: raw.layout,
         direction,
-        justify: raw["layout-justify-content"] ?? "start",
+        justify: raw["layout-justify-content"] ?? (raw.layout === "grid" ? "stretch" : "start"),
         align: raw["layout-align-items"] ?? "start",
         wrap: raw["layout-wrap-type"] ?? "nowrap",
       };
@@ -439,12 +488,29 @@ export function inspectionReport(
           child.visible &&
           !projection.nodes[child.id]?.["layout-item-absolute"],
       );
-      if (!direction.endsWith("reverse")) children.reverse();
+      // The tree lists children in reading order already.
       const transformed = [
         ...ancestry(node),
         raw,
         ...children.map((child) => projection.nodes[child.id]),
       ].some((item) => item.rotation || item.flipX || item.flipY);
+      if (raw.layout === "grid") {
+        // Tracks and cells, as the HTML writes them.
+        const track = (entry) => entry.type === "auto" ? "auto"
+          : entry.type === "flex" ? `${entry.value ?? 1}fr`
+            : entry.type === "percent" ? `${entry.value ?? 0}%` : `${entry.value ?? 0}px`;
+        layout.flow = raw["layout-grid-dir"] ?? "row";
+        layout.columns = (raw["layout-grid-columns"] ?? []).map(track);
+        layout.rows = (raw["layout-grid-rows"] ?? []).map(track);
+        layout.justifyItems = raw["layout-justify-items"] ?? "start";
+        layout.rowGap = raw["layout-gap"]?.["row-gap"] ?? 0;
+        layout.columnGap = raw["layout-gap"]?.["column-gap"] ?? 0;
+        // Each gap with the Token it follows, as a flex gap shows it.
+        add("rowGap", layout.rowGap, ["itemSpacing"], 0);
+        add("columnGap", layout.columnGap, ["itemSpacing"], 0);
+        delete layout.direction;
+        delete layout.wrap;
+      }
       if (raw.layout !== "flex" || layout.wrap !== "nowrap")
         layout.spacingUnknown = "wrapped_or_grid_spacing_not_exposed";
       layout.spaces =
@@ -489,9 +555,14 @@ export function inspectionReport(
       ])
         add(`margin${side}`, margin[key], [], 0);
     const visible = add("visible", raw.visible, [], true);
+    // Every fill and stroke layer, top first: fill, fill2, ...
+    const layers = (list, word) => (Array.isArray(list) ? list : []).map((value, index) =>
+      [index === 0 ? word : `${word}${index + 1}`, value, [`${word}s.${index}`]]);
     for (const [name, value, aliases] of [
-      ["fill", raw.fills?.[0], ["fills.0"]],
-      ["stroke", raw.strokes?.[0], ["strokes.0"]],
+      ...layers(raw.fills, "fill"),
+      ...layers(raw.strokes, "stroke"),
+      ["blur", raw.blur],
+      ["backgroundBlur", raw.backgroundBlur],
       ["opacity", raw.opacity],
       ["rotation", raw.rotation],
       ["shadow", raw.shadow],
@@ -573,6 +644,7 @@ export function inspectionReport(
       },
       constraints,
       ...(layout ? { layout } : {}),
+      ...gridCellOf(node),
       fields,
       source: component
         ? { kind: "component", ...componentSource }
@@ -658,16 +730,22 @@ export function inspectionReport(
                 (variant) => variant.id === design.selection.variantId,
               )?.selection;
               return chosen?.[axis.id] !== undefined
-                ? `${axis.name}=${chosen[axis.id]}`
+                ? `${axis.name}: ${chosen[axis.id]}`
                 : undefined;
             })
             .filter(Boolean)
-            .join(" · "),
+            .join("; "),
         }
       : {}),
     ...(design.selection.nodeId ? { element: design.tree.root.name } : {}),
   };
+  // A page version that starts a prototype flow (data-flow) says so.
+  const pageEntry = design.selection.screenId && workspace.product.manifest.entries.screens
+    .map((entry) => workspace.product.entries[entry]).find((candidate) => candidate.id === design.selection.screenId);
+  const pageVersion = pageEntry?.presentations.find((candidate) => candidate.id === design.selection.presentationId);
+  const flowStarts = !design.selection.nodeId ? (pageVersion?.prototypeFlows ?? []).map((flow) => flow.name) : [];
   return {
+    ...(flowStarts.length ? { flowStarts } : {}),
     snapshot: { ...snapshot, nodes: undefined, target },
     nodes,
     issues,
@@ -684,10 +762,77 @@ export function inspectionReport(
   };
 }
 
+// Padding in one line, each Token's source said once: "padding T/R/B/L:
+// 12 {spacing-3} / 24 {spacing-6} / … ← Habit Tracker / base".
+function paddingLine(indent, sides) {
+  const texts = sides.map(fieldText);
+  if (texts.every((text) => text === texts[0])) return `${indent}  padding (all sides): ${texts[0]}`;
+  const value = (field) => (field.kind === "token" ? `${field.value} {${field.token.path}}` : `${field.value ?? 0}${field.kind === "default" ? "" : ` · ${field.kind}`}`);
+  const sources = [...new Set(sides.filter((field) => field.kind === "token").map((field) => fieldText(field).split(" ← ")[1]).filter(Boolean))];
+  return `${indent}  padding T/R/B/L: ${sides.map(value).join(" / ")}${sources.length ? ` ← ${sources.join("; ")}` : ""}`;
+}
+
+// A link's animation in the words the file writes: "slide in left 300ms ease-out".
+function animationText(animation) {
+  if (!animation || typeof animation !== "object") return String(animation ?? "");
+  const type = animation["animation-type"] ?? animation.type;
+  const parts = [type === "slide" ? `slide ${animation.way ?? "in"} ${animation.direction ?? "right"}` : type === "push" ? `push ${animation.direction ?? "right"}` : type];
+  if (animation.duration !== undefined) parts.push(`${animation.duration}ms`);
+  if (animation.easing) parts.push(animation.easing);
+  if (animation["offset-effect"]) parts.push("offset");
+  return parts.filter(Boolean).join(" ");
+}
+
+// A declared link as one line: "click → navigate Habits / Detail (desktop) · slide in left 300ms".
+function interactionLine(rule) {
+  const to = rule.destination?.page ? `${rule.destination.page}${rule.destination.platform ? ` (${rule.destination.platform})` : ""}` : rule.url ?? "";
+  const options = [
+    rule.position && `position ${rule.position}`,
+    rule.relativeTo && `relative to ${rule.relativeTo}`,
+    rule.closeOutside && "close outside",
+    rule.backdrop && "backdrop",
+    rule.preserveScroll && "preserve scroll",
+    rule.delay !== undefined && `after ${rule.delay}ms`,
+    rule.animation && `animation ${rule.animation}`,
+  ].filter(Boolean);
+  return `${rule.on} → ${rule.action}${to ? ` ${to}` : ""}${options.length ? ` · ${options.join(" · ")}` : ""}`;
+}
+
+// A paint, stroke, shadow or blur in the words a stylesheet uses.
+function paintText(value) {
+  if (!value || typeof value !== "object") return undefined;
+  const alpha = (opacity) => (opacity !== undefined && opacity !== 1 ? ` ${Math.round(opacity * 100)}%` : "");
+  if (Array.isArray(value)) return value.map(paintText).join(", ");
+  if (value.type === "linear-gradient" || value.type === "radial-gradient") {
+    // As CSS writes it: a direction, then each stop as #rrggbbaa at its place.
+    const hex = (color, opacity) => `${color}${opacity !== undefined && opacity !== 1 ? Math.round(opacity * 255).toString(16).padStart(2, "0") : ""}`;
+    const dx = (value.endX ?? 0.5) - (value.startX ?? 0.5), dy = (value.endY ?? 1) - (value.startY ?? 0);
+    const direction = value.type === "radial-gradient" ? "circle"
+      : Math.abs(dx) < 0.01 ? (dy >= 0 ? "to bottom" : "to top")
+        : Math.abs(dy) < 0.01 ? (dx >= 0 ? "to right" : "to left")
+          : `${Math.round(((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360)}deg`;
+    return `${value.type}(${direction}, ${(value.stops ?? []).map((stop) => `${hex(stop.color, stop.opacity)} ${Math.round((stop.offset ?? 0) * 100)}%`).join(", ")})${alpha(value.opacity)}`;
+  }
+  if (value.type === "image" || value.image) return `image${alpha(value.opacity)}`;
+  if (value.offsetX !== undefined || value["offset-x"] !== undefined || value.style === "drop-shadow" || value.style === "inner-shadow") {
+    const color = typeof value.color === "object" ? value.color.color : value.color;
+    const opacity = typeof value.color === "object" ? value.color.opacity : value.opacity;
+    return `${value.inset || value.style === "inner-shadow" ? "inset " : ""}${value.offsetX ?? value["offset-x"] ?? 0} ${value.offsetY ?? value["offset-y"] ?? 0} ${value.blur ?? 0} ${value.spread ?? 0} ${color ?? ""}${alpha(opacity)}${value.hidden ? " hidden" : ""}`;
+  }
+  if (value.type === "layer-blur" || value.type === "background-blur") return `${value.value ?? 0}px${value.hidden ? " hidden" : ""}`;
+  if (value.color !== undefined && value.width !== undefined) {
+    const sides = ["widthTop", "widthRight", "widthBottom", "widthLeft"].filter((side) => value[side] !== undefined);
+    const width = sides.length ? `T/R/B/L ${["widthTop", "widthRight", "widthBottom", "widthLeft"].map((side) => value[side] ?? value.width).join("/")}px` : `${value.width}px`;
+    return `${width} ${value.color}${alpha(value.opacity)} ${value.alignment ?? "inner"}${value.style && value.style !== "solid" ? ` ${value.style}` : ""}${value.hidden ? " hidden" : ""}`;
+  }
+  if (value.color !== undefined) return `${value.color}${alpha(value.opacity)}`;
+  return undefined;
+}
+
 function fieldText(field) {
   const value =
     typeof field.value === "object"
-      ? plain(field.value)
+      ? paintText(field.value) ?? plain(field.value)
       : String(field.value ?? "?");
   if (field.kind === "token") {
     const token = field.token;
@@ -709,6 +854,37 @@ function fieldText(field) {
   return `${value} · ${field.kind}${field.kind === "unknown" ? ` (${field.reason})` : ""}`;
 }
 
+// One line of what an element looks like, for writing its code: every
+// fill and stroke layer, radius, shadow, blur, opacity and text style, each
+// with the Token it follows.
+function styleLine(fields) {
+  const token = (field) => (field.kind === "token" ? ` {${field.token.path}}` : "");
+  const shown = (field) => `${typeof field.value === "object" ? paintText(field.value) ?? plain(field.value) : field.value}${token(field)}`;
+  const parts = [];
+  for (const [name, field] of Object.entries(fields)) {
+    if (!/^(fill\d*|stroke\d*|shadow|blur|backgroundBlur|opacity)$/.test(name) || field.value === undefined) continue;
+    if (name === "opacity" && field.value === 1) continue;
+    parts.push(`${name.replace(/^backgroundBlur$/, "backdrop blur")} ${shown(field)}`);
+  }
+  const corners = ["radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft"].map((name) => fields[name]).filter(Boolean);
+  if (corners.length === 4 && corners.some((field) => field.value)) {
+    parts.push(corners.every((field) => field.value === corners[0].value && token(field) === token(corners[0]))
+      ? `radius ${shown(corners[0])}`
+      : `radius ${corners.map(shown).join(" / ")}`);
+  }
+  // Text style as the CSS font shorthand: 600 15px/1.2 "Source Sans Pro".
+  const font = ["fontWeight", "fontSize", "lineHeight", "fontFamily"].filter((name) => fields[name]);
+  if (font.length) {
+    const value = (name) => fields[name]?.value;
+    const shorthand = `${value("fontWeight") ?? 400} ${value("fontSize") ?? 14}px${value("lineHeight") !== undefined ? `/${value("lineHeight")}` : ""} "${value("fontFamily") ?? "Source Sans Pro"}"`;
+    const tokens = [...new Set(font.map((name) => token(fields[name])).filter(Boolean))];
+    parts.push(`font ${shorthand}${tokens.join("")}`);
+  }
+  for (const name of ["letterSpacing", "textAlign", "textTransform", "textDecoration"])
+    if (fields[name]?.value !== undefined) parts.push(`${name.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`)} ${shown(fields[name])}`);
+  return parts.join(" · ");
+}
+
 export function inspectionText(report, { details = false } = {}) {
   const { snapshot } = report;
   const lines = [
@@ -726,12 +902,13 @@ export function inspectionText(report, { details = false } = {}) {
     `Snapshot: ${snapshot.id}`,
     "Use constraints for implementation; PNG for appearance; wireframe for spatial orientation.",
   ];
+  if (report.flowStarts?.length) lines.push(`Flow start: ${report.flowStarts.join(", ")} (data-flow on <body>)`);
   for (const node of report.nodes) {
     const bounds = node.geometry.bounds;
     const layout = node.geometry.layoutBox;
     const indent = "  ".repeat(node.depth);
     lines.push(
-      `${indent}[${node.ref}] ${node.name}${node.source.kind === "component" ? ` → ${node.source.name}${node.source.variant.length ? ` (${node.source.variant.join(" · ")})` : ""}` : ""}${node.visibility.value ? "" : " · hidden"}`,
+      `${indent}[${node.ref}] ${node.name}${node.source.kind === "component" && (node.source.role !== "definition" || node.depth === 0) ? ` → ${node.source.name}${node.source.variant.length ? ` (${node.source.variant.join("; ")})` : ""}` : ""}${node.visibility.value ? "" : " · hidden"}`,
     );
     lines.push(
       `${indent}  x=${number(bounds?.x)}, y=${number(bounds?.y)} · width=${node.constraints.width} → ${number(layout?.width)}px · height=${node.constraints.height} → ${number(layout?.height)}px${node.geometry.status === "partial" ? ` · partial (${node.geometry.reason})` : ""}`,
@@ -757,12 +934,25 @@ export function inspectionText(report, { details = false } = {}) {
       lines.push(
         `${indent}  export rule: hide fill; preview keeps the authored fill`,
       );
-    if (node.layout) {
+    if (node.gridCell) {
+      const cell = node.gridCell;
+      lines.push(
+        `${indent}  cell: row ${cell.row} column ${cell.column}${cell.rowSpan > 1 || cell.columnSpan > 1 ? ` · spans ${cell.rowSpan} row(s) × ${cell.columnSpan} column(s)` : ""} · align ${cell.alignSelf} · justify ${cell.justifySelf}`,
+      );
+    }
+    if (node.layout?.type === "grid") {
+      const layout = node.layout;
+      lines.push(
+        `${indent}  layout: grid · columns ${layout.columns.join(" ") || "none"} · rows ${layout.rows.join(" ") || "none"} · flow ${layout.flow} · gap row ${node.fields.rowGap ? fieldText(node.fields.rowGap) : layout.rowGap} column ${node.fields.columnGap ? fieldText(node.fields.columnGap) : layout.columnGap} · justify-items=${layout.justifyItems} · align=${layout.align} · justify=${layout.justify}`,
+      );
+    } else if (node.layout) {
       lines.push(
         `${indent}  layout: ${node.layout.type === "flex" ? node.layout.direction : node.layout.type} · gap=${fieldText(node.fields.gap)} · justify=${node.layout.justify} · align=${node.layout.align} · ${node.layout.wrap}`,
       );
+    }
+    if (node.layout) {
       lines.push(
-        `${indent}  padding T/R/B/L: ${["Top", "Right", "Bottom", "Left"].map((side) => fieldText(node.fields[`padding${side}`])).join(" / ")}`,
+        paddingLine(indent, ["Top", "Right", "Bottom", "Left"].map((side) => node.fields[`padding${side}`])),
       );
       for (const space of node.layout.spaces)
         lines.push(
@@ -773,6 +963,10 @@ export function inspectionText(report, { details = false } = {}) {
           `${indent}  actual inter-item spacing: ? · partial (${node.layout.spacingUnknown})`,
         );
     }
+    if (!details) {
+      const style = styleLine(node.fields);
+      if (style) lines.push(`${indent}  style: ${style}`);
+    }
     if (node.source.kind === "component") {
       lines.push(
         `${indent}  source: ${node.source.package} / ${node.source.name} / ${node.source.element}${node.source.role === "definition" ? " · shared definition" : ""}`,
@@ -780,7 +974,7 @@ export function inspectionText(report, { details = false } = {}) {
       if (node.source.status === "partial")
         lines.push(`${indent}  source chain: partial (${node.source.reason})`);
       lines.push(
-        `${indent}  page overrides: ${node.source.overrides.length ? node.source.overrides.map((item) => `${item.element}.${item.field}=${plain(item.value)}`).join("; ") : node.source.role === "definition" ? "not applicable (shared definition)" : node.source.overridesKnown ? "none" : "unknown (source chain unavailable)"}`,
+        `${indent}  page overrides: ${node.source.overrides.length ? node.source.overrides.map((item) => `${item.element}.${item.field}=${item.field === "interactions" && Array.isArray(item.value) ? item.value.map(interactionLine).join(", ") : plain(item.value)}`).join("; ") : node.source.role === "definition" ? "not applicable (shared definition)" : node.source.overridesKnown ? "none" : "unknown (source chain unavailable)"}`,
       );
     }
     if (node.fields.visible.kind === "token" || !node.visibility.value)
@@ -793,11 +987,11 @@ export function inspectionText(report, { details = false } = {}) {
           ? `${node.text.value.slice(0, 120)}… (+${node.text.value.length - 120} chars; expand --element)`
           : node.text.value;
       lines.push(
-        `${indent}  text: ${JSON.stringify(content)} · ${node.text.wrapping} · lines=? (${node.text.lines.reason}) · ellipsis: unspecified`,
+        `${indent}  text: ${JSON.stringify(content)} · ${node.text.wrapping}`,
       );
     }
     if (node.interaction.status === "declared")
-      lines.push(`${indent}  interaction: ${plain(node.interaction.readable)}`);
+      for (const rule of node.interaction.readable) lines.push(`${indent}  link: ${interactionLine(rule)}`);
     if (details) {
       if (known(bounds))
         lines.push(
@@ -819,11 +1013,7 @@ export function inspectionText(report, { details = false } = {}) {
           `${indent}  ${name}: ${fieldText(value)} · from ${value.source}`,
         );
       }
-      lines.push(
-        `${indent}  disabled reason: unspecified (no declared business rule)`,
-      );
-      if (node.interaction.status === "unspecified")
-        lines.push(`${indent}  interaction: unspecified`);
+
     }
     for (const issue of report.issues.filter((item) => item.ref === node.ref))
       lines.push(

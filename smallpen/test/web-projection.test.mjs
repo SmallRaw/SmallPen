@@ -6,6 +6,7 @@ import test from "node:test";
 import { openPackage } from "@smallpen/local-package";
 
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
+import { onlyScreen } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
@@ -16,7 +17,7 @@ test("Web projection keeps a valid Package loadable", async () => {
 
   assert.deepEqual(projected.projectionErrors, []);
   assert.equal(
-    projected.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(projected).presentations[0].nodes
       .node_rectangle.name,
     "Editable Rectangle",
   );
@@ -24,7 +25,7 @@ test("Web projection keeps a valid Package loadable", async () => {
 
 test("Web projection reports an invalid reference without rewriting the design", async () => {
   const product = await openPackage(fixture);
-  const screen = product.entries["screens/roundtrip.json"];
+  const screen = onlyScreen(product);
   const presentation = screen.presentations[0];
   presentation.nodes.node_canvas.children.push("node_missing_component");
   presentation.nodes.node_missing_component = {
@@ -62,7 +63,7 @@ test("Web projection reports an invalid reference without rewriting the design",
 
   assert.deepEqual(product.entries, before);
   assert.equal(
-    product.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(product).presentations[0].nodes
       .node_missing_component.type,
     "INSTANCE",
   );

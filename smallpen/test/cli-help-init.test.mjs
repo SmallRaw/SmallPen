@@ -38,7 +38,6 @@ async function workspace(context) {
 test("the compatibility init alias creates a blank project without questions in any locale", async (context) => {
   const target = await workspace(context);
   const result = await runCli([
-    "project",
     "init",
     target,
     "--locale",
@@ -59,7 +58,7 @@ test("removed questionnaire parameters are rejected before creating state", asyn
     ["--state", `${target}.state.json`],
     ["--answer", 'projectKind="application"'],
   ]) {
-    const result = await runCli(["project", "init", target, ...args, "--json"]);
+    const result = await runCli(["init", target, ...args, "--json"]);
     assert.equal(result.code, 1);
     assert.equal(result.json.error.code, "unknown_option");
     assert.equal(result.json.error.writeState, "not-applied");

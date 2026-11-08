@@ -13,9 +13,10 @@ import {
   resolveEffectiveToken,
 } from "@smallpen/core";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { onlyScreen, readModelEntry, tokenEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 const setId = "tset_11111111111141118111111111111111";
 const setRuntimeId = "11111111-1111-4111-8111-111111111111";
@@ -27,9 +28,7 @@ const themeRuntimeId = "44444444-4444-4444-8444-444444444444";
 const addedTokenRuntimeId = "55555555-5555-4555-8555-555555555555";
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -170,7 +169,7 @@ test("set-token-value updates a Penpot Token by path and reverses exactly", asyn
   });
 
   assert.equal(
-    prepared.snapshot.entries["tokens/design.json"].sets[0].tokens[0].value,
+    tokenEntry(prepared.snapshot).sets[0].tokens[0].value,
     "#db2777",
   );
   const reversed = await prepareOperationBatch(
@@ -280,7 +279,7 @@ test("native TokensStatus updates round-trip and reject unknown identities", asy
     },
   ]);
   const prepared = await prepareOperationBatch(snapshot, batch);
-  const library = prepared.snapshot.entries["tokens/design.json"];
+  const library = tokenEntry(prepared.snapshot);
   assert.deepEqual(library.activeThemeIds, []);
   assert.deepEqual(library.activeSetIds, [setId]);
   const reversed = await prepareOperationBatch(
@@ -409,7 +408,7 @@ test("Penpot applied-tokens edits compile, apply, and reverse exactly", async ()
 
   const prepared = await prepareOperationBatch(snapshot, batch);
   assert.ok(
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle.tokenBindings.fill,
   );
   const reversed = await prepareOperationBatch(
@@ -504,7 +503,7 @@ test("Penpot Token, Set, Theme, and activation changes replace one library atomi
   assert.equal(batch.operations[0].type, "replace-token-library");
 
   const prepared = await prepareOperationBatch(snapshot, batch);
-  const library = prepared.snapshot.entries["tokens/design.json"];
+  const library = tokenEntry(prepared.snapshot);
   assert.deepEqual(
     {
       activeSetIds: library.activeSetIds,
@@ -583,7 +582,7 @@ test("Penpot Token Set and group moves preserve order and Theme references", asy
     commitId: "token-moves",
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
-  const moved = prepared.snapshot.entries["tokens/design.json"];
+  const moved = tokenEntry(prepared.snapshot);
   assert.deepEqual(
     moved.sets.map(({ name }) => name),
     [
@@ -668,7 +667,7 @@ test("the first Penpot Token changes create one library entry whose inverse remo
   ]);
   assert.equal(prepared.snapshot.runtime.tokenSets[setId], setRuntimeId);
   assert.equal(
-    prepared.snapshot.entries["tokens/tokens.json"].sets[0].tokens[0].id,
+    tokenEntry(prepared.snapshot).sets[0].tokens[0].id,
     colorTokenId,
   );
 

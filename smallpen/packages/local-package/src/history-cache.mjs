@@ -21,9 +21,10 @@ export function defaultHistoryCacheRoot({ platform = process.platform, home = ho
 // with another ID also starts a fresh history. No project names enter filenames.
 export async function batchHistoryPath(locator) {
   const path = await realpath(resolve(locator));
-  const manifest = JSON.parse(await readRegularFile(join(path, "manifest.json"), "utf8", { maxBytes: 4 * 1024 * 1024 }));
-  if (typeof manifest.packageId !== "string" || !manifest.packageId)
+  const index = await readRegularFile(join(path, "index.html"), "utf8", { maxBytes: 4 * 1024 * 1024 });
+  const packageId = /<meta\s+name=["']smallpen:package-id["']\s+content=["']([^"']+)["']/i.exec(index)?.[1];
+  if (!packageId)
     throw new SmallPenError("invalid_package_id", "Cannot locate history without a Package ID");
-  const identity = createHash("sha256").update(path).update("\0").update(manifest.packageId).digest("hex");
+  const identity = createHash("sha256").update(path).update("\0").update(packageId).digest("hex");
   return join(defaultHistoryCacheRoot(), identity, "batches.json");
 }

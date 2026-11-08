@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { pageHtml } from "./helpers/named.mjs";
 
 const cli = new URL("../apps/cli/bin/smallpen.mjs", import.meta.url);
 
@@ -23,49 +24,47 @@ async function run(args, expected = 0) {
   return JSON.parse(stdout);
 }
 
-async function file(root, name, value) {
-  const path = join(root, name);
-  await writeFile(path, JSON.stringify(value));
-  return path;
-}
+// The design an agent writes as files: Tokens, a Button with two
+// properties, and a Tasks / Board page that places it.
+const FILES = {
+  "tokens.css": ":root {\n  --color-brand: #4f46e5;\n  --spacing-2: 8px;\n  --spacing-4: 16px;\n}\n",
+  "components/Button.html": `<sp-component name="Button" props="Style: primary | secondary; Size: md | sm">
+  <div class="flex flex-row py-2 px-4 bg-brand rounded-[8px]">
+    <p data-name="Label" class="text-[#ffffff] text-[14px]">Go</p>
+  </div>
+  <sp-variant when="Style: secondary" class="bg-[#ffffff]">
+    <p data-name="Label" class="text-brand"></p>
+  </sp-variant>
+  <sp-variant when="Size: sm">
+    <p data-name="Label" class="text-[12px]"></p>
+  </sp-variant>
+</sp-component>
+`,
+  "pages/Tasks/Board.html": pageHtml(`<body class="flex flex-row">
+  <div data-name="Sidebar" class="w-[240px] h-full"></div>
+  <div data-name="Content" class="flex flex-col w-full h-full">
+    <div data-name="Top bar" class="flex flex-row w-full">
+      <p data-name="Title">Sprint</p>
+      <sp-use component="Button" data-name="New task">
+        <p data-name="Label">New task</p>
+      </sp-use>
+    </div>
+  </div>
+</body>`, { title: "Board", depth: 2 }),
+};
 
 let shared;
 async function designed() {
   if (shared) return shared;
   shared = (async () => {
     const root = await mkdtemp(join(tmpdir(), "smallpen-look-"));
-    const path = (await run(["project", "init", join(root, "demo"), "--json"])).packagePath;
-    await run(["token", "set", path, "--intent", await file(root, "tokens.json", {
-      tokens: [
-        { name: "color.brand", type: "color", value: "#4f46e5" },
-        { name: "space.2", type: "spacing", value: 8 },
-        { name: "space.4", type: "spacing", value: 16 },
-      ],
-    }), "--json"]);
-    await run(["component", "define", path, "--intent", await file(root, "button.json", {
-      name: "Button",
-      properties: { Style: ["primary", "secondary"], Size: ["md", "sm"] },
-      base: {
-        layout: "row", padding: ["{space.2}", "{space.4}"], fill: "{color.brand}", radius: 8,
-        children: [{ name: "Label", text: "Go", color: "#ffffff", fontSize: 14 }],
-      },
-      variants: [
-        { when: { Style: "secondary" }, set: { fill: "#ffffff", "Label.color": "{color.brand}" } },
-        { when: { Size: "sm" }, set: { "Label.fontSize": 12 } },
-      ],
-    }), "--json"]);
-    await run(["page", "draw", path, "--intent", await file(root, "board.json", {
-      page: "Board", module: "Tasks", layout: "row",
-      children: [
-        { name: "Sidebar", width: 240, height: "fill" },
-        { name: "Content", width: "fill", height: "fill", children: [
-          { name: "Top bar", layout: "row", width: "fill", children: [
-            { name: "Title", text: "Sprint" },
-            { name: "New task", use: "Button", text: { Label: "New task" } },
-          ] },
-        ] },
-      ],
-    }), "--json"]);
+    const path = (await run(["init", join(root, "demo"), "--json"])).packagePath;
+    for (const [name, content] of Object.entries(FILES)) {
+      await mkdir(dirname(join(path, name)), { recursive: true });
+      await writeFile(join(path, name), content);
+    }
+    const checked = await run(["check", path, "--json"]);
+    assert.equal(checked.ok, true, JSON.stringify(checked.issues));
     return { root, path };
   })();
   return shared;
@@ -77,8 +76,8 @@ test("view by name reads the package, every kind and one thing as text, without 
   assert.match(overview.text, /Button · Style: primary\|secondary · Size: md\|sm · 4 variants/);
   assert.match(overview.text, /Tasks \/ Board — desktop 1440×900\n\s+Sidebar, Content/);
 
-  const tokens = await run(["view", path, "--token", "space", "--json"]);
-  assert.match(tokens.text, /space\.2\s+8\n\s+space\.4\s+16/, "Tokens read in natural order");
+  const tokens = await run(["view", path, "--token", "spacing", "--json"]);
+  assert.match(tokens.text, /spacing-2\s+8\n\s+spacing-4\s+16/, "Tokens read in natural order");
   assert.equal(tokens.tokenCount, 2);
 
   const page = await run(["view", path, "--page", "Board", "--json"]);
@@ -89,10 +88,10 @@ test("view by name reads the package, every kind and one thing as text, without 
   assert.doesNotMatch(part.text, /Sidebar/, "a part shows only that part");
 
   const variant = await run(["view", path, "--component", "Button", "--variant", "secondary", "--json"]);
-  assert.equal(variant.target.variant, "Style=secondary, Size=md");
-  assert.match(variant.text, /Structure of Style=secondary, Size=md:/);
+  assert.equal(variant.target.variant, "Style: secondary; Size: md");
+  assert.match(variant.text, /Structure of Style: secondary; Size: md:/);
   const element = await run(["view", path, "--component", "Button", "--variant", "Size=sm", "--element", "Label", "--json"]);
-  assert.match(element.text, /Element in Style=primary, Size=sm:\nLabel · TEXT/);
+  assert.match(element.text, /Element in Style: primary; Size: sm:\nLabel · TEXT/);
 });
 
 test("view by name draws sheets and pages as wireframes and PNGs", async () => {
@@ -102,7 +101,7 @@ test("view by name draws sheets and pages as wireframes and PNGs", async () => {
   assert.ok((await stat(sheet.output)).size > 0);
   assert.ok(sheet.width < 2000, "a part draws on a narrow sheet");
   const wire = await run(["view", path, "--page", "Board", "--as", "wireframe", "--json"]);
-  assert.match(wire.wireframe, /ASCII WIREFRAME/);
+  assert.match(wire.text, /ASCII WIREFRAME/);
   const pages = await run(["view", path, "--pages", "--as", "png", "--json"]);
   assert.equal(pages.items.length, 1);
   assert.ok(pages.items.every(({ output }) => output.endsWith(".png")));
@@ -119,7 +118,7 @@ test("view by name lists issues by name and names what it cannot find", async ()
   assert.ok(page.error.details.pages.includes("Tasks / Board"));
   const variant = await run(["view", path, "--component", "Button", "--variant", "huge", "--json"], 1);
   assert.equal(variant.error.code, "unknown_variant");
-  assert.ok(variant.error.details.variants.includes("Style=secondary, Size=sm"));
+  assert.ok(variant.error.details.variants.includes("Style: secondary; Size: sm"));
   const element = await run(["view", path, "--page", "Board", "--element", "Nope", "--json"], 1);
   assert.ok(element.error.details.elements.includes("Content / Top bar / New task"));
   const two = await run(["view", path, "--page", "Board", "--tokens", "--json"], 1);

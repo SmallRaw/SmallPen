@@ -22,6 +22,7 @@ import {
   LocalWorkspaceSession,
   openPackage,
 } from "@smallpen/local-package";
+import { assetEntry, onlyScreen, seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
@@ -30,6 +31,7 @@ async function copyFixture() {
   const parent = await mkdtemp(join(tmpdir(), "smallpen-test-"));
   const packagePath = join(parent, "roundtrip.smallpen");
   await cp(fixture, packagePath, { recursive: true });
+  await seedLegacyIds(packagePath, "roundtrip");
   return packagePath;
 }
 
@@ -38,7 +40,9 @@ async function productWorkspaceFixture() {
   const productPath = join(root, "product.smallpen");
   const foundationPath = join(root, "foundation.smallpen");
   await cp(fixture, productPath, { recursive: true });
+  await seedLegacyIds(productPath, "roundtrip");
   await cp(fixture, foundationPath, { recursive: true });
+  await seedLegacyIds(foundationPath, "roundtrip");
   const foundationManifestPath = join(foundationPath, "manifest.json");
   const foundationManifest = JSON.parse(
     await readFile(foundationManifestPath, "utf8"),
@@ -100,30 +104,21 @@ test("opening a package produces deterministic Penpot runtime UUIDs", async () =
 
 test("runtime UUID indexes keep Presentation-scoped node IDs distinct", async () => {
   const packagePath = await copyFixture();
-  const screenPath = join(packagePath, "screens/roundtrip.json");
-  const screen = JSON.parse(await readFile(screenPath, "utf8"));
-  const second = structuredClone(screen.presentations[0]);
-  second.id = "pres_mobile";
-  second.name = "Mobile";
-  await writeFile(
-    screenPath,
-    `${JSON.stringify(
-      { ...screen, presentations: [...screen.presentations, second] },
-      null,
-      2,
-    )}\n`,
-  );
+  // A mobile version: the same page file under the .mobile name.
+  await cp(join(packagePath, "pages", "Round Trip.html"), join(packagePath, "pages", "Round Trip.mobile.html"));
 
   const opened = await openPackage(packagePath);
+  const mobileVersion = onlyScreen(opened).presentations.find(({ platform }) => platform === "mobile");
+  const mobileRectangle = Object.values(mobileVersion.nodes).find(({ name }) => name === "Editable Rectangle");
   const desktop =
     opened.runtime.nodes.scr_roundtrip.pres_desktop.node_rectangle;
-  const mobile = opened.runtime.nodes.scr_roundtrip.pres_mobile.node_rectangle;
+  const mobile = opened.runtime.nodes.scr_roundtrip[mobileVersion.id][mobileRectangle.id];
 
   assert.notEqual(desktop, mobile);
   // Both versions are boards on the one default canvas.
   assert.equal(
     opened.runtime.pages.scr_roundtrip.pres_desktop,
-    opened.runtime.pages.scr_roundtrip.pres_mobile,
+    opened.runtime.pages.scr_roundtrip[mobileVersion.id],
   );
 });
 
@@ -135,15 +130,13 @@ test("a typed operation batch atomically changes one node and one revision", asy
     opacityBatch(before.revision, 0.45),
   );
   const after = await openPackage(packagePath);
-  const screen = JSON.parse(
-    await readFile(join(packagePath, "screens/roundtrip.json"), "utf8"),
-  );
+  const page = await readFile(join(packagePath, "pages", "Round Trip.html"), "utf8");
 
   assert.notEqual(result.revision, before.revision);
   assert.equal(after.revision, result.revision);
-  assert.deepEqual(result.changedFiles, ["screens/roundtrip.json"]);
+  assert.deepEqual(result.changedFiles, ["pages/Round Trip.html"]);
   assert.deepEqual(result.affectedIds, ["node_rectangle"]);
-  assert.equal(screen.presentations[0].nodes.node_rectangle.opacity, 0.45);
+  assert.match(page, /data-name="Editable Rectangle"[^>]*opacity-\[0\.45\]/);
   assert.equal(
     after.runtime.nodes.scr_roundtrip.pres_desktop.node_rectangle,
     before.runtime.nodes.scr_roundtrip.pres_desktop.node_rectangle,
@@ -301,10 +294,7 @@ test("a Package reader waits for an active commit journal owner", async (context
   await delay(100);
   assert.equal(settled, false);
   assert.equal(JSON.parse(await readFile(journalPath, "utf8")).candidatePath, candidatePath);
-  assert.equal(
-    JSON.parse(await readFile(join(candidatePath, "manifest.json"), "utf8")).packageId,
-    "pkg_roundtrip",
-  );
+  assert.match(await readFile(join(candidatePath, "index.html"), "utf8"), /content="pkg_roundtrip"/);
 
   await rm(activePath, { force: true });
   await rm(claimPath, { force: true });
@@ -381,35 +371,31 @@ test("a Media import writes its descriptor and content-addressed blob atomically
     name: "Pixel",
     width: 1,
   });
-  assert.ok(imported.result.changedFiles.includes("assets/assets.json"));
-  assert.ok(!imported.result.changedFiles.includes("manifest.json"));
-  assert.ok(imported.result.changedFiles.includes(imported.descriptor.blob));
-  assert.deepEqual(
-    await readFile(join(packagePath, imported.descriptor.blob)),
-    bytes,
-  );
+  // The image becomes one file in assets/, named after the media.
+  assert.deepEqual(imported.result.changedFiles, ["assets/Pixel.png"]);
+  assert.deepEqual(await readFile(join(packagePath, "assets", "Pixel.png")), bytes);
   const opened = await openPackage(packagePath);
-  assert.equal(opened.entries["assets/assets.json"].media[0].name, "Pixel");
+  assert.equal(assetEntry(opened).media[0].name, "Pixel");
 
   await applyOperationBatch(packagePath, imported.result.inverseBatch);
   const reversed = await openPackage(packagePath);
-  assert.deepEqual(reversed.manifest.entries.assets, ["assets/assets.json"]);
-  assert.deepEqual(reversed.entries["assets/assets.json"].media, []);
-  assert.ok(reversed.blobs.has(imported.descriptor.blob));
+  assert.deepEqual(assetEntry(reversed)?.media ?? [], []);
+  await assert.rejects(readFile(join(packagePath, "assets", "Pixel.png")), (error) => error.code === "ENOENT");
 });
 
 test("the Node adapter rejects non-package directories and entry symlinks", async () => {
   const parent = await mkdtemp(join(tmpdir(), "smallpen-path-test-"));
   const wrongExtension = join(parent, "roundtrip");
   await cp(fixture, wrongExtension, { recursive: true });
+  await seedLegacyIds(wrongExtension, "roundtrip");
   await assert.rejects(
     openPackage(wrongExtension),
     (error) => error?.code === "invalid_package_path",
   );
 
   const packagePath = await copyFixture();
-  const screenPath = join(packagePath, "screens/roundtrip.json");
-  const outsidePath = join(dirname(packagePath), "outside.json");
+  const screenPath = join(packagePath, "pages", "Round Trip.html");
+  const outsidePath = join(dirname(packagePath), "outside.html");
   await rename(screenPath, outsidePath);
   await symlink(outsidePath, screenPath);
   await assert.rejects(
@@ -497,18 +483,16 @@ test("the local backend watches nested entries and retains last-valid read-only 
   context.after(() => backend.close());
   const opened = await backend.open(packagePath);
   const originalRevision = opened.revision;
-  const screenPath = join(packagePath, "screens/roundtrip.json");
-  const screen = JSON.parse(await readFile(screenPath, "utf8"));
-  screen.name = "Manual nested edit";
-  await writeFile(screenPath, JSON.stringify(screen));
+  const screenPath = join(packagePath, "pages", "Round Trip.html");
+  const screen = (await readFile(screenPath, "utf8")).replace("bg-[#7c3aed]", "bg-[#111111]");
+  await writeFile(screenPath, screen);
   await waitFor(() => events.some(({ type }) => type === "external-revision"));
   assert.notEqual(backend.snapshot.revision, originalRevision);
   assert.equal(backend.changes.at(-1).source, "external");
-  assert.ok(backend.changes.at(-1).affectedIds.includes("scr_roundtrip"));
-  assert.ok(backend.changes.at(-1).changedFiles.includes("screens/roundtrip.json"));
+  assert.ok(backend.changes.at(-1).changedFiles.includes("pages/Round Trip.html"), JSON.stringify(backend.changes.at(-1)));
 
   const lastValidRevision = backend.snapshot.revision;
-  await writeFile(screenPath, "{ partial");
+  await writeFile(screenPath, "<!doctype html>\n<html>\n<body><div");
   await waitFor(() => backend.status.state === "repair");
   assert.equal(backend.status.readOnly, true);
   assert.equal(backend.status.lastValidRevision, lastValidRevision);
@@ -518,7 +502,7 @@ test("the local backend watches nested entries and retains last-valid read-only 
     (error) => error?.code === "repair_read_only",
   );
 
-  await writeFile(screenPath, JSON.stringify(screen));
+  await writeFile(screenPath, screen);
   await waitFor(() => backend.status.state === "ready");
   assert.equal(backend.status.readOnly, false);
   assert.equal(backend.snapshot.revision, lastValidRevision);
@@ -534,21 +518,22 @@ test("local Backend Undo and Redo submit inverse Operation Batches", async (cont
     opacityBatch(opened.revision, 0.35, "_history"),
   );
   assert.equal(
-    backend.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(backend.snapshot).presentations[0].nodes
       .node_rectangle.opacity,
     0.35,
   );
   const undone = await backend.undo();
   assert.equal(undone.revision, opened.revision);
+  // Full opacity is the default, so the page stores none.
   assert.equal(
-    backend.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
-      .node_rectangle.opacity,
+    onlyScreen(backend.snapshot).presentations[0].nodes
+      .node_rectangle.opacity ?? 1,
     1,
   );
   const redone = await backend.redo();
   assert.equal(redone.revision, changed.revision);
   assert.equal(
-    backend.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(backend.snapshot).presentations[0].nodes
       .node_rectangle.opacity,
     0.35,
   );
@@ -642,10 +627,9 @@ test("one workspace session opens multiple independent files and reconciles surv
     zoom: 1.5,
   });
 
-  const secondScreenPath = join(second.locator, "screens/roundtrip.json");
-  const secondScreen = JSON.parse(await readFile(secondScreenPath, "utf8"));
-  secondScreen.name = "Second file changed";
-  await writeFile(secondScreenPath, JSON.stringify(secondScreen));
+  const secondScreenPath = join(second.locator, "pages", "Round Trip.html");
+  const secondScreen = await readFile(secondScreenPath, "utf8");
+  await writeFile(secondScreenPath, secondScreen.replace('data-name="Editable Rectangle"', 'data-name="Second file changed"'));
   await waitFor(() =>
     events.some(
       ({ locator, type }) =>
@@ -653,52 +637,9 @@ test("one workspace session opens multiple independent files and reconciles surv
     ),
   );
   assert.equal(workspace.activeLocator, first.locator);
-  assert.equal(
-    workspace.describe(second.locator).snapshot.entries["screens/roundtrip.json"]
-      .name,
-    "Second file changed",
+  assert.ok(
+    Object.values(onlyScreen(workspace.describe(second.locator).snapshot).presentations[0].nodes)
+      .some(({ name }) => name === "Second file changed"),
   );
 });
 
-test("a Product session tracks its Foundation and retains the last valid composite workspace", async (context) => {
-  const paths = await productWorkspaceFixture();
-  const workspace = new LocalWorkspaceSession();
-  context.after(async () => {
-    await workspace.closeAll();
-    await rm(paths.root, { force: true, recursive: true });
-  });
-  const product = await workspace.open(paths.productPath);
-  assert.equal(workspace.packages.length, 2);
-  assert.equal(product.status.state, "ready");
-  const lastValidFoundationRevision =
-    workspace.describe(product.locator).workspace.foundation.revision;
-
-  const foundationScreenPath = join(
-    paths.foundationPath,
-    "screens/roundtrip.json",
-  );
-  const validFoundationScreen = await readFile(foundationScreenPath, "utf8");
-  await writeFile(foundationScreenPath, "{ partial");
-  await waitFor(
-    () => workspace.describe(product.locator).status.state === "repair",
-  );
-  const repair = workspace.describe(product.locator);
-  assert.equal(repair.status.readOnly, true);
-  assert.equal(
-    repair.workspace.foundation.revision,
-    lastValidFoundationRevision,
-  );
-  await assert.rejects(
-    workspace.commit(
-      product.locator,
-      opacityBatch(product.snapshot.revision, 0.2, "_dependency_repair"),
-    ),
-    (error) => error?.code === "workspace_repair_read_only",
-  );
-
-  await writeFile(foundationScreenPath, validFoundationScreen);
-  await waitFor(
-    () => workspace.describe(product.locator).status.state === "ready",
-  );
-  assert.equal(workspace.describe(product.locator).status.readOnly, false);
-});

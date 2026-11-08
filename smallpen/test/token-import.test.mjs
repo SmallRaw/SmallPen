@@ -5,20 +5,23 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
-  applyTokenSelection,
-  buildTokenLibrary,
-  diffTokenLibraries,
   importTokens,
   listPackageEntries,
   loadPackageFromValues,
+  prepareOperationBatch,
+} from "@smallpen/core";
+import {
+  applyTokenSelection,
+  buildTokenLibrary,
+  diffTokenLibraries,
   normalizeTokenType,
   parseTokenDocument,
-  prepareOperationBatch,
   pruneUnresolvableTokens,
-} from "@smallpen/core";
+} from "../packages/core/src/token-import.mjs";
+import { readModelEntry, tokenEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 // The shape Penpot's own export-dtcg-json emits (see common tokens_lib_test).
 const penpotExport = {
@@ -89,9 +92,7 @@ const previousLibrary = {
 };
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -411,7 +412,7 @@ test("importTokens produces a batch that validates and replaces the library", as
     operations: result.operations,
   });
   assert.deepEqual(
-    prepared.snapshot.entries["tokens/tokens.json"],
+    tokenEntry(prepared.snapshot),
     result.library,
   );
   assert.deepEqual(prepared.result.changedFiles, ["tokens/tokens.json"]);
@@ -420,7 +421,7 @@ test("importTokens produces a batch that validates and replaces the library", as
     prepared.result.inverseBatch,
   );
   assert.deepEqual(
-    reversed.snapshot.entries["tokens/tokens.json"],
+    tokenEntry(reversed.snapshot),
     previousLibrary,
     "the inverse batch restores the previous library exactly",
   );
@@ -641,7 +642,7 @@ test("constructs the library would reject are reported in review, so apply succe
   );
   assert.equal(result.diff.summary.tokensAdded, 2);
   const applied = await applyImport(snapshot, result, "import_tokens_rejectable");
-  assert.equal(applied.snapshot.entries["tokens/tokens.json"].themes.length, 1);
+  assert.equal(tokenEntry(applied.snapshot).themes.length, 1);
 });
 
 test("re-importing object values in another key order is a no-op", async () => {

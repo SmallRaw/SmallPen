@@ -31,6 +31,8 @@ function tokenTable(snapshot, foundation) {
     );
   const table = read(workspace);
   const themes = listTokenThemes(snapshot, foundation);
+  // The options the default values are read under: "mode/light".
+  table.defaults = themes.filter((theme) => theme.active).map((theme) => theme.path);
   for (const theme of themes) {
     const under = read(selectTokenThemes(workspace, [theme.path]));
     for (const [path, entry] of table) {
@@ -39,6 +41,17 @@ function tokenTable(snapshot, foundation) {
     }
   }
   return table;
+}
+
+// A typography or shadow Token reads key by key: "font family Inter →
+// Source Sans Pro", not two cut-off objects.
+function valueChange(from, to) {
+  const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  if (!object(from) || !object(to)) return `${short(from)} → ${short(to)}`;
+  return [...new Set([...Object.keys(from), ...Object.keys(to)])]
+    .filter((key) => !same(from[key], to[key]))
+    .map((key) => `${STYLE_WORDS[key] ?? key} ${short(from[key] ?? "none")} → ${short(to[key] ?? "none")}`)
+    .join(", ");
 }
 
 function tokenChanges(before, after, options) {
@@ -57,13 +70,17 @@ function tokenChanges(before, after, options) {
       continue;
     }
     const details = [];
-    if (!same(previous.value, entry.value)) details.push(`${short(previous.value)} → ${short(entry.value)}`);
+    if (previous.type !== entry.type) details.push(`type ${previous.type} → ${entry.type}`);
+    // A Token that differs by option says which option its default is.
+    const groups = new Set(Object.keys({ ...(previous.values ?? {}), ...(entry.values ?? {}) }).map((path) => path.split("/")[0]));
+    const under = now.defaults?.filter((path) => groups.has(path.split("/")[0])) ?? [];
+    if (!same(previous.value, entry.value)) details.push(`${under.length ? `${under.join(" + ")} ` : ""}${valueChange(previous.value, entry.value)}`);
     const options = new Set([...Object.keys(previous.values ?? {}), ...Object.keys(entry.values ?? {})]);
     for (const option of options) {
       const from = previous.values?.[option] ?? previous.value;
       const to = entry.values?.[option] ?? entry.value;
       if (!same(from, to) && !(same(previous.value, from) && same(entry.value, to)))
-        details.push(`${option} ${short(from)} → ${short(to)}`);
+        details.push(`${option} ${valueChange(from, to)}`);
     }
     if (details.length) changes.push({ kind: "token", name: path, change: "changed", detail: details.join("; ") });
   }
@@ -145,13 +162,25 @@ const IGNORED = new Set(["id", "children", "interactions"]);
 // the layout computed; that is not a design change.
 // A text that grows (auto width, auto height) takes its size from its words.
 function layoutDecided(node, parent) {
-  const flexChild = parent?.layout === "flex" && node["layout-item-absolute"] !== true;
+  const flexChild = (parent?.layout === "flex" || parent?.layout === "grid") && node["layout-item-absolute"] !== true;
   const grows = node.type === "TEXT" ? node.growType : undefined;
+  // A container that hugs takes its size from its content.
+  const hugs = (axis) => (node.layout || node.type === "INSTANCE" || node.instance) && node[axis] === "auto";
   return {
     position: flexChild,
-    width: (flexChild && ["fill", "auto"].includes(node["layout-item-h-sizing"])) || grows === "auto-width",
-    height: (flexChild && ["fill", "auto"].includes(node["layout-item-v-sizing"])) || grows === "auto-width" || grows === "auto-height",
+    width: (flexChild && ["fill", "auto"].includes(node["layout-item-h-sizing"])) || grows === "auto-width" || hugs("layout-item-h-sizing"),
+    height: (flexChild && ["fill", "auto"].includes(node["layout-item-v-sizing"])) || grows === "auto-width" || grows === "auto-height" || hugs("layout-item-v-sizing"),
   };
+}
+
+// Values that follow the same Token in both versions changed with the
+// Token, which is reported once as a Token change.
+const TYPOGRAPHY_KEYS = new Set(["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "fontStyle", "fontId", "fontVariantId"]);
+const FOLLOWS = { textStyle: ["typography"], fills: ["fill", "fills.0"], strokes: ["stroke", "strokes.0"], cornerRadius: ["cornerRadius", "radius"], width: ["width"], height: ["height"], "layout-gap": ["rowGap", "columnGap", "itemSpacing"], "layout-padding": ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"] };
+function followsToken(old, now, field) {
+  const bindings = FOLLOWS[field] ?? [];
+  return bindings.some((name) => now.tokenBindings?.[name]) &&
+    bindings.every((name) => same(old.tokenBindings?.[name], now.tokenBindings?.[name]));
 }
 
 function nodeFieldChanges(old, now, names, decided = {}) {
@@ -162,6 +191,22 @@ function nodeFieldChanges(old, now, names, decided = {}) {
     ),
   );
   const take = (key) => changed.delete(key);
+  for (const field of Object.keys(FOLLOWS)) {
+    if (!changed.has(field) || !followsToken(old, now, field)) continue;
+    // A typography Token sets the font; alignment and case stay the
+    // element's own.
+    if (field === "textStyle") {
+      const own = (style) => Object.fromEntries(Object.entries(style ?? {}).filter(([key]) => !TYPOGRAPHY_KEYS.has(key)));
+      if (!same(own(old.textStyle), own(now.textStyle))) continue;
+    }
+    take(field);
+  }
+  // Grid cells hold element ids; the cells read by the children's names.
+  if (changed.has("layout-grid-cells")) {
+    const cells = (node) => Object.values(node["layout-grid-cells"] ?? {}).map((cell) => [cell.row, cell.column, cell["row-span"], cell["column-span"], cell["align-self"], cell["justify-self"], (cell.shapes ?? []).length]).sort();
+    take("layout-grid-cells");
+    if (!same(cells(old), cells(now))) details.push("grid cells changed");
+  }
   if (decided.width) take("width");
   if (decided.height) take("height");
   if (decided.position) {
@@ -185,8 +230,9 @@ function nodeFieldChanges(old, now, names, decided = {}) {
   const textChanged = take("text") | take("textBlocks");
   const visibleChanged = take("visible");
   const bindingChanged = (field) => !same(old.tokenBindings?.[field], now.tokenBindings?.[field]);
-  if (textChanged || bindingChanged("text")) details.push(`text ${valueOf(old, "text")} → ${valueOf(now, "text")}`);
-  if (visibleChanged || bindingChanged("visible")) details.push(`visible ${valueOf(old, "visible")} → ${valueOf(now, "visible")}`);
+  // Only when the words differ: an unset field and its default read the same.
+  if ((textChanged || bindingChanged("text")) && (textOf(old) !== textOf(now) || bindingChanged("text"))) details.push(`text ${valueOf(old, "text")} → ${valueOf(now, "text")}`);
+  if ((visibleChanged || bindingChanged("visible")) && valueOf(old, "visible") !== valueOf(now, "visible")) details.push(`visible ${valueOf(old, "visible")} → ${valueOf(now, "visible")}`);
   if (take("tokenBindings")) {
     const fields = new Set([...Object.keys(old.tokenBindings ?? {}), ...Object.keys(now.tokenBindings ?? {})]);
     for (const field of fields) {
@@ -203,8 +249,8 @@ function nodeFieldChanges(old, now, names, decided = {}) {
   }
   if (take("instance")) {
     const from = old.instance ?? {}, to = now.instance ?? {};
-    if (!same(from.variant, to.variant))
-      details.push(`variant ${names.variant(from.component, from.variant)} → ${names.variant(to.component, to.variant)}`);
+    const variantFrom = names.variant(from.component, from.variant), variantTo = names.variant(to.component, to.variant);
+    if (!same(from.variant, to.variant) && variantFrom !== variantTo) details.push(`variant ${variantFrom} → ${variantTo}`);
     if (!same(from.overrides, to.overrides))
       details.push(...overrideChanges(from.overrides ?? {}, to.overrides ?? {}, to.component ?? from.component, names));
     if (!same(from.component, to.component))
@@ -224,10 +270,18 @@ function nodeFieldChanges(old, now, names, decided = {}) {
       for (const axis of ["width", "height"])
         if (mode(old, axis) !== mode(now, axis)) details.push(`${axis} ${mode(old, axis)} → ${mode(now, axis)}`);
   }
+  // Sides and gaps in the words a stylesheet uses: "padding 0/12/0/12".
+  const sides = (value, keys) => (value && typeof value === "object" ? keys.map((side) => value[side] ?? 0).join("/") : short(value));
+  const shape = {
+    "layout-padding": (value) => sides(value, ["p1", "p2", "p3", "p4"]),
+    "layout-item-margin": (value) => sides(value, ["m1", "m2", "m3", "m4"]),
+    "layout-gap": (value) => (value && typeof value === "object" ? `row ${value["row-gap"] ?? 0} column ${value["column-gap"] ?? 0}` : short(value)),
+  };
   for (const key of changed) {
     const word = FIELD_WORDS[key];
     if (word === null) continue;
-    const value = (node) => short(VALUE_WORDS[node[key]] ?? node[key]);
+    const value = (node) => (shape[key] ? shape[key](node[key]) : short(VALUE_WORDS[node[key]] ?? node[key]));
+    if (value(old) === value(now)) continue;
     details.push(`${word ?? key} ${value(old)} → ${value(now)}`);
   }
   return details;
@@ -332,21 +386,87 @@ function overrideChanges(old, now, component, names) {
   return [...merged].filter(([, { from, to }]) => from !== to).map(([key, { from, to }]) => `${key} ${from} → ${to}`);
 }
 
+// Elements renamed or moved: a removed element and an added one of the same
+// kind, with the same text, component or children (by name), are one
+// element under a new name or parent. Returns Map(new id -> old id) for
+// them and the elements under them, paired by name.
+function matchRenames(oldNodes, newNodes) {
+  const pairs = new Map();
+  const parentsOf = (nodes) => {
+    const parents = new Map();
+    for (const [id, node] of Object.entries(nodes)) for (const child of node.children ?? []) parents.set(child, id);
+    return parents;
+  };
+  const removed = new Set(Object.keys(oldNodes).filter((id) => ownNode(id) && !newNodes[id]));
+  const added = new Set(Object.keys(newNodes).filter((id) => ownNode(id) && !oldNodes[id]));
+  if (!removed.size || !added.size) return pairs;
+  const oldParents = parentsOf(oldNodes), newParents = parentsOf(newNodes);
+  const signature = (nodes, id) => {
+    const node = nodes[id];
+    return JSON.stringify([node.type, node.instance?.component?.assetId ?? null, node.type === "TEXT" ? textOf(node) : null, (node.children ?? []).map((child) => nodes[child]?.name)]);
+  };
+  const tops = (ids, parents) => [...ids].filter((id) => !ids.has(parents.get(id)));
+  const oldTops = tops(removed, oldParents);
+  const taken = new Set();
+  const depth = (id, parents) => {
+    let count = 0;
+    for (let at = parents.get(id); at; at = parents.get(at)) count += 1;
+    return count;
+  };
+  const pair = (newId, oldId) => {
+    pairs.set(newId, oldId);
+    for (const child of newNodes[newId].children ?? []) {
+      const match = (oldNodes[oldId].children ?? []).find((other) => oldNodes[other]?.name === newNodes[child]?.name && !newNodes[other]);
+      if (match && added.has(child)) pair(child, match);
+    }
+  };
+  const match = (id, pool) => {
+    const wanted = signature(newNodes, id);
+    let candidates = pool.filter((old) => !taken.has(old) && !pairedOld().has(old) && signature(oldNodes, old) === wanted);
+    // Several look alike (copies of one component): the one with its name.
+    if (candidates.length > 1) candidates = candidates.filter((old) => oldNodes[old].name === newNodes[id].name);
+    if (candidates.length !== 1) return;
+    taken.add(candidates[0]);
+    pair(id, candidates[0]);
+  };
+  const pairedOld = () => new Set(pairs.values());
+  for (const id of tops(added, newParents)) match(id, oldTops);
+  // Moved into a new container: an added element under an added parent
+  // that matches a removed one anywhere, outermost first.
+  const rest = [...removed].filter((id) => !pairedOld().has(id));
+  for (const id of [...added].filter((id) => !pairs.has(id)).sort((left, right) => depth(left, newParents) - depth(right, newParents)))
+    if (!pairs.has(id)) match(id, rest);
+  return pairs;
+}
+
 function nodeChanges(where, before, after, names) {
   const changes = [];
   const oldNodes = before?.nodes ?? {}, newNodes = after?.nodes ?? {};
+  const renamed = matchRenames(oldNodes, newNodes);
+  const pairedOld = new Set(renamed.values());
+  const parentIds = new Map();
+  for (const [key, entry] of Object.entries(newNodes)) for (const child of entry.children ?? []) parentIds.set(child, key);
   for (const [id, node] of Object.entries(newNodes)) {
     if (!ownNode(id)) continue;
     // The root is the page version or variant itself.
     const name = id === after.rootId ? undefined : elementPath(newNodes, after.rootId, id) || node.name;
-    const previous = oldNodes[id];
+    const previous = oldNodes[id] ?? oldNodes[renamed.get(id)];
     if (!previous) {
       changes.push({ where, element: name, change: "added" });
       continue;
     }
     const parent = Object.values(newNodes).find((candidate) => candidate.children?.includes(id));
+    // A renamed or moved element says where it was; its name is not a
+    // field change.
+    const was = renamed.has(id) ? elementPath(oldNodes, before.rootId, renamed.get(id)) : undefined;
+    const parentRenamed = renamed.has(parentIds.get(id));
+    if (was && !parentRenamed) {
+      const details = nodeFieldChanges({ ...previous, name: node.name }, node, names, layoutDecided(node, parent));
+      changes.push({ where, element: name, change: previous.name === node.name ? "moved" : "renamed", detail: [`was ${was}`, ...details].join("; ") });
+      continue;
+    }
     // The root's name is the page's or the variant's: their rename says it.
-    const details = id === after.rootId
+    const details = id === after.rootId || was
       ? nodeFieldChanges({ ...previous, name: node.name }, node, names, layoutDecided(node, parent))
       : nodeFieldChanges(previous, node, names, layoutDecided(node, parent));
     // The same children in another order (in reading order: a flex line
@@ -356,12 +476,13 @@ function nodeChanges(where, before, after, names) {
     if (kept.length > 1 && !same(kept, keptBefore)) {
       const reading = (ids, holder) => (holder.layout === "flex" && !String(holder["layout-flex-dir"] ?? "row").endsWith("reverse") ? [...ids].reverse() : ids);
       const label = (ids, holder, table) => reading(ids, holder).map((child) => table[child]?.name ?? child).join(", ");
-      details.push(`order ${label(keptBefore, previous, oldNodes)} → ${label(kept, node, newNodes)}`);
+      const from = label(keptBefore, previous, oldNodes), to = label(kept, node, newNodes);
+      if (from !== to) details.push(`order ${from} → ${to}`);
     }
     if (details.length) changes.push({ where, element: name, change: "changed", detail: details.join("; ") });
   }
   for (const [id, node] of Object.entries(oldNodes))
-    if (ownNode(id) && !newNodes[id])
+    if (ownNode(id) && !newNodes[id] && !pairedOld.has(id))
       changes.push({ where, element: elementPath(oldNodes, before.rootId, id) || node.name, change: "removed" });
   return changes;
 }
@@ -369,30 +490,68 @@ function nodeChanges(where, before, after, names) {
 // --- components -------------------------------------------------------------
 
 function variantLabel(set, variant) {
-  return set.axes.map((axis) => `${axis.name}=${variant.selection?.[axis.id]}`).join(", ");
+  return set.axes.map((axis) => `${axis.name}: ${variant.selection?.[axis.id]}`).join("; ");
 }
 
 // Several variants in one phrase: "Content=leading|trailing|icon" when they
 // are every combination of those values, else "36 of 48 variants".
+// The variants a change is in, as few words as say them: "Tone: neutral |
+// success", or each variant when they do not form a grid of values.
 function variantsText(set, variants, labels) {
-  if (variants.length <= 3) return labels.filter(Boolean).join("; ");
   const values = set.axes.map((axis) => [...new Set(variants.map((variant) => variant.selection?.[axis.id]))]);
   const combinations = values.reduce((total, list) => total * list.length, 1);
   if (combinations === variants.length) {
     const parts = set.axes
       .map((axis, index) => [axis, values[index]])
       .filter(([axis, list]) => list.length < axis.domain.length)
-      .map(([axis, list]) => `${axis.name}=${list.join("|")}`);
-    if (parts.length) return `${parts.join(", ")}; ${variants.length} variants`;
+      .map(([axis, list]) => `${axis.name}: ${list.join(" | ")}`);
+    if (parts.length) return `${parts.join("; ")}${variants.length > 3 ? ` · ${variants.length} variants` : ""}`;
   }
+  if (variants.length <= 3) return labels.filter(Boolean).join(" · ");
   return `${variants.length} of ${set.variants.length} variants`;
+}
+
+// A variant's nodes keyed like another version's, where their name paths
+// match: a renamed component gives every node a new id.
+function alignByPath(before, after) {
+  const pathOf = (variant, id) => (id === variant.rootId ? "" : elementPath(variant.nodes, variant.rootId, id));
+  const ids = new Map(Object.keys(after.nodes).map((id) => [pathOf(after, id), id]));
+  const rename = new Map();
+  for (const id of Object.keys(before.nodes)) {
+    const target = ids.get(pathOf(before, id));
+    if (target) rename.set(id, target);
+  }
+  const nodes = {};
+  for (const [id, node] of Object.entries(before.nodes))
+    nodes[rename.get(id) ?? id] = { ...node, children: (node.children ?? []).map((child) => rename.get(child) ?? child) };
+  return { ...before, nodes, rootId: rename.get(before.rootId) ?? before.rootId };
 }
 
 function componentChanges(before, after, names) {
   const changes = [];
   const old = before.domain.componentSets;
+  // A component file renamed: a removed and an added component with the same
+  // properties and values are one component under a new name.
+  const props = (set) => JSON.stringify(set.axes.map((axis) => [axis.name.toLowerCase(), axis.domain]));
+  const removedSets = [...old.values()].filter((set) => !after.domain.componentSets.has(set.id));
+  const renamedFrom = new Map();
   for (const set of after.domain.componentSets.values()) {
-    const previous = old.get(set.id);
+    if (old.has(set.id)) continue;
+    const candidates = removedSets.filter((other) => props(other) === props(set) && ![...renamedFrom.values()].includes(other));
+    if (candidates.length === 1) renamedFrom.set(set.id, candidates[0]);
+  }
+  // One component gone and one new, with a property in common: renamed
+  // while its values changed (a ghost style added).
+  const addedLeft = [...after.domain.componentSets.values()].filter((set) => !old.has(set.id) && !renamedFrom.has(set.id));
+  const removedLeft = removedSets.filter((set) => ![...renamedFrom.values()].includes(set));
+  if (addedLeft.length === 1 && removedLeft.length === 1 &&
+    addedLeft[0].axes.some((axis) => removedLeft[0].axes.some((other) => other.name.toLowerCase() === axis.name.toLowerCase())))
+    renamedFrom.set(addedLeft[0].id, removedLeft[0]);
+  // A variant by its values, property by property name (a renamed
+  // component's axes have new ids).
+  const values = (set, variant) => JSON.stringify(set.axes.map((axis) => [axis.name.toLowerCase(), variant.selection?.[axis.id]]).sort());
+  for (const set of after.domain.componentSets.values()) {
+    const previous = old.get(set.id) ?? renamedFrom.get(set.id);
     if (!previous) {
       changes.push({ kind: "component", name: set.name, change: "added", detail: `${set.variants.length} variant${set.variants.length === 1 ? "" : "s"}` });
       continue;
@@ -406,7 +565,9 @@ function componentChanges(before, after, names) {
     const grouped = new Map();
     for (const variant of set.variants) {
       const label = variantLabel(set, variant);
-      const before = previous.variants.find(({ id }) => id === variant.id);
+      const same = previous.variants.find(({ id }) => id === variant.id);
+      const matched = same ?? previous.variants.find((candidate) => values(previous, candidate) === values(set, variant));
+      const before = matched && !same ? alignByPath(matched, variant) : matched;
       if (!before) {
         changes.push({ kind: "component", name: `${set.name} (${label})`, change: "added" });
         continue;
@@ -430,11 +591,12 @@ function componentChanges(before, after, names) {
         ...(change.detail ? { detail: change.detail } : {}),
       });
     for (const variant of previous.variants)
-      if (!set.variants.some(({ id }) => id === variant.id))
+      if (!set.variants.some(({ id }) => id === variant.id) && !set.variants.some((candidate) => values(set, candidate) === values(previous, variant)))
         changes.push({ kind: "component", name: `${set.name} (${variantLabel(previous, variant)})`, change: "removed" });
   }
+  const renamed = new Set(renamedFrom.values());
   for (const set of old.values())
-    if (!after.domain.componentSets.has(set.id)) changes.push({ kind: "component", name: set.name, change: "removed" });
+    if (!after.domain.componentSets.has(set.id) && !renamed.has(set)) changes.push({ kind: "component", name: set.name, change: "removed" });
   return changes;
 }
 
@@ -510,8 +672,21 @@ function linkChanges(before, after, options = {}) {
     const link = (newLinks.get(at) ?? oldLinks.get(at))[0];
     const name = `${link.page} (${link.platform})`;
     const added = is.filter((text) => !was.includes(text)), removed = was.filter((text) => !is.includes(text));
-    for (const text of added) changes.push({ kind: "page", name, element: link.element, change: "link added", detail: text });
-    for (const text of removed) changes.push({ kind: "page", name, element: link.element, change: "link removed", detail: text });
+    const oldLink = (oldLinks.get(at) ?? [])[0], newLink = (newLinks.get(at) ?? [])[0];
+    for (const text of added) changes.push({ kind: "page", name, element: (newLink ?? link).element, change: "link added", detail: text });
+    for (const text of removed) changes.push({ kind: "page", name, element: (oldLink ?? link).element, change: "link removed", detail: text });
+  }
+  // An element renamed or moved keeps its links: a removed and an added link
+  // with the same words on an element of the same name cancel out.
+  const leaf = (element) => String(element ?? "").split(/ [›/] /).at(-1);
+  for (let index = changes.length - 1; index >= 0; index -= 1) {
+    const change = changes[index];
+    if (change.change !== "link added") continue;
+    const pair = changes.findIndex((other) => other.change === "link removed" && other.name === change.name && other.detail === change.detail && leaf(other.element) === leaf(change.element));
+    if (pair === -1) continue;
+    changes.splice(Math.max(index, pair), 1);
+    changes.splice(Math.min(index, pair), 1);
+    index = Math.min(index, changes.length);
   }
   const startKey = (start) => `${start.screenId}\0${start.presentationId}`;
   const oldStarts = new Set(old.starts.map(startKey)), newStarts = new Set(now.starts.map(startKey));
@@ -604,6 +779,10 @@ export function designChanges(before, after, options = {}) {
         for (const [id, node] of Object.entries(variant.nodes))
           if (!elements.has(`${set.id}\0${id}`)) elements.set(`${set.id}\0${id}`, node.name ?? id);
     }
+  const partNames = new Map();
+  for (const set of sets.values())
+    for (const variant of set.variants)
+      for (const [id, node] of Object.entries(variant.nodes)) if (node.name && !partNames.has(id)) partNames.set(id, node.name);
   const names = {
     component: (reference) => sets.get(reference?.assetId)?.name ?? "none",
     // A nested copy's variant, by the axes of the component it places.
@@ -611,15 +790,17 @@ export function designChanges(before, after, options = {}) {
       const set = sets.get(reference?.assetId);
       const nested = set?.variants.flatMap((variant) => [variant.nodes[element]]).find(Boolean);
       const inner = sets.get(nested?.instance?.component?.assetId);
-      return inner ? inner.axes.filter((axis) => selection[axis.id] !== undefined).map((axis) => `${axis.name}=${selection[axis.id]}`).join(", ") : short(selection);
+      return inner ? inner.axes.filter((axis) => selection[axis.id] !== undefined).map((axis) => `${axis.name}: ${selection[axis.id]}`).join("; ") : short(selection);
     },
     variant: (reference, selection) => {
       const set = sets.get(reference?.assetId);
       if (!set || !selection) return short(selection);
-      return set.axes.map((axis) => `${axis.name}=${selection[axis.id]}`).join(", ") || "default";
+      return set.axes.map((axis) => `${axis.name}: ${selection[axis.id]}`).join("; ") || "default";
     },
-    token: (reference) => paths.get(reference?.assetId) ?? reference?.assetId ?? "none",
-    element: (component, id) => elements.get(`${component?.assetId}\0${id}`) ?? id,
+    token: (reference) => paths.get(reference?.assetId) ?? (reference ? "a removed Token" : "none"),
+    // A part of a component that was renamed or replaced keeps the name it
+    // had in either version.
+    element: (component, id) => elements.get(`${component?.assetId}\0${id}`) ?? partNames.get(String(id).split("__").at(-1)) ?? "a component part",
   };
   return [
     ...themeChanges(before, after, options),

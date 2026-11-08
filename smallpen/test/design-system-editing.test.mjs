@@ -11,14 +11,13 @@ import {
   loadPackageFromValues,
   prepareOperationBatch,
 } from "@smallpen/core";
+import { readModelEntry, tokenEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "design-system.smallpen");
+const fixture = join(here, "fixtures", "model", "design-system");
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -44,7 +43,7 @@ test("DSP-018-A: set-token-value writes base radius 8→12", async () => {
     }],
   };
   const after = await prepareOperationBatch(before, batch);
-  const lib = after.snapshot.entries["tokens/tokens.json"];
+  const lib = tokenEntry(after.snapshot);
   const base = lib.sets.find((s) => s.name === "radius/md")
     ?.tokens.find((t) => t.name === "base");
   assert.equal(base?.value, 12);
@@ -61,7 +60,7 @@ test("DSP-018-A: inverse batch restores original value", async () => {
   };
   const s1 = await prepareOperationBatch(s0, b1);
   const s2 = await prepareOperationBatch(s1.snapshot, s1.result.inverseBatch);
-  const lib = s2.snapshot.entries["tokens/tokens.json"];
+  const lib = tokenEntry(s2.snapshot);
   const base = lib.sets.find((s) => s.name === "radius/md")
     ?.tokens.find((t) => t.name === "base");
   assert.equal(base?.value, 8);
@@ -74,7 +73,7 @@ test("DSP-018-B: alias expression preserved when editing shared target", async (
     operations: [{ type: "set-token-value", filePath: "tokens/tokens.json", path: "base", value: 16 }],
   };
   const s1 = await prepareOperationBatch(s0, b1);
-  const lib = s1.snapshot.entries["tokens/tokens.json"];
+  const lib = tokenEntry(s1.snapshot);
   const alias = lib.sets.find((s) => s.name === "alias/demo")
     ?.tokens.find((t) => t.name === "radius.alias");
   assert.equal(alias?.value, "{base}");
@@ -87,7 +86,7 @@ test("DSP-018-B: alias expression preserved when editing shared target", async (
 
 test("DSP-019-A: composite typography value edit", async () => {
   const s0 = await snapshot();
-  const typoSet = s0.entries["tokens/tokens.json"].sets
+  const typoSet = tokenEntry(s0).sets
     .find((s) => s.name === "typography/md");
   const heading = typoSet?.tokens.find((t) => t.name === "heading");
   assert.ok(heading, "heading token exists");
@@ -102,7 +101,7 @@ test("DSP-019-A: composite typography value edit", async () => {
     }],
   };
   const s1 = await prepareOperationBatch(s0, b1);
-  const lib = s1.snapshot.entries["tokens/tokens.json"];
+  const lib = tokenEntry(s1.snapshot);
   const updated = lib.sets.find((s) => s.name === "typography/md")
     ?.tokens.find((t) => t.name === "heading");
   assert.equal(updated?.value.fontSize, 32);
@@ -115,7 +114,7 @@ test("DSP-019-B: spacing token cell edit", async () => {
     operations: [{ type: "set-token-value", filePath: "tokens/tokens.json", path: "space.medium", value: 12 }],
   };
   const s1 = await prepareOperationBatch(s0, b1);
-  const lib = s1.snapshot.entries["tokens/tokens.json"];
+  const lib = tokenEntry(s1.snapshot);
   const spacing = lib.sets.find((s) => s.name === "spacing/md")
     ?.tokens.find((t) => t.name === "space.medium");
   assert.equal(spacing?.value, 12);

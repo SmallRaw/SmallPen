@@ -1,11 +1,9 @@
 // One definition drives command schemas, help, argument validation and errors.
 import {
-  INIT_LAYOUTS,
   SMALLPEN_FORMAT_CAPABILITIES,
   SmallPenError,
   suggestField,
 } from "@smallpen/core";
-import { DISCOVERY_OUTPUT } from "./read-output.mjs";
 
 const parameter = (option, type, description, extra = {}) => ({
   option,
@@ -18,8 +16,6 @@ const parameter = (option, type, description, extra = {}) => ({
 const flag = (option, description) =>
   parameter(option, "boolean", description, { default: false });
 const path = (option, description) => parameter(option, "path", description);
-const id = (name, prefix, description, extra = {}) =>
-  parameter(`--${name}-id`, "string", description, { prefix, ...extra });
 const integer = (option, description, extra = {}) =>
   parameter(option, "integer", description, {
     minimum: 0,
@@ -30,90 +26,19 @@ const integer = (option, description, extra = {}) =>
 const PARAMETERS = {
   targetTimeout: integer(
     "--target-timeout",
-    "Maximum milliseconds per validation target, including native layout; progress uses JSON lines on stderr and interruption returns partial coverage",
+    "Maximum milliseconds per validation target, including native layout; interruption returns partial coverage",
     { minimum: 1, maximum: 600_000, default: 30_000 },
   ),
   stdout: flag(
     "--stdout",
     "Print large results to stdout instead of saving a temporary result file",
   ),
-  assetId: id(
-    "asset",
-    undefined,
-    "Local color, typography, media or font identifier",
-  ),
-  flowId: id(
-    "flow",
-    undefined,
-    "App prototype start UUID in the selected Presentation",
-  ),
-  steps: path(
-    "--steps",
-    "JSON {steps:[{nodeId,trigger?,phase?,index?,interactionId?,waitMs?,expect?}]} for read-only prototype verification",
-  ),
-  all: flag(
-    "--all",
-    "Check every variant of one --component-id, or every Presentation of one --screen-id; never all components/pages or theme combinations",
-  ),
-  action: parameter(
-    "--action",
-    "string",
-    "One action offered by the selected repair conflict",
-  ),
-  after: path("--after", "The second Draft package"),
   allThemes: flag("--all-themes", "Search inactive token themes too"),
-  answer: parameter(
-    "--answer",
-    "assignment",
-    "QUESTION_ID=JSON initialization answer",
-    { repeatable: true, uniqueBy: "assignment-key" },
-  ),
-  answers: path(
-    "--answers",
-    "Compatibility import of a complete legacy initialization brief; not used by project init",
-  ),
-  apply: flag("--apply", "Commit the reviewed token import"),
-  asset: parameter("--asset", "string", "Repair asset identifier"),
-  assetKind: parameter("--asset-kind", "string", "Repair asset kind"),
   base64: flag(
     "--base64",
     "Include inline image bytes; disables the small reply budget",
   ),
-  batch: path(
-    "--batch",
-    "JSON batch with batchId, baseRevision and operations",
-  ),
-  batchId: parameter(
-    "--batch-id",
-    "string",
-    "Stable retry identity; reuse with identical input",
-    {
-      defaultFrom: "a new random identity; supply one before a retryable write",
-    },
-  ),
   color: parameter("--color", "string", "Search tokens near this color"),
-  compact: flag("--compact", "Explicit alias for the default small reply"),
-  componentId: id(
-    "component",
-    "cmp_",
-    "Component identifier in its owning package",
-  ),
-  confirm: flag("--confirm", "With --answers: create the workspace the answers propose (a plain init creates a blank one at once)"),
-  confirmUnmatched: flag(
-    "--confirm-unmatched",
-    "Accept creation of an unmatched component selection",
-  ),
-  conflict: integer("--conflict", "Index of the repair conflict", {
-    default: 0,
-  }),
-  context: parameter(
-    "--context",
-    "assignment",
-    "CONTEXT=VALUE by name (Density=Compact) for this call",
-    { repeatable: true, uniqueBy: "assignment-key" },
-  ),
-  contextProfileId: id("context-profile", undefined, "Named Context profile"),
-  contexts: path("--contexts", "JSON file containing render-matrix selectors"),
   evidence: flag(
     "--evidence",
     "Export PNG, specification, wireframe and JSON evidence from one native layout; requires --format png",
@@ -121,6 +46,10 @@ const PARAMETERS = {
   designSystem: flag(
     "--design-system",
     "Render the generated Design System page (every Token and representative component samples) instead of a Screen",
+  ),
+  unused: flag(
+    "--unused",
+    "Only Tokens no page or component uses (they may still be meant for code)",
   ),
   definitions: flag(
     "--definitions",
@@ -131,94 +60,46 @@ const PARAMETERS = {
     "string",
     "Only Tokens that take values in this theme group (Brand); requires --definitions",
   ),
-  diff: flag("--diff", "Explain affected targets and preview the batch diff without writing"),
-  from: parameter("--from", "string", "Source element as \"Page / Element\""),
-  to: parameter("--to", "string", "Destination page name"),
-  on: parameter("--on", "string", "Trigger; default click", {
-    values: ["click", "mouse-enter", "mouse-leave", "after-delay", "mouse-press", "mouse-over"],
-    errorCode: "invalid_flow_trigger",
-  }),
   page: parameter("--page", "string", "Page name"),
   by: parameter("--by", "string", "Theme group: one file per option, for example Language"),
-  tokenFormat: parameter("--format", "string", "json (nested by name) or flat (one key per Token name)", {
-    values: ["json", "flat"],
+  tokenFormat: parameter("--format", "string", "json (nested by name, numbers in px), flat (one key per Token name) or css (custom properties as tokens.css writes them: aliases as var(--name), units kept)", {
+    values: ["json", "flat", "css"],
     errorCode: "unknown_token_format",
   }),
   since: parameter("--since", "string", "A revision you saw; every read and write reports one"),
   canvas: parameter("--canvas", "string", "Canvas name"),
-  direction: parameter("--direction", "string", "up, down, left or right", {
-    values: ["up", "down", "left", "right"],
-    errorCode: "invalid_direction",
-  }),
-  moveSteps: parameter("--steps", "integer", "How many places to move; default 1"),
-  colorName: parameter("--color", "string", "Color name, as Group/Name, for example Brand/Primary"),
-  typographyName: parameter("--typography", "string", "Typography name, as Group/Name, for example Text/Body"),
-  assetValue: parameter("--value", "string", "A color (#1f6feb) for --color; a style object for --typography, for example {\"fontFamily\":\"sourcesanspro\",\"fontSize\":16}"),
-  mediaName: parameter("--media", "string", "Media file name, as Group/Name"),
-  fontFamily: parameter("--font", "string", "Font family name"),
-  removeStart: flag("--remove", "Stop the page being a start"),
   as: parameter("--as", "string", "Three design outputs: spec for implementation and sources; wireframe for structure; png for appearance. text (default) navigates; issues checks. Compare layout.hash", {
     values: ["text", "wireframe", "png", "issues", "spec"],
     errorCode: "unknown_view_as",
   }),
   component: parameter("--component", "string", "Component name"),
-  setField: parameter(
-    "--set",
-    "assignment",
-    'FIELD=VALUE as in page draw: width=320, fill={color.surface}, padding=[8,16], text="Save", props={"Style":"ghost"}; a JSON value or plain text. Conflicting values for one field, including --intent values, are rejected',
-    { repeatable: true },
-  ),
-  variant: parameter("--variant", "string", 'One variant, as "Style=secondary" (or just "secondary")'),
-  element: parameter("--element", "string", 'Element name, or "Parent / Element" when the name repeats'),
+  variant: parameter("--variant", "string", 'One variant, as in props: "Style: secondary; Size: sm" (or just "secondary")'),
+  element: parameter("--element", "string", 'Element name, or "Parent / Element" when the name repeats; view/export also accept the actual root name'),
   platform: parameter("--platform", "string", "Page version: desktop, mobile, ..."),
   token: parameter("--token", "string", "Token name or prefix, for example color or color.brand"),
   allTokens: flag("--tokens", "Every Token"),
   allComponents: flag("--components", "Every component"),
   allPages: flag("--pages", "Every page"),
-  draft: path("--draft", "Source Draft package"),
-  dryRun: flag("--dry-run", "Validate without committing a batch"),
-  preview: flag("--preview", "Render the candidate page as PNG, specification and evidence without writing; returns the exact batch to apply after review"),
-  explain: flag(
-    "--explain",
-    "Compatibility alias for --diff; explains affected targets and fields without writing",
-  ),
-  family: parameter("--family", "string", "Font family name"),
-  file: path("--file", "Source binary file"),
-  fontId: id("font", "font_", "Imported font identifier"),
-  foundation: path("--foundation", "Replacement Foundation package"),
   full: flag(
     "--full",
     "Expand selected data; large results still use files. --stdout opts into large stdout. View nodes honor explicit pagination",
   ),
   help: flag("--help", "Print this command's help"),
-  includeImage: flag(
-    "--include-image",
-    "Include a PNG artifact in the view receipt",
-  ),
-  input: path("--input", "Source import file"),
-  intent: path("--intent", "JSON file containing the drawing or token intent"),
   interval: integer(
     "--interval",
     "Watch poll interval in milliseconds; values below 100 use 100",
     { default: 500, maximum: 3_600_000 },
   ),
-  inverseOut: path(
-    "--inverse-out",
-    "Durable output file for the exact undo batch",
-  ),
   json: flag("--json", "Machine-readable output with stable keys"),
   kind: parameter("--kind", "string", "Object kind"),
-  layout: parameter("--layout", "string", "Workspace layout", {
+  // Accepted for older scripts; a package is always one directory, so help
+  // does not list it.
+  layout: parameter("--layout", "string", "Kept for older scripts: a package is always single", {
+    hidden: true,
     default: "single",
-    values: Object.keys(INIT_LAYOUTS),
+    values: ["single"],
     errorCode: "invalid_init_layout",
   }),
-  library: parameter(
-    "--library",
-    "string",
-    "Declared Library package identifier or source URL",
-    { defaultFrom: "the first declared URL Library" },
-  ),
   limit: integer("--limit", "Maximum items in this page", {
     default: 20,
     maximum: 100,
@@ -234,71 +115,38 @@ const PARAMETERS = {
     maximum: 10_000,
     defaultFrom: "unlimited",
   }),
-  mediaId: id("media", "media_", "Imported media identifier"),
-  mediaPath: parameter("--media-path", "string", "Media catalog path", {
-    default: "",
-  }),
   name: parameter("--name", "string", "Display name"),
-  nodeId: id(
-    "node",
-    "node_",
-    "Node identifier in the selected presentation or variant",
-  ),
   offset: integer("--offset", "First item index in this page", { default: 0 }),
   output: path(
     "--output",
     "Output artifact path; image commands otherwise return temporary file paths",
-  ),
-  packageId: id(
-    "package",
-    "pkg_",
-    "Owning package identifier for a cross-package reference",
   ),
   path: parameter(
     "--path",
     "string",
     "Token name, for example color.brand",
   ),
-  presentationId: id("presentation", "pres_", "Presentation identifier", {
-    defaultFrom: "the selected Screen's Base Presentation",
-  }),
   query: parameter("--query", "string", "Search text"),
-  replacementAssetId: id(
-    "replacement-asset",
-    undefined,
-    "Replacement asset identifier",
+  revert: flag(
+    "--revert",
+    "Put the files check rejects back to the last accepted version (new files are removed)",
   ),
-  replacementPackageId: id(
-    "replacement-package",
-    "pkg_",
-    "Replacement asset's package identifier",
+  file: parameter("--file", "string", "With --revert: revert only this package file (repeatable), such as pages/Tasks/Board.html", {
+    repeatable: true,
+  }),
+  render: flag(
+    "--render",
+    "Also lay out and draw the pages and components and check text fit, bounds, overlaps and contrast",
+  ),
+  allThemes: flag(
+    "--all-themes",
+    "With --render: check under every combination of theme options, not only the defaults",
   ),
   scale: parameter("--scale", "number", "Raster scale within (0, 8]", {
     default: 1,
     exclusiveMinimum: 0,
     maximum: 8,
     errorCode: "invalid_render_scale",
-  }),
-  scenarioId: id("scenario", "scn_", "Reproducible Scenario identifier"),
-  screenId: id("screen", "scr_", "Screen identifier", {
-    defaultFrom: "manifest.defaultScreenId",
-  }),
-  select: parameter("--select", "string", "SET/NAME token to import", {
-    repeatable: true,
-  }),
-  selection: parameter("--selection", "json", "JSON component axis selection", {
-    errorCode: "invalid_repair_selection",
-  }),
-  selections: path("--selections", "JSON file naming Draft fields to compile"),
-  selector: parameter("--selector", "json", "JSON Design View selector", {
-    repeatable: true,
-    errorCode: "invalid_compare_selector",
-  }),
-  setName: parameter("--set-name", "string", "Imported token set name"),
-  state: path("--state", "Initialization state to resume explicitly"),
-  style: parameter("--style", "string", "Font style", {
-    default: "normal",
-    values: ["normal", "italic", "oblique"],
   }),
   theme: parameter(
     "--theme",
@@ -307,10 +155,9 @@ const PARAMETERS = {
     {
       repeatable: true,
       defaultFrom:
-        "project group defaults; explicit Scenario themes then explicit --theme override named groups for this call; independent of App active selection",
+        "project group defaults (data-GROUP on index.html's <html>); --theme overrides named groups for this call; independent of App active selection",
     },
   ),
-  tokenId: id("token", "tok_", "Token identifier in its owning package"),
   type: parameter("--type", "string", "Token type filter", {
     values: SMALLPEN_FORMAT_CAPABILITIES.canonicalPackage.tokenTypes,
     errorCode: "invalid_token_type",
@@ -320,61 +167,16 @@ const PARAMETERS = {
     "string",
     "Token value filter; JSON when valid, otherwise text",
   ),
-  variantId: id(
-    "variant",
-    "var_",
-    "Component variant identifier; import-font uses a font variant id",
-  ),
-  viewFormat: parameter("--format", "string", "Design View representation", {
-    default: "structure",
-    values: ["structure", "semantic", "wireframe", "screenshot"],
-    errorCode: "unknown_view_format",
-  }),
-  designFormat: parameter(
-    "--format",
-    "string",
-    "Design output: spec for implementation and provenance, wireframe for structure, png for appearance",
-    {
-      default: "outline",
-      values: ["outline", "wireframe", "spec", "structure", "semantic"],
-      errorCode: "unknown_view_format",
-    },
-  ),
-  artifactFormat: parameter("--format", "string", "spec implements and traces sources; wireframe shows structure; png reviews appearance; text is a navigation outline", {
+  artifactFormat: parameter("--format", "string", "spec implements and traces sources; wireframe shows structure; png reviews appearance; html exports an offline page review; text is a navigation outline", {
     default: "wireframe",
-    values: ["text", "spec", "wireframe", "png"],
+    values: ["text", "spec", "wireframe", "png", "html"],
     errorCode: "unknown_export_format",
-  }),
-  warningDetail: parameter(
-    "--warning-detail",
-    "string",
-    "Design advice detail",
-    {
-      default: "compact",
-      values: ["compact", "full"],
-      errorCode: "invalid_warning_detail",
-    },
-  ),
-  weight: integer("--weight", "Font weight", {
-    default: 400,
-    values: [100, 200, 300, 400, 500, 600, 700, 800, 900, 950],
-  }),
-};
+  }),};
 
 const PAGE = ["limit", "offset"];
-const VIEW = ["context", "theme"];
+const VIEW = ["theme"];
 // A design target by name, as view takes it.
 const TARGET = ["page", "platform", "element", "component", "variant"];
-const WRITE = [
-  "compact",
-  "confirmUnmatched",
-  "diff",
-  "dryRun",
-  "explain",
-  "inverseOut",
-  "warningDetail",
-];
-const TOKEN = ["context", "theme"];
 const COMMON = ["json", "full", "stdout", "help"];
 const command = (purpose, fields = [], extra = {}) => ({
   purpose,
@@ -398,6 +200,17 @@ export const COMMAND_CONTRACTS = {
     ],
   }),
   version: command("Print the CLI version", [], { locator: false }),
+  // Internal: the rendering checks behind check --render and view --as
+  // issues. It is not a public command.
+  validate: command(
+    "Render the selected pages and components and check text fit, bounds, overlaps and contrast",
+    [...TARGET, ...VIEW, "designSystem", "limit", "offset", "targetTimeout"],
+    { conflicts: { designSystem: ["page", "component"] } },
+  ),
+  check: command(
+    "Check the package's HTML, tokens.css and rules: one line per problem with file:line:column; --render also checks text fit, bounds, overlaps and contrast",
+    ["revert", "file", "render", "allThemes", ...TARGET, ...VIEW, "limit", "offset", "targetTimeout"],
+  ),
   schema: command(
     "Print the JSON shape and parameters of each command and write input",
     PAGE,
@@ -417,25 +230,12 @@ export const COMMAND_CONTRACTS = {
     },
   ),
   init: command(
-    "Create a blank package or workspace",
-    ["name", "layout", "locale", "answers", "confirm"],
+    "Create a blank package (index.html and tokens.css)",
+    ["name", "layout", "locale"],
     { locatorName: "workspace" },
   ),
-  themes: command(
-    "Read project theme groups, options, defaults and this call's selection",
-    ["theme", ...PAGE],
-  ),
-  assets: command(
-    "Read local asset definitions, including fonts, media, colors and typographies",
-    ["kind", ...PAGE],
-    {
-      overrides: {
-        kind: { values: ["colors", "fonts", "media", "typographies"] },
-      },
-    },
-  ),
   "token-export": command(
-    "Export resolved Token values as JSON; --by GROUP writes one file per option",
+    "Export Token values as JSON or CSS custom properties; --by GROUP writes one file per option",
     ["type", "token", "by", "tokenFormat", "theme", "output"],
     { overrides: { output: { description: "Directory for the files; default a temporary directory" } } },
   ),
@@ -467,9 +267,10 @@ export const COMMAND_CONTRACTS = {
     { conflicts: { designSystem: ["page", "component", "canvas", "token", "allTokens", "allComponents", "allPages"] } },
   ),
   export: command(
-    "Export specification, wireframe or PNG by name; --format png --evidence exports all three from one layout",
+    "Export spec, wireframe or PNG; --format html --canvas NAME --output DIR saves an offline review with declared prototype navigation",
     [
       ...TARGET,
+      "canvas",
       ...VIEW,
       "designSystem",
       "artifactFormat",
@@ -481,7 +282,8 @@ export const COMMAND_CONTRACTS = {
     ],
     {
       conflicts: {
-        designSystem: ["page", "component"],
+        designSystem: ["page", "component", "canvas"],
+        canvas: ["page", "component", "element", "variant", "platform"],
       },
       requires: [
         {
@@ -489,455 +291,26 @@ export const COMMAND_CONTRACTS = {
           when: ["evidence", "base64"],
           code: "missing_png_format",
         },
+        { field: "output", when: { artifactFormat: "html" }, code: "missing_review_output" },
       ],
       overrides: {
+        output: { description: "Artifact path; HTML requires a new/empty directory outside source Packages, with index written last" },
         component: { description: "Component name; PNG/wireframe show all variants as view does unless --variant or --element selects one; spec reads the main variant unless --variant selects another" },
+        page: { description: "Page name; HTML exports all its versions unless --platform selects one" },
+        canvas: { description: "HTML review canvas name; without --page/--canvas, exactly one canvas must exist" },
       },
     },
   ),
-  validate: command(
-    "Validate canonical data and report text/layout/contrast issues and coverage; a page checks every version and a component every variant unless one is named",
-    [...TARGET, ...VIEW, "designSystem", "limit", "offset", "targetTimeout"],
-    { conflicts: { designSystem: ["page", "component"] } },
-  ),
-  inspect: command("Read package identity, revision and counts"),
-  list: command("Locate objects by kind", ["kind", ...PAGE], {
-    output: DISCOVERY_OUTPUT,
-    overrides: {
-      limit: { defaultWhenFull: 100 },
-      kind: {
-        default: "all",
-        values: [
-          "all",
-          "screens",
-          "presentations",
-          "contexts",
-          "tokens",
-          "components",
-          "scenarios",
-          "requirements",
-          "flows",
-        ],
-        errorCode: "unknown_list_kind",
-      },
-    },
-  }),
-  catalog: command(
-    "Read the design-system catalog",
-    ["context", "theme", ...PAGE],
-    { output: DISCOVERY_OUTPUT },
-  ),
-  "search-components": command(
-    "Find reusable components",
-    ["query", "theme", "limit"],
-    {
-      output: DISCOVERY_OUTPUT,
-      required: [required("query", "missing_component_search")],
-      overrides: {
-        query: {
-          nonBlank: true,
-          errorCode: "missing_component_search",
-        },
-        limit: { minimum: 1, errorCode: "invalid_component_search_limit" },
-      },
-    },
-  ),
-  tokens: command("Read effective Tokens for this theme and Context", [
+  tokens: command("Read effective Tokens for these themes", [
     "definitions",
+    "unused",
     "token",
     "group",
     "type",
-    "context",
     "locale",
     "theme",
     ...PAGE,
   ]),
-  "search-tokens": command(
-    "Find reusable Tokens",
-    [
-      "allThemes",
-      "color",
-      "context",
-      "query",
-      "theme",
-      "type",
-      "value",
-      "limit",
-    ],
-    {
-      atLeastOne: [
-        {
-          fields: ["query", "type", "value", "color"],
-          code: "missing_token_search",
-        },
-      ],
-      conflictsWith: [
-        { fields: ["color", "value"], code: "ambiguous_token_search_value" },
-        { fields: ["allThemes", "theme"], code: "conflicting_theme_options" },
-      ],
-      overrides: {
-        query: { nonBlank: true, errorCode: "missing_token_search" },
-        limit: { minimum: 1, errorCode: "invalid_token_search_limit" },
-        type: {
-          valuesWhen: [
-            {
-              when: ["color"],
-              values: ["color"],
-              errorCode: "conflicting_token_search_type",
-            },
-          ],
-        },
-      },
-    },
-  ),
-  "effective-token": command("Resolve one Token", [...TOKEN, "path"], {
-    required: [required("path", "missing_token_path")],
-  }),
-  "explain-token": command("Explain one Token resolution", [...TOKEN, "path"], {
-    required: [required("path", "missing_token_path")],
-  }),
-  "import-draft": command(
-    "Import a separate Draft package",
-    ["input", "kind", "packageId"],
-    {
-      required: [required("input", "missing_draft_input")],
-      overrides: {
-        kind: { default: "figma", values: ["figma", "svg", "png"] },
-      },
-    },
-  ),
-  "import-media": command(
-    "Import a media file",
-    ["file", "inverseOut", "mediaPath", "name"],
-    { required: [required("file", "missing_media_file")] },
-  ),
-  "import-font": command(
-    "Import a font file",
-    [
-      "family",
-      "file",
-      "inverseOut",
-      "name",
-      "style",
-      "weight",
-    ],
-    {
-      required: [
-        required("file", "missing_font_file"),
-        required("family", "missing_font_family"),
-      ],
-    },
-  ),
-  "import-tokens": command(
-    "Review or apply a token import",
-    [
-      "apply",
-      "batchId",
-      "compact",
-      "dryRun",
-      "input",
-      "inverseOut",
-      "select",
-      "setName",
-    ],
-    { required: [required("input", "missing_import_input")] },
-  ),
-  "library-refresh": command("Refresh a declared URL Library", ["library"]),
-  "draft-diff": command("Compare two Drafts", ["after"], {
-    required: [required("after", "missing_draft_after")],
-  }),
-  "draft-compile": command(
-    "Compile selected Draft fields into a batch",
-    ["batchId", "draft", "selections"],
-    {
-      required: [
-        required("draft", "missing_draft_compile_input"),
-        required("selections", "missing_draft_compile_input"),
-      ],
-    },
-  ),
-  "token-set": command(
-    "Create or change Tokens by name; one call sets default and theme option values",
-    ["intent", "batchId", ...WRITE],
-    { required: [required("intent", "missing_intent")] },
-  ),
-  "component-define": command(
-    "Define a component by name: a base element tree, properties and variant changes",
-    ["intent", "batchId", ...WRITE],
-    { required: [required("intent", "missing_intent")] },
-  ),
-  "page-draw": command(
-    "Draw a page (or one container) from a tree of named elements and component instances",
-    ["intent", "batchId", "preview", "theme", "context", "scale", ...WRITE],
-    { required: [required("intent", "missing_intent")],
-      requires: [
-        { field: "preview", when: ["theme"], code: "preview_required" },
-        { field: "preview", when: ["context"], code: "preview_required" },
-        { field: "preview", when: ["scale"], code: "preview_required" },
-      ] },
-  ),
-  "page-move": command(
-    "Move an element up, down, left or right among its siblings, or (without --element) a page left or right in its row on the canvas; the CLI picks the coordinates and keeps things from overlapping",
-    ["page", "platform", "element", "direction", "moveSteps", "batchId", ...WRITE],
-    {
-      required: [required("page", "missing_page"), required("direction", "missing_direction")],
-      overrides: { element: { description: 'Element to move, or "Parent / Element" when the name repeats' } },
-    },
-  ),
-  "page-set": command(
-    "Change fields of one element, or of the page itself, without drawing it again: sizes, colors, text, layout, a copy's props, text and set. Texts are measured and containers that hug grow, as page draw does",
-    ["page", "platform", "element", "all", "setField", "intent", "batchId", ...WRITE],
-    {
-      required: [required("page", "missing_page")],
-      overrides: {
-        all: { description: "Change every version that has the element; without it an element in several versions needs --platform" },
-        element: { description: 'Element to change ("Parent / Element" when the name repeats); without it the page itself (its size, fill, layout)' },
-        platform: { description: "One version; needed when the element (or the page) is in several, unless --all" },
-        intent: { description: 'JSON file {"set": {...}} for values awkward on a command line; --set adds to it' },
-      },
-    },
-  ),
-  "component-set": command(
-    "Change fields of one element of a component, or of the component itself, without defining it again: in the one variant that has it, the one --variant names, or every one with --all",
-    ["component", "variant", "element", "all", "setField", "intent", "batchId", ...WRITE],
-    {
-      required: [required("component", "missing_component")],
-      overrides: {
-        all: { description: "Change every variant that has the element; without it an element in several variants needs --variant" },
-        element: { description: "Element to change; without it the component itself" },
-        intent: { description: 'JSON file {"set": {...}}; --set adds to it' },
-      },
-    },
-  ),
-  "canvas-list": command("List canvases, the rows on each (one per module) and their pages left to right", []),
-  "canvas-rename": command("Rename a canvas", ["canvas", "to", "batchId", ...WRITE], {
-    required: [required("canvas", "missing_canvas"), required("to", "missing_to")],
-    overrides: { to: { description: "New canvas name" } },
-  }),
-  "canvas-put": command(
-    "Put a page on a canvas (made when it does not exist); by default every page is on one canvas",
-    ["page", "canvas", "batchId", ...WRITE],
-    { required: [required("page", "missing_page"), required("canvas", "missing_canvas")] },
-  ),
-  "flow-link": command(
-    "Link an element to a page by name; --platform picks the version (default: the page's main one)",
-    ["from", "to", "on", "action", "platform", "batchId", ...WRITE],
-    {
-      required: [required("from", "missing_from")],
-      overrides: {
-        action: {
-          description: "navigate (default), overlay or back",
-          values: ["navigate", "overlay", "back"],
-          errorCode: "invalid_flow_action",
-        },
-      },
-    },
-  ),
-  "flow-start": command(
-    "Make a page version the start of a prototype flow, or (--remove) stop it being one; the flow's row on the canvas starts with it",
-    ["page", "platform", "removeStart", "batchId", ...WRITE],
-    { required: [required("page", "missing_page")] },
-  ),
-  "flow-list": command("List prototype starts and element links by page and element name", []),
-  "flow-unlink": command(
-    "Remove an element's links; --on or --to removes only those",
-    ["from", "on", "to", "platform", "batchId", ...WRITE],
-    {
-      required: [required("from", "missing_from")],
-      overrides: { to: { description: "Remove only the link to this page" }, on: { description: "Remove only links on this trigger" } },
-    },
-  ),
-  "page-rename": command(
-    "Rename a page (its boards and start follow), or one of its elements (--element). A used name is numbered (\"List 2\")",
-    ["page", "platform", "element", "to", "batchId", ...WRITE],
-    {
-      required: [required("page", "missing_page"), required("to", "missing_to")],
-      overrides: {
-        to: { description: "New name: \"Module / Page\" or a last part that keeps the module; with --element, the element's new name" },
-        element: { description: 'Rename this element instead: a name, "Parent / Element", or "Name [2]" when siblings share a name' },
-        platform: { description: "The version --element is in; default the main one" },
-      },
-    },
-  ),
-  "page-delete": command(
-    "Delete a page, one platform version (--platform) or one element (--element); pages other pages link to are protected",
-    ["page", "platform", "element", "batchId", ...WRITE],
-    {
-      required: [required("page", "missing_page")],
-      overrides: {
-        platform: { description: "Delete only this version, or the version --element is in" },
-        element: { description: 'Delete this element and its content: a name, or "Parent / Element"' },
-      },
-    },
-  ),
-  "component-rename": command(
-    "Rename a component (copies keep pointing at it), or one of its elements in every variant that has it (--element; with --variant only there). A used name is numbered",
-    ["component", "element", "variant", "to", "batchId", ...WRITE],
-    {
-      required: [required("component", "missing_component"), required("to", "missing_to")],
-      overrides: {
-        to: { description: "New component name, or the element's new name with --element" },
-        element: { description: 'Rename this element instead: a name, "Parent / Element", or "Name [2]" when siblings share a name' },
-      },
-    },
-  ),
-  "component-delete": command(
-    "Delete a component, or one variant (--variant); components in use are protected",
-    ["component", "variant", "batchId", ...WRITE],
-    { required: [required("component", "missing_component")] },
-  ),
-  "asset-set": command(
-    "Create or change a color or typography by name",
-    ["colorName", "typographyName", "assetValue", "batchId", ...WRITE],
-    {
-      exactlyOne: [["colorName", "typographyName"]],
-      required: [required("assetValue", "missing_value")],
-    },
-  ),
-  "asset-delete": command(
-    "Delete a color or typography by name",
-    ["colorName", "typographyName", "batchId", ...WRITE],
-    { exactlyOne: [["colorName", "typographyName"]] },
-  ),
-  "media-delete": command(
-    "Delete a media file by name",
-    ["mediaName", "batchId", ...WRITE],
-    { required: [required("mediaName", "missing_media")] },
-  ),
-  "font-delete": command(
-    "Delete a font family, or one of its variants (--variant Bold)",
-    ["fontFamily", "variant", "batchId", ...WRITE],
-    {
-      required: [required("fontFamily", "missing_font")],
-      overrides: { variant: { description: "One font variant by name, for example Bold" } },
-    },
-  ),
-  "theme-add": command(
-    "Add theme options by full name; a new group is created with them",
-    ["theme", "batchId", ...WRITE],
-    {
-      required: [required("theme", "missing_theme")],
-      overrides: {
-        theme: {
-          description:
-            "Option to add as Group/Option, for example Viewport/Tablet; repeat for several. The first option of a new group is its default",
-          defaultFrom: undefined,
-        },
-      },
-    },
-  ),
-  "theme-rename": command(
-    "Rename one theme option or one theme group",
-    ["theme", "group", "to", "batchId", ...WRITE],
-    {
-      exactlyOne: [["theme", "group"]],
-      required: [required("to", "missing_to")],
-      overrides: {
-        theme: { description: "Option to rename, as Group/Option", defaultFrom: undefined },
-        group: { description: "Group to rename" },
-        to: { description: "New name: an option name (or Group/New) for --theme, a group name for --group" },
-      },
-    },
-  ),
-  "theme-default": command(
-    "Make one option its group's default",
-    ["theme", "batchId", ...WRITE],
-    {
-      required: [required("theme", "missing_theme")],
-      overrides: {
-        theme: { description: "Option to make the default, as Group/Option", defaultFrom: undefined },
-      },
-    },
-  ),
-  "theme-delete": command(
-    "Delete one theme option or a whole group",
-    ["theme", "group", "batchId", ...WRITE],
-    {
-      exactlyOne: [["theme", "group"]],
-      overrides: {
-        theme: { description: "Option to delete, as Group/Option", defaultFrom: undefined },
-        group: { description: "Group to delete with all its options" },
-      },
-    },
-  ),
-  "token-delete": command(
-    "Delete a Token by name from every theme option; bound Tokens are protected",
-    ["path", "batchId", ...WRITE],
-    {
-      required: [required("path", "missing_token_path")],
-      overrides: { path: { description: "Token name, for example color.brand" } },
-    },
-  ),
-  impact: command(
-    "Locate bindings of one Token",
-    ["path", "theme"],
-    { required: [required("path", "missing_token_path")] },
-  ),
-  apply: command("Apply one atomic batch", ["batch", ...WRITE], {
-    required: [required("batch", "missing_batch")],
-  }),
-  watch: command("Emit changed package revisions", ["interval", "maxEvents"]),
-  repair: command(
-    "Read conflicts or apply one offered repair",
-    [
-      "action",
-      "asset",
-      "assetKind",
-      "batchId",
-      "conflict",
-      "foundation",
-      "replacementAssetId",
-      "replacementPackageId",
-      "selection",
-    ],
-    {
-      requires: [
-        {
-          field: "replacementPackageId",
-          when: { action: "retarget-reference" },
-          code: "missing_repair_replacement",
-        },
-        {
-          field: "replacementAssetId",
-          when: { action: "retarget-reference" },
-          code: "missing_repair_replacement",
-        },
-        {
-          field: "foundation",
-          when: { action: "choose-foundation" },
-          code: "missing_foundation_path",
-        },
-        {
-          field: "asset",
-          when: { action: "recreate-product-asset" },
-          code: "missing_recreated_asset",
-        },
-        {
-          field: "assetKind",
-          when: { action: "recreate-product-asset" },
-          code: "missing_recreated_asset",
-        },
-      ],
-      overrides: {
-        asset: {
-          type: "path",
-          description: "JSON file containing the recreated asset",
-        },
-        assetKind: {
-          valuesWhen: [
-            {
-              when: { action: "recreate-product-asset" },
-              values: ["token", "component"],
-              errorCode: "missing_recreated_asset",
-            },
-          ],
-        },
-      },
-    },
-  ),
-  "migrate-themes": command("Copy a package with migrated themes", ["output"], {
-    required: [required("output", "missing_migration_output")],
-  }),
 };
 
 export function commandContract(name) {

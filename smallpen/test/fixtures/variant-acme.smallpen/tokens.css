@@ -1,0 +1,11 @@
+:root {
+  --color-brand: #6750a4;
+  --spacing-md: 8px;
+  --radius-md: 8px;
+}
+
+:root[data-theme="light"] {
+}
+
+:root[data-theme="dark"] {
+}

@@ -13,6 +13,7 @@ import {
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const recorded = JSON.parse(
@@ -22,10 +23,8 @@ const groupId = "node_e3d95a5930d680188008b90518fe63c3";
 const copyId = "node_e3d95a5930d680188008b90514cdfe8a";
 
 async function fixtureValues(name) {
-  const fixture = join(here, "fixtures", name);
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const fixture = join(here, "fixtures", "model", String(name).replace(/\.smallpen$/, ""));
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
@@ -53,7 +52,7 @@ async function commit(snapshot, value) {
 }
 
 function desktopNodes(snapshot) {
-  return snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+  return onlyScreen(snapshot).presentations[0].nodes;
 }
 
 function runtime(snapshot, nodeId) {
@@ -296,7 +295,7 @@ test("mod-page clears a background, drops a cleared Token link and refuses a new
     changes: [{ id: pageId(snapshot), type: "mod-page", ...extra }],
   });
   const presentation = (value) =>
-    value.entries["screens/roundtrip.json"].presentations[0];
+    onlyScreen(value).presentations[0];
 
   const colored = await commit(
     snapshot,
@@ -363,7 +362,7 @@ test("moving a component instance restates its projected children without writin
   ]);
   const prepared = await prepareOperationBatch(snapshot, batch);
   assert.equal(
-    prepared.snapshot.entries["screens/screen.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_card_instance_idle.x,
     210,
   );

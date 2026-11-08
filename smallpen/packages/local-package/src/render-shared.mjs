@@ -370,7 +370,8 @@ export async function renderAppProjection(product, projection, options = {}) {
         fontRequests: described.fonts.filter(face => sourceIds[face.nodeId]).map(face => {
           const names = assets.fontFamilies.find(family => family.fontId === face.fontId)?.names;
           return { nodeId: sourceIds[face.nodeId], family: names?.[1] ?? names?.[0] ?? face.fontId,
-            fontId: face.fontId, weight: face.weight, style: face.style };
+            fontId: face.fontId, weight: face.weight, style: face.style,
+            ...(face.isFallback ? { isFallback: true } : {}) };
         }),
       };
     } catch (error) {

@@ -1,9 +1,6 @@
-// Extend an existing package with real, editable component sources and a
-// composed screen. The generated Design System sheet is never serialized.
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { listPackageEntries, loadPackageFromValues } from "@smallpen/core";
+// Extend a package model with real, editable component sources and a
+// composed screen, in memory (tests use it). examples/common-components
+// .smallpen is the HTML package this produced; edit that package directly.
 
 export function buildCommonComponentsDemo(base) {
   const values = structuredClone(base);
@@ -500,51 +497,3 @@ export function buildCommonComponentsDemo(base) {
   });
   return values;
 }
-
-async function main() {
-  const [source, destination] = process.argv.slice(2);
-  if (!source || !destination)
-    throw new Error(
-      "Usage: node scripts/build-common-components-demo.mjs SOURCE NEW_DESTINATION",
-    );
-  const manifest = JSON.parse(
-    await readFile(join(source, "manifest.json"), "utf8"),
-  );
-  const base = new Map([["manifest.json", manifest]]);
-  for (const path of listPackageEntries(manifest).entries)
-    base.set(path, JSON.parse(await readFile(join(source, path), "utf8")));
-  const values = buildCommonComponentsDemo(base);
-  const snapshot = await loadPackageFromValues(
-    "memory://common-components.smallpen",
-    values,
-  );
-  const failures = snapshot.runtime.designSystemRefs.componentSamples.filter(
-    (sample) => sample.error,
-  );
-  if (failures.length)
-    throw new Error(JSON.stringify(failures.map((sample) => sample.error)));
-  // Refuse to overwrite an existing review package.
-  await mkdir(destination);
-  for (const [path, value] of values) {
-    await mkdir(dirname(join(destination, path)), { recursive: true });
-    await writeFile(
-      join(destination, path),
-      JSON.stringify(value, null, 2) + "\n",
-      { flag: "wx" },
-    );
-  }
-  console.log(
-    JSON.stringify({
-      destination,
-      componentSamples:
-        snapshot.runtime.designSystemRefs.componentSamples.length,
-      pages: snapshot.runtime.designSystemRefs.pages.length,
-    }),
-  );
-}
-
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-)
-  await main();

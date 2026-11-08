@@ -8,6 +8,7 @@ import test from "node:test";
 
 import { serveLocalPackage } from "@smallpen/background";
 import { servePenpotFrontend } from "@smallpen/web";
+import { seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
@@ -24,6 +25,7 @@ async function copyFixture(context) {
   });
   const packagePath = join(parent, "first.smallpen");
   await cp(fixture, packagePath, { recursive: true });
+  await seedLegacyIds(packagePath, "roundtrip");
   return { closeLater: (close) => closers.push(close), packagePath, parent };
 }
 
@@ -171,6 +173,7 @@ test("Background selects the open session for aliased and concurrent opens", asy
   const { closeLater, packagePath, parent } = await copyFixture(context);
   const second = join(parent, "second.smallpen");
   await cp(fixture, second, { recursive: true });
+  await seedLegacyIds(second, "roundtrip");
   const alias = join(parent, "alias.smallpen");
   await symlink(packagePath, alias);
   const background = await serveLocalPackage({ packagePath, port: 0 });
@@ -222,32 +225,16 @@ test("Background Font Variant uploads refuse prototype-named formats explicitly"
   }
 });
 
-test("Background reports an unreachable remote Library explicitly", async (context) => {
+
+test("Background refuses library actions with a reason: a package stands alone", async (context) => {
   const { closeLater, packagePath } = await copyFixture(context);
   const background = await serveLocalPackage({ packagePath, port: 0 });
   closeLater(() => background.close());
-  const closed = createServer();
-  await new Promise((resolve) => closed.listen(0, "127.0.0.1", resolve));
-  const { port } = closed.address();
-  await new Promise((resolve) => closed.close(resolve));
-  const link = () =>
-    postJson(
-      `${background.url}/v1/libraries/link`,
-      JSON.stringify({
-        source: { type: "url", url: `http://127.0.0.1:${port}/library.smallpen` },
-      }),
-    );
-
-  // Loopback is not a public Library host unless local development opts in.
-  const refused = await link();
-  assert.equal(refused.status, 422);
-  assert.equal((await refused.json()).error.code, "remote_library_private_address");
-
-  process.env.SMALLPEN_ALLOW_PRIVATE_LIBRARY_HOSTS = "1";
-  context.after(() => delete process.env.SMALLPEN_ALLOW_PRIVATE_LIBRARY_HOSTS);
-  const response = await link();
-  assert.equal(response.status, 422);
-  const { error } = await response.json();
-  assert.equal(error.code, "remote_library_unavailable");
-  assert.equal(error.details.cause, "ECONNREFUSED");
+  for (const route of ["link", "unlink", "refresh"]) {
+    const response = await postJson(`${background.url}/v1/libraries/${route}`, JSON.stringify({ packageId: "pkg_other" }));
+    assert.equal(response.status, 422, route);
+    assert.equal((await response.json()).error.code, "libraries_not_supported", route);
+  }
+  const listed = await fetch(`${background.url}/v1/libraries`).then((response) => response.json());
+  assert.deepEqual(listed.libraries, []);
 });

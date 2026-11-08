@@ -1,0 +1,50 @@
+:root {
+  --radius-base: 8px;
+  --spacing-space-small: 4px;
+  --spacing-space-medium: 8px;
+  --spacing-space-large: 16px;
+  --type-heading: 600 28px/1.2 "Source Sans Pro";
+  --type-body: 400 16px/1.5 "Source Sans Pro";
+  --type-demo-page: 600 28px/1.2 "Source Sans Pro";
+  --type-demo-section: 600 22px/1.2 "Source Sans Pro";
+  --type-demo-dialog: 600 20px/1.2 "Source Sans Pro";
+  --type-demo-label: 600 14px/1.2 "Source Sans Pro";
+  --radius-alias: var(--radius-base);
+  --size-control: 40px;
+  --border-width: 1px;
+  --shadow-elevation-1: 0 2px 4px 0 #0000003d;
+  --flag-flag: true;
+  --size-box: 120px;
+  --font-family: "Source Sans Pro";
+  --text-size: 24px;
+  --font-weight-weight: 700;
+  --tracking-tracking: 1.5px;
+  --opacity-veil: 0.42;
+  --string-label: "Hello 覆盖";
+}
+
+:root[data-color="light"] {
+  --color-surface: #ffffff;
+  --color-surface-variant: #e7e0ec;
+  --color-primary: #6750a4;
+  --color-on-primary: #ffffff;
+  --color-demo-ink: #25232c;
+  --color-demo-muted: #625f6b;
+  --color-demo-border: #d7d3df;
+  --color-demo-danger: #b42318;
+  --color-demo-success: #12663f;
+  --color-demo-canvas: #f5f3f8;
+}
+
+:root[data-color="dark"] {
+  --color-surface: #1b1b1f;
+  --color-surface-variant: #4a4458;
+  --color-primary: #d0bcff;
+  --color-on-primary: #381e72;
+  --color-demo-ink: #f2eef7;
+  --color-demo-muted: #c4bfcc;
+  --color-demo-border: #625b71;
+  --color-demo-danger: #ffb4ab;
+  --color-demo-success: #83d9ae;
+  --color-demo-canvas: #121015;
+}

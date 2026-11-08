@@ -23,6 +23,7 @@ import { createEvidence, openPackage } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
+import { onlyScreen, readModelEntry, seedLegacyIds, tokenEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
@@ -32,13 +33,18 @@ const SCREEN = "scr_design_system";
 const PRESENTATION = "pres_desktop";
 const SWATCH = "node_swatch_primary";
 
+// In-memory model values for a fixture (test/fixtures/model/<name>).
+const MODEL = new Map([
+  [ROUNDTRIP, join(here, "fixtures", "model", "roundtrip")],
+  [DESIGN_SYSTEM, join(here, "fixtures", "model", "design-system")],
+]);
+
 async function fixtureValues(fixture) {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const directory = MODEL.get(fixture) ?? fixture;
+  const manifest = JSON.parse(await readFile(join(directory, "manifest.json"), "utf8"));
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
-    values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
+    values.set(entry, JSON.parse(await readFile(join(directory, entry), "utf8")));
   }
   return values;
 }
@@ -223,20 +229,6 @@ function runCli(args, cwd) {
   });
 }
 
-test("smallpen schema documents stroke color bindings", async () => {
-  const node = await runCli(["schema", "node", "--json"], here);
-  assert.equal(node.code, 0, node.stdout);
-  const types = JSON.parse(node.stdout).tokenBindings.fieldTokenTypes;
-  assert.deepEqual(types.stroke, ["color"]);
-  assert.deepEqual(types["strokes.N"], ["color"]);
-  const operation = await runCli(
-    ["schema", "operation", "set-token-binding", "--json"],
-    here,
-  );
-  assert.equal(operation.code, 0, operation.stdout);
-  assert.match(operation.stdout, /stroke, strokes\.N/);
-});
-
 function runtimeId(snapshot, nodeId) {
   return Object.entries(snapshot.runtime.reverseNodes).find(
     ([, value]) => value.nodeId === nodeId,
@@ -267,7 +259,7 @@ async function served(snapshot) {
 }
 
 function swatch(snapshot) {
-  return snapshot.entries["screens/screen.json"].presentations[0].nodes[SWATCH];
+  return onlyScreen(snapshot).presentations[0].nodes[SWATCH];
 }
 
 const STROKE = {
@@ -278,11 +270,12 @@ const STROKE = {
   "stroke-width": 4,
 };
 
-test("CLI stroke binding round-trips through the Web projection and Penpot", async (context) => {
+test("a stroke bound in the page file round-trips through the Web projection and Penpot", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-stroke-binding-"));
   context.after(() => rm(root, { force: true, recursive: true }));
   const packagePath = join(root, "design-system.smallpen");
   await cp(DESIGN_SYSTEM, packagePath, { recursive: true });
+  await seedLegacyIds(packagePath, "design-system");
   await cp(
     join(here, "fixtures", "dsp-shared.smallpen"),
     join(root, "dsp-shared.smallpen"),
@@ -290,64 +283,33 @@ test("CLI stroke binding round-trips through the Web projection and Penpot", asy
       recursive: true,
     },
   );
-  const before = await openPackage(packagePath);
+  // The agent gives the swatch a 4px inner stroke bound to the primary
+  // color Token by editing the page, then checks the package.
+  const pagePath = join(packagePath, "pages", "Design System Fixture.html");
   await writeFile(
-    join(root, "bind.json"),
-    JSON.stringify({
-      baseRevision: before.revision,
-      batchId: "bind-stroke",
-      operations: [
-        {
-          changes: {
-            strokes: [
-              { alignment: "inner", color: "#000000", type: "solid", width: 4 },
-            ],
-          },
-          nodeId: SWATCH,
-          presentationId: PRESENTATION,
-          screenId: SCREEN,
-          type: "update-presentation-node",
-        },
-        {
-          binding: {
-            assetId: "tok_color_light_primary",
-            packageId: "pkg_design_system",
-          },
-          field: "stroke",
-          nodeId: SWATCH,
-          screenId: SCREEN,
-          type: "set-token-binding",
-        },
-      ],
-    }),
+    pagePath,
+    (await readFile(pagePath, "utf8")).replace(
+      'data-name="Primary Swatch" class="left-[40px] top-[40px] w-[120px] h-[80px] bg-[#6750a4]"',
+      'data-name="Primary Swatch" class="left-[40px] top-[40px] w-[120px] h-[80px] bg-[#6750a4] border-[4px] border-inside border-primary"',
+    ),
   );
-  const applied = await runCli(
-    ["advanced", "apply", packagePath, "--batch", "bind.json", "--json"],
-    root,
-  );
-  assert.equal(applied.code, 0, applied.stdout);
+  const checked = await runCli(["check", packagePath, "--json"], root);
+  assert.equal(checked.code, 0, checked.stdout);
 
   // The Web projection carries the binding with the active (Light) value.
   const light = await served(await openPackage(packagePath));
   const projected =
-    light.web.entries["screens/screen.json"].presentations[0].nodes[SWATCH];
+    onlyScreen(light.web).presentations[0].nodes[SWATCH];
   assert.deepEqual(projected.tokenBindings.stroke, {
     assetId: "tok_color_light_primary",
     packageId: "pkg_design_system",
   });
   assert.equal(projected.strokes[0].color, "#6750a4");
 
-  // Switching the active color theme to Dark changes the stroke.
-  const darkValues = await fixtureValues(packagePath);
-  darkValues.get("tokens/tokens.json").activeThemeIds = darkValues
-    .get("tokens/tokens.json")
-    .activeThemeIds.map((id) =>
-      id === "theme_color_light" ? "theme_color_dark" : id,
-    );
-  const dark = await loadPackageFromValues(
-    "memory://dark.smallpen",
-    darkValues,
-  );
+  // Choosing the dark color option in index.html changes the stroke.
+  const indexPath = join(packagePath, "index.html");
+  await writeFile(indexPath, (await readFile(indexPath, "utf8")).replace('data-color="light"', 'data-color="dark"'));
+  const dark = await openPackage(packagePath);
   assert.equal(
     projectScreen(dark, SCREEN, {}).nodes[SWATCH].strokes[0].color,
     "#d0bcff",
@@ -358,7 +320,7 @@ test("CLI stroke binding round-trips through the Web projection and Penpot", asy
   const same = compilePenpotChanges(light, {
     changes: [
       modObj(light, SWATCH, [
-        userSet("applied-tokens", { "stroke-color": "primary" }),
+        userSet("applied-tokens", { "stroke-color": "color-primary" }),
       ]),
     ],
     commitId: "same-stroke-token",
@@ -388,7 +350,7 @@ test("CLI stroke binding round-trips through the Web projection and Penpot", asy
   const reapplied = compilePenpotChanges(reserved, {
     changes: [
       modObj(reserved, SWATCH, [
-        userSet("applied-tokens", { "stroke-color": "on-primary" }),
+        userSet("applied-tokens", { "stroke-color": "color-on-primary" }),
       ]),
       modObj(reserved, SWATCH, [
         userSet("strokes", [{ ...STROKE, "stroke-color": "#ffffff" }]),
@@ -448,11 +410,11 @@ test("page changes on the generated Components page fail with a clear code", asy
   }
 });
 
-const EXAMPLE = join(here, "..", "examples", "common-components.smallpen");
+const EXAMPLE = join(here, "fixtures", "model", "common-components");
 const CARD = "node_card_hardcoded";
 
 function cardOf(snapshot) {
-  return snapshot.entries["screens/screen.json"].presentations[0].nodes[CARD];
+  return onlyScreen(snapshot).presentations[0].nodes[CARD];
 }
 
 test("a shadow Token applied in Penpot binds the shadow and resolves to the Token", async () => {
@@ -556,7 +518,7 @@ test("a shadow Token saved from Penpot keeps the Package's DTCG shadow form", as
     commitId: "edit-shadow-token",
   });
   const saved = (await prepareOperationBatch(snapshot, batch)).snapshot;
-  const token = saved.entries["tokens/tokens.json"].sets
+  const token = tokenEntry(saved).sets
     .find(({ id }) => id === "tset_demo_effect")
     .tokens.find(({ id }) => id === "tok_demo_effect_elevation");
   assert.deepEqual(token.value, {

@@ -1,0 +1,18 @@
+<sp-component name="Button">
+  <div class="w-[120px] h-[40px] bg-[#6750a4]"></div>
+</sp-component>
+
+<sp-component name="Badge">
+  <div class="w-[72px] h-[24px] bg-[#16a34a] rounded-[12px]">
+    <p data-name="Label" class="top-[4px] w-[72px] h-[24px] text-[#ffffff] text-[12px] text-center">Badge</p>
+  </div>
+</sp-component>
+
+<sp-component name="Chip" props="Tone: neutral | brand">
+  <div class="w-[96px] h-[32px] bg-[#e5e7eb] rounded-[16px]">
+    <p data-name="Label" class="top-[6px] w-[96px] h-[20px] text-[#111827] text-[13px] text-center">Chip</p>
+  </div>
+  <sp-variant when="Tone: brand" class="bg-[#6750a4]">
+    <p data-name="Label" class="text-[#ffffff]"></p>
+  </sp-variant>
+</sp-component>

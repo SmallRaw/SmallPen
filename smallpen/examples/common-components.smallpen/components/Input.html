@@ -1,0 +1,18 @@
+<sp-component name="Input" props="State: default | focus | error">
+  <div class="w-[320px] h-[104px] bg-surface rounded-base">
+    <p data-name="Label" class="left-[16px] top-[8px] w-[288px] h-[19px] text-demo-ink type-demo-label">Email address</p>
+    <div data-shape="rectangle" data-name="Field border" class="left-[16px] top-[32px] w-[288px] h-[44px] bg-demo-border rounded-base"></div>
+    <div data-shape="rectangle" data-name="Field surface" class="left-[18px] top-[34px] w-[284px] h-[40px] bg-surface rounded-base"></div>
+    <p data-name="Value" class="left-[28px] top-[47px] w-[260px] h-[19px] text-demo-muted type-demo-label">alex@example.com</p>
+    <p data-name="Helper" class="left-[16px] top-[82px] w-[288px] h-[19px] text-demo-muted type-demo-label">Use your work email address.</p>
+  </div>
+  <sp-variant when="State: focus">
+    <div data-name="Field border" class="bg-primary"></div>
+    <p data-name="Value" class="text-demo-ink"></p>
+  </sp-variant>
+  <sp-variant when="State: error">
+    <div data-name="Field border" class="bg-demo-danger"></div>
+    <p data-name="Value" class="text-demo-ink">not-an-email</p>
+    <p data-name="Helper" class="text-demo-danger">Enter a valid email address.</p>
+  </sp-variant>
+</sp-component>

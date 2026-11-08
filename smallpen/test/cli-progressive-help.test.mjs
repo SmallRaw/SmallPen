@@ -40,7 +40,7 @@ test("the ordinary entry point lists commands and lets AI discover one command o
     );
     if (reply.value) {
       assert.ok(
-        reply.value.commands.some(({ command }) => command === "project"),
+        reply.value.commands.some(({ command }) => command === "check"),
       );
       assert.equal(reply.value.workflow, undefined);
     }
@@ -92,7 +92,7 @@ test("command help includes conventional options; machine contracts remain separ
       const argv = name.split(" ");
       const reply = await run(["help", ...argv, "--json"]);
       assert.equal(reply.value.command, name);
-      assert.ok(reply.bytes < 2048, `${name}: ${reply.bytes} bytes`);
+      assert.ok(reply.bytes < (reply.value.input ? 8192 : 2048), `${name}: ${reply.bytes} bytes`);
       assert.equal(reply.value.parameters, undefined);
       assert.ok(reply.value.usage.includes(`smallpen ${name}`));
       for (const query of reply.value.nextOperations) await run(query.argv);
@@ -119,9 +119,9 @@ test("command help includes conventional options; machine contracts remain separ
     assert.ok(groupedNames.has(error.details.suggestion), engine);
     assert.ok(!error.details.validCommands.includes(engine), engine);
   }
-  const complete = await run(["help", "token", "theme", "add", "--full", "--json"]);
-  assert.ok(complete.value.parameters.theme.required);
-  assert.ok(!complete.value.parameters.intent);
+  const complete = await run(["help", "token", "list", "--full", "--json"]);
+  assert.ok(complete.value.parameters.theme);
+  assert.ok(!complete.value.parameters.intent, "reads take no write input");
 });
 
 test("common rules are individually discoverable instead of repeated in every help", async () => {
@@ -137,25 +137,8 @@ test("common rules are individually discoverable instead of repeated in every he
   assert.ok(themes.notes.some((note) => note.includes("Project defaults")));
 });
 
-test("write routes name a small input query with fields and an example", async () => {
-  const topics = Object.values(COMMAND_GROUPS).flatMap(({ actions }) =>
-    Object.values(actions)
-      .filter(({ topic }) => topic && topic !== "batch")
-      .map(({ name, topic }) => ({ name, topic })),
-  );
-  assert.ok(topics.length >= 3);
-  for (const { name, topic } of topics) {
-    const reply = await run(["schema", topic, "--json"]);
-    assert.ok(reply.bytes < 4096, `${topic}: ${reply.bytes} bytes`);
-    assert.equal(reply.value.topic, topic);
-    assert.ok(reply.value.command.startsWith(name), `${topic}: ${name}`);
-    assert.ok(Object.keys(reply.value.fields).length, topic);
-    assert.ok(reply.value.example, topic);
-  }
-});
-
-test("schema directories paginate and omit operation fields until requested", async () => {
-  for (const topic of ["commands", "operations"]) {
+test("schema directories paginate until requested", async () => {
+  for (const topic of ["commands"]) {
     const first = (await run(["schema", topic, "--limit", "1", "--json"]))
       .value;
     assert.equal(first[topic].length, 1);

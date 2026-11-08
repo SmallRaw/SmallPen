@@ -9,6 +9,7 @@ import test from "node:test";
 
 import { serveLocalPackage } from "@smallpen/background";
 import { servePenpotFrontend } from "@smallpen/web";
+import { seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
@@ -21,6 +22,7 @@ async function startBackground(context) {
   const parent = await mkdtemp(join(tmpdir(), "smallpen-apps-servers-"));
   const packagePath = join(parent, "first.smallpen");
   await cp(fixture, packagePath, { recursive: true });
+  await seedLegacyIds(packagePath, "roundtrip");
   const background = await serveLocalPackage({ packagePath, port: 0 });
   context.after(async () => {
     await background.close();
@@ -345,7 +347,7 @@ test("Background token import rejects a stale baseRevision", async (context) => 
   assert.equal((await invalid.json()).error.code, "invalid_base_revision");
 
   const current = await post({ apply: true, baseRevision: initial, document });
-  assert.equal(current.status, 200);
+  assert.equal(current.status, 200, JSON.stringify(await current.clone().json()));
   assert.equal((await current.json()).applied, true);
   assert.notEqual(background.backend.snapshot.revision, initial);
 

@@ -5834,6 +5834,10 @@ msgstr "共享库"
 msgid "workspace.libraries.shared-library-btn"
 msgstr "连接库"
 
+#: src/app/main/smallpen/ui/libraries.cljs
+msgid "workspace.libraries.smallpen.standalone"
+msgstr "这个包是独立的。要复用另一个包的组件或 Token，把它的文件（components/、tokens.css、assets/）复制到这个包里。"
+
 #: src/app/main/ui/workspace/sidebar/options/menus/text.cljs:552
 msgid "workspace.libraries.text.mixed-tokens"
 msgstr "混合令牌"
@@ -8320,36 +8324,6 @@ msgstr "自动保存的版本将保留 %s 天。"
 msgid "workspace.assets.tokens"
 msgstr "令牌"
 
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.add-source"
-msgstr "添加资源库来源"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.foundation"
-msgstr "基础库"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.local-help"
-msgstr "浏览会将无外部依赖的素材库目录上传一份到当前项目旁边（最多 50 MB、2000 个文件），再点“添加”关联。也可以手动输入本地路径。"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.local-path"
-msgstr "本地路径"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.remote-help"
-msgstr "URL 会始终作为资源库来源；SmallPen 会保留经过校验的本地快照，用于加速加载和离线使用。"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.remote-url"
-msgstr "远端 URL"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.tokens"
-msgid_plural "workspace.libraries.smallpen.tokens"
-msgstr[0] "1 个令牌"
-msgstr[1] "%s 个令牌"
-
 #: src/app/main/ui/workspace/sidebar/history.cljs:144
 msgid "workspace.undo.entry.multiple.token"
 msgstr "令牌"
@@ -8698,10 +8672,6 @@ msgstr "预览"
 #: src/app/main/ui/workspace/tokens/matrix.cljs:325
 msgid "workspace.tokens.matrix.contract-draft-note"
 msgstr "本次评审草稿只保存在面板本地，暂不改变 Package 格式。"
-
-#: src/app/main/smallpen/ui/libraries.cljs
-msgid "workspace.libraries.smallpen.browse"
-msgstr "浏览…"
 
 #: src/app/main/ui/workspace/sidebar/assets/media.cljs
 msgid "workspace.assets.graphics"

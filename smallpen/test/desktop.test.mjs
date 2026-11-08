@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { startDesktopHost } from "../apps/desktop/src/host.mjs";
+import { seedLegacyIds, setPackageId } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
@@ -49,11 +50,10 @@ test("Desktop host starts the local Penpot workspace and opens independent files
   const first = join(parent, "first.smallpen");
   const second = join(parent, "second.smallpen");
   await cp(fixture, first, { recursive: true });
+  await seedLegacyIds(first, "roundtrip");
   await cp(fixture, second, { recursive: true });
-  const secondManifestPath = join(second, "manifest.json");
-  const secondManifest = JSON.parse(await readFile(secondManifestPath, "utf8"));
-  secondManifest.packageId = "pkg_second_desktop";
-  await writeFile(secondManifestPath, JSON.stringify(secondManifest, null, 2));
+  await setPackageId(second, "pkg_second_desktop");
+  await seedLegacyIds(second, "roundtrip");
   const frontendRoot = await frontendFixture(parent);
   const desktop = await startDesktopHost({
     applicationStatePath: join(parent, "application-state.json"),

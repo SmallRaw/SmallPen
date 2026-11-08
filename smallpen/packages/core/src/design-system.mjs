@@ -5,7 +5,6 @@
 // Theme activates one Variant's Token Set. The Workbench Combination is the
 // *observed* selection and never mutates the project's Current Combination.
 import { listEffectiveTokens } from "./effective-tokens.mjs";
-import { tokenInventoryRows } from "./catalog.mjs";
 import { loadPackageFromValues } from "./package.mjs";
 import {
   listTokenThemes,
@@ -16,13 +15,6 @@ import {
 
 function compareText(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function tokenLibraryEntries(snapshot) {
-  return snapshot.manifest.entries.tokens.map((entry) => ({
-    entry,
-    library: snapshot.entries[entry],
-  }));
 }
 
 function aliasPathOf(value) {
@@ -93,7 +85,7 @@ export function enumerateWorkbenchCombinations(snapshot, options = {}) {
 
 // DSP-003-A: validate a workbench selection given as stable-id pairs
 // [{domainId, themeId}]. Empty diagnostics means the combination is usable.
-export function validateWorkbenchCombination(snapshot, combination, options = {}) {
+function validateWorkbenchCombination(snapshot, combination, options = {}) {
   const { diagnostics: enumerationDiagnostics, domains } =
     enumerateWorkbenchCombinations(snapshot, options);
   const diagnostics = [...enumerationDiagnostics];
@@ -269,199 +261,3 @@ export async function createWorkbenchPreview(snapshot, combination, options = {}
   };
 }
 
-function editablePackageId(previewSnapshot) {
-  return previewSnapshot.manifest.packageId;
-}
-
-// DSP-003-C: explicit edit targets for one displayed value. Targets are only
-// offered when unambiguous: the owning cell, the alias expression (when the
-// raw value is an alias), the alias's shared target cell, and a variant
-// override when the observed variant set differs from the cell's home set.
-export function resolveWorkbenchEditTargets(
-  previewSnapshot,
-  combination,
-  token,
-) {
-  const rows = previewTokenRows(previewSnapshot);
-  const row = rows.find(
-    (candidate) =>
-      candidate.path === token.path &&
-      candidate.ownerPackageId === token.ownerPackageId,
-  );
-  if (!row) {
-    return {
-      diagnostics: [{ code: "token_not_in_preview", path: token.path }],
-      targets: [],
-    };
-  }
-  const editablePackage = editablePackageId(previewSnapshot);
-  const homeReadOnly = row.ownerPackageId !== editablePackage;
-  const targets = [
-    {
-      kind: "cell",
-      ownerPackageId: row.ownerPackageId,
-      path: row.path,
-      readOnly: homeReadOnly,
-      setId: row.setId,
-      tokenId: row.sourceTokenId,
-    },
-  ];
-  if (row.alias) {
-    targets.push({
-      kind: "alias-expression",
-      current: `{${row.alias}}`,
-      ownerPackageId: row.ownerPackageId,
-      path: row.path,
-      readOnly: homeReadOnly,
-      tokenId: row.sourceTokenId,
-    });
-    const target = rows.find((candidate) => candidate.path === row.alias);
-    if (target) {
-      targets.push({
-        kind: "shared-cell",
-        ownerPackageId: target.ownerPackageId,
-        path: target.path,
-        readOnly: target.ownerPackageId !== editablePackage,
-        setId: target.setId,
-        tokenId: target.sourceTokenId,
-      });
-    }
-  }
-  const domain = row.homeSetName ? row.homeSetName.split("/")[0] : null;
-  const selection = (combination ?? []).find(
-    (candidate) => candidate.domainId === `domain_${domain}`,
-  );
-  if (domain && selection) {
-    const observed = findSetByTheme(previewSnapshot, selection.themeId);
-    if (observed && observed.id !== row.setId) {
-      targets.push({
-        kind: "variant-override",
-        observedSetId: observed.id,
-        observedSetName: observed.name,
-        ownerPackageId: row.ownerPackageId,
-        path: row.path,
-        readOnly: homeReadOnly,
-      });
-    }
-  }
-  return { diagnostics: [], targets };
-}
-
-function findSetByTheme(previewSnapshot, themeId) {
-  for (const entry of Object.values(previewSnapshot.entries)) {
-    if (!Array.isArray(entry?.themes)) continue;
-    const theme = entry.themes.find((candidate) => candidate.id === themeId);
-    if (theme) {
-      const set = (entry.sets ?? []).find((candidate) =>
-        (theme.setIds ?? []).includes(candidate.id),
-      );
-      if (set) return set;
-    }
-  }
-  return null;
-}
-
-// DSP-004-B: build the generated System Sheet as pure data. Every specimen
-// carries a stable projection identity derived from its qualified source key
-// and points at the real editable target (Token Cell or component variant).
-// Decorative elements (labels, section headers, rulers, scale) are flagged
-// separately and are never design nodes.
-export function buildWorkbenchSheet(snapshot, options = {}) {
-  const libraries = options.libraries ?? [];
-  const foundation = options.foundation;
-  const packageId = snapshot.manifest.packageId;
-  const sections = new Map();
-  const sources = [
-    { rows: tokenInventoryRows(snapshot, "product"), owner: packageId, source: "product" },
-    ...(foundation
-      ? [{ rows: tokenInventoryRows(foundation, "foundation"), owner: foundation.manifest.packageId, source: "foundation" }]
-      : []),
-    ...libraries.map((library) => ({
-      rows: tokenInventoryRows(library, "library"),
-      owner: library.manifest.packageId,
-      source: "library",
-    })),
-  ];
-  for (const { rows, owner } of sources) {
-    for (const row of rows) {
-      const domain = row.setName.split("/")[0];
-      const sectionId = `dsp-section-${domain}`;
-      if (!sections.has(sectionId)) {
-        sections.set(sectionId, {
-          id: sectionId,
-          kind: "section",
-          name: domain,
-          // The section header/ruler are generated decorations.
-          decoration: true,
-          specimens: [],
-        });
-      }
-      sections.get(sectionId).specimens.push({
-        specimenId: `dsp-specimen/${row.qualifiedKey}`,
-        kind: "token",
-        decoration: false,
-        active: row.active,
-        readOnly: owner !== packageId,
-        target: {
-          kind: "token-cell",
-          ownerPackageId: row.ownerPackageId,
-          qualifiedKey: row.qualifiedKey,
-          setId: row.setId,
-          setName: row.setName,
-          tokenId: row.tokenId ?? row.path,
-          path: row.path,
-        },
-        display: { type: row.type, value: row.value },
-      });
-    }
-  }
-  // Component specimens: one per (component set, variant).
-  const componentSetsOf = (snapshot, source, owner) =>
-    [...snapshot.manifest.entries.components]
-      .map((entry) => snapshot.entries[entry])
-      .filter((componentFile) => Array.isArray(componentFile.componentSets))
-      .flatMap((componentFile) => componentFile.componentSets)
-      .filter((componentSet) => !publicFilter(componentSet))
-      .flatMap((componentSet) =>
-        componentSet.variants.map((variant) => ({
-          specimenId: `dsp-specimen/component/${owner}/${componentSet.id}/${variant.id}`,
-          kind: "component",
-          decoration: false,
-          readOnly: source !== "product",
-          target: {
-            kind: "component-definition",
-            componentSetId: componentSet.id,
-            ownerPackageId: owner,
-            variantId: variant.id,
-            rootId: variant.rootId,
-          },
-          display: { name: componentSet.name, selection: variant.selection },
-        })),
-      );
-  function publicFilter(componentSet) {
-    return componentSet.deprecated === true;
-  }
-  for (const specimen of componentSetsOf(snapshot, "product", packageId)) {
-    const sectionId = "dsp-section-components";
-    if (!sections.has(sectionId)) {
-      sections.set(sectionId, {
-        id: sectionId,
-        kind: "section",
-        name: "Components",
-        decoration: true,
-        specimens: [],
-      });
-    }
-    sections.get(sectionId).specimens.push(specimen);
-  }
-  const orderedSections = [...sections.values()].sort((left, right) =>
-    compareText(left.id, right.id),
-  );
-  return {
-    id: "dsp-system-sheet",
-    kind: "system-sheet",
-    // Regenerable: the sheet is derived data and never persisted as pages.
-    regenerable: true,
-    sections: orderedSections,
-  };
-}

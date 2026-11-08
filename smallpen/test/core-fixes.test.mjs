@@ -11,14 +11,13 @@ import {
   readDesignView,
 } from "@smallpen/core";
 import { createEvidence } from "@smallpen/local-package";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -91,7 +90,7 @@ test("stroke-width token bindings bind, apply, project, clear, and inverse-resto
   const prepared = await prepareOperationBatch(before, batch);
   const applied = prepared.snapshot;
   assert.equal(
-    applied.entries["screens/roundtrip.json"].presentations[0].nodes.node_rectangle
+    onlyScreen(applied).presentations[0].nodes.node_rectangle
       .tokenBindings.strokeWidth.assetId,
     "tok_stroke_width",
   );
@@ -115,7 +114,7 @@ test("stroke-width token bindings bind, apply, project, clear, and inverse-resto
   });
   assert.equal(clearedRead.result.nodes.node_rectangle.strokes[0].width, 2);
   assert.deepEqual(
-    cleared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(cleared.snapshot).presentations[0].nodes
       .node_rectangle.tokenBindings,
     {},
   );

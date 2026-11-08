@@ -35,9 +35,10 @@
 (defn- event-type-names
   []
   {:click       (tr "workspace.options.interaction-on-click")
-   ;; TODO: need more UX research
-   ;; :mouse-over (tr "workspace.options.interaction-while-hovering")
-   ;; :mouse-press (tr "workspace.options.interaction-while-pressing")
+   ;; SmallPen files write these triggers (data-hover, data-press) and the
+   ;; viewer plays them, so the panel names them too.
+   :mouse-over  (tr "workspace.options.interaction-while-hovering")
+   :mouse-press (tr "workspace.options.interaction-while-pressing")
    :mouse-enter (tr "workspace.options.interaction-mouse-enter")
    :mouse-leave (tr "workspace.options.interaction-mouse-leave")
    :after-delay (tr "workspace.options.interaction-after-delay")})
@@ -331,9 +332,8 @@
 
 
         event-type-options   (-> [{:value :click       :label (tr "workspace.options.interaction-on-click")}
-                                  ;; TODO: need more UX research
-                                  ;; :mouse-over (tr "workspace.options.interaction-while-hovering")
-                                  ;; :mouse-press (tr "workspace.options.interaction-while-pressing")
+                                  {:value :mouse-over  :label (tr "workspace.options.interaction-while-hovering")}
+                                  {:value :mouse-press :label (tr "workspace.options.interaction-while-pressing")}
                                   {:value :mouse-enter :label (tr "workspace.options.interaction-mouse-enter")}
                                   {:value :mouse-leave :label (tr "workspace.options.interaction-mouse-leave")}]
                                  (cond-> (cfh/frame-shape? shape)

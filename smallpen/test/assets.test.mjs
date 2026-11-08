@@ -11,9 +11,10 @@ import {
   sha256Hex,
 } from "@smallpen/core";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { assetEntry, onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 const colorId = "color_11111111111141118111111111111111";
 const colorRuntimeId = "11111111-1111-4111-8111-111111111111";
@@ -95,9 +96,7 @@ function textContent(text, snapshot, typographyRuntime = typographyRuntimeId) {
 }
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -333,7 +332,7 @@ test("Penpot fill and stroke Color references apply and reverse exactly", async 
 
   const prepared = await prepareOperationBatch(snapshot, batch);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(node.fills[0].colorRef, colorId);
   assert.equal(node.strokes[0].colorRef, colorId);
@@ -413,7 +412,7 @@ test("Penpot external Color references retain their Package identity", async () 
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   assert.deepEqual(
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle.fills[0].colorRef,
     { assetId: colorId, packageId: "pkg_shared_library" },
   );
@@ -449,7 +448,7 @@ test("Penpot rich text Typography references apply and reverse exactly", async (
 
   const prepared = await prepareOperationBatch(snapshot, batch);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.deepEqual(node.textStyle, { typographyRef: typographyId });
   const reversed = await prepareOperationBatch(
@@ -500,7 +499,7 @@ test("Penpot external Typography references retain their Package identity", asyn
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   assert.deepEqual(
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle.textStyle.typographyRef,
     { assetId: typographyId, packageId: "pkg_shared_library" },
   );
@@ -627,7 +626,7 @@ test("a first Penpot Asset Library can be created, referenced, and reversed", as
     "assets/assets.json",
   ]);
   assert.equal(
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle.fills[0].colorRef,
     `color_${addedColorRuntimeId.replaceAll("-", "")}`,
   );
@@ -783,7 +782,7 @@ test("embedded Fonts validate blobs, project stable identities, and reverse Penp
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(node.textStyle.fontId, fontId);
   const reversed = await prepareOperationBatch(
@@ -860,7 +859,7 @@ test("Penpot image fills, strokes, and IMAGE metadata apply and reverse", async 
   });
   const prepared = await prepareOperationBatch(snapshot, batch);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_rectangle;
   assert.equal(node.mediaRef, mediaId);
   assert.equal(node.fills[0].mediaRef, mediaId);
@@ -932,7 +931,7 @@ test("Penpot external Media references retain their Package identity", async () 
   ]);
   const prepared = await prepareOperationBatch(snapshot, batch);
   const node =
-    prepared.snapshot.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(prepared.snapshot).presentations[0].nodes
       .node_88888888888848888888888888888888;
   assert.deepEqual(node.mediaRef, qualifiedReference);
   assert.deepEqual(node.fills[0].mediaRef, qualifiedReference);
@@ -1023,7 +1022,7 @@ test("an orphan content-addressed blob can be attached atomically and restored",
   });
   assert.ok(attached.snapshot.blobs.has(blob));
   assert.equal(
-    attached.snapshot.entries["assets/assets.json"].media[0].id,
+    assetEntry(attached.snapshot).media[0].id,
     mediaId,
   );
   const reversed = await prepareOperationBatch(

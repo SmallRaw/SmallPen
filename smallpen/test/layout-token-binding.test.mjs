@@ -23,9 +23,11 @@ import { createEvidence, openPackage } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
+import { onlyScreen, seedLegacyIds } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "variant-acme.smallpen");
+const fixtureModel = join(here, "fixtures", "model", "variant-acme");
 const cli = join(here, "..", "apps", "cli", "bin", "smallpen.mjs");
 const SCREEN = "scr_home";
 const PRESENTATION = "pres_home_mobile";
@@ -37,11 +39,11 @@ const reference = (assetId = "tok_spacing_md") => ({
 
 async function layoutValues() {
   const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
+    await readFile(join(fixtureModel, "manifest.json"), "utf8"),
   );
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
-    values.set(entry, JSON.parse(await readFile(join(fixture, entry), "utf8")));
+    values.set(entry, JSON.parse(await readFile(join(fixtureModel, entry), "utf8")));
   }
   const library = values.get("tokens/tokens.json");
   library.sets[0].tokens.find(({ id }) => id === "tok_spacing_md").value = 16;
@@ -126,7 +128,7 @@ async function layoutPackage() {
 }
 
 function canonicalRow(snapshot) {
-  return snapshot.entries["screens/first-design.json"].presentations[0].nodes[
+  return onlyScreen(snapshot).presentations[0].nodes[
     ROW
   ];
 }
@@ -488,54 +490,3 @@ function runCli(args, cwd) {
   });
 }
 
-test("CLI Token edits update layout after reopen and retries keep a small receipt", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "smallpen-layout-token-"));
-  context.after(() => rm(root, { recursive: true, force: true }));
-  const packagePath = join(root, "acme.smallpen");
-  await cp(fixture, packagePath, { recursive: true });
-  for (const [entry, value] of await layoutValues()) {
-    await writeFile(join(packagePath, entry), JSON.stringify(value));
-  }
-  const before = await openPackage(packagePath);
-  const batchPath = join(root, "spacing.json");
-  await writeFile(
-    batchPath,
-    JSON.stringify({
-      baseRevision: before.revision,
-      batchId: "spacing-24",
-      operations: [
-        {
-          setId: "tset_base",
-          token: {
-            id: "tok_spacing_md",
-            name: "spacing.md",
-            type: "spacing",
-            value: 24,
-          },
-          type: "put-set-token",
-        },
-      ],
-    }),
-  );
-  const first = await runCli(
-    ["advanced", "apply", packagePath, "--batch", batchPath, "--json"],
-    root,
-  );
-  assert.equal(first.code, 0, first.stdout + first.stderr);
-  assert.ok(Buffer.byteLength(first.stdout) < 2000);
-  const reopened = await openPackage(packagePath);
-  const projected = projectScreen(reopened, SCREEN, {});
-  assert.equal(projected.nodes.node_cell_a.x, 24);
-  assert.equal(projected.nodes.node_cell_b.x, 68);
-  assert.deepEqual(canonicalRow(reopened)["layout-gap"], {
-    columnGap: 3,
-    rowGap: 5,
-  });
-  const retried = await runCli(
-    ["advanced", "apply", packagePath, "--batch", batchPath, "--json"],
-    root,
-  );
-  assert.equal(retried.code, 0, retried.stdout + retried.stderr);
-  assert.equal(JSON.parse(retried.stdout).alreadyApplied, true);
-  assert.equal((await openPackage(packagePath)).revision, reopened.revision);
-});

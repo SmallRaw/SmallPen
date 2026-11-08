@@ -22,6 +22,7 @@ import {
 } from "@smallpen/core";
 import { openPackage } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { assetEntry, onlyScreen, readModelEntry, seedLegacyIds, setPackageId } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, "fixtures", "roundtrip.smallpen");
@@ -31,131 +32,22 @@ async function copyFixture() {
   const parent = await mkdtemp(join(tmpdir(), "smallpen-bridge-test-"));
   const packagePath = join(parent, "roundtrip.smallpen");
   await cp(fixture, packagePath, { recursive: true });
+  await seedLegacyIds(packagePath, "roundtrip");
   return packagePath;
 }
 
-async function productWorkspaceFixture() {
-  const root = await mkdtemp(join(tmpdir(), "smallpen-bridge-workspace-"));
-  const productPath = join(root, "product.smallpen");
-  const foundationPath = join(root, "foundation.smallpen");
-  await cp(fixture, productPath, { recursive: true });
-  await cp(fixture, foundationPath, { recursive: true });
-
-  const foundationManifestPath = join(foundationPath, "manifest.json");
-  const foundationManifest = JSON.parse(
-    await readFile(foundationManifestPath, "utf8"),
-  );
-  foundationManifest.name = "Shared Foundation";
-  foundationManifest.packageId = "pkg_shared_foundation";
-  foundationManifest.entries.assets = ["assets/design.json"];
-  const mediaBytes = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-    "base64",
-  );
-  const mediaSha256 = await sha256Hex(mediaBytes);
-  const mediaBlob = `blobs/${mediaSha256}`;
-  await mkdir(join(foundationPath, "assets"), { recursive: true });
-  await mkdir(join(foundationPath, "blobs"), { recursive: true });
-  await writeFile(join(foundationPath, mediaBlob), mediaBytes);
-  await writeFile(
-    join(foundationPath, "assets/design.json"),
-    JSON.stringify({
-      colors: [
-        {
-          id: "color_shared_primary",
-          name: "Primary",
-          paint: { color: "#2563eb", opacity: 1, type: "solid" },
-          path: "Brand",
-        },
-      ],
-      fonts: [],
-      id: "alib_shared",
-      media: [
-        {
-          blob: mediaBlob,
-          byteLength: mediaBytes.byteLength,
-          height: 1,
-          id: "media_shared_pixel",
-          mimeType: "image/png",
-          name: "Shared Pixel",
-          path: "Brand",
-          sha256: mediaSha256,
-          width: 1,
-        },
-      ],
-      typographies: [],
-    }),
-  );
-  await writeFile(
-    foundationManifestPath,
-    JSON.stringify(foundationManifest, null, 2),
-  );
-
-  const productManifestPath = join(productPath, "manifest.json");
-  const productManifest = JSON.parse(
-    await readFile(productManifestPath, "utf8"),
-  );
-  productManifest.dependencies = [
-    {
-      packageId: foundationManifest.packageId,
-      path: "foundation.smallpen",
-    },
-  ];
-  productManifest.name = "Product";
-  productManifest.packageId = "pkg_product";
-  productManifest.role = "product";
-  await writeFile(
-    productManifestPath,
-    JSON.stringify(productManifest, null, 2),
-  );
-  return { foundationPath, mediaBytes, productPath };
-}
-
+// A font file in assets/fonts/ and its @font-face in tokens.css.
 async function addEmbeddedFont(packagePath) {
   const bytes = new Uint8Array([0x77, 0x4f, 0x46, 0x46, 0, 1, 0, 0]);
-  const sha256 = await sha256Hex(bytes);
-  const blob = `blobs/${sha256}`;
-  const fontId = "font_66666666666646668666666666666666";
-  const variantId = "fvar_77777777777747778777777777777777";
-  const manifestPath = join(packagePath, "manifest.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  manifest.entries.assets = ["assets/fonts.json"];
-  await mkdir(join(packagePath, "assets"), { recursive: true });
-  await mkdir(join(packagePath, "blobs"), { recursive: true });
+  await mkdir(join(packagePath, "assets", "fonts"), { recursive: true });
+  await writeFile(join(packagePath, "assets", "fonts", "SmallPenSans-400.woff"), bytes);
+  const tokens = join(packagePath, "tokens.css");
   await writeFile(
-    join(packagePath, "assets/fonts.json"),
-    JSON.stringify({
-      colors: [],
-      fonts: [
-        {
-          family: "SmallPen Sans",
-          id: fontId,
-          variants: [
-            {
-              files: {
-                woff: {
-                  blob,
-                  byteLength: bytes.byteLength,
-                  mimeType: "font/woff",
-                  sha256,
-                },
-              },
-              id: variantId,
-              name: "Regular",
-              style: "normal",
-              weight: 400,
-            },
-          ],
-        },
-      ],
-      id: "alib_fonts",
-      media: [],
-      typographies: [],
-    }),
+    tokens,
+    `${await readFile(tokens, "utf8")}\n@font-face {\n  font-family: "SmallPen Sans";\n  src: url("assets/fonts/SmallPenSans-400.woff");\n  font-weight: 400;\n  font-style: normal;\n}\n`,
   );
-  await writeFile(join(packagePath, blob), bytes);
-  await writeFile(manifestPath, JSON.stringify(manifest));
-  return { bytes, fontId, variantId };
+  const font = assetEntry(await openPackage(packagePath)).fonts[0];
+  return { bytes, fontId: font.id, variantId: font.variants[0].id };
 }
 
 function minimalTtf() {
@@ -256,39 +148,19 @@ test("the local HTTP bridge compiles and commits a Penpot opacity edit", async (
     headers: { "content-type": "application/json" },
     method: "POST",
   }).then((result) => result.json());
-  const screen = JSON.parse(
-    await readFile(join(packagePath, "screens/roundtrip.json"), "utf8"),
-  );
+  const screen = await readModelEntry(packagePath, "screens/roundtrip.json");
 
   assert.equal(response.revn, 1);
   assert.match(response.revision, /^[a-f0-9]{64}$/);
   assert.equal(screen.presentations[0].nodes.node_rectangle.opacity, 0.4);
 });
 
-test("CLI Token changes reload into Web with resolved bound attributes", async (context) => {
+test("an agent's tokens.css edit reloads into the App with resolved bound attributes", async (context) => {
   const packagePath = await copyFixture();
-  const tokenId = "tok_aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa";
-  const tokenPath = join(packagePath, "tokens", "tokens.json");
-  const library = JSON.parse(await readFile(tokenPath, "utf8"));
-  library.sets[0].tokens = [
-    {
-      description: "Primary",
-      id: tokenId,
-      name: "color.primary",
-      type: "color",
-      value: "#2563eb",
-    },
-  ];
-  await writeFile(tokenPath, JSON.stringify(library));
-
-  const screenPath = join(packagePath, "screens", "roundtrip.json");
-  const screen = JSON.parse(await readFile(screenPath, "utf8"));
-  const rectangle = screen.presentations[0].nodes.node_rectangle;
-  rectangle.appliedTokens = { fill: "color.primary" };
-  rectangle.tokenBindings = {
-    fill: { assetId: tokenId, packageId: "pkg_roundtrip" },
-  };
-  await writeFile(screenPath, JSON.stringify(screen));
+  const tokensPath = join(packagePath, "tokens.css");
+  await writeFile(tokensPath, ":root {\n  --color-primary: #2563eb;\n}\n");
+  const pagePath = join(packagePath, "pages", "Round Trip.html");
+  await writeFile(pagePath, (await readFile(pagePath, "utf8")).replace("bg-[#7c3aed]", "bg-primary"));
 
   const service = await serveLocalPackage({ packagePath, port: 0 });
   context.after(() => service.close());
@@ -296,26 +168,16 @@ test("CLI Token changes reload into Web with resolved bound attributes", async (
     response.json(),
   );
   assert.equal(
-    opened.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(opened).presentations[0].nodes
       .node_rectangle.fills[0].color,
     "#2563eb",
   );
 
-  const intentPath = join(dirname(packagePath), "set-token.json");
-  await writeFile(
-    intentPath,
-    JSON.stringify({ tokens: [{ name: "color.primary", value: "#db2777" }] }),
-  );
-  const changed = await runCli([
-    "token",
-    "set",
-    packagePath,
-    "--intent",
-    intentPath,
-    "--json",
-  ]);
-  assert.equal(changed.code, 0, `${changed.stderr}\n${changed.stdout}`);
-  const changedRevision = JSON.parse(changed.stdout).revision;
+  // The agent edits the Token in tokens.css and checks the package.
+  await writeFile(tokensPath, ":root {\n  --color-primary: #db2777;\n}\n");
+  const checked = await runCli(["check", packagePath, "--json"]);
+  assert.equal(checked.code, 0, `${checked.stderr}\n${checked.stdout}`);
+  const changedRevision = JSON.parse(checked.stdout).revision;
 
   for (let attempt = 0; attempt < 100; attempt += 1) {
     opened = await fetch(`${service.url}/v1/workspace`).then((response) =>
@@ -326,7 +188,7 @@ test("CLI Token changes reload into Web with resolved bound attributes", async (
   }
   assert.equal(opened.revision, changedRevision);
   assert.equal(
-    opened.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(opened).presentations[0].nodes
       .node_rectangle.fills[0].color,
     "#db2777",
   );
@@ -377,10 +239,8 @@ test("the local HTTP bridge refuses every non-loopback binding", async (context)
 test("the local HTTP bridge keeps multiple Package sessions independent", async (context) => {
   const firstPath = await copyFixture();
   const secondPath = await copyFixture();
-  const secondManifestPath = join(secondPath, "manifest.json");
-  const secondManifest = JSON.parse(await readFile(secondManifestPath, "utf8"));
-  secondManifest.packageId = "pkg_second_session";
-  await writeFile(secondManifestPath, JSON.stringify(secondManifest, null, 2));
+  await setPackageId(secondPath, "pkg_second_session");
+  await seedLegacyIds(secondPath, "roundtrip");
   const service = await serveLocalPackage({ packagePath: firstPath, port: 0 });
   context.after(() => service.close());
 
@@ -438,161 +298,18 @@ test("the local HTTP bridge keeps multiple Package sessions independent", async 
   });
   assert.equal(response.status, 200);
 
-  const firstScreen = JSON.parse(
-    await readFile(join(firstPath, "screens/roundtrip.json"), "utf8"),
-  );
-  const secondScreen = JSON.parse(
-    await readFile(join(secondPath, "screens/roundtrip.json"), "utf8"),
-  );
+  const firstScreen = await readModelEntry(firstPath, "screens/roundtrip.json");
+  const secondScreen = await readModelEntry(secondPath, "screens/roundtrip.json");
   assert.equal(firstScreen.presentations[0].nodes.node_rectangle.opacity, 0.41);
-  assert.equal(secondScreen.presentations[0].nodes.node_rectangle.opacity, 1);
+  assert.equal(secondScreen.presentations[0].nodes.node_rectangle.opacity ?? 1, 1);
 
   const undone = await fetch(`${service.url}/v1/history/undo`, {
     headers: { "x-smallpen-package": firstSessionId },
     method: "POST",
   });
   assert.equal(undone.status, 200);
-  const restored = JSON.parse(
-    await readFile(join(firstPath, "screens/roundtrip.json"), "utf8"),
-  );
-  assert.equal(restored.presentations[0].nodes.node_rectangle.opacity, 1);
-});
-
-test("the workspace bridge exposes Foundation assets and persists their references", async (context) => {
-  const { mediaBytes, productPath } = await productWorkspaceFixture();
-  const service = await serveLocalPackage({
-    packagePath: productPath,
-    port: 0,
-  });
-  context.after(() => service.close());
-
-  const opened = await fetch(`${service.url}/v1/workspace`).then((response) =>
-    response.json(),
-  );
-  assert.equal(opened.libraries.length, 1);
-  const [library] = opened.libraries;
-  assert.equal(library.manifest.name, "Shared Foundation");
-  assert.equal(library.packageStatus.readOnly, true);
-  assert.equal(library.blobs, undefined);
-  assert.deepEqual(library.formatCapabilities, SMALLPEN_FORMAT_CAPABILITIES);
-
-  const mediaResponse = await fetch(
-    `${service.url}/v1/media/${library.runtime.media.media_shared_pixel}`,
-  );
-  assert.equal(mediaResponse.status, 200);
-  assert.equal(mediaResponse.headers.get("content-type"), "image/png");
-  assert.deepEqual(Buffer.from(await mediaResponse.arrayBuffer()), mediaBytes);
-
-  const response = await fetch(`${service.url}/v1/penpot/commit`, {
-    body: JSON.stringify({
-      baseRevision: opened.revision,
-      changes: [
-        {
-          id: opened.runtime.nodes.scr_roundtrip.pres_desktop.node_rectangle,
-          operations: [
-            {
-              attr: "fills",
-              type: "set",
-              val: [
-                {
-                  "fill-color": "#2563eb",
-                  "fill-color-ref-file": library.runtime.file,
-                  "fill-color-ref-id":
-                    library.runtime.colors.color_shared_primary,
-                },
-              ],
-            },
-          ],
-          type: "mod-obj",
-        },
-      ],
-      commitId: "external-foundation-color",
-    }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  assert.equal(response.status, 200);
-
-  const screen = JSON.parse(
-    await readFile(join(productPath, "screens/roundtrip.json"), "utf8"),
-  );
-  assert.deepEqual(
-    screen.presentations[0].nodes.node_rectangle.fills[0].colorRef,
-    {
-      assetId: "color_shared_primary",
-      packageId: "pkg_shared_foundation",
-    },
-  );
-});
-
-test("the Library bridge links and unlinks a local Package source", async (context) => {
-  const { productPath } = await productWorkspaceFixture();
-  const libraryPath = join(dirname(productPath), "icons.smallpen");
-  await cp(fixture, libraryPath, { recursive: true });
-  const libraryManifestPath = join(libraryPath, "manifest.json");
-  const libraryManifest = JSON.parse(
-    await readFile(libraryManifestPath, "utf8"),
-  );
-  libraryManifest.name = "Icons";
-  libraryManifest.packageId = "pkg_icons";
-  await writeFile(
-    libraryManifestPath,
-    JSON.stringify(libraryManifest, null, 2),
-  );
-  const service = await serveLocalPackage({
-    packagePath: productPath,
-    port: 0,
-  });
-  context.after(() => service.close());
-
-  // Machine-specific paths are refused before anything is committed, so a
-  // typed absolute path cannot link and then put the Product into Repair.
-  for (const path of [
-    libraryPath,
-    "C:\\libs\\icons.smallpen",
-    "..\\icons.smallpen",
-  ]) {
-    const refused = await fetch(`${service.url}/v1/libraries/link`, {
-      body: JSON.stringify({ source: { path, type: "local" } }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
-    assert.equal(refused.status, 422, path);
-    assert.equal((await refused.json()).error.code, "invalid_library_source");
-  }
-
-  const linked = await fetch(`${service.url}/v1/libraries/link`, {
-    body: JSON.stringify({
-      source: { path: "icons.smallpen", type: "local" },
-    }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  assert.equal(linked.status, 200);
-  const linkedBody = await linked.json();
-  assert.equal(linkedBody.libraries.length, 2);
-  assert.equal(
-    linkedBody.librarySources.find(({ packageId }) => packageId === "pkg_icons")
-      .source.path,
-    "icons.smallpen",
-  );
-  const saved = JSON.parse(
-    await readFile(join(productPath, "manifest.json"), "utf8"),
-  );
-  assert.equal(saved.libraries[0].packageId, "pkg_icons");
-
-  const unlinked = await fetch(`${service.url}/v1/libraries/unlink`, {
-    body: JSON.stringify({ packageId: "pkg_icons" }),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
-  assert.equal(unlinked.status, 200);
-  const unlinkedBody = await unlinked.json();
-  assert.equal(unlinkedBody.libraries.length, 1);
-  const removed = JSON.parse(
-    await readFile(join(productPath, "manifest.json"), "utf8"),
-  );
-  assert.equal(removed.libraries, undefined);
+  const restored = await readModelEntry(firstPath, "screens/roundtrip.json");
+  assert.equal(restored.presentations[0].nodes.node_rectangle.opacity ?? 1, 1);
 });
 
 test("the local HTTP bridge restores a recent Package by stable file ID", async (context) => {
@@ -601,11 +318,11 @@ test("the local HTTP bridge restores a recent Package by stable file ID", async 
   const secondPath = join(parent, "second.smallpen");
   const statePath = join(parent, "application-state.json");
   await cp(fixture, firstPath, { recursive: true });
+  await seedLegacyIds(firstPath, "roundtrip");
   await cp(fixture, secondPath, { recursive: true });
-  const secondManifestPath = join(secondPath, "manifest.json");
-  const secondManifest = JSON.parse(await readFile(secondManifestPath, "utf8"));
-  secondManifest.packageId = "pkg_second_restore";
-  await writeFile(secondManifestPath, JSON.stringify(secondManifest, null, 2));
+  await seedLegacyIds(secondPath, "roundtrip");
+  await setPackageId(secondPath, "pkg_second_restore");
+  await seedLegacyIds(secondPath, "roundtrip");
   let service;
   context.after(async () => {
     await service?.close();
@@ -654,7 +371,9 @@ test("recent file lookup distinguishes identity changes from missing files", asy
   const secondPath = join(parent, "second.smallpen");
   const statePath = join(parent, "application-state.json");
   await cp(fixture, firstPath, { recursive: true });
+  await seedLegacyIds(firstPath, "roundtrip");
   await cp(fixture, secondPath, { recursive: true });
+  await seedLegacyIds(secondPath, "roundtrip");
   let service;
   context.after(async () => {
     await service?.close();
@@ -676,11 +395,8 @@ test("recent file lookup distinguishes identity changes from missing files", asy
   }).then((response) => response.json());
   await service.close();
 
-  const manifestPath = join(secondPath, "manifest.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  const originalPackageId = manifest.packageId;
-  manifest.packageId = "pkg_replaced_at_same_locator";
-  await writeFile(manifestPath, JSON.stringify(manifest));
+  const originalPackageId = (await openPackage(secondPath)).manifest.packageId;
+  await setPackageId(secondPath, "pkg_replaced_at_same_locator");
   service = await serveLocalPackage({
     applicationStatePath: statePath,
     packagePath: firstPath,
@@ -694,9 +410,8 @@ test("recent file lookup distinguishes identity changes from missing files", asy
   assert.equal((await response.json()).error.code, "file_identity_mismatch");
 
   await service.close();
-  manifest.packageId = originalPackageId;
-  await writeFile(manifestPath, JSON.stringify(manifest));
-  await writeFile(join(secondPath, "screens/roundtrip.json"), "{");
+  await setPackageId(secondPath, originalPackageId);
+  await writeFile(join(secondPath, "pages", "Round Trip.html"), "<!doctype html>\n<html>\n<body><div");
   service = await serveLocalPackage({
     applicationStatePath: statePath,
     packagePath: firstPath,
@@ -905,9 +620,7 @@ test("the local HTTP bridge exposes shared domain view models", async (context) 
   });
   assert.equal(operationResponse.status, 200);
   assert.equal(
-    JSON.parse(
-      await readFile(join(packagePath, "screens/roundtrip.json"), "utf8"),
-    ).presentations[0].nodes.node_rectangle.opacity,
+    (await readModelEntry(packagePath, "screens/roundtrip.json")).presentations[0].nodes.node_rectangle.opacity,
     0.72,
   );
 });
@@ -974,7 +687,7 @@ test("the local HTTP bridge serves embedded Font files by runtime identity", asy
   );
   const fileId = opened.runtime.fontFiles[variantId].woff;
   const response = await fetch(`${service.url}/v1/font/${fileId}`);
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, await response.clone().text());
   assert.equal(response.headers.get("content-type"), "font/woff");
   assert.equal(
     response.headers.get("cross-origin-resource-policy"),
@@ -996,14 +709,15 @@ test("the local HTTP bridge serves embedded Font files by runtime identity", asy
     headers: { "content-type": "application/json" },
     method: "POST",
   });
-  assert.equal(deleted.status, 200);
+  assert.equal(deleted.status, 200, await deleted.clone().text());
   const reloaded = await fetch(`${service.url}/v1/workspace`).then((result) =>
     result.json(),
   );
-  assert.deepEqual(
-    reloaded.entries[reloaded.manifest.entries.assets[0]].fonts,
-    [],
-  );
+  // The last font gone, the package has no asset library, no @font-face
+  // and no font file.
+  assert.deepEqual(assetEntry(reloaded)?.fonts ?? [], []);
+  assert.doesNotMatch(await readFile(join(packagePath, "tokens.css"), "utf8"), /@font-face/);
+  await assert.rejects(readFile(join(packagePath, "assets", "fonts", "SmallPenSans-400.woff")), (error) => error.code === "ENOENT");
 });
 
 test("the local HTTP bridge creates, renames, and deletes an offline Font", async (context) => {
@@ -1064,8 +778,7 @@ test("the local HTTP bridge creates, renames, and deletes an offline Font", asyn
   let opened = await fetch(`${service.url}/v1/workspace`).then((response) =>
     response.json(),
   );
-  let library = opened.entries[opened.manifest.entries.assets[0]];
-  assert.equal(library.fonts[0].family, "Renamed Sans");
+  assert.equal(assetEntry(opened).fonts[0].family, "Renamed Sans");
 
   const deletedResponse = await fetch(`${service.url}/v1/font/variant/delete`, {
     body: JSON.stringify({ id: created.id }),
@@ -1076,8 +789,7 @@ test("the local HTTP bridge creates, renames, and deletes an offline Font", asyn
   opened = await fetch(`${service.url}/v1/workspace`).then((response) =>
     response.json(),
   );
-  library = opened.entries[opened.manifest.entries.assets[0]];
-  assert.deepEqual(library.fonts, []);
+  assert.deepEqual(assetEntry(opened)?.fonts ?? [], []);
 });
 
 test("the local HTTP bridge persists basic Penpot node edits atomically", async (context) => {
@@ -1127,9 +839,7 @@ test("the local HTTP bridge persists basic Penpot node edits atomically", async 
   });
 
   assert.equal(response.status, 200);
-  const screen = JSON.parse(
-    await readFile(join(packagePath, "screens/roundtrip.json"), "utf8"),
-  );
+  const screen = await readModelEntry(packagePath, "screens/roundtrip.json");
   assert.deepEqual(
     {
       cornerRadius: screen.presentations[0].nodes.node_rectangle.cornerRadius,
@@ -1171,7 +881,6 @@ test("the local HTTP bridge reloads official local editing attributes", async (c
             { attr: "blend-mode", type: "set", val: "multiply" },
             { attr: "hide-fill-on-export", type: "set", val: true },
             { attr: "hide-in-viewer", type: "set", val: true },
-            { attr: "masked-group", type: "set", val: true },
             { attr: "show-content", type: "set", val: false },
             {
               attr: "grids",
@@ -1194,37 +903,31 @@ test("the local HTTP bridge reloads official local editing attributes", async (c
     headers: { "content-type": "application/json" },
     method: "POST",
   });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, await response.clone().text());
 
   const reloaded = await fetch(`${service.url}/v1/workspace`).then((result) =>
     result.json(),
   );
   const node =
-    reloaded.entries["screens/roundtrip.json"].presentations[0].nodes
+    onlyScreen(reloaded).presentations[0].nodes
       .node_rectangle;
+  // Blend mode and viewer visibility are design; guides and export
+  // settings are editor state the package does not keep, and clipping
+  // (show-content) applies to boards, not to this rectangle.
   assert.deepEqual(
     {
       blendMode: node["blend-mode"],
       grids: node.grids,
       hideFillOnExport: node["hide-fill-on-export"],
       hideInViewer: node["hide-in-viewer"],
-      maskedGroup: node["masked-group"],
       showContent: node["show-content"],
     },
     {
       blendMode: "multiply",
-      grids: [
-        {
-          color: "#22d3ee",
-          display: true,
-          params: { size: 8 },
-          type: "square",
-        },
-      ],
-      hideFillOnExport: true,
+      grids: undefined,
+      hideFillOnExport: undefined,
       hideInViewer: true,
-      maskedGroup: true,
-      showContent: false,
+      showContent: undefined,
     },
   );
 });
@@ -1311,9 +1014,7 @@ test("the local HTTP bridge preserves a newly added node identity across commits
   });
   assert.equal(updated.status, 200);
 
-  const screen = JSON.parse(
-    await readFile(join(packagePath, "screens/roundtrip.json"), "utf8"),
-  );
+  const screen = await readModelEntry(packagePath, "screens/roundtrip.json");
   assert.equal(screen.presentations[0].nodes[nodeId].name, "Edited After Add");
 });
 
@@ -1353,62 +1054,9 @@ test("a Penpot page made in the App is a new canvas that persists across reloads
     method: "POST",
   });
   assert.equal(renamed.status, 200);
-  const manifest = JSON.parse(await readFile(join(packagePath, "manifest.json"), "utf8"));
+  const manifest = await readModelEntry(packagePath, "manifest.json");
   assert.equal(manifest.canvases.find(({ id }) => id === "cnv_77777777777747778777777777777777").name, "Renamed Page");
+  // A canvas without pages is declared in index.html.
+  assert.match(await readFile(join(packagePath, "index.html"), "utf8"), /<meta name="smallpen:canvas" content="Renamed Page">/);
 });
 
-test("the CLI applies the typed operation contract and inspects the result", async () => {
-  const packagePath = await copyFixture();
-  const opened = await openPackage(packagePath);
-  const batchPath = join(dirname(packagePath), "batch.json");
-  await writeFile(
-    batchPath,
-    JSON.stringify({
-      baseRevision: opened.revision,
-      batchId: "batch_cli_opacity",
-      operations: [
-        {
-          changes: { opacity: 0.25 },
-          nodeId: "node_rectangle",
-          presentationId: "pres_desktop",
-          screenId: "scr_roundtrip",
-          type: "update-presentation-node",
-        },
-      ],
-    }),
-  );
-
-  const applyResult = await runCli([
-    "advanced",
-    "apply",
-    packagePath,
-    "--batch",
-    batchPath,
-    "--json",
-  ]);
-  assert.equal(applyResult.code, 0, applyResult.stderr);
-  const applied = JSON.parse(applyResult.stdout);
-  assert.notEqual(applied.revision, opened.revision);
-
-  const screen = JSON.parse(
-    await readFile(join(packagePath, "screens/roundtrip.json"), "utf8"),
-  );
-  assert.equal(screen.presentations[0].nodes.node_rectangle.opacity, 0.25);
-
-  const validateResult = await runCli(["validate", packagePath, "--json"]);
-  assert.equal(validateResult.code, 0, validateResult.stderr);
-  assert.equal(JSON.parse(validateResult.stdout).status, "valid");
-
-  const inspectResult = await runCli([
-    "project",
-    "show",
-    packagePath,
-    "--full",
-    "--json",
-  ]);
-  assert.equal(inspectResult.code, 0, inspectResult.stderr);
-  const inspected = JSON.parse(inspectResult.stdout);
-  assert.equal(inspected.package.id, "pkg_roundtrip");
-  assert.equal(inspected.screens[0].presentations[0].nodeCount, 2);
-  assert.deepEqual(inspected.formatCapabilities, SMALLPEN_FORMAT_CAPABILITIES);
-});

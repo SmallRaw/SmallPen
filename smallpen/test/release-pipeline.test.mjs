@@ -318,17 +318,9 @@ test("the release smoke renders text and a WebP image with the CLI", async (t) =
     evidence.semanticTree &&
       JSON.stringify(evidence.semanticTree).includes("Smoke"),
   );
-  // Replies leave out IDs by default; the smoke must still bind the stored
-  // media id, or the image fill silently points at nothing.
+  // The image is a file in assets/ that the page places by its path.
   const smoke = join(temp, "render-smoke.smallpen");
-  const media = JSON.parse(
-    await readFile(join(smoke, "assets/assets.json"), "utf8"),
-  ).media.find(({ name }) => name === "Smoke");
-  const screen = JSON.parse(
-    await readFile(join(smoke, "screens/roundtrip.json"), "utf8"),
-  );
-  assert.match(media.id, /^media_/);
-  assert.deepEqual(screen.presentations[0].nodes.node_rectangle.fills, [
-    { mediaRef: media.id, type: "image" },
-  ]);
+  const page = await readFile(join(smoke, "pages", "Round Trip.html"), "utf8");
+  assert.match(page, /<img data-name="Smoke" src="\.\.\/assets\/smoke\.webp"/);
+  assert.ok(JSON.stringify(evidence.semanticTree).includes("Smoke text"));
 });

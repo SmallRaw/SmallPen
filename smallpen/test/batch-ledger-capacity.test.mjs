@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import test from "node:test";
 import { applyOperationBatch, batchHistoryPath, openPackage, readBatchHistory } from "@smallpen/local-package";
+import { onlyScreen } from "./helpers/named.mjs";
+import { seedLegacyIds } from "./helpers/named.mjs";
 
 const exec = promisify(execFile);
 const cli = new URL("../apps/cli/bin/smallpen.mjs", import.meta.url).pathname;
@@ -15,6 +17,7 @@ test("public writes keep a byte-bounded recent history with replay and changes i
   context.after(() => rm(root, { recursive: true, force: true }));
   const path = join(root, "example.smallpen");
   await cp(new URL("fixtures/roundtrip.smallpen", import.meta.url), path, { recursive: true });
+  await seedLegacyIds(path, "roundtrip");
   let revision = (await openPackage(path)).revision;
   const apply = async (batchId, operations) => {
     const batch = { batchId, baseRevision: revision, operations };
@@ -67,6 +70,7 @@ test("an oversized inverse cannot block a valid save or lose its retry receipt",
   context.after(() => rm(root, { recursive: true, force: true }));
   const path = join(root, "example.smallpen");
   await cp(new URL("fixtures/roundtrip.smallpen", import.meta.url), path, { recursive: true });
+  await seedLegacyIds(path, "roundtrip");
   const before = await openPackage(path);
   const content = "é".repeat(17 * 1024 * 1024);
   const created = await applyOperationBatch(path, { batchId: "content", baseRevision: before.revision, operations: [
@@ -86,7 +90,7 @@ test("an oversized inverse cannot block a valid save or lose its retry receipt",
   assert.ok(written.inverseBatch, "the immediate caller still receives its undo batch");
   const saved = await openPackage(path);
   assert.equal(saved.revision, written.revision);
-  assert.equal(saved.entries["screens/roundtrip.json"].presentations[0].nodes.node_content.text, "replacement");
+  assert.equal(onlyScreen(saved).presentations[0].nodes.node_content.text, "replacement");
   const receipt = JSON.parse(await readFile(ledgerPath, "utf8")).oversized;
   assert.equal(receipt.revision, written.revision);
   assert.equal(receipt.result.inverseBatch, undefined);
@@ -97,14 +101,12 @@ test("an oversized inverse cannot block a valid save or lose its retry receipt",
   assert.equal(replay.revision, written.revision);
   assert.equal(replay.history.status, "partial");
   assert.equal((await readBatchHistory(path)).at(-1).history.status, "partial");
-  const batchPath = join(root, "retry.json");
-  await writeFile(batchPath, JSON.stringify(batch));
-  const retry = JSON.parse((await exec(process.execPath, [cli, "advanced", "apply", path, "--batch", batchPath, "--json"])).stdout);
-  assert.equal(retry.alreadyApplied, true);
-  assert.equal(retry.history.replayRetained, true);
   const current = JSON.parse((await exec(process.execPath, [cli, "changes", path, "--since", written.revision, "--json"])).stdout);
   assert.equal(current.changeCount, 0);
   assert.equal(current.historyWindow[0].incompleteBatches, 1);
-  await assert.rejects(exec(process.execPath, [cli, "changes", path, "--since", created.revision, "--json"]),
-    error => JSON.parse(error.stdout).error.code === "batch_history_unavailable");
+  // changes compares remembered revisions, so a write whose undo batch was
+  // too large to keep still shows what it changed.
+  const since = JSON.parse((await exec(process.execPath, [cli, "changes", path, "--since", created.revision, "--json"])).stdout);
+  assert.equal(since.changeCount, 1);
+  assert.match(since.text, /Content/);
 });

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { openPackage } from "@smallpen/local-package";
-import { INIT_ANSWERS_EXAMPLE } from "../apps/cli/bin/schema.mjs";
+import { pageHtml, writePackage } from "./helpers/named.mjs";
 import {
   componentSummary,
   componentSummaryText,
@@ -30,42 +30,19 @@ async function run(args, expected = 0) {
   return JSON.parse(stdout);
 }
 
-async function workspace() {
+// A package written as files: Home has only a mobile version.
+async function workspace(files) {
   const root = await mkdtemp(join(tmpdir(), "smallpen-review-"));
-  const answers = join(root, "answers.json");
-  await writeFile(answers, JSON.stringify(INIT_ANSWERS_EXAMPLE));
-  const initialized = await run([
-    "project",
-    "init", join(root, "acme"), "--answers", answers, "--layout", "single", "--confirm", "--json",
-  ]);
-  return { root, path: initialized.packages.package.path };
+  const path = join(root, "acme.smallpen");
+  await writePackage(path, files, { name: "Acme", packageId: "pkg_acme" });
+  const checked = await run(["check", path, "--json"]);
+  assert.equal(checked.ok, true, JSON.stringify(checked.issues));
+  return { root, path };
 }
 
-// Applies exact operations through `advanced apply`.
-async function apply(path, root, operations) {
-  const { revision } = await openPackage(path);
-  const name = `batch-${Math.random().toString(16).slice(2)}`;
-  const file = join(root, `${name}.json`);
-  await writeFile(file, JSON.stringify({ baseRevision: revision, batchId: name, operations }));
-  return run(["advanced", "apply", path, "--batch", file, "--json"]);
-}
-
-// Adds nodes to the Home page's mobile Presentation, under its root unless a
-// parent is named.
-function addNodes(path, root, nodes, parentId = "node_home_root") {
-  return apply(path, root, nodes.map((node) => ({
-    node, parentId, presentationId: "pres_home_mobile", screenId: "scr_home", type: "add-presentation-node",
-  })));
-}
-
-async function buttonSet(path) {
-  const snapshot = await openPackage(path);
-  for (const entry of Object.values(snapshot.entries)) {
-    const set = entry?.componentSets?.find(({ id }) => id === "cmp_button");
-    if (set) return structuredClone(set);
-  }
-  throw new Error("cmp_button not found");
-}
+const mobileHome = (body) => pageHtml(`<body class="w-[390px] h-[844px] bg-[#ffffff]">
+${body}
+</body>`, { title: "Home" });
 
 const button = {
   id: "cmp_button",
@@ -108,13 +85,13 @@ test("an outline names components and their variants, folds copies and marks lit
   };
   const outline = outlineTree(tree, projection, { components: () => button, ids: true });
   assert.match(outline, /^Toolbar · FRAME 400×60 · row layout \(3\) #node_root$/m);
-  assert.match(outline, /Button ×2 \(Size=md\) · 112×40: "Save" \(Style=primary\) #node_save; "Cancel" \(Style=ghost\) #node_cancel/);
+  assert.match(outline, /Button ×2 \(Size: md\) · 112×40: "Save" \(Style: primary\) #node_save; "Cancel" \(Style: ghost\) #node_cancel/);
   assert.match(outline, /Chip · RECTANGLE 20×20 · literal fill #node_chip/);
   assert.ok(outline.indexOf("Button ×2") < outline.indexOf("Chip"), "a flex row reads in its visual order");
   assert.doesNotMatch(outline, /Label/, "component internals stay folded");
   const named = outlineTree(tree, projection, { components: () => button });
   assert.doesNotMatch(named, /#node_/, "agents read names, not IDs");
-  assert.match(named, /Button ×2 \(Size=md\) · 112×40: Action Save "Save" \(Style=primary\); Action Cancel "Cancel" \(Style=ghost\)/);
+  assert.match(named, /Button ×2 \(Size: md\) · 112×40: Action Save "Save" \(Style: primary\); Action Cancel "Cancel" \(Style: ghost\)/);
 });
 
 test("a component summary says what each property changes", () => {
@@ -139,25 +116,22 @@ test("a component summary says what each property changes", () => {
   assert.deepEqual(style.values, ["primary", "ghost"]);
   assert.deepEqual(style.changes, ["Button: fill"]);
   assert.deepEqual(size.changes, ["Button: size"]);
-  assert.deepEqual(summary.mainVariant.selection, ["Style=primary", "Size=sm"]);
+  assert.deepEqual(summary.mainVariant.selection, ["Style: primary", "Size: sm"]);
   const text = componentSummaryText(summary);
-  assert.match(text, /^Button · component · 4 variants · main: Style=primary, Size=sm$/m);
+  assert.match(text, /^Button · component · 4 variants · main: Style: primary; Size: sm$/m);
   assert.match(text, /^ {2}Style: primary \/ ghost → changes Button: fill$/m);
 });
 
 test("validate skips sub-pixel text rounding, reads the paint under a text and says where each issue is", async () => {
-  const { root, path } = await workspace();
-  await addNodes(path, root, [{
-    id: "node_panel", type: "FRAME", name: "Panel", x: 0, y: 0, width: 400, height: 200,
-    fills: [{ type: "solid", color: "#ffffff" }], children: [],
-  }]);
-  await addNodes(path, root, [
-      { id: "node_badge", type: "RECTANGLE", name: "Badge", x: 10, y: 10, width: 60, height: 30, children: [], fills: [{ type: "solid", color: "#111111" }] },
-      { id: "node_badge_text", type: "TEXT", name: "Badge text", x: 10, y: 10, width: 60, height: 30, children: [], text: "OK", fills: [{ type: "solid", color: "#ffffff" }], textStyle: { fontSize: 14 } },
-      { id: "node_tight", type: "TEXT", name: "Tight", x: 10, y: 60, width: 200, height: 16, children: [], text: "Fits", fills: [{ type: "solid", color: "#111111" }], textStyle: { fontSize: 12, lineHeight: 1.4 } },
-      { id: "node_long", type: "TEXT", name: "Long", x: 10, y: 100, width: 40, height: 16, children: [], text: "A label far too long for this box", fills: [{ type: "solid", color: "#111111" }], textStyle: { fontSize: 12 } },
-  ], "node_panel");
-  const report = await run(["validate", path, "--page", "Home", "--json"]);
+  const { path } = await workspace({
+    "pages/Home.mobile.html": mobileHome(`  <div data-name="Panel" class="left-[0px] top-[0px] w-[400px] h-[200px] bg-[#ffffff]">
+    <div data-shape="rectangle" data-name="Badge" class="left-[10px] top-[10px] w-[60px] h-[30px] bg-[#111111]"></div>
+    <p data-name="Badge text" class="left-[10px] top-[10px] w-[60px] h-[30px] text-[#ffffff] text-[14px]">OK</p>
+    <p data-name="Tight" class="left-[10px] top-[60px] w-[200px] h-[16px] text-[#111111] text-[12px] leading-[1.4]">Fits</p>
+    <p data-name="Long" class="left-[10px] top-[100px] w-[40px] h-[16px] text-[#111111] text-[12px]">A label far too long for this box</p>
+  </div>`),
+  });
+  const report = (await run(["check", path, "--render", "--page", "Home", "--json"])).render;
   const issues = report.issues;
   assert.ok(issues.every(({ nodeId }) => nodeId === undefined), "issues name elements, not IDs");
   assert.ok(!issues.some(({ where }) => where === "Panel › Badge text"),
@@ -171,25 +145,17 @@ test("validate skips sub-pixel text rounding, reads the paint under a text and s
 });
 
 test("one problem inside a component is reported once with its copies counted", async () => {
-  const { root, path } = await workspace();
-  // Replies leave out ids; an apply batch reads the stored packageId.
-  const { packageId } = (await openPackage(path)).manifest;
-  const variant = (await buttonSet(path)).variants.find(({ id }) => id === "var_button_default");
-  variant.nodes[variant.rootId] = {
-    ...variant.nodes[variant.rootId], width: 120, height: 40, children: ["node_faint"],
-    fills: [{ type: "solid", color: "#ffffff" }], tokenBindings: {},
-  };
-  variant.nodes.node_faint = {
-    id: "node_faint", type: "TEXT", name: "Faint label", children: [], text: "Go",
-    x: 8, y: 8, width: 100, height: 24, fills: [{ type: "solid", color: "#bbbbbb" }], textStyle: { fontSize: 14 },
-  };
-  await apply(path, root, [{ type: "put-variant", componentId: "cmp_button", variant }]);
-  const copy = (id, x) => ({
-    id, type: "INSTANCE", name: `Copy ${id}`, children: [], width: 120, height: 40, x, y: 10,
-    instance: { component: { assetId: "cmp_button", packageId }, variant: {}, overrides: {} },
+  const { path } = await workspace({
+    "components/Button.html": `<sp-component name="Button">
+  <div class="w-[120px] h-[40px] bg-[#ffffff]">
+    <p data-name="Faint label" class="left-[8px] top-[8px] w-[100px] h-[24px] text-[#bbbbbb] text-[14px]">Go</p>
+  </div>
+</sp-component>
+`,
+    "pages/Home.mobile.html": mobileHome(["a", "b", "c"].map((name, index) =>
+      `  <sp-use component="Button" data-name="Copy ${name}" class="left-[${10 + index * 140}px] top-[10px]"></sp-use>`).join("\n")),
   });
-  await addNodes(path, root, [copy("node_a", 10), copy("node_b", 150), copy("node_c", 290)]);
-  const report = await run(["validate", path, "--page", "Home", "--json"]);
+  const report = (await run(["check", path, "--render", "--page", "Home", "--json"])).render;
   const faint = report.issues.filter(({ code }) => code === "low_text_contrast");
   assert.equal(faint.length, 1);
   assert.equal(faint[0].occurrences, 3);
@@ -197,49 +163,26 @@ test("one problem inside a component is reported once with its copies counted", 
   assert.match(faint[0].message, /fix it in the component/);
 });
 
-test("a write reminder names only the Token equal to a literal value", async () => {
-  const { root, path } = await workspace();
-  const tokens = await run(["token", "list", path, "--json"]);
-  const brand = tokens.items.find(({ token }) => token.type === "color");
-  assert.ok(brand, "the initialized package has a color Token");
-  const result = await addNodes(path, root, [{
-    id: "node_literal", type: "RECTANGLE", name: "Literal", children: [], x: 0, y: 0, width: 20, height: 20,
-    fills: [{ type: "solid", color: brand.value }],
-  }]);
-  const reminder = result.reuseReminders.find(({ code }) => code === "design_token_not_used");
-  assert.ok(reminder);
-  assert.ok(reminder.suggestions.length >= 1);
-  assert.ok(reminder.suggestions.every((suggestion) =>
-    suggestion.value === brand.value && Object.keys(suggestion).sort().join() === "path,reference,value"));
-});
-
 test("a mobile Presentation hints at its theme option and at another platform's variant", async () => {
-  const { root, path } = await workspace();
-  // Replies leave out ids; an apply batch reads the stored packageId.
-  const { packageId } = (await openPackage(path)).manifest;
-  await run(["token", "theme", "add", path, "--theme", "Viewport/Desktop", "--theme", "Viewport/Mobile", "--json"]);
-  const set = await buttonSet(path);
-  const [base] = set.variants;
-  set.axes = [{ id: "axis_platform", name: "Platform", domain: ["desktop", "mobile"], role: "configuration" }];
-  set.variants = ["desktop", "mobile"].map((platform) => ({
-    ...structuredClone(base), id: `var_button_${platform}`, selection: { axis_platform: platform },
-  }));
-  await apply(path, root, [{ type: "put-component-set", componentSet: set }]);
-  await addNodes(path, root, [{
-    id: "node_cta", type: "INSTANCE", name: "Call to action", children: [], width: 120, height: 40, x: 10, y: 10,
-    instance: { component: { assetId: "cmp_button", packageId }, variant: { axis_platform: "desktop" }, overrides: {} },
-  }]);
+  const { path } = await workspace({
+    "tokens.css": ':root {\n}\n\n:root[data-viewport="desktop"] {\n}\n\n:root[data-viewport="mobile"] {\n}\n',
+    "components/Button.html": `<sp-component name="Button" props="Platform: desktop | mobile">
+  <div class="w-[120px] h-[40px] bg-[#4f46e5]"></div>
+</sp-component>
+`,
+    "pages/Home.mobile.html": mobileHome('  <sp-use component="Button" props="Platform: desktop" data-name="Call to action" class="left-[10px] top-[10px]"></sp-use>'),
+  });
   // scr_home's only Presentation is the mobile one.
   const view = await run(["view", path, "--page", "Home", "--json"]);
   const codes = view.hints.map(({ code }) => code);
   assert.ok(codes.includes("platform_theme_available"));
-  assert.equal(view.hints.find(({ code }) => code === "platform_theme_available").theme, "Viewport/Mobile");
+  assert.equal(view.hints.find(({ code }) => code === "platform_theme_available").theme, "viewport/mobile");
   const mismatch = view.hints.find(({ code }) => code === "platform_variant_mismatch");
   assert.equal(mismatch.nodeId, undefined);
   assert.match(mismatch.where, /(^|› )Call to action$/);
   assert.equal(view.revision, (await openPackage(path)).revision, "view says which revision it read");
-  assert.match(mismatch.message, /Platform=desktop.*Platform=mobile/);
-  const report = await run(["validate", path, "--page", "Home", "--theme", "Viewport/Mobile", "--json"]);
+  assert.match(mismatch.message, /Platform: desktop.*Platform: mobile/);
+  const report = (await run(["check", path, "--render", "--page", "Home", "--theme", "viewport/mobile", "--json"])).render;
   assert.ok(!(report.hints ?? []).some(({ code }) => code === "platform_theme_available"),
     "no theme hint once the option is selected");
   assert.ok(report.hints.some(({ code }) => code === "platform_variant_mismatch"));

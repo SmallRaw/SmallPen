@@ -42,9 +42,8 @@ export async function resolveDesignLayout(workspace, design, options = {}) {
       const requestedFont = issue.details.requestedFont;
       const availableFonts = ["Source Sans Pro (bundled)", ...imported.map(name => `${name} (imported)`)];
       return { ...issue, requestedFont, availableFonts,
-        message: `${issue.message}. Available fonts: ${availableFonts.join(", ")}. Import with smallpen asset font import, or use an available family.`,
-        nextOperations: [{ operation: "smallpen.import-font", argv: ["import-font", workspace.product.locator,
-          "--file", `<${requestedFont} .ttf|.otf|.woff file>`, "--family", requestedFont, "--weight", "<400|700|...>", "--json"] }],
+        message: `${issue.message}. Available fonts: ${availableFonts.join(", ")}. Put a ${requestedFont} TTF, OTF or WOFF file in assets/fonts/ and declare it with @font-face in tokens.css, or use an available family.`,
+        nextOperations: [{ operation: "smallpen.help", argv: ["help", "rules", "format"] }],
       };
     }) };
   return {
@@ -147,8 +146,17 @@ function variantChanges(left, right, changes = new Map()) {
     }
     for (const field of new Set([...Object.keys(before), ...Object.keys(after)])) {
       if (["id", "name", "children", "sourceNodeId", "touched"].includes(field)) continue;
-      if (JSON.stringify(before[field]) !== JSON.stringify(after[field]))
-        add(name, CHANGE_LABELS[field] ?? field);
+      if (JSON.stringify(before[field]) === JSON.stringify(after[field])) continue;
+      // A nested copy says what changed in it: its variant, its overrides
+      // (texts and styles), or the component it places.
+      if (field === "instance") {
+        const from = before.instance ?? {}, to = after.instance ?? {};
+        if (JSON.stringify(from.component) !== JSON.stringify(to.component)) add(name, "component");
+        if (JSON.stringify(from.variant) !== JSON.stringify(to.variant)) add(name, "nested variant");
+        if (JSON.stringify(from.overrides ?? {}) !== JSON.stringify(to.overrides ?? {})) add(name, "copy overrides");
+        continue;
+      }
+      add(name, CHANGE_LABELS[field] ?? field);
     }
   }
   return changes;
@@ -164,7 +172,7 @@ function changeLines(changes) {
 }
 
 export function axisLabel(axis, value) {
-  return `${axis.name}=${axis.labels?.[value] ?? value}`;
+  return `${axis.name}: ${axis.labels?.[value] ?? value}`;
 }
 
 // names: {token(reference) -> path, component(reference) -> name}, so the
@@ -238,7 +246,7 @@ export function componentSummary(component, names = {}) {
 // heading names what the structure below shows; by default the main variant.
 export function componentSummaryText(summary, components, heading = "Main variant structure:") {
   const lines = [
-    `${summary.name} · component · ${summary.variantCount} variant${summary.variantCount === 1 ? "" : "s"}${summary.mainVariant.selection.length ? ` · main: ${summary.mainVariant.selection.join(", ")}` : ""}`,
+    `${summary.name} · component · ${summary.variantCount} variant${summary.variantCount === 1 ? "" : "s"}${summary.mainVariant.selection.length ? ` · main: ${summary.mainVariant.selection.join("; ")}` : ""}`,
   ];
   for (const axis of summary.axes) {
     lines.push(`  ${axis.name}: ${axis.values.join(" / ")}${axis.changes.length ? ` → changes ${axis.changes.join("; ")}${axis.moreChanges ? `; +${axis.moreChanges} more` : ""}` : " → no visible change"}`);
@@ -450,7 +458,19 @@ function literalFields(raw) {
   return literal;
 }
 
-// An instance's variant as "Property=value" pairs, in property order.
+// Effects kept but not drawn (the App's eye button on a stroke, shadow or
+// blur), so the outline does not read as if they show.
+function hiddenEffects(raw) {
+  const list = (value) => (Array.isArray(value) ? value : value ? [value] : []);
+  const hidden = [];
+  if (list(raw.strokes).some((stroke) => stroke?.hidden === true)) hidden.push("stroke");
+  if (list(raw.shadow).some((layer) => layer?.hidden === true)) hidden.push("shadow");
+  if (raw.blur?.hidden === true) hidden.push("blur");
+  if (raw.backgroundBlur?.hidden === true) hidden.push("backdrop blur");
+  return hidden;
+}
+
+// An instance's variant as "Property: value" pairs, in property order.
 function variantPairs(selection, set) {
   if (!selection) return [];
   const axes = set?.axes ?? [];
@@ -458,7 +478,7 @@ function variantPairs(selection, set) {
     .map((axis) => [axis.id, axisLabel(axis, selection[axis.id])]);
   const rest = Object.entries(selection)
     .filter(([id]) => !axes.some((axis) => axis.id === id))
-    .map(([id, value]) => [id, `${id}=${value}`]);
+    .map(([id, value]) => [id, `${id}: ${value}`]);
   return [...known, ...rest];
 }
 
@@ -488,18 +508,23 @@ export function outlineTree(tree, projection, { full = false, components, ids = 
       // The element's own name first when it is not the component's, so
       // --element finds it: "Save button: Button (Style=primary)".
       const own = node.name && set?.name && node.name.trim().toLowerCase() !== set.name.trim().toLowerCase() ? `${node.name}: ` : "";
-      return `${own}${set?.name ?? reference.assetId}${pairs.length ? ` (${pairs.map(([, text]) => text).join(", ")})` : ""}${texts.length ? ` ${shortText(texts)}` : ""} · ${size(node)}${ids ? ` #${node.id}` : ""}`;
+      return `${own}${set?.name ?? reference.assetId}${pairs.length ? ` (${pairs.map(([, text]) => text).join("; ")})` : ""}${texts.length ? ` ${shortText(texts)}` : ""} · ${size(node)}${ids ? ` #${node.id}` : ""}`;
     }
     const children = node.children.filter(({ visible }) => visible).length;
+    // Hidden children are left out of the outline; say how many.
+    const hiddenChildren = node.children.length - children;
+    const more = hiddenChildren ? `, ${hiddenChildren} hidden` : "";
     const layout = raw.layout === "flex"
-      ? ` · ${raw["layout-flex-dir"]?.startsWith("column") ? "column" : "row"} layout (${children})`
+      ? ` · ${raw["layout-flex-dir"]?.startsWith("column") ? "column" : "row"} layout (${children}${more})`
       : raw.layout
-        ? ` · ${raw.layout} layout (${children})`
-        : children && node.type !== "TEXT"
-          ? ` · ${children} item${children === 1 ? "" : "s"}`
+        ? ` · ${raw.layout} layout (${children}${more})`
+        : (children || hiddenChildren) && node.type !== "TEXT"
+          ? ` · ${children} item${children === 1 ? "" : "s"}${hiddenChildren ? ` (+${hiddenChildren} hidden)` : ""}`
           : "";
     const literal = literalFields(raw);
-    return `${node.name} · ${node.type} ${size(node)}${layout}${node.text ? ` ${shortText([node.text])}` : ""}${literal.length ? ` · literal ${literal.join(",")}` : ""}${ids ? ` #${node.id}` : ""}`;
+    const hidden = hiddenEffects(raw);
+    const type = raw["masked-group"] === true ? "MASK" : node.type;
+    return `${node.name} · ${type} ${size(node)}${layout}${node.text ? ` ${shortText([node.text])}` : ""}${literal.length ? ` · literal ${literal.join(",")}` : ""}${hidden.length ? ` · hidden ${hidden.join(",")}` : ""}${ids ? ` #${node.id}` : ""}`;
   };
   const visit = (node, depth) => {
     if (!node.visible) return;
@@ -510,9 +535,10 @@ export function outlineTree(tree, projection, { full = false, components, ids = 
       return;
     // A flex line places its last stored child first: list children in the
     // order they appear.
+    // A grid puts its first child in its top layer too.
     const direction = raw.layout === "flex" ? raw["layout-flex-dir"] ?? "row" : null;
     const stored = node.children.filter(({ visible }) => visible);
-    const children = direction && !direction.endsWith("reverse") ? [...stored].reverse() : stored;
+    const children = (direction && !direction.endsWith("reverse")) || raw.layout === "grid" ? [...stored].reverse() : stored;
     for (let i = 0; i < children.length;) {
       const child = children[i];
       const ref = instanceReference(child, projection);
@@ -537,10 +563,10 @@ export function outlineTree(tree, projection, { full = false, components, ids = 
           const shown = ids
             ? (texts.length ? shortText(texts, 48) : item.name)
             : `${item.name}${texts.length ? ` ${shortText(texts, 48)}` : ""}`;
-          return `${shown}${own.length ? ` (${own.join(", ")})` : ""}${sizes.size > 1 ? ` ${size(item)}` : ""}${ids ? ` #${item.id}` : ""}`;
+          return `${shown}${own.length ? ` (${own.join("; ")})` : ""}${sizes.size > 1 ? ` ${size(item)}` : ""}${ids ? ` #${item.id}` : ""}`;
         });
         lines.push(
-          `${"  ".repeat(depth + 1)}${group[0].set?.name ?? ref.assetId} ×${end - i}${shared.length ? ` (${shared.map(([, text]) => text).join(", ")})` : ""}${sizes.size === 1 ? ` · ${[...sizes][0]}` : ""}: ${items.join("; ")}`,
+          `${"  ".repeat(depth + 1)}${group[0].set?.name ?? ref.assetId} ×${end - i}${shared.length ? ` (${shared.map(([, text]) => text).join("; ")})` : ""}${sizes.size === 1 ? ` · ${[...sizes][0]}` : ""}: ${items.join("; ")}`,
         );
       } else visit(child, depth + 1);
       i = end;
@@ -743,7 +769,7 @@ export async function validateDesign(workspace, design) {
         code: "text_missing_glyphs",
         severity: "warning",
         nodeId: node.id,
-        message: `The font has no glyphs for ${[...new Set(item.missingGlyphs)].slice(0, 6).join(" ")}; import a font that covers this language with asset font import and use it in the text style`,
+        message: `The font has no glyphs for ${[...new Set(item.missingGlyphs)].slice(0, 6).join(" ")}; put a font that covers this language in assets/fonts/, declare it with @font-face in tokens.css and use it in the text style`,
       });
     } else if (
       // Sub-pixel line-height rounding is not an overflow; a clipped word
@@ -776,8 +802,28 @@ export async function validateDesign(workspace, design) {
       });
     }
   }
+  // The App draws the nearest weight a font has; say so when it differs.
+  // A missing font is its own problem, so its texts are left out here.
+  const substituted = new Set(metrics.diagnostics.filter((diagnostic) => diagnostic.code === "font_render_fallback").map((diagnostic) => diagnostic.nodeId));
+  for (const item of metrics.items) {
+    if (substituted.has(item.nodeId)) continue;
+    const node = nodes[item.nodeId];
+    const wanted = Number(node?.textStyle?.fontWeight ?? 400);
+    const faces = (design.render?.fontRequests ?? []).filter((face) => face.nodeId === item.nodeId && !face.isFallback);
+    if (!faces.length || faces.some((face) => Number(face.weight) === wanted)) continue;
+    issues.push({
+      code: "font_weight_substituted",
+      severity: "warning",
+      nodeId: item.nodeId,
+      family: faces[0].family,
+      requestedWeight: wanted,
+      drawnWeight: Number(faces[0].weight),
+      message: `${faces[0].family} has no ${wanted} weight, so the App draws ${faces[0].weight}; use a weight the font has, or add the ${wanted} file in assets/fonts/ with @font-face`,
+    });
+  }
+  // A substituted font is still measured: text fit runs with the font drawn.
   for (const diagnostic of metrics.diagnostics)
-    skipped.push({ check: "text-fit", ...diagnostic });
+    if (diagnostic.code !== "font_render_fallback") skipped.push({ check: "text-fit", ...diagnostic });
   const measuredText = new Map(metrics.items.filter((item) => !item.missingGlyphs.length).map((item) => [item.nodeId, item]));
   // Where each node sits, by name, so an issue reads without its ID.
   const places = new Map();
@@ -839,6 +885,42 @@ export async function validateDesign(workspace, design) {
         message: "Node extends beyond the selected root",
         bounds: semantic.bounds,
       });
+    // A small control drawn only by its outline (an empty checkbox, a radio
+    // ring): WCAG asks 3:1 between that outline and what is under it.
+    const outline = (node.strokes ?? []).find((stroke) => !stroke.hidden && stroke.type !== "image" && /^#[0-9a-f]{6}/i.test(stroke.color ?? ""));
+    if (node.type !== "TEXT" && outline &&
+      semantic.bounds && semantic.bounds.width <= 48 && semantic.bounds.height <= 48 &&
+      ancestors.every((parent) => (parent.opacity ?? 1) === 1) && (outline.opacity ?? 1) === 1) {
+      let background = backdrop(semantic);
+      if (!background)
+        for (const ancestor of [...design.ancestors].reverse())
+          if (ancestor.fills?.length) {
+            background = solidColor(ancestor);
+            break;
+          }
+      const rgb = (hex) => [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16) / 255);
+      const contrast = (left, right) => {
+        const a = luminance(left), b = luminance(right);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      };
+      // Its fill, if any, is the colour of what is under it: only the
+      // outline shows the control.
+      const visibleFills = (node.fills ?? []).filter((fill) => !fill.hidden);
+      const fill = visibleFills.length ? solidColor(node) : undefined;
+      const outlineOnly = background && (!visibleFills.length || (fill && contrast(fill, background) < 1.1));
+      if (outlineOnly) {
+        const ratio = contrast(rgb(outline.color), background);
+        if (ratio < 3)
+          issues.push({
+            code: "low_ui_contrast",
+            severity: "warning",
+            nodeId: node.id,
+            ratio: Math.round(ratio * 100) / 100,
+            minimum: 3,
+            message: `This ${Math.round(semantic.bounds.width)}×${Math.round(semantic.bounds.height)} control is drawn only by its outline, at ${Math.round(ratio * 100) / 100}:1 against what is under it (3:1 needed to see it); darken or lighten the stroke`,
+          });
+      }
+    }
     if (node.type === "TEXT" && node.text) {
       const foreground = solidColor(node);
       let background = backdrop(semantic);
@@ -872,8 +954,7 @@ export async function validateDesign(workspace, design) {
             nodeId: node.id,
             ratio: Math.round(ratio * 100) / 100,
             minimum,
-            message:
-              "Text contrast below the large/normal text threshold against the solid paint under it",
+            message: `Text contrast ${Math.round(ratio * 100) / 100}:1 is below ${minimum}:1 against the solid paint under it; darken or lighten the text or its background`,
           });
       } else
         skipped.push({
@@ -912,6 +993,51 @@ export async function validateDesign(workspace, design) {
         });
       }
     }
+    // A stroke drawn outside or a shadow needs room past its element; a
+    // board that clips its content (the default) cuts what does not fit.
+    if (["FRAME", "COMPONENT"].includes(node.type) && node["show-content"] !== true)
+      for (const child of children) {
+        const raw = nodes[child.id];
+        const box = child.bounds, frame = semantic.bounds;
+        if (!box || !frame || outside(box, frame)) continue;
+        const reach = { left: 0, right: 0, top: 0, bottom: 0 };
+        const why = [];
+        for (const stroke of raw?.strokes ?? []) {
+          if (stroke.hidden) continue;
+          const share = stroke.alignment === "outer" ? 1 : stroke.alignment === "center" ? 0.5 : 0;
+          if (!share) continue;
+          const side = (field) => (stroke[field] ?? stroke.width ?? 1) * share;
+          reach.left = Math.max(reach.left, side("widthLeft"));
+          reach.right = Math.max(reach.right, side("widthRight"));
+          reach.top = Math.max(reach.top, side("widthTop"));
+          reach.bottom = Math.max(reach.bottom, side("widthBottom"));
+          why.push(`its ${stroke.alignment === "outer" ? "outside" : "centred"} stroke`);
+        }
+        for (const shadow of Array.isArray(raw?.shadow) ? raw.shadow : []) {
+          const inset = shadow.inset === true || shadow.style === "inner-shadow";
+          if (shadow.hidden || inset) continue;
+          const x = Number(shadow.offsetX ?? shadow["offset-x"] ?? 0), y = Number(shadow.offsetY ?? shadow["offset-y"] ?? 0);
+          const spread = Number(shadow.blur ?? 0) + Number(shadow.spread ?? 0);
+          reach.left = Math.max(reach.left, spread - x);
+          reach.right = Math.max(reach.right, spread + x);
+          reach.top = Math.max(reach.top, spread - y);
+          reach.bottom = Math.max(reach.bottom, spread + y);
+          why.push("its shadow");
+        }
+        const cut = [
+          ["left", frame.x - (box.x - reach.left)],
+          ["right", box.x + box.width + reach.right - (frame.x + frame.width)],
+          ["top", frame.y - (box.y - reach.top)],
+          ["bottom", box.y + box.height + reach.bottom - (frame.y + frame.height)],
+        ].filter(([, amount]) => amount > 0.5);
+        if (cut.length)
+          issues.push({
+            code: "clipped_by_parent",
+            severity: "warning",
+            nodeId: child.id,
+            message: `${[...new Set(why)].join(" and ")} ${why.length > 1 ? "are" : "is"} cut off by ${semantic.name}, which clips its content (${cut.map(([side, amount]) => `${Math.ceil(amount)}px ${side}`).join(", ")}); give ${semantic.name} overflow-visible or room around ${child.name}`,
+          });
+      }
     for (let i = 0; i < children.length; i++)
       for (let j = i + 1; j < children.length; j++) {
         const a = children[i],
@@ -1000,4 +1126,61 @@ export async function validateDesign(workspace, design) {
     },
     issueCount: issues.length,
   };
+}
+
+// What each variant changes against the first, by part, with values and
+// the Tokens behind them: "Style: secondary — Button fill #e7e0ec
+// {color-surface-variant}; Label fill #6750a4 {color-primary}".
+export function variantDifferences(set, tokenPath) {
+  const main = set.variants[0];
+  const pathsOf = (variant) => {
+    const paths = new Map();
+    const visit = (id, path) => {
+      const node = variant.nodes[id];
+      if (!node) return;
+      paths.set(path, node);
+      for (const child of node.children ?? []) visit(child, path ? `${path} / ${variant.nodes[child]?.name}` : variant.nodes[child]?.name ?? "");
+    };
+    visit(variant.rootId, "");
+    return paths;
+  };
+  const token = (node, ...keys) => {
+    const reference = keys.map((key) => node.tokenBindings?.[key]).find(Boolean);
+    const path = reference && tokenPath(reference);
+    return path ? ` {${path}}` : "";
+  };
+  const paint = (list) => {
+    const first = Array.isArray(list) ? list.find((item) => !item.hidden) : undefined;
+    if (!first) return "none";
+    return `${first.color ?? first.type}${first.opacity !== undefined && first.opacity !== 1 ? ` ${Math.round(first.opacity * 100)}%` : ""}`;
+  };
+  const fields = [
+    ["fill", (node) => `${paint(node.fills)}${token(node, "fill", "fills.0")}`],
+    ["stroke", (node) => `${node.strokes?.length ? `${node.strokes[0].width ?? 1}px ${paint(node.strokes)}` : "none"}${token(node, "stroke", "strokes.0")}`],
+    ["opacity", (node) => `${node.opacity ?? 1}${token(node, "opacity")}`],
+    ["visible", (node) => (node.visible === false ? "hidden" : "shown")],
+    ["text", (node) => (node.type === "TEXT" ? `"${String(node.text ?? "").slice(0, 40)}"${token(node, "text")}` : "")],
+    ["font", (node) => (node.textStyle ? `${node.textStyle.fontWeight ?? ""} ${node.textStyle.fontSize ?? ""}px${token(node, "typography")}`.trim() : "")],
+    ["size", (node) => `${Math.round(node.width ?? 0)}×${Math.round(node.height ?? 0)}`],
+    ["radius", (node) => `${JSON.stringify(node.cornerRadius ?? 0)}${token(node, "cornerRadius")}`],
+    ["position", (node) => `${Math.round(node.x ?? 0)},${Math.round(node.y ?? 0)}`],
+  ];
+  const label = (variant) => set.axes.map((axis) => `${axis.name}: ${variant.selection?.[axis.id]}`).join("; ");
+  const base = pathsOf(main);
+  const lines = [`Variants: what each changes against ${label(main)}`];
+  for (const variant of set.variants.slice(1)) {
+    const parts = [];
+    for (const [path, node] of pathsOf(variant)) {
+      const before = base.get(path);
+      const name = path || set.name;
+      if (!before) {
+        parts.push(`${name} added`);
+        continue;
+      }
+      const changed = fields.filter(([, show]) => show(node) !== show(before)).map(([field, show]) => `${field} ${show(node)}`);
+      if (changed.length) parts.push(`${name} ${changed.join(", ")}`);
+    }
+    lines.push(`  ${label(variant)} — ${parts.join("; ") || "same as the first"}`);
+  }
+  return lines.join("\n");
 }

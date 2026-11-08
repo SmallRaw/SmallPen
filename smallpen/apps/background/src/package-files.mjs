@@ -1,25 +1,32 @@
 import { createHash } from "node:crypto";
-import { canonicalJSON } from "@smallpen/core";
 
 const cache = new WeakMap();
 
-// Only validated canonical entries and blobs are exported. No host paths,
-// journals, lock files, or caller-provided filesystem names are read here.
+// The package's own files: its HTML and CSS from memory, assets by their
+// recorded hash and size. Asset bytes load only when one is requested.
+// No host paths, journals, lock files, or caller-provided names are read.
 export function packageFiles(snapshot) {
   if (cache.has(snapshot)) return cache.get(snapshot);
-  const bytes = new Map([
-    ["manifest.json", Buffer.from(canonicalJSON(snapshot.manifest))],
-    ...Object.entries(snapshot.entries).map(([path, value]) => [
+  const text = new Map(
+    [...(snapshot.files ?? [])].map(([path, value]) => [path, Buffer.from(value)]),
+  );
+  const assets = new Map(snapshot.assets ?? []);
+  const files = [
+    ...[...text].map(([path, body]) => ({
       path,
-      Buffer.from(canonicalJSON(value)),
-    ]),
-    ...[...snapshot.blobs].map(([path, value]) => [path, Buffer.from(value)]),
-  ]);
-  const files = [...bytes].map(([path, body]) => ({
-    path,
-    sha256: createHash("sha256").update(body).digest("hex"),
-    size: body.length,
-  }));
+      sha256: createHash("sha256").update(body).digest("hex"),
+      size: body.length,
+    })),
+    ...[...assets].map(([path, facts]) => ({ path, sha256: facts.sha256, size: facts.byteLength })),
+  ].sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+  const bytes = {
+    get(path) {
+      if (text.has(path)) return text.get(path);
+      const facts = assets.get(path);
+      const blob = facts && snapshot.blobs.get(`blobs/${facts.sha256}`);
+      return blob ? Buffer.from(blob) : undefined;
+    },
+  };
   const result = { bytes, files };
   cache.set(snapshot, result);
   return result;

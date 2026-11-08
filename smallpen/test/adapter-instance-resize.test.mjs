@@ -13,6 +13,7 @@ import {
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
 
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SCREEN = "scr_home";
@@ -21,8 +22,8 @@ const PRESENTATION = "pres_home_mobile";
 // The init Package with a Chip set; `labelConstraint` gives the Chip label
 // a horizontal constraint in both variants.
 async function chipPackage(labelConstraint) {
-  const fixture = join(here, "fixtures", "variant-acme.smallpen");
-  const manifest = JSON.parse(await readFile(join(fixture, "manifest.json"), "utf8"));
+  const fixture = join(here, "fixtures", "model", "variant-acme");
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of listPackageEntries(manifest).entries) {
     const value = JSON.parse(await readFile(join(fixture, entry), "utf8"));
@@ -83,7 +84,7 @@ function resize(current, labelWidth) {
 }
 
 function chipOne(snapshot) {
-  return snapshot.entries["screens/first-design.json"].presentations[0].nodes
+  return onlyScreen(snapshot).presentations[0].nodes
     .node_chip_one;
 }
 

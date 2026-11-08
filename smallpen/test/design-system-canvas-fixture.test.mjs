@@ -38,32 +38,6 @@ function rowsByPath(previewResult) {
   return new Map(previewResult.tokens.map((row) => [row.path, row]));
 }
 
-test("canvas fixture enumerates exactly the device and mode domains", async () => {
-  const snapshot = await loadCanvas();
-  const enumeration = enumerateWorkbenchCombinations(snapshot);
-  assert.deepEqual(enumeration.diagnostics, []);
-  assert.deepEqual(
-    enumeration.domains.map((domain) => domain.domain),
-    ["device", "mode"],
-  );
-  const [device, mode] = enumeration.domains;
-  assert.deepEqual(
-    device.variants.map((variant) => variant.name),
-    ["Mobile", "Desktop"],
-  );
-  assert.deepEqual(
-    mode.variants.map((variant) => variant.name),
-    ["Light", "Dark"],
-  );
-  // Four combinations are constructible and each validates cleanly.
-  for (const combination of canvasCombinations()) {
-    const validation = await import("@smallpen/core").then(({ validateWorkbenchCombination }) =>
-      validateWorkbenchCombination(snapshot, combination),
-    );
-    assert.deepEqual(validation.diagnostics, []);
-  }
-});
-
 for (const combination of canvasCombinations()) {
   const key = combinationKey(combination);
   test(`combination ${key} matches the expected raw/resolved table`, async () => {

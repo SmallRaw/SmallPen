@@ -32,7 +32,6 @@ export async function buildSkills({
     join(root, "apps", "cli", "bin", "smallpen.mjs"),
     "schema",
     "command",
-    "project",
     "init",
     "--json",
     "--stdout",
@@ -52,7 +51,7 @@ export async function buildSkills({
       CLI_RULES.selection.precedence,
       CLI_RULES.selection.dimensions,
       CLI_RULES.selection.writes,
-      `Scoped checks: ${commandContract("validate").purpose}.`,
+      `Checks: ${commandContract("check").purpose}.`,
     ]
       .map((line) => `- ${line}`)
       .join("\n");

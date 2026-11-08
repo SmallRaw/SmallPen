@@ -2,6 +2,8 @@
 // agent sees in outlines, so reads never need IDs. Each finder fails with
 // the names it could have matched.
 import { fail } from "./errors.mjs";
+import { findComponentVariant } from "./components-domain.mjs";
+import { MAX_NODE_DEPTH } from "./internal.mjs";
 
 const same = (left, right) =>
   String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
@@ -31,6 +33,71 @@ function pickOne(find, text) {
 }
 
 const numberedNames = (names) => names.map((name, index) => `${name} [${index + 1}]`);
+
+// References are package-qualified: a local component may share an ID with
+// a library component without being the source of that library's copies.
+export function componentReferenceLookup(snapshot, { foundation, libraries = [] } = {}) {
+  return (reference) => {
+    const owner = [snapshot, foundation, ...libraries].find(candidate =>
+      candidate?.manifest.packageId === reference.packageId);
+    const set = owner?.domain.componentSets.get(reference.assetId);
+    if (!set) fail("missing_component", `Component not found: ${reference.assetId}`, { reference });
+    return { owner, set };
+  };
+}
+
+// A variant override selects axes independently; an outer copy may change
+// one axis while retaining axes selected on the nested copy itself.
+export function mergeInstanceOverrides(...tables) {
+  const result = {};
+  for (const table of tables)
+    for (const [path, value] of Object.entries(table ?? {}))
+      result[path] = path.endsWith(":variant") ? { ...result[path], ...value } : value;
+  return result;
+}
+
+// A read-only source tree with the same nested IDs used by Instance
+// overrides. Keep nested copies as nodes, with their selected content below
+// them, so name lookup and reverse lookup share one ancestry model.
+export function instanceSourceTree(instance, components) {
+  const nodes = {};
+  const stack = new Set();
+  const expand = (copy, prefix = "", extra = {}, depth = 0) => {
+    const { owner, set } = components(copy.component);
+    const key = `${owner.manifest.packageId}:${set.id}`;
+    if (stack.has(key)) fail("component_instance_cycle", `Component instance cycle includes ${set.id}`, { componentId: set.id });
+    if (depth >= MAX_NODE_DEPTH) fail("node_depth_exceeded", `Component instances are deeper than ${MAX_NODE_DEPTH} levels`, { maxDepth: MAX_NODE_DEPTH });
+    const variant = findComponentVariant(set, copy.variant ?? {}).variant;
+    if (!variant) fail("missing_variant", `${set.name} has no variant for this copy`, { componentId: set.id, selection: copy.variant });
+    stack.add(key);
+    const overrides = mergeInstanceOverrides(copy.overrides, extra);
+    const idOf = id => id === variant.rootId && prefix ? prefix : prefix ? `${prefix}__${id}` : id;
+    const visit = (sourceId) => {
+      const source = variant.nodes[sourceId];
+      const id = idOf(sourceId);
+      const fields = Object.fromEntries(Object.entries(overrides)
+        .filter(([path]) => path.startsWith(`${sourceId}:`))
+        .map(([path, value]) => [path.slice(sourceId.length + 1), value]));
+      let node = { ...structuredClone(source), ...structuredClone(fields), id };
+      if (source.instance) {
+        const nested = { ...structuredClone(source.instance), variant: { ...source.instance.variant, ...fields.variant } };
+        const nestedOverrides = Object.fromEntries(Object.entries(overrides)
+          .filter(([path]) => path.startsWith(`${sourceId}__`))
+          .map(([path, value]) => [path.slice(sourceId.length + 2), value]));
+        expand(nested, id, nestedOverrides, depth + 1);
+        node = { ...nodes[id], ...node, children: nodes[id].children, instance: nested };
+      } else {
+        node.children = (source.children ?? []).map(idOf);
+        for (const child of source.children ?? []) visit(child);
+      }
+      nodes[id] = node;
+    };
+    visit(variant.rootId);
+    stack.delete(key);
+    return idOf(variant.rootId);
+  };
+  return { nodes, rootId: expand(instance) };
+}
 
 function screens(snapshot) {
   return snapshot.manifest.entries.screens.map((entry) => snapshot.entries[entry]);
@@ -82,18 +149,21 @@ export function findComponent(snapshot, name, { foundation, libraries = [] } = {
     { components: matches.length ? numberedNames(matches.map(({ set }) => set.name)) : sets.map(({ set }) => set.name) });
 }
 
-// "Style=secondary, Size=sm", or bare values "secondary sm". Unnamed
-// properties keep the first variant's value.
-// Every variant the text names: unnamed properties match any value.
-export function findVariants(set, text) {
+// "Style: secondary; Size: sm" as in a file's props, "Style=secondary,
+// Size=sm", or bare values "secondary sm". Every variant the text names:
+// unnamed properties match any value.
+function findVariants(set, text) {
   if (text === undefined) return set.variants;
   const wanted = String(text)
-    .split(/[,;]|\s+(?=[^=\s]+=)/)
+    .split(/[,;]|\s+(?=[^=:\s]+\s*[=:])/)
     .map((item) => item.trim())
     .filter(Boolean)
-    .map((item) => {
-      const [left, right] = item.includes("=") ? item.split("=") : [undefined, item];
-      return { axis: left?.trim(), value: right.trim() };
+    .flatMap((item) => {
+      const at = item.search(/[=:]/);
+      if (at !== -1) return [{ axis: item.slice(0, at).trim(), value: item.slice(at + 1).trim() }];
+      // Bare values: "secondary md" is two unless one value has a space.
+      const whole = set.axes.some((axis) => axis.domain.some((value) => same(value, item)));
+      return (whole ? [item] : item.split(/\s+/)).map((value) => ({ axis: undefined, value }));
     });
   const labels = set.variants.map((variant) => variantLabel(set, variant));
   const resolved = wanted.map(({ axis, value }) => {
@@ -102,10 +172,10 @@ export function findVariants(set, text) {
         ? candidate.domain.some((item) => same(item, value))
         : same(candidate.name, axis));
     if (candidates.length !== 1)
-      fail("unknown_variant", `${set.name} has no ${axis ? `${axis}=${value}` : value}`, { variants: labels });
+      fail("unknown_variant", `${set.name} has no ${axis ? `${axis}: ${value}` : value}`, { variants: labels });
     const option = candidates[0].domain.find((item) => same(item, value));
     if (option === undefined)
-      fail("unknown_variant", `${set.name} has no ${candidates[0].name}=${value}`, { variants: labels });
+      fail("unknown_variant", `${set.name} has no ${candidates[0].name}: ${value}`, { variants: labels });
     return [candidates[0].id, option];
   });
   const found = set.variants.filter((variant) => resolved.every(([axis, value]) => variant.selection?.[axis] === value));
@@ -125,14 +195,14 @@ export function findVariant(set, text) {
 }
 
 export function variantLabel(set, variant) {
-  return set.axes.map((axis) => `${axis.name}=${variant.selection?.[axis.id]}`).join(", ");
+  return set.axes.map((axis) => `${axis.name}: ${variant.selection?.[axis.id]}`).join("; ");
 }
 
 // "Top bar", or a path "Content / Top bar" when the name repeats. Path
 // parts are ancestors in order; when several elements match, the one whose
 // path ends with exactly those parents ("Content / Heading" is Heading
 // directly in Content) wins, then the one whose whole path it is.
-export function findElement(nodes, rootId, text, where) {
+export function findElement(nodes, rootId, text, where, { allowRoot = false } = {}) {
   const parent = new Map();
   for (const [id, node] of Object.entries(nodes))
     for (const child of node.children ?? []) parent.set(child, id);
@@ -170,6 +240,9 @@ export function findElement(nodes, rootId, text, where) {
   };
   const { matches, one } = pickOne(find, text);
   if (one) return one;
+  // Reads and field edits can name the root. Descendant paths keep their
+  // meaning; move and delete callers still exclude the root by default.
+  if (!matches.length && allowRoot && same(nodes[rootId]?.name, text)) return rootId;
   // Siblings stored under one name: only a number tells them apart.
   const siblings = matches.length > 1 && matches.every((id) => parent.get(id) === parent.get(matches[0]));
   fail(matches.length ? "ambiguous_element" : "unknown_element",
@@ -183,74 +256,19 @@ export function findElement(nodes, rootId, text, where) {
         ? numberedNames(matches.map((id) => chain(id).join(" / ")))
         : matches.length
           ? matches.slice(0, 40).map(uniquePath)
-          : Object.keys(nodes).filter((id) => id !== rootId).slice(0, 40).map((id) => chain(id).join(" / ")),
+          : Object.keys(nodes).filter((id) => id !== rootId || allowRoot).slice(0, 40).map((id) => id === rootId ? nodes[id].name : chain(id).join(" / ")),
     });
-}
-
-// "Tasks / List / Open" or "List / Card / Open": the longest leading part
-// that names a page, and the element path after it.
-// "Page / Element", or "Page / Copy / Element" for an element inside a copy
-// of a component: then nodeId is the copy and inside names the component's
-// element (sourcePath, its name and type). lookups find the component.
-export function findPageElement(snapshot, text, platform, lookups) {
-  const path = parts(text);
-  for (let cut = path.length - 1; cut >= 1; cut -= 1) {
-    const name = path.slice(0, cut).join(" / ");
-    const all = screens(snapshot);
-    const exact = all.filter((screen) => same(screen.name, name));
-    const matches = exact.length ? exact : all.filter((screen) => same(parts(screen.name).at(-1), name));
-    if (matches.length !== 1) continue;
-    const screen = matches[0];
-    const presentation = findPresentation(screen, platform);
-    const rest = path.slice(cut);
-    try {
-      const nodeId = findElement(presentation.nodes, presentation.rootId, rest.join(" / "), screen.name);
-      return { screen, presentation, nodeId };
-    } catch (error) {
-      if (error?.code !== "unknown_element" || !lookups) throw error;
-      const inside = findInsideCopy(snapshot, presentation, rest, screen.name, lookups);
-      if (!inside) throw error;
-      return { screen, presentation, nodeId: inside.copyId, inside };
-    }
-  }
-  fail("unknown_page", `${text} does not start with a page name: "Page / Element"`, {
-    pages: screens(snapshot).map((screen) => screen.name),
-  });
-}
-
-// "Copy / Element": the longest leading part that names a stored copy, then
-// the element in the variant that copy shows.
-function findInsideCopy(snapshot, presentation, rest, where, { foundation, libraries = [] }) {
-  for (let split = rest.length - 1; split >= 1; split -= 1) {
-    let copyId;
-    try {
-      copyId = findElement(presentation.nodes, presentation.rootId, rest.slice(0, split).join(" / "), where);
-    } catch {
-      continue;
-    }
-    const copy = presentation.nodes[copyId];
-    if (!copy.instance) continue;
-    const owner = [snapshot, foundation, ...libraries].find(candidate =>
-      candidate?.manifest.packageId === copy.instance.component.packageId);
-    const set = owner?.domain.componentSets.get(copy.instance.component.assetId);
-    if (!set) continue;
-    const variant = set.variants.find((candidate) =>
-      Object.entries(copy.instance.variant ?? {}).every(([axis, value]) => candidate.selection?.[axis] === value)) ?? set.variants[0];
-    const sourcePath = findElement(variant.nodes, variant.rootId, rest.slice(split).join(" / "), `${copy.name} (${set.name})`);
-    const element = variant.nodes[sourcePath];
-    return { copyId, sourcePath, name: element.name, type: element.type, component: set.name, path: [copy.name, element.name].join(" / ") };
-  }
-  return undefined;
 }
 
 // The shortest path that names an element on its page: "Open", or
 // "Card / Open" when another element is also named Open.
-export function elementPath(nodes, rootId, id) {
+export function elementPath(nodes, rootId, id, { full = false } = {}) {
   const parent = new Map();
   for (const [key, node] of Object.entries(nodes))
     for (const child of node.children ?? []) parent.set(child, key);
   const chain = [];
   for (let at = id; at !== undefined && at !== rootId; at = parent.get(at)) chain.unshift(nodes[at]?.name ?? at);
+  if (full) return chain.join(" / ");
   for (let length = 1; length <= chain.length; length += 1) {
     const candidate = chain.slice(-length).join(" / ");
     try {

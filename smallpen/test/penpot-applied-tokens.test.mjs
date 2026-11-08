@@ -4,10 +4,10 @@ import test from "node:test";
 import { penpotAppliedTokens } from "@smallpen/core";
 import { createWebWorkspaceSnapshot } from "../apps/background/src/web-projection.mjs";
 import { openPackage } from "@smallpen/local-package";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
+import { pageHtml, writePackage } from "./helpers/named.mjs";
 
 // The one translation from bindings to the attributes the App shows:
 // core computes it and the Background sends it with every node.
@@ -37,30 +37,23 @@ test("a Token of another package stays a value; names an older App stored still 
   assert.deepEqual(applied({ width: md }, { fill: "color.legacy" }), { fill: "color.legacy", width: "size.md" });
 });
 
-async function run(args) {
-  const child = spawn(process.execPath, [new URL("../apps/cli/bin/smallpen.mjs", import.meta.url).pathname, ...args], { stdio: ["ignore", "pipe", "pipe"] });
-  let stdout = "";
-  child.stdout.on("data", (chunk) => (stdout += chunk));
-  await new Promise((resolve) => child.once("close", resolve));
-  return JSON.parse(stdout);
-}
-
 test("the Background sends the applied Tokens with screen, variant and copy nodes", async () => {
   const root = await mkdtemp(join(tmpdir(), "smallpen-applied-"));
-  const path = (await run(["project", "init", join(root, "demo"), "--json"])).packagePath;
-  const file = async (name, value) => { const at = join(root, name); await writeFile(at, JSON.stringify(value)); return at; };
-  await run(["token", "set", path, "--intent", await file("t.json", { tokens: [{ name: "color.brand", type: "color", value: "#4f46e5" }] }), "--json"]);
-  await run(["component", "define", path, "--intent", await file("c.json", { name: "Chip", base: { width: 40, height: 20, fill: "{color.brand}" } }), "--json"]);
-  await run(["page", "draw", path, "--intent", await file("p.json", { page: "Board", children: [
-    { name: "Box", width: 40, height: 40, fill: "{color.brand}" },
-    { name: "Copy", use: "Chip" },
-  ] }), "--json"]);
+  const path = join(root, "demo.smallpen");
+  await writePackage(path, {
+    "tokens.css": ":root {\n  --color-brand: #4f46e5;\n}\n",
+    "components/components.html": '<sp-component name="Chip">\n  <div class="w-[40px] h-[20px] bg-brand"></div>\n</sp-component>\n',
+    "pages/Board.html": pageHtml(`<body class="w-[390px] h-[200px]">
+  <div data-name="Box" class="left-[0px] top-[0px] w-[40px] h-[40px] bg-brand"></div>
+  <sp-use component="Chip" data-name="Copy" class="left-[0px] top-[60px]"></sp-use>
+</body>`, { title: "Board" }),
+  });
   const snapshot = await createWebWorkspaceSnapshot(await openPackage(path));
   const screenEntry = snapshot.manifest.entries.screens.find((entry) => snapshot.entries[entry].name === "Board");
   const screenNodes = Object.values(snapshot.entries[screenEntry].presentations[0].nodes);
-  assert.equal(screenNodes.find(({ name }) => name === "Box").penpotAppliedTokens.fill, "color.brand");
-  assert.equal(screenNodes.find(({ id }) => id.includes("__") || id.endsWith("_copy"))?.penpotAppliedTokens?.fill, "color.brand",
+  assert.equal(screenNodes.find(({ name }) => name === "Box").penpotAppliedTokens.fill, "color-brand");
+  assert.equal(screenNodes.find(({ name }) => name === "Copy")?.penpotAppliedTokens?.fill, "color-brand",
     "a placed copy shows its source's Token");
   const variant = snapshot.entries[snapshot.manifest.entries.components[0]].componentSets[0].variants[0];
-  assert.equal(variant.nodes[variant.rootId].penpotAppliedTokens.fill, "color.brand");
+  assert.equal(variant.nodes[variant.rootId].penpotAppliedTokens.fill, "color-brand");
 });

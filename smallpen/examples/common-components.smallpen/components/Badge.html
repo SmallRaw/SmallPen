@@ -1,0 +1,11 @@
+<sp-component name="Badge" props="Tone: neutral | success | danger">
+  <div class="w-[108px] h-[32px] bg-surface-variant rounded-base">
+    <p data-name="Label" class="left-[12px] top-[7px] w-[90px] h-[19px] text-demo-muted type-demo-label">Pending</p>
+  </div>
+  <sp-variant when="Tone: success">
+    <p data-name="Label" class="text-demo-success">Active</p>
+  </sp-variant>
+  <sp-variant when="Tone: danger">
+    <p data-name="Label" class="text-demo-danger">Attention</p>
+  </sp-variant>
+</sp-component>

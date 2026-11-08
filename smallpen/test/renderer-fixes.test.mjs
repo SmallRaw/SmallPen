@@ -13,9 +13,10 @@ import {
   sha256Hex,
 } from "@smallpen/core";
 import { createEvidence } from "@smallpen/local-package";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 
 function crc32(bytes) {
   let crc = 0xffffffff;
@@ -137,9 +138,7 @@ function encodeTestGif(width, height, colorIndexAt, palette) {
 }
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -595,7 +594,7 @@ test("auto-height text grows the projected bounds and shows the whole sentence",
     `auto-height should grow the semantic bounds (got ${textEntry.bounds.height})`,
   );
   assert.equal(
-    product.entries["screens/roundtrip.json"].presentations[0].nodes.node_rectangle
+    onlyScreen(product).presentations[0].nodes.node_rectangle
       .height,
     70,
     "canonical height stays untouched",

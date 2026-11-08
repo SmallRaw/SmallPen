@@ -5,8 +5,6 @@ import { followedVariantOperations, SmallPenError } from "@smallpen/core";
 
 import { LocalPackageBackend } from "./local-package-backend.mjs";
 import {
-  localLibraryLocator,
-  MAX_LIBRARY_DECLARATIONS,
   resolveWorkspace,
 } from "./workspace.mjs";
 
@@ -219,9 +217,7 @@ export class LocalWorkspaceSession {
       snapshot: session.backend.snapshot,
       status: structuredClone(session.workspaceStatus),
       viewState: structuredClone(session.viewState),
-      workspace: structuredClone(
-        session.lastValidWorkspace ?? session.repairWorkspace,
-      ),
+      workspace: cloneWorkspace(session.lastValidWorkspace ?? session.repairWorkspace),
     };
   }
 
@@ -408,19 +404,6 @@ export class LocalWorkspaceSession {
     if (snapshot.manifest.role === "product") {
       const dependency = snapshot.manifest.dependencies[0];
       locators.push(join(dirname(snapshot.locator), dependency.path));
-    }
-    // Resolution never follows more declarations than this, so retrying
-    // the rest would only spend CPU on every Repair retry.
-    for (const library of (snapshot.manifest.libraries ?? []).slice(
-      0,
-      MAX_LIBRARY_DECLARATIONS,
-    )) {
-      if (library.source.type !== "local") continue;
-      try {
-        locators.push(localLibraryLocator(snapshot.locator, library.source));
-      } catch {
-        // Composite status exposes the invalid Library source for Repair.
-      }
     }
     for (const locator of locators) {
       if (this.#find(locator)) continue;
@@ -665,4 +648,29 @@ export class LocalWorkspaceSession {
   #emit(event) {
     for (const listener of this.#listeners) listener(event);
   }
+}
+
+// A copy of a workspace for callers. Snapshot blobs stay the same lazy
+// maps: structuredClone would turn them into plain maps holding only the
+// bytes read so far, and fonts or images not yet read would go missing.
+function cloneWorkspace(workspace) {
+  if (!workspace) return workspace;
+  const snapshots = [workspace.product, workspace.foundation, ...(workspace.libraries ?? [])].filter(
+    (snapshot) => snapshot?.blobs,
+  );
+  const blobs = new Map(snapshots.map((snapshot) => [snapshot, snapshot.blobs]));
+  for (const snapshot of blobs.keys()) snapshot.blobs = undefined;
+  let copy;
+  try {
+    copy = structuredClone(workspace);
+  } finally {
+    for (const [snapshot, map] of blobs) snapshot.blobs = map;
+  }
+  const restore = (cloned, original) => {
+    if (cloned && original?.blobs) cloned.blobs = original.blobs;
+  };
+  restore(copy.product, workspace.product);
+  restore(copy.foundation, workspace.foundation);
+  (copy.libraries ?? []).forEach((library, index) => restore(library, workspace.libraries[index]));
+  return copy;
 }

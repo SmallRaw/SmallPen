@@ -14,14 +14,13 @@ import {
   prepareOperationBatch,
   resolveEffectiveToken,
 } from "@smallpen/core";
+import { readModelEntry, tokenEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "design-system.smallpen");
+const fixture = join(here, "fixtures", "model", "design-system");
 
 async function fixtureValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -54,7 +53,7 @@ test("DSP-018-A: set-token-value writes the correct Cell", async () => {
     }],
   };
   const after = await prepareOperationBatch(before, batch);
-  const lib = after.snapshot.entries["tokens/tokens.json"];
+  const lib = tokenEntry(after.snapshot);
   const base = lib.sets.find((s) => s.name === "radius/md")
     ?.tokens.find((t) => t.id === "tok_radius_md_base");
   assert.equal(base.value, 12);
@@ -67,7 +66,7 @@ test("DSP-018-A: set-token-value writes the correct Cell", async () => {
 test("DSP-018-B: alias edit preserves expression and source chain", async () => {
   const before = await snapshot();
   // The fixture has an alias: radius.alias = "{base}" in set alias/demo.
-  const libBefore = before.entries["tokens/tokens.json"];
+  const libBefore = tokenEntry(before);
   const aliasBefore = libBefore.sets.find((s) => s.id === "tset_alias_demo")
     ?.tokens.find((t) => t.id === "tok_alias_demo_radius");
   assert.equal(aliasBefore.value, "{base}");
@@ -84,7 +83,7 @@ test("DSP-018-B: alias edit preserves expression and source chain", async () => 
     }],
   };
   const afterBase = await prepareOperationBatch(before, batchBase);
-  const libAfter = afterBase.snapshot.entries["tokens/tokens.json"];
+  const libAfter = tokenEntry(afterBase.snapshot);
   const base = libAfter.sets.find((s) => s.id === "tset_radius_md")
     ?.tokens.find((t) => t.id === "tok_radius_md_base");
   assert.equal(base.value, 16);
@@ -99,7 +98,7 @@ test("DSP-018-B: alias edit preserves expression and source chain", async () => 
 test("DSP-018-D: tokenId disambiguates same-name tokens across sets", async () => {
   const before = await snapshot();
   // "surface" exists in color/light, color/dark and color/archived.
-  const libBefore = before.entries["tokens/tokens.json"];
+  const libBefore = tokenEntry(before);
   const lightBefore = libBefore.sets.find((s) => s.id === "tset_color_light")
     ?.tokens.find((t) => t.id === "tok_color_light_surface");
   const darkBefore = libBefore.sets.find((s) => s.id === "tset_color_dark")
@@ -121,7 +120,7 @@ test("DSP-018-D: tokenId disambiguates same-name tokens across sets", async () =
     }],
   };
   const after = await prepareOperationBatch(before, batch);
-  const lib = after.snapshot.entries["tokens/tokens.json"];
+  const lib = tokenEntry(after.snapshot);
   const light = lib.sets.find((s) => s.id === "tset_color_light")
     ?.tokens.find((t) => t.id === "tok_color_light_surface");
   const dark = lib.sets.find((s) => s.id === "tset_color_dark")

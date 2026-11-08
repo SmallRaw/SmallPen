@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { applyOperationBatch, batchHistoryPath, defaultHistoryCacheRoot, openPackage, readBatchHistory } from "@smallpen/local-package";
+import { seedLegacyIds } from "./helpers/named.mjs";
 
 const fixture = new URL("fixtures/roundtrip.smallpen", import.meta.url);
 const cli = new URL("../apps/cli/bin/smallpen.mjs", import.meta.url).pathname;
@@ -16,6 +17,7 @@ async function example(context) {
   context.after(() => rm(root, { recursive: true, force: true }));
   const path = join(root, "example.smallpen");
   await cp(fixture, path, { recursive: true });
+  await seedLegacyIds(path, "roundtrip");
   const before = await openPackage(path);
   const batch = { batchId: "first", baseRevision: before.revision, operations: [{
     type: "update-presentation-node", screenId: "scr_roundtrip", presentationId: "pres_desktop",
@@ -49,25 +51,14 @@ test("legacy history migrates once without changing its design or losing retry i
   assert.equal(await readFile(cache, "utf8"), original);
   await assert.rejects(stat(`${path}.batches.json`), error => error.code === "ENOENT");
   assert.equal((await openPackage(path)).revision, result.revision);
-  const batchPath = join(root, "retry.json");
-  await writeFile(batchPath, JSON.stringify(batch));
-  const { stdout } = await exec(process.execPath, [cli, "advanced", "apply", path, "--batch", batchPath, "--json"]);
-  assert.equal(JSON.parse(stdout).alreadyApplied, true);
-});
-
-test("opening a legacy Package moves its bookkeeping out of the project", async context => {
-  const { path, result } = await example(context);
-  const cache = await batchHistoryPath(path);
-  await rename(cache, `${path}.batches.json`);
-  assert.equal((await openPackage(path)).revision, result.revision);
-  await assert.rejects(stat(`${path}.batches.json`), error => error.code === "ENOENT");
-  assert.equal((await readBatchHistory(path)).length, 1);
+  assert.equal((await applyOperationBatch(path, batch)).alreadyApplied, true);
 });
 
 test("package copies have separate caches while filesystem aliases share one", async context => {
   const { root, path, batch } = await example(context);
   const copy = join(root, "copy.smallpen"), alias = join(root, "alias.smallpen");
   await cp(fixture, copy, { recursive: true });
+  await seedLegacyIds(copy, "roundtrip");
   await applyOperationBatch(copy, { ...batch, operations: [{ ...batch.operations[0], changes: { opacity: 0.5 } }] });
   assert.notEqual(await batchHistoryPath(path), await batchHistoryPath(copy));
   await symlink(path, alias, process.platform === "win32" ? "junction" : "dir");

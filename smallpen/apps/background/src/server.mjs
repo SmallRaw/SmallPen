@@ -6,11 +6,8 @@ import { pipeline } from "node:stream";
 
 import {
   buildDesignSystemPage,
-  compileDraftMerge,
   createWorkspaceRuntime,
   designSystemPageOptions,
-  diffDrafts,
-  draftFromSnapshot,
   importTokens,
   projectEffectiveSnapshot,
   withCanvasPositions,
@@ -21,11 +18,7 @@ import {
 import {
   createBlankPackage,
   createEvidence,
-  importDraft,
-  localLibraryLocator,
   LocalWorkspaceSession,
-  openPackage,
-  openRemoteLibrary,
   resolveFontResource,
 } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
@@ -46,10 +39,6 @@ import {
   importDirectoryUpload,
   MAX_DIRECTORY_UPLOAD_BYTES,
 } from "./directory-upload.mjs";
-import {
-  importLibraryUpload,
-  MAX_LIBRARY_UPLOAD_BYTES,
-} from "./library-upload.mjs";
 import {
   createWebLibrarySnapshot,
   compactDesignSystemRefs,
@@ -169,25 +158,6 @@ function designSystemRefsForCombination(refs, combinationId) {
     specimenKeysByToken,
     specimens,
   };
-}
-
-function referencesPackage(snapshot, packageId) {
-  let found = false;
-  const visit = (value) => {
-    if (found || value === null || value === undefined) return;
-    if (Array.isArray(value)) {
-      for (const child of value) visit(child);
-      return;
-    }
-    if (typeof value !== "object") return;
-    if (value.packageId === packageId && typeof value.assetId === "string") {
-      found = true;
-      return;
-    }
-    for (const child of Object.values(value)) visit(child);
-  };
-  for (const entry of Object.values(snapshot.entries)) visit(entry);
-  return found;
 }
 
 function librarySummary(snapshot) {
@@ -831,96 +801,6 @@ export async function serveLocalPackage({
         });
         return;
       }
-      if (request.method === "POST" && route === "/v1/drafts/import") {
-        const kind = String(request.headers["x-smallpen-draft-kind"] ?? "");
-        let output;
-        try {
-          output = decodeURIComponent(
-            String(request.headers["x-smallpen-draft-output"] ?? ""),
-          );
-        } catch {
-          throw new SmallPenError(
-            "invalid_draft_path",
-            "Draft output header is not valid URI-encoded text",
-          );
-        }
-        if (output.length === 0 || output.length > 4096) {
-          throw new SmallPenError(
-            "invalid_draft_path",
-            "Draft output must contain 1 to 4096 characters",
-          );
-        }
-        const bytes = await readBytes(request, MAX_MEDIA_BYTES, {
-          emptyCode: "invalid_draft_input",
-          label: "Draft input",
-          tooLargeCode: "draft_input_too_large",
-        });
-        let html;
-        if (kind === "figma") {
-          try {
-            html = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-          } catch {
-            throw new SmallPenError(
-              "invalid_draft_input",
-              "Figma Draft input must be UTF-8 clipboard HTML",
-            );
-          }
-        }
-        const result = await importDraft({
-          ...(kind === "figma" ? { html } : { bytes }),
-          kind,
-          output,
-          packageId:
-            String(
-              request.headers["x-smallpen-draft-package-id"] ?? "",
-            ).trim() || "pkg_figma_draft",
-        });
-        const description = await workspace.open(result.output);
-        await application.recordPackage({
-          locator: description.snapshot.locator,
-          name: description.snapshot.manifest.name,
-          packageId: description.snapshot.manifest.packageId,
-          role: description.snapshot.manifest.role,
-        });
-        workspace.setActive(description.locator);
-        for (const item of workspace.packages) packageSessionId(item.locator);
-        writeJson(response, 201, {
-          ...result,
-          activeSessionId: packageSessionId(description.locator),
-          packages: workspace.packages.map(packageSummary),
-        });
-        return;
-      }
-      if (request.method === "POST" && route === "/v1/drafts/diff") {
-        const params = await readJson(request);
-        const before = packageBySessionId(params.beforeSessionId);
-        const after = packageBySessionId(params.afterSessionId);
-        writeJson(
-          response,
-          200,
-          diffDrafts(
-            draftFromSnapshot(before.snapshot),
-            draftFromSnapshot(after.snapshot),
-          ),
-        );
-        return;
-      }
-      if (request.method === "POST" && route === "/v1/drafts/compile") {
-        const params = await readJson(request);
-        const target = packageBySessionId(params.targetSessionId);
-        const draft = packageBySessionId(params.draftSessionId);
-        writeJson(
-          response,
-          200,
-          compileDraftMerge(
-            target.snapshot,
-            draftFromSnapshot(draft.snapshot),
-            params.selections,
-            { batchId: params.batchId },
-          ),
-        );
-        return;
-      }
       const packageAction =
         request.method === "POST"
           ? /^\/v1\/packages\/([a-f0-9-]{36})\/(activate|close)$/.exec(route)
@@ -1001,6 +881,20 @@ export async function serveLocalPackage({
         }
         return;
       }
+      // A package stands alone: the App's library actions are refused with
+      // a reason instead of a missing route.
+      if (
+        request.method === "POST" &&
+        ["/v1/libraries/link", "/v1/libraries/unlink", "/v1/libraries/refresh", "/v1/libraries/import-local"].includes(route)
+      ) {
+        writeJson(response, 422, {
+          error: {
+            code: "libraries_not_supported",
+            message: "A SmallPen package stands alone; copy the components and Tokens you need into its files",
+          },
+        });
+        return;
+      }
       if (request.method === "GET" && route === "/v1/libraries") {
         writeJson(response, 200, {
           libraries: librarySnapshots(description).map((snapshot) => ({
@@ -1023,141 +917,6 @@ export async function serveLocalPackage({
                 : undefined),
           })),
           warnings: description.status?.warnings ?? [],
-        });
-        return;
-      }
-      if (request.method === "POST" && route === "/v1/libraries/import-local") {
-        const contentType = request.headers["content-type"] ?? "";
-        if (!contentType.startsWith("multipart/form-data;")) {
-          throw new SmallPenError(
-            "invalid_content_type",
-            "Expected a directory upload.",
-          );
-        }
-        const bytes = await readBytes(
-          request,
-          MAX_LIBRARY_UPLOAD_BYTES + 1024 * 1024,
-          {
-            label: "library",
-            emptyCode: "empty_library_upload",
-            tooLargeCode: "library_too_large",
-          },
-        );
-        const form = await new Response(bytes, {
-          headers: { "content-type": contentType },
-        }).formData();
-        writeJson(response, 200, await importLibraryUpload(locator, form));
-        return;
-      }
-      if (request.method === "POST" && route === "/v1/libraries/link") {
-        const params = await readJson(request);
-        const source = params.source;
-        let library;
-        if (source?.type === "local" && typeof source.path === "string") {
-          library = await openPackage(localLibraryLocator(locator, source));
-        } else if (source?.type === "url" && typeof source.url === "string") {
-          library = await openRemoteLibrary(source.url, {
-            cacheRoot: libraryCacheRoot,
-            refresh: true,
-          });
-        } else {
-          throw new SmallPenError(
-            "invalid_library_source",
-            "Library source must be a local Package path or HTTP(S) URL",
-          );
-        }
-        if (
-          typeof params.packageId === "string" &&
-          params.packageId !== library.manifest.packageId
-        ) {
-          throw new SmallPenError(
-            "library_id_mismatch",
-            `Library Package id ${library.manifest.packageId} does not match expected ${params.packageId}`,
-            {
-              actualPackageId: library.manifest.packageId,
-              expectedPackageId: params.packageId,
-            },
-          );
-        }
-        const result = await workspace.commit(locator, {
-          baseRevision: backend.snapshot.revision,
-          batchId: `link-library-${randomUUID()}`,
-          operations: [
-            {
-              library: {
-                packageId: library.manifest.packageId,
-                source,
-              },
-              type: "put-library",
-            },
-          ],
-        });
-        // The commit opens a linked local Library in this session.
-        const updated = workspace.describe(locator);
-        writeJson(response, 200, {
-          ...result,
-          libraries: await webLibrarySnapshots(updated),
-          librarySources: updated.workspace?.librarySources ?? [],
-          warnings: updated.status?.warnings ?? [],
-        });
-        return;
-      }
-      if (request.method === "POST" && route === "/v1/libraries/unlink") {
-        const params = await readJson(request);
-        if (referencesPackage(backend.snapshot, params.packageId)) {
-          throw new SmallPenError(
-            "library_in_use",
-            `Library still has live references: ${params.packageId}`,
-            { packageId: params.packageId },
-          );
-        }
-        const result = await workspace.commit(locator, {
-          baseRevision: backend.snapshot.revision,
-          batchId: `unlink-library-${randomUUID()}`,
-          operations: [{ packageId: params.packageId, type: "remove-library" }],
-        });
-        const updated = workspace.describe(locator);
-        writeJson(response, 200, {
-          ...result,
-          libraries: await webLibrarySnapshots(updated),
-          librarySources: updated.workspace?.librarySources ?? [],
-          warnings: updated.status?.warnings ?? [],
-        });
-        return;
-      }
-      if (request.method === "POST" && route === "/v1/libraries/refresh") {
-        const params = await readJson(request);
-        const linked = backend.snapshot.manifest.libraries?.find(
-          ({ packageId }) => packageId === params.packageId,
-        );
-        if (!linked) {
-          throw new SmallPenError(
-            "missing_library",
-            `Library is not linked: ${params.packageId}`,
-          );
-        }
-        if (linked.source.type === "url") {
-          const refreshed = await openRemoteLibrary(linked.source.url, {
-            cacheRoot: libraryCacheRoot,
-            expectedPackageId: linked.packageId,
-            refresh: true,
-          });
-          if (refreshed.manifest.packageId !== linked.packageId) {
-            throw new SmallPenError(
-              "library_id_mismatch",
-              "Refreshed URL returned a different Library Package",
-              {
-                actualPackageId: refreshed.manifest.packageId,
-                expectedPackageId: linked.packageId,
-              },
-            );
-          }
-        }
-        const updated = await workspace.refresh(locator);
-        writeJson(response, 200, {
-          libraries: await webLibrarySnapshots(updated),
-          librarySources: updated.workspace?.librarySources ?? [],
-          warnings: updated.status?.warnings ?? [],
         });
         return;
       }

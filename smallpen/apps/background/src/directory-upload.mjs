@@ -53,58 +53,10 @@ export async function importDirectoryUpload(
       );
     }
   }
-  if (!form.get(`${root}/manifest.json`))
-    invalid(`Select the ${kind} directory containing manifest.json.`);
-  for (const [path, file] of files.filter(([path]) =>
-    path.endsWith("/manifest.json"),
-  )) {
-    let manifest;
-    try {
-      manifest = JSON.parse(await file.text());
-    } catch {
-      invalid(`The ${kind} manifest is not valid JSON.`);
-    }
-    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
-      invalid(`The ${kind} manifest is invalid.`);
-    if (
-      kind === "library" &&
-      (Object.keys(manifest.dependencies ?? {}).length ||
-        Object.keys(manifest.libraries ?? {}).length)
-    ) {
-      invalid("Import a self-contained library without external dependencies.");
-    }
-    // Product dependencies can be absent and open in the existing repair flow.
-    // Declared local paths, including nested Packages, must stay in this upload's
-    // isolated container and can never read other files on the host computer.
-    const sources = [
-      ...(Array.isArray(manifest.dependencies)
-        ? manifest.dependencies.map((value) => value?.path)
-        : []),
-      ...(Array.isArray(manifest.libraries)
-        ? manifest.libraries
-            .filter((value) => value?.source?.type === "local")
-            .map((value) => value.source.path)
-        : []),
-    ];
-    for (const source of sources) {
-      if (
-        typeof source !== "string" ||
-        !source ||
-        /[\\:\x00-\x1f]/.test(source) ||
-        posix.isAbsolute(source)
-      )
-        invalid(
-          "Local dependency paths must stay inside the uploaded directory.",
-        );
-      const destination = posix.normalize(
-        posix.join(posix.dirname(posix.dirname(path)), source),
-      );
-      if (destination === ".." || destination.startsWith("../"))
-        invalid(
-          "Local dependency paths must stay inside the uploaded directory.",
-        );
-    }
-  }
+  // An HTML package: index.html at the top of the selected directory. It
+  // is self-contained, so nothing it names can read files outside it.
+  if (!form.get(`${root}/index.html`))
+    invalid(`Select the ${kind} directory containing index.html.`);
   await mkdir(parent, { recursive: true, mode: 0o700 });
   const container = await mkdtemp(join(parent, `imported-${kind}-`));
   const target = join(

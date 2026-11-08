@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { watch } from "node:fs";
-import { lstat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
 import {
@@ -19,6 +18,7 @@ import {
   openPackage,
   updateFontFamily as updatePackageFontFamily,
 } from "./local-package.mjs";
+import { statPackageFiles } from "./html-store.mjs";
 
 const MAX_CHANGE_HISTORY = 200;
 const DEFAULT_TOKEN_ENTRY = "tokens/tokens.json";
@@ -27,40 +27,30 @@ const DEFAULT_TOKEN_ENTRY = "tokens/tokens.json";
 // contains a timestamp this recent is never trusted to skip a reload.
 const FINGERPRINT_SETTLE_MS = 2000;
 
-// A cheap stat-only fingerprint of the Package directory, its manifest, its
-// entries, its blob directory, and its blobs. Commits replace the whole
-// directory, and external edits change a file's size or timestamps, so an
-// unchanged fingerprint means a full reload would read the same content.
-async function packageFingerprint(packagePath, entries) {
-  const parts = [];
-  let newest = 0n;
-  for (const path of [
-    packagePath,
-    join(packagePath, "manifest.json"),
-    join(packagePath, "blobs"),
-    ...entries.map((entry) => join(packagePath, entry)),
-  ]) {
-    try {
-      const info = await lstat(path, { bigint: true });
-      parts.push(`${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`);
-      for (const time of [info.mtimeMs, info.ctimeMs]) {
-        if (time > newest) newest = time;
-      }
-    } catch (error) {
-      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") return undefined;
-      parts.push("-");
-    }
+// A cheap stat-only fingerprint of every file in the Package. Commits
+// replace the whole directory, and external edits add files or change a
+// file's size or timestamps, so an unchanged fingerprint means a full reload
+// would read the same content.
+async function packageFingerprint(packagePath) {
+  let stats;
+  try {
+    stats = await statPackageFiles(packagePath);
+  } catch {
+    return undefined;
   }
-  if (Date.now() - Number(newest) < FINGERPRINT_SETTLE_MS) return undefined;
+  const parts = [];
+  let newest = 0;
+  for (const [path, info] of stats) {
+    parts.push(`${path}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`);
+    newest = Math.max(newest, info.mtimeMs, info.ctimeMs);
+  }
+  if (Date.now() - newest < FINGERPRINT_SETTLE_MS) return undefined;
   return parts.join("|");
 }
 
-// Blobs are listed too: an in-place blob edit changes no entry or directory.
+// The package's own files, as read: an added or removed file changes it.
 function diskEntries(snapshot) {
-  return [
-    ...Object.values(snapshot.manifest.entries).flat(),
-    ...[...snapshot.blobs.keys()].sort(),
-  ];
+  return [...(snapshot.files?.keys() ?? []), ...(snapshot.assets?.keys() ?? [])].sort();
 }
 
 // Projects an in-memory default Token library into a Package that has none,
@@ -122,11 +112,11 @@ function changedStableIds(before, after, result) {
   }
 }
 
+// What changed on disk, by file path, and which ids the change touches.
 function externalChange(before, after) {
   const changedFiles = [];
   const affectedIds = new Set();
   if (!sameCanonical(before.manifest, after.manifest)) {
-    changedFiles.push("manifest.json");
     changedStableIds(before.manifest, after.manifest, affectedIds);
   }
   const entries = new Set([
@@ -135,11 +125,19 @@ function externalChange(before, after) {
   ]);
   for (const entry of [...entries].sort()) {
     if (sameCanonical(before.entries[entry], after.entries[entry])) continue;
-    changedFiles.push(entry);
     changedStableIds(before.entries[entry], after.entries[entry], affectedIds);
   }
-  for (const blob of new Set([...before.blobs.keys(), ...after.blobs.keys()])) {
-    if (before.blobs.has(blob) !== after.blobs.has(blob)) changedFiles.push(blob);
+  const beforeText = before.files ?? new Map();
+  const afterText = after.files ?? new Map();
+  for (const path of new Set([...beforeText.keys(), ...afterText.keys()])) {
+    const left = beforeText.get(path);
+    const right = afterText.get(path);
+    if (left === undefined || right === undefined || Buffer.compare(Buffer.from(left), Buffer.from(right)) !== 0) changedFiles.push(path);
+  }
+  const beforeAssets = before.assets ?? new Map();
+  const afterAssets = after.assets ?? new Map();
+  for (const path of new Set([...beforeAssets.keys(), ...afterAssets.keys()])) {
+    if (beforeAssets.get(path)?.sha256 !== afterAssets.get(path)?.sha256) changedFiles.push(path);
   }
   return {
     affectedIds: [...affectedIds].sort(),
@@ -362,7 +360,7 @@ export class LocalPackageBackend {
       // Stat before reading: a change that lands during the read alters the
       // next fingerprint, so it is never hidden behind this one.
       const entries = this.#diskEntries;
-      const fingerprint = await packageFingerprint(this.#packagePath, entries);
+      const fingerprint = await packageFingerprint(this.#packagePath);
       if (
         fingerprint !== undefined &&
         fingerprint === this.#fingerprint &&

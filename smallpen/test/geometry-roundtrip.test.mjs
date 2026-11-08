@@ -20,9 +20,10 @@ import {
 } from "@smallpen/core";
 import { createEvidence } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
+import { onlyScreen, readModelEntry } from "./helpers/named.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixture = join(here, "fixtures", "roundtrip.smallpen");
+const fixture = join(here, "fixtures", "model", "roundtrip");
 const COS30 = Math.sqrt(3) / 2;
 const addedPathRuntimeId = "abababab-abab-4bab-8bab-abababababab";
 const addedPathNodeId = "node_abababababab4bab8bababababababab";
@@ -155,9 +156,7 @@ const LINE_CONTENT = [
 ];
 
 async function geometryValues() {
-  const manifest = JSON.parse(
-    await readFile(join(fixture, "manifest.json"), "utf8"),
-  );
+  const manifest = await readModelEntry(fixture, "manifest.json");
   const { entries } = listPackageEntries(manifest);
   const values = new Map([["manifest.json", manifest]]);
   for (const entry of entries) {
@@ -181,7 +180,7 @@ function runtimeId(snapshot, nodeId) {
 }
 
 function nodesOf(snapshot) {
-  return snapshot.entries["screens/roundtrip.json"].presentations[0].nodes;
+  return onlyScreen(snapshot).presentations[0].nodes;
 }
 
 function placementOf(node) {
