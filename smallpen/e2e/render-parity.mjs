@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,10 +9,8 @@ import { fileURLToPath } from "node:url";
 import { serveLocalPackage } from "@smallpen/background";
 import {
   createEvidence,
-  importFontVariant,
   openPackage,
   renderAppProjection,
-  sfntToWoff,
 } from "@smallpen/local-package";
 import { servePenpotFrontend } from "@smallpen/web";
 
@@ -20,20 +18,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(join(root, "..", "frontend", "package.json"));
 const { chromium } = require("playwright");
 const { PNG } = createRequire(import.meta.url)("pngjs");
-
-const solid = (color) => [{ type: "solid", color }];
-const rect = (id, x, y, width, height, extra = {}) => ({
-  id,
-  name: id,
-  type: "RECTANGLE",
-  children: [],
-  x,
-  y,
-  width,
-  height,
-  fills: solid("#18181b"),
-  ...extra,
-});
 
 // Reuse a bundled outline but give four CJK codepoints an exact one-em
 // advance. This tests CJK line breaking without depending on system fonts.
@@ -115,132 +99,67 @@ function precisionFont(source) {
   return bytes;
 }
 
-// One contract scene exercises the shared semantics, rather than a page's styling.
-function nodes() {
-  const result = {
-    node_canvas: rect("node_canvas", 0, 0, 800, 600, {
-      name: "Render parity",
-      type: "FRAME",
-      fills: solid("#ffffff"),
-      children: [],
-    }),
-    node_opacity: rect("node_opacity", 24, 24, 80, 80, {
-      type: "FRAME",
-      opacity: 0.5,
-      children: ["node_white_mark"],
-    }),
-    node_white_mark: rect("node_white_mark", 20, 20, 40, 40, {
-      fills: solid("#ffffff"),
-    }),
-    node_nested: rect("node_nested", 128, 24, 80, 80, {
-      type: "FRAME",
-      opacity: 0.5,
-      children: ["node_nested_red"],
-    }),
-    node_nested_red: rect("node_nested_red", 20, 20, 40, 40, {
-      opacity: 0.5,
-      fills: solid("#ff0000"),
-    }),
-    node_alpha_hex: rect("node_alpha_hex", 232, 24, 80, 80, {
-      fills: solid("#18181b00"),
-    }),
-    node_alpha_rgba: rect("node_alpha_rgba", 336, 24, 80, 80, {
-      fills: [{ type: "solid", color: "rgba(255, 0, 0, 0.5)", opacity: 0.5 }],
-    }),
-    node_opacity_stroke: rect("node_opacity_stroke", 440, 24, 80, 80, {
-      opacity: 0.5,
-      strokes: [
-        { type: "solid", color: "#ffffff", width: 8, alignment: "inner" },
-      ],
-    }),
-    node_fill_row: rect("node_fill_row", 24, 360, 400, 100, {
-      type: "FRAME",
-      fills: [],
-      children: ["node_fill_control"],
-      layout: "flex",
-      "layout-flex-dir": "row",
-      "layout-align-items": "center",
-      "layout-padding": { p1: 12, p2: 12, p3: 12, p4: 12 },
-    }),
-    node_fill_control: rect("node_fill_control", 0, 0, 160, 44, {
-      type: "FRAME",
-      fills: solid("#ffffff"),
-      children: ["node_focus_outline"],
-      "layout-item-h-sizing": "fill",
-      "layout-item-v-sizing": "fix",
-      strokes: [
-        { type: "solid", color: "#d4d4d8", width: 1, alignment: "inner" },
-      ],
-    }),
-    node_focus_outline: rect("node_focus_outline", -4, -4, 168, 52, {
-      fills: [],
-      "layout-item-absolute": true,
-      "constraints-h": "leftright",
-      "constraints-v": "topbottom",
-      strokes: [
-        { type: "solid", color: "#71717a", width: 2, alignment: "inner" },
-      ],
-    }),
-    node_shadow_filled: rect("node_shadow_filled", 540, 380, 80, 40, {
-      fills: solid("#ffffff"),
-      shadow: [
-        { offsetX: 0, offsetY: 6, blur: 12, spread: 0, color: "#0000004d" },
-      ],
-    }),
-    node_shadow_negative: rect("node_shadow_negative", 660, 380, 80, 40, {
-      fills: solid("#ffffff"),
-      shadow: [
-        { offsetX: 0, offsetY: 18, blur: 0, spread: -6, color: "#00000066" },
-      ],
-    }),
-    node_measured_text: rect("node_measured_text", 24, 500, 240, 36, {
-      type: "TEXT",
-      text: "Measured without a source edit",
-      growType: "auto-height",
-      textStyle: {
-        fontFamily: "Source Sans Pro",
-        fontId: "sourcesanspro",
-        fontVariantId: "regular",
-        fontWeight: 400,
-        fontSize: 16,
-        lineHeight: 1.25,
-      },
-    }),
-  };
-  for (const [index, alignment] of ["inner", "center", "outer"].entries()) {
-    for (const radius of [0, 12]) {
-      const id = `node_stroke_${alignment}_${radius}`;
-      result[id] = rect(
-        id,
-        24 + index * 160,
-        144 + (radius ? 100 : 0),
-        120,
-        64,
-        {
-          cornerRadius: radius,
-          fills: [],
-          strokes: [
-            {
-              type: "solid",
-              color: "#18181b",
-              style: "solid",
-              alignment,
-              width: 2,
-              widthTop: 0,
-              widthBottom: 8,
-            },
-          ],
-        },
-      );
-    }
-  }
-  const descendants = new Set(
-    Object.values(result).flatMap((node) => node.children),
-  );
-  result.node_canvas.children = Object.keys(result).filter(
-    (id) => id !== "node_canvas" && !descendants.has(id),
-  );
-  return result;
+// One contract scene exercises the shared semantics, rather than a page's
+// styling, written as an agent writes a page. The page root is a frame
+// without paint that holds both boards at their canvas places: Render
+// parity at 0,0 and Precision boundary at x=1950.16, where texts at
+// x=2014.16 cross the f32 exponent boundary.
+const STROKES = ["inside", "center", "outside"].flatMap((alignment, index) =>
+  [0, 12].map((radius) =>
+    `    <div data-shape="rectangle" data-name="Stroke ${alignment} ${radius}" class="left-[${24 + index * 160}px] top-[${144 + (radius ? 100 : 0)}px] w-[120px] h-[64px] border-[2px] border-t-0 border-b-[8px] border-[#18181b] border-${alignment}${radius ? " rounded-[12px]" : ""}"></div>`));
+const PRECISION_TEXT = "text-[#18181b] font-[Precision_Source_Sans] text-[14px] font-[400] leading-[1.5]";
+const SCENE = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Parity</title>
+  <link rel="stylesheet" href="../tokens.css">
+</head>
+<body data-name="Parity scene" class="w-[2400px] h-[600px] bg-none">
+  <div data-name="Render parity" class="left-[0px] top-[0px] w-[800px] h-[600px] bg-[#ffffff]">
+    <div data-name="Opacity" class="left-[24px] top-[24px] w-[80px] h-[80px] bg-[#18181b] opacity-[0.5]">
+      <div data-shape="rectangle" data-name="White mark" class="left-[20px] top-[20px] w-[40px] h-[40px] bg-[#ffffff]"></div>
+    </div>
+    <div data-name="Nested" class="left-[128px] top-[24px] w-[80px] h-[80px] bg-[#18181b] opacity-[0.5]">
+      <div data-shape="rectangle" data-name="Nested red" class="left-[20px] top-[20px] w-[40px] h-[40px] bg-[#ff0000] opacity-[0.5]"></div>
+    </div>
+    <div data-shape="rectangle" data-name="Alpha hex" class="left-[232px] top-[24px] w-[80px] h-[80px] bg-[#18181b00]"></div>
+    <div data-shape="rectangle" data-name="Alpha fill" class="left-[336px] top-[24px] w-[80px] h-[80px] bg-[#ff000080]"></div>
+    <div data-shape="rectangle" data-name="Opacity stroke" class="left-[440px] top-[24px] w-[80px] h-[80px] bg-[#18181b] opacity-[0.5] border-[8px] border-[#ffffff]"></div>
+${STROKES.join("\n")}
+    <div data-name="Fill row" class="flex flex-row items-center p-[12px] left-[24px] top-[360px] w-[400px] h-[100px]">
+      <div data-name="Fill control" class="w-full h-[44px] bg-[#ffffff] border border-[#d4d4d8]">
+        <div data-shape="rectangle" data-name="Focus outline" class="left-[-4px] top-[-4px] w-[384px] h-[52px] pin-x-stretch pin-y-stretch border-[2px] border-[#71717a]"></div>
+      </div>
+    </div>
+    <div data-shape="rectangle" data-name="Shadow filled" class="left-[540px] top-[380px] w-[80px] h-[40px] bg-[#ffffff] shadow-[0_6px_12px_0_#0000004d]"></div>
+    <div data-shape="rectangle" data-name="Shadow negative" class="left-[660px] top-[380px] w-[80px] h-[40px] bg-[#ffffff] shadow-[0_18px_0_-6px_#00000066]"></div>
+    <p data-name="Measured text" class="left-[24px] top-[500px] w-[240px] text-[#18181b] text-[16px] font-[400] leading-[1.25]">Measured without a source edit</p>
+  </div>
+  <div data-name="Precision boundary" class="left-[1950.16px] top-[0px] w-[360px] h-[220px] bg-[#ffffff]">
+    <p data-name="Precision fit" class="left-[64px] top-[12px] w-[56px] ${PRECISION_TEXT}">保存配置</p>
+    <p data-name="Precision narrow" class="left-[64px] top-[84px] w-[54px] ${PRECISION_TEXT}">保存配置</p>
+    <p data-name="CJK across rich text runs" class="left-[64px] top-[156px] w-[54px] ${PRECISION_TEXT}"><span class="text-[#18181b]">保存</span><span class="text-[#18181a]">配置</span></p>
+  </div>
+</body>
+</html>
+`;
+
+// Both boards sit in the page's root board; open it in the layers panel
+// before selecting one.
+async function selectBoard(page, name) {
+  const toggle = page
+    .getByTestId("layer-row")
+    .filter({ hasText: "Parity scene" })
+    .first()
+    .getByTestId("toggle-content");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true")
+    await toggle.click();
+  await page
+    .getByTestId("layer-row")
+    .filter({ hasText: name })
+    .first()
+    .click();
 }
 
 async function stableScreenshot(page, clip) {
@@ -290,92 +209,46 @@ function compareGeometry(expectedBytes, actualBytes) {
 async function main() {
   const artifacts = await mkdtemp(join(tmpdir(), "smallpen-render-parity-"));
   const packagePath = join(artifacts, "contract.smallpen");
-  await cp(join(root, "test", "fixtures", "roundtrip.smallpen"), packagePath, {
-    recursive: true,
-  });
-  const screenPath = join(packagePath, "screens", "roundtrip.json");
-  const screen = JSON.parse(await readFile(screenPath, "utf8"));
-  screen.presentations[0].nodes = nodes();
-  const scene = screen.presentations[0];
-  scene.rootIds = ["node_canvas", "node_precision_root"];
-  scene.nodes.node_precision_root = rect(
-    "node_precision_root",
-    1950.16,
-    0,
-    360,
-    220,
-    {
-      type: "FRAME",
-      name: "Precision boundary",
-      fills: solid("#ffffff"),
-      children: [
-        "node_precision_fit",
-        "node_precision_narrow",
-        "node_precision_rich",
-      ],
-    },
-  );
-  for (const [id, y, width] of [
-    ["node_precision_fit", 12, 56],
-    ["node_precision_narrow", 84, 54],
-  ]) {
-    scene.nodes[id] = rect(id, 64, y, width, 57, {
-      type: "TEXT",
-      text: "保存配置",
-      growType: "auto-height",
-      textStyle: {
-        fontFamily: "Precision Source Sans",
-        fontId: "font_precision",
-        fontSize: 14,
-        fontWeight: 400,
-        lineHeight: 1.5,
-      },
-    });
-  }
-  scene.nodes.node_precision_rich = {
-    ...scene.nodes.node_precision_narrow,
-    id: "node_precision_rich",
-    name: "CJK across rich text runs",
-    y: 156,
-    textBlocks: [{ runs: [{ text: "保存" }, { text: "配置" }] }],
-  };
   // Embed the same face for all three renderers. Four one-em glyphs fit
-  // exactly in 56px; x=2014.16 crosses the f32 exponent boundary.
+  // exactly in 56px.
   const fonts = join(root, "..", "frontend", "resources", "public", "fonts");
   const precisionTtf = precisionFont(
     await readFile(join(fonts, "sourcesanspro-regular.ttf")),
   );
-  await importFontVariant(packagePath, {
-    family: "Precision Source Sans",
-    fontId: "font_precision",
-    id: "fvar_precision_regular",
-    name: "Regular",
-    style: "normal",
-    weight: 400,
-    files: {
-      ttf: { bytes: precisionTtf, mimeType: "font/ttf" },
-      woff: {
-        bytes: sfntToWoff(precisionTtf, "font/ttf"),
-        mimeType: "font/woff",
-      },
-    },
-  });
-  await writeFile(screenPath, JSON.stringify(screen, null, 2));
+  await mkdir(join(packagePath, "pages"), { recursive: true });
+  await mkdir(join(packagePath, "assets", "fonts"), { recursive: true });
+  await writeFile(join(packagePath, "assets", "fonts", "precision.ttf"), precisionTtf);
+  await writeFile(
+    join(packagePath, "index.html"),
+    '<!doctype html>\n<html>\n<head>\n  <meta charset="utf-8">\n  <title>Render parity</title>\n  <meta name="smallpen:package-id" content="pkg_render_parity">\n</head>\n<body></body>\n</html>\n',
+  );
+  await writeFile(
+    join(packagePath, "tokens.css"),
+    '@font-face {\n  font-family: "Precision Source Sans";\n  src: url(assets/fonts/precision.ttf);\n  font-weight: 400;\n  font-style: normal;\n}\n\n:root {\n}\n',
+  );
+  await writeFile(join(packagePath, "pages", "Parity.html"), SCENE);
   const product = await openPackage(packagePath);
   const evidence = await createEvidence(product, {
     selector: { viewFormat: "screenshot" },
   });
+  const { nodes: projected } = evidence.projection;
+  const idOf = (name) => {
+    const id = Object.keys(projected).find((key) => projected[key].name === name);
+    assert.ok(id, `the scene has ${name}`);
+    return id;
+  };
   evidence.render = await renderAppProjection(product, {
     ...evidence.projection,
-    rootId: "node_canvas",
+    rootId: idOf("Render parity"),
   });
-  const { nodes: projected } = evidence.projection;
-  assert.equal(projected.node_fill_control.width, 376);
-  assert.equal(projected.node_focus_outline.width, 384);
+  // The page states the outline's box, 4px outside the control that fills
+  // the row; laying out the page must keep both.
+  assert.equal(projected[idOf("Fill control")].width, 376);
+  assert.equal(projected[idOf("Focus outline")].width, 384);
   await writeFile(join(artifacts, "cli.png"), evidence.render.bytes);
   const cliPrecision = await renderAppProjection(product, {
     ...evidence.projection,
-    rootId: "node_precision_root",
+    rootId: idOf("Precision boundary"),
   });
   await writeFile(join(artifacts, "cli-precision.png"), cliPrecision.bytes);
 
@@ -412,11 +285,7 @@ async function main() {
         await page.getByText(/Enable WebGL/i).click();
         await page.locator("canvas#render").waitFor({ timeout: 60_000 });
       }
-      const row = page
-        .getByTestId("layer-row")
-        .filter({ hasText: "Render parity" })
-        .first();
-      await row.click();
+      await selectBoard(page, "Render parity");
       await page.keyboard.press("Shift+2");
       await page.keyboard.press("Shift+0");
       await page.waitForFunction(
@@ -452,11 +321,7 @@ async function main() {
         diff.meanMaxChannelError < 0.3,
         `${mode}: ${JSON.stringify(diff)}`,
       );
-      await page
-        .getByTestId("layer-row")
-        .filter({ hasText: "Precision boundary" })
-        .first()
-        .click();
+      await selectBoard(page, "Precision boundary");
       await page.keyboard.press("Shift+2");
       await page.keyboard.press("Shift+0");
       await page.waitForLoadState("networkidle");
