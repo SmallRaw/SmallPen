@@ -5,6 +5,7 @@
 
 import { formatGradient, formatLength, formatNumber, formatShadow, formatTracks, normalizeHex, tokenTypeOfName } from "./vocabulary.mjs";
 import { cellsByChild, explicitLines } from "./grid-cells.mjs";
+import { DEFAULT_FONT_SIZE } from "./style-slots.mjs";
 import { formatInteraction } from "./interactions.mjs";
 
 // Editor state the format does not keep (spec section 14): locks, export
@@ -18,7 +19,7 @@ const KNOWN_FIELDS = new Set([
   "text", "textStyle", "textBlocks", "growType", "opacity", "visible", "instance",
   "interactions", "mediaRef", "pathData", "shadow", "rotation", "flipX", "flipY",
   "blend-mode", "show-content", "hide-in-viewer", "constraints-h", "constraints-v", "blur", "backgroundBlur",
-  "masked-group",
+  "masked-group", "lint-ignore", "typography-overrides",
   "layout", "layout-flex-dir", "layout-wrap-type", "layout-align-items",
   "layout-justify-content", "layout-gap", "layout-padding", "layout-item-margin",
   "layout-item-h-sizing", "layout-item-v-sizing", "layout-item-min-w", "layout-item-max-w",
@@ -231,7 +232,8 @@ function checkFields(node, path) {
 
 function sizeClass(writer, axis, node, mode, ctx, info) {
   const prefix = axis === "width" ? "w" : "h";
-  if (mode === "fill") return writer.add(`${prefix}-full`);
+  // Filling is what the parent does by default on a stretched axis.
+  if (mode === "fill") return info.fillIsDefault ? undefined : writer.add(`${prefix}-full`);
   // A copy's size defaults to its component root's.
   const root = info.copyRoot;
   if (root) {
@@ -256,7 +258,16 @@ function sizeClass(writer, axis, node, mode, ctx, info) {
   return undefined;
 }
 
-export function textStyleClasses(writer, style, ctx, base = {}) {
+// A short multiple (1.5) stays a multiple; one that only px explain
+// (20px on 13px is 1.5385) is written as the px it came from.
+export function lineHeightText(ratio, size) {
+  const short = Math.abs(ratio * 1000 - Math.round(ratio * 1000)) < 1e-6;
+  const px = ratio * size;
+  if (!short && size > 0 && Math.abs(px - Math.round(px)) < 0.01) return `${Math.round(px)}px`;
+  return formatNumber(ratio);
+}
+
+export function textStyleClasses(writer, style, ctx, base = {}, overrides = []) {
   let typography;
   const typographyName = writer.bound("typography");
   if (typographyName) {
@@ -265,6 +276,8 @@ export function textStyleClasses(writer, style, ctx, base = {}) {
   }
   const same = (field) => {
     if (style[field] === undefined) return true;
+    // A field this text keeps as its own is written even when it equals the Token's.
+    if (typography && overrides.includes(field)) return false;
     if (typography && typography[field] !== undefined && typography[field] === style[field]) return true;
     return base[field] !== undefined && base[field] === style[field];
   };
@@ -273,7 +286,10 @@ export function textStyleClasses(writer, style, ctx, base = {}) {
   }
   if (!writer.token("text", "fontSize") && !same("fontSize")) writer.add(`text-${px(style.fontSize)}`);
   if (!writer.token("font", "fontWeight") && !same("fontWeight")) writer.add(`font-[${Number.parseInt(style.fontWeight, 10)}]`);
-  if (!same("lineHeight")) writer.add(`leading-[${formatNumber(Number(style.lineHeight))}]`);
+  if (!same("lineHeight")) {
+    const size = Number(style.fontSize ?? typography?.fontSize ?? base.fontSize ?? DEFAULT_FONT_SIZE);
+    writer.add(`leading-[${lineHeightText(Number(style.lineHeight), size)}]`);
+  }
   if (!writer.token("tracking", "letterSpacing") && !same("letterSpacing")) writer.add(`tracking-${px(style.letterSpacing)}`);
   const keywords = {
     textAlign: { left: "text-left", center: "text-center", right: "text-right", justify: "text-justify" },
@@ -458,8 +474,9 @@ export function nodeClasses(node, ctx, path, info) {
     writer.add("grid");
     if (node["layout-grid-dir"] === "column") writer.add("grid-flow-col");
     gridTrackClasses(writer, node);
-    if (node["layout-align-items"] && node["layout-align-items"] !== "start") writer.add(`items-${node["layout-align-items"]}`);
-    if (node["layout-justify-items"] && node["layout-justify-items"] !== "start") writer.add(`justify-items-${node["layout-justify-items"]}`);
+    // stretch is CSS's default; the App's own default is start.
+    if (node["layout-align-items"] !== "stretch") writer.add(`items-${node["layout-align-items"] ?? "start"}`);
+    if (node["layout-justify-items"] !== "stretch") writer.add(`justify-items-${node["layout-justify-items"] ?? "start"}`);
     if (node["layout-justify-content"] && node["layout-justify-content"] !== "stretch") writer.add(JUSTIFY[node["layout-justify-content"]]);
     if (node["layout-align-content"] && node["layout-align-content"] !== "stretch") writer.add(CONTENT[node["layout-align-content"]]);
   }
@@ -467,7 +484,7 @@ export function nodeClasses(node, ctx, path, info) {
     writer.add("flex");
     writer.add(DIRECTION[node["layout-flex-dir"] ?? "row"]);
     if (node["layout-wrap-type"] === "wrap") writer.add("flex-wrap");
-    if (node["layout-align-items"]) writer.add(`items-${node["layout-align-items"]}`);
+    if (node["layout-align-items"] !== "stretch") writer.add(`items-${node["layout-align-items"] ?? "start"}`);
     if (node["layout-justify-content"]) writer.add(JUSTIFY[node["layout-justify-content"]]);
     if (node["layout-align-content"] && node["layout-align-content"] !== "stretch") writer.add(CONTENT[node["layout-align-content"]]);
   }
@@ -501,9 +518,40 @@ export function nodeClasses(node, ctx, path, info) {
   writer.group = "absolute";
   if (absoluteItem) writer.add("absolute");
   writer.group = "position";
+  // In a board, a right/bottom constraint is right-*/bottom-*, and both
+  // sides are left-* right-* with the size following the parent, as for an
+  // absolute child in CSS.
+  const anchored = { width: false, height: false };
   if (!info.isRoot && (!inLayout || absoluteItem)) {
-    if (node.x) writer.add(`left-${px(node.x)}`);
-    if (node.y) writer.add(`top-${px(node.y)}`);
+    const sides = {};
+    for (const [axis, start, field, near, far, both, end] of [
+      ["width", "x", "constraints-h", "left", "right", "leftright", "right"],
+      ["height", "y", "constraints-v", "top", "bottom", "topbottom", "bottom"],
+    ]) {
+      const constraint = info.parentBoard && !node.tokenBindings?.[axis] ? node[field] : undefined;
+      const farValue = Number(info.parentSize?.[axis] ?? 0) - Number(node[start] ?? 0) - Number(node[axis] ?? 0);
+      if (constraint === both) {
+        sides[near] = Number(node[start] ?? 0);
+        sides[far] = farValue;
+        anchored[axis] = "both";
+      } else if (constraint === end) {
+        sides[far] = farValue;
+        anchored[axis] = "end";
+      } else if (node[start]) sides[near] = Number(node[start]);
+    }
+    const position = (value) => (value === 0 ? "0" : px(value));
+    const all = ["left", "right", "top", "bottom"];
+    if (all.every((side) => sides[side] !== undefined) && all.every((side) => sides[side] === sides.left)) {
+      writer.add(`inset-${position(sides.left)}`);
+    } else {
+      for (const [pair, near, far] of [["x", "left", "right"], ["y", "top", "bottom"]]) {
+        if (sides[near] !== undefined && sides[near] === sides[far]) writer.add(`inset-${pair}-${position(sides[near])}`);
+        else {
+          if (sides[near] !== undefined) writer.add(`${near}-${position(sides[near])}`);
+          if (sides[far] !== undefined) writer.add(`${far}-${position(sides[far])}`);
+        }
+      }
+    }
   }
 
   writer.group = "size";
@@ -511,10 +559,11 @@ export function nodeClasses(node, ctx, path, info) {
   const vMode = node["layout-item-v-sizing"] ?? "fix";
   if (type === "TEXT") {
     const grow = node.growType ?? "fixed";
-    if (hMode === "fill") writer.add("w-full");
-    else if (grow !== "auto-width") {
+    if (hMode === "fill") {
+      if (!info.stretch?.width) writer.add("w-full");
+    } else if (grow !== "auto-width" && anchored.width !== "both") {
       if (!writer.token("w", "width")) writer.add(`w-${px(node.width)}`);
-    }
+    } else if (grow === "auto-width" && info.stretch?.width) writer.add("w-fit");
     if (vMode === "fill") writer.add("h-full");
     else if (grow === "fixed" && hMode !== "fill") {
       if (!writer.token("h", "height")) writer.add(`h-${px(node.height)}`);
@@ -523,11 +572,18 @@ export function nodeClasses(node, ctx, path, info) {
     }
   } else {
     const canHug = isFlex || isGrid || type === "INSTANCE";
-    const sizing = { canHug, hugIsDefault: canHug, isPageRoot: info.isPageRoot, copyRoot: type === "INSTANCE" ? ctx.instanceRoot?.(node) : undefined };
+    // Hugging is the default unless the parent would stretch this axis.
+    const sizing = (axis) => ({
+      canHug,
+      hugIsDefault: canHug && !info.stretch?.[axis],
+      fillIsDefault: Boolean(info.stretch?.[axis]),
+      isPageRoot: info.isPageRoot,
+      copyRoot: type === "INSTANCE" ? ctx.instanceRoot?.(node) : undefined,
+    });
     // A mask group is as big as its mask, which the reader takes it from.
     const maskSize = type === "GROUP" && node["masked-group"] === true;
-    if (!(maskSize && hMode === "fix")) sizeClass(writer, "width", node, hMode === "fill" && !inLayout ? "fix" : hMode, ctx, sizing);
-    if (!(maskSize && vMode === "fix")) sizeClass(writer, "height", node, vMode === "fill" && !inLayout ? "fix" : vMode, ctx, sizing);
+    if (!(maskSize && hMode === "fix") && anchored.width !== "both") sizeClass(writer, "width", node, hMode === "fill" && !inLayout ? "fix" : hMode, ctx, sizing("width"));
+    if (!(maskSize && vMode === "fix") && anchored.height !== "both") sizeClass(writer, "height", node, vMode === "fill" && !inLayout ? "fix" : vMode, ctx, sizing("height"));
   }
   writer.group = "item";
   if (inLayout) itemClasses(writer, node, { grid: info.parentGrid });
@@ -558,10 +614,13 @@ export function nodeClasses(node, ctx, path, info) {
   writer.group = "pins";
   const pinX = { left: "pin-x-left", right: "pin-x-right", leftright: "pin-x-stretch", center: "pin-x-center", scale: "pin-x-scale" };
   const pinY = { top: "pin-y-top", bottom: "pin-y-bottom", topbottom: "pin-y-stretch", center: "pin-y-center", scale: "pin-y-scale" };
-  if (node["constraints-h"]) writer.add(pinX[node["constraints-h"]]);
-  if (node["constraints-v"]) writer.add(pinY[node["constraints-v"]]);
+  // Constraints written as right/bottom above need no pin.
+  if (node["constraints-h"] && !anchored.width) writer.add(pinX[node["constraints-h"]]);
+  if (node["constraints-v"] && !anchored.height) writer.add(pinY[node["constraints-v"]]);
   writer.group = "text";
-  if (type === "TEXT" && node.textStyle) textStyleClasses(writer, node.textStyle, ctx);
+  if (type === "TEXT" && node.textStyle) textStyleClasses(writer, node.textStyle, ctx, {}, node["typography-overrides"] ?? []);
+  // Spaces HTML would fold (leading, trailing, doubled, tabs) are kept.
+  if (type === "TEXT" && /(?:^|\n)[ \t]|[ \t](?:\n|$)|[ \t]{2}|\t/.test(String(node.text ?? ""))) writer.add("whitespace-pre-wrap");
   return writer;
 }
 
@@ -576,6 +635,25 @@ function defaultTextName(text) {
   return String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 40) || "Text";
 }
 
+// The axes on which the reader would stretch this child if it had no size
+// there, as CSS does (see decodeElement): so a child that hugs there says so.
+function stretchedAxes(node, parent, cell) {
+  const layout = parent?.layout;
+  if ((layout !== "flex" && layout !== "grid") || node["layout-item-absolute"] === true) return {};
+  if (node.type === "INSTANCE" || node["masked-group"] === true) return {};
+  const hugs = (axis) => parent[axis === "width" ? "layout-item-h-sizing" : "layout-item-v-sizing"] === "auto";
+  const axes = layout === "grid"
+    ? [["width", parent["layout-justify-items"], cell?.["justify-self"]], ["height", parent["layout-align-items"], cell?.["align-self"]]]
+    : [[String(parent["layout-flex-dir"] ?? "row").startsWith("row") ? "height" : "width", parent["layout-align-items"], node["layout-item-align-self"]]];
+  const result = {};
+  for (const [axis, items, self] of axes) {
+    if (node.type === "TEXT" && axis === "height") continue;
+    const own = self && self !== "auto" ? self : items;
+    if (own === "stretch" && !hugs(axis)) result[axis] = true;
+  }
+  return result;
+}
+
 // Encodes one tree. Returns an array of lines (without trailing newline).
 export function encodeTree(nodes, rootId, ctx, options) {
   const lines = [];
@@ -586,6 +664,9 @@ export function encodeTree(nodes, rootId, ctx, options) {
     const info = {
       parentFlex: parent?.layout === "flex",
       parentGrid: parent?.layout === "grid",
+      parentBoard: parent?.type === "FRAME" || parent?.type === "COMPONENT",
+      stretch: stretchedAxes(node, parent, parentCell?.cell),
+      parentSize: parent ? { width: parent.width, height: parent.height } : undefined,
       cell: parentCell?.cell,
       explicitLines: parentCell?.explicit,
       isRoot,
@@ -593,6 +674,8 @@ export function encodeTree(nodes, rootId, ctx, options) {
     };
     const writer = nodeClasses(node, ctx, `${path}`, info);
     const indent = "  ".repeat(depth + (options.baseDepth ?? 0));
+    // Muted warnings stay with their element: <!-- smallpen-ignore … -->.
+    if (Array.isArray(node["lint-ignore"]) && node["lint-ignore"].length) lines.push(`${indent}<!-- smallpen-ignore ${node["lint-ignore"].join(" ")} -->`);
     const attrs = [];
     const type = node.type;
     let tag;

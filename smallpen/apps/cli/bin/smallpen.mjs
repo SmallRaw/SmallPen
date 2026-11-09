@@ -71,6 +71,7 @@ import {
   inspectMedia,
   exportHtmlReview,
   openPackage,
+  overlayDraft,
   readBatchHistory,
   resolveWorkspace,
 } from "@smallpen/local-package";
@@ -2011,7 +2012,7 @@ async function renderReport(packagePath, args, { named: publicNames = true } = {
 
 const CHECK_HELP = `SmallPen check
 Check a package's HTML, tokens.css and rules; accept what passes, reject what fails
-Usage: smallpen check <package> [--revert [--file PATH]...] [--render [--page P [--platform X]] [--component C [--variant V]] [--theme G/O]...] [--json] [--help]
+Usage: smallpen check <package> [--revert [--file PATH]...] [--render [--page P [--platform X]] [--component C [--variant V]] [--theme G/O]...] [--draft FILE|- [--draft-name NAME]] [--json] [--help]
 Prints one line per problem: file:line:column severity code message, with the fix.
 Every passing check (and every App save) is the accepted version. When files
 have errors, the changed files that keep the package valid are accepted and
@@ -2023,12 +2024,213 @@ adds text overflow, bounds, overlap and contrast problems, by element name.
 A copied package has no accepted version until its first passing check.
 --render checks the default theme options (or --theme); --all-themes checks
 every combination of options. Errors exit with code 1; warnings and
-rendering problems do not.`;
+rendering problems do not.
+--draft FILE checks a page kept outside the package (a drafts/ folder beside
+it, or - for standard input) with the package's Tokens and components: its
+own problems only, never accepted or remembered; view and export draw it.`;
 
 // check is also the gate for an agent's direct edits: a passing check
 // accepts the files; with errors, the changed files that keep the package
 // valid are accepted and the ones with errors are rejected. --revert puts the
 // rejected files (or only those named by --file) back to the accepted version.
+// The rendering checks of check --render: under the default theme options,
+// --theme ones, or every combination (--all-themes), issues saying which.
+async function renderChecks(root, pass, allThemes) {
+  if (!allThemes) return renderReport(root, ["validate", root, ...pass]);
+  const groups = themeSettings(await tokenWorkspace(root, ["check", root])).groups ?? [];
+  let combos = [[]];
+  for (const group of groups) combos = combos.flatMap((combo) => group.options.map((option) => [...combo, option]));
+  const runs = [];
+  for (const combo of combos)
+    runs.push({ combo, report: await renderReport(root, ["validate", root, ...withoutOptions(pass, [], ["--theme"]), ...combo.flatMap((theme) => ["--theme", theme])]) });
+  const label = (combo) => combo.join(" + ") || "defaults";
+  return {
+    ...runs[0].report,
+    issueCount: runs.reduce((sum, run) => sum + (run.report.issueCount ?? 0), 0),
+    issues: runs.flatMap(({ combo, report }) => (report.issues ?? []).map((issue) => ({ ...issue, themes: label(combo) }))),
+    page: { hasMore: runs.some(({ report }) => report.page?.hasMore), total: runs.reduce((sum, run) => sum + (run.report.page?.total ?? 0), 0), offset: 0, limit: runs[0].report.page?.limit ?? 20 },
+    combinations: combos.map(label),
+    coverage: { ...runs[0].report.coverage, targetCount: runs.reduce((sum, run) => sum + (run.report.coverage?.targetCount ?? 0), 0) },
+  };
+}
+
+// Each line names the page version or variant, then the element.
+function renderIssueLines(render, again) {
+  return [
+    ...(render?.issues ?? []).map((issue) => {
+      const place = [issue.themes ? `[${issue.themes}] ${issue.target ?? ""}`.trim() : issue.target, issue.where].filter(Boolean).join(": ");
+      const examples = issue.examples?.length ? ` For example ${issue.examples.join("; ")}.` : "";
+      // Repeats folded into this line, by name.
+      const also = issue.alsoAt?.length ? ` Also at: ${issue.alsoAt.join("; ")}.` : "";
+      return `render ${place ? `${place} ` : ""}${issue.code} ${issue.message ?? ""}${examples}${also}`.replace(/\s+/g, " ").trim();
+    }),
+    ...(render?.page?.hasMore
+      ? [`${render.issues.length} of ${render.page.total} rendering problems shown; next: ${again} --offset ${render.page.offset + render.page.limit}${render.page.limit < 100 ? " --limit 100" : ""}`]
+      : []),
+  ].join("\n");
+}
+
+// ", 2 rendering problems under light (defaults; …)" for the summary line.
+function renderCountText(render, args) {
+  if (!render || render.skipped) return "";
+  const problems = render.issueCount ?? 0;
+  // Which theme options the render used: the defaults unless --theme or
+  // --all-themes says otherwise.
+  const checkedUnder = render.combinations
+    ? ` under ${render.combinations.length} theme combination${render.combinations.length === 1 ? "" : "s"}`
+    : render.selection?.themes?.length ? ` under ${render.selection.themes.join(" + ")}${flag(args, "--theme") ? "" : " (defaults; --all-themes checks every combination)"}` : "";
+  return `, ${problems} rendering problem${problems === 1 ? "" : "s"}${checkedUnder}`;
+}
+
+// --- Drafts ----------------------------------------------------------------
+
+// A draft is a page kept outside the package for review: a file such as
+// drafts/Login.html beside the package, or text on standard input (--draft -).
+// view, export and check draw it with the package's Tokens and components as
+// one more page; the package never holds it: no revision, no changes, no
+// accepted version. A draft that reads well becomes a page by moving its file
+// into pages/.
+const DRAFT_PLATFORM = /\.(mobile|tablet)$/;
+
+async function readStandardInput() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function prepareDraft(packagePath, args) {
+  const source = option(args, "--draft");
+  if (source === undefined) return undefined;
+  let text;
+  let name;
+  if (source === "-") {
+    text = await readStandardInput();
+    name = option(args, "--draft-name") ?? "Draft";
+  } else {
+    if (option(args, "--draft-name") !== undefined) {
+      throw new SmallPenError("conflicting_draft_name", "--draft-name names a draft read from standard input; a draft file is named by its file name");
+    }
+    if (!/\.html$/i.test(source)) {
+      throw new SmallPenError("invalid_draft", "A draft is a page file: NAME.html, or NAME.mobile.html for its mobile version");
+    }
+    try {
+      text = await readFile(resolve(source), "utf8");
+    } catch (error) {
+      throw new SmallPenError("missing_draft", `Unable to read the draft: ${error.message}`);
+    }
+    name = basename(source).replace(/\.html$/i, "");
+  }
+  if (!name.trim() || /[\\/]/.test(name)) {
+    throw new SmallPenError("invalid_draft_name", "A draft is named by one page name, without /");
+  }
+  let root;
+  try {
+    root = await realpath(resolve(packagePath));
+  } catch (error) {
+    throw new SmallPenError("invalid_package_path", `Unable to open Package: ${error.message}`);
+  }
+  const path = `pages/${name}.html`;
+  try {
+    await lstat(join(root, path));
+    throw new SmallPenError("draft_name_taken", `${path} is a page of the package; give the draft another name`);
+  } catch (error) {
+    if (error instanceof SmallPenError) throw error;
+  }
+  return {
+    root,
+    path,
+    file: source === "-" ? "<stdin>" : source,
+    page: name.replace(DRAFT_PLATFORM, ""),
+    platform: DRAFT_PLATFORM.exec(name)?.[1],
+    // Its stylesheet is the package's tokens.css, wherever the draft is kept.
+    bytes: Buffer.from(text.replace(/(<link\b[^>]*\bhref\s*=\s*["'])[^"']*tokens\.css(["'])/gi, "$1../tokens.css$2")),
+  };
+}
+
+// The package's check with the draft as one more page; the draft's problems
+// name the draft's own file.
+async function checkDraft(draft) {
+  const files = await readPackageFiles(draft.root);
+  files.set(draft.path, draft.bytes);
+  const result = await checkPackageFiles(files, {
+    locator: draft.root,
+    inspectMedia: (bytes) => {
+      try {
+        const info = inspectMediaBytes(bytes);
+        return { mimeType: info.mimeType, width: info.width, height: info.height };
+      } catch {
+        return undefined;
+      }
+    },
+  });
+  // The draft's own problems; the package's are counted, not listed: a draft
+  // review is about the draft.
+  const issues = result.issues
+    .filter((issue) => issue.file === draft.path)
+    .map((issue) => ({ ...issue, file: draft.file }));
+  return {
+    issues,
+    draftErrors: issues.filter((issue) => issue.severity === "error").length,
+    packageErrors: result.issues.filter((issue) => issue.file !== draft.path && issue.severity === "error").length,
+    warnings: issues.filter((issue) => issue.severity !== "error").length,
+  };
+}
+
+function draftLabel(draft) {
+  return { file: draft.file, page: draft.page, ...(draft.platform ? { platform: draft.platform } : {}) };
+}
+
+function printDraftCheck(draft, checked, render, args) {
+  const ok = checked.draftErrors === 0 && checked.packageErrors === 0;
+  if (flag(args, "--json")) {
+    printJson({
+      ok,
+      draft: draftLabel(draft),
+      errors: checked.draftErrors + checked.packageErrors,
+      warnings: checked.warnings,
+      issues: checked.issues,
+      ...(render ? { render: render.skipped ? render : Object.fromEntries(Object.entries(render).filter(([key]) => !["revision", "productRevision", "outputBytes"].includes(key))) } : {}),
+    });
+  } else {
+    const lines = checked.issues.length ? `${formatIssues(checked.issues)}\n` : "";
+    const renderLines = renderIssueLines(render, `smallpen check ${draft.root} --draft ${draft.file} --render`);
+    const counts = `${checked.draftErrors + checked.packageErrors} error${checked.draftErrors + checked.packageErrors === 1 ? "" : "s"}, ${checked.warnings} warning${checked.warnings === 1 ? "" : "s"}`;
+    const packageNote = checked.packageErrors ? `The package itself has ${checked.packageErrors} error${checked.packageErrors === 1 ? "" : "s"}: fix them first (smallpen check ${draft.root}).\n` : "";
+    process.stdout.write(`${lines}${renderLines ? `${renderLines}\n` : ""}${render?.skipped ? `render skipped: ${render.skipped}\n` : ""}${packageNote}${ok ? "ok" : "failed"}: draft ${draft.page}${draft.platform ? ` (${draft.platform})` : ""}: ${counts}${renderCountText(render, args)}; nothing was written to the package\n`);
+  }
+  if (!ok) process.exitCode = 1;
+  return ok;
+}
+
+// view and export of a draft: check it, lay it over the package, and name
+// it as the page to look at.
+async function draftArgs(packagePath, args) {
+  const draft = await prepareDraft(packagePath, args);
+  if (!draft) return { args };
+  const checked = await checkDraft(draft);
+  if (checked.draftErrors || checked.packageErrors) {
+    printDraftCheck(draft, checked, undefined, args);
+    return { stop: true };
+  }
+  await overlayDraft(draft.root, draft);
+  return {
+    draft,
+    args: [
+      ...withoutOptions(args, [], ["--draft", "--draft-name"]),
+      "--page",
+      draft.page,
+      ...(draft.platform ? ["--platform", draft.platform] : []),
+    ],
+  };
+}
+
+// A draft is not a revision of the package: replies say which draft they show.
+function withDraft(value, draft) {
+  if (!draft || !value || typeof value !== "object") return value;
+  const { revision: _revision, productRevision: _productRevision, ...rest } = value;
+  return { draft: draftLabel(draft), ...rest };
+}
+
 async function checkCommand(args) {
   if (flag(args, "--help")) {
     process.stdout.write(`${CHECK_HELP}\n`);
@@ -2037,6 +2239,27 @@ async function checkCommand(args) {
   const packagePath = args[1];
   if (!packagePath || packagePath.startsWith("--")) throw new SmallPenError("missing_package", "check needs a package path", { usage: "smallpen check <package> [--revert] [--render] [--json]" });
   args = validateCommandArguments("check", args);
+  const draft = await prepareDraft(packagePath, args);
+  if (draft) {
+    // A draft is checked, never accepted: the gate and the history are the
+    // package's.
+    const checked = await checkDraft(draft);
+    let render;
+    if (flag(args, "--render")) {
+      if (checked.draftErrors || checked.packageErrors) render = { skipped: "The files have errors; fix them before rendering" };
+      else {
+        await overlayDraft(draft.root, draft);
+        const pass = [
+          ...withoutOptions(args.slice(2), ["--render", "--json", "--all-themes"], ["--draft", "--draft-name", "--page", "--platform"]),
+          "--page", draft.page,
+          ...(draft.platform ? ["--platform", draft.platform] : []),
+        ];
+        render = await renderChecks(draft.root, pass, flag(args, "--all-themes"));
+      }
+    }
+    printDraftCheck(draft, checked, render, args);
+    return;
+  }
   let root;
   try {
     root = await realpath(resolve(packagePath));
@@ -2102,28 +2325,8 @@ async function checkCommand(args) {
   if (flag(args, "--render")) {
     const pass = withoutOptions(args.slice(2), ["--render", "--json", "--revert", "--all-themes"], ["--file"]);
     if (!result.ok) render = { skipped: "The files have errors; fix them before rendering" };
-    else if (!flag(args, "--all-themes")) render = await renderReport(root, ["validate", root, ...pass]);
-    else {
-      // Every combination of theme options, one render each; issues say
-      // which combination they come from.
-      const groups = themeSettings(await tokenWorkspace(root, ["check", root])).groups ?? [];
-      let combos = [[]];
-      for (const group of groups) combos = combos.flatMap((combo) => group.options.map((option) => [...combo, option]));
-      const runs = [];
-      for (const combo of combos)
-        runs.push({ combo, report: await renderReport(root, ["validate", root, ...withoutOptions(pass, [], ["--theme"]), ...combo.flatMap((theme) => ["--theme", theme])]) });
-      const label = (combo) => combo.join(" + ") || "defaults";
-      render = {
-        ...runs[0].report,
-        issueCount: runs.reduce((sum, run) => sum + (run.report.issueCount ?? 0), 0),
-        issues: runs.flatMap(({ combo, report }) => (report.issues ?? []).map((issue) => ({ ...issue, themes: label(combo) }))),
-        page: { hasMore: runs.some(({ report }) => report.page?.hasMore), total: runs.reduce((sum, run) => sum + (run.report.page?.total ?? 0), 0), offset: 0, limit: runs[0].report.page?.limit ?? 20 },
-        combinations: combos.map(label),
-        coverage: { ...runs[0].report.coverage, targetCount: runs.reduce((sum, run) => sum + (run.report.coverage?.targetCount ?? 0), 0) },
-      };
-    }
+    else render = await renderChecks(root, pass, flag(args, "--all-themes"));
   }
-  const renderProblems = render?.issueCount ?? 0;
   // Rendering problems are reported for the agent to look at; only file
   // and rule errors fail the check.
   const ok = result.ok;
@@ -2216,26 +2419,9 @@ async function checkCommand(args) {
       ...(rejected.length ? [`Run smallpen check ${root} --revert to put the rejected files back to the last accepted version (--file PATH reverts only that file).`] : []),
       ...(gateReply.note ? [gateReply.note] : []),
     ].join("\n");
-    // Each line names the page version or variant, then the element.
-    const renderLines = [
-      ...(render?.issues ?? []).map((issue) => {
-        const place = [issue.themes ? `[${issue.themes}] ${issue.target ?? ""}`.trim() : issue.target, issue.where].filter(Boolean).join(": ");
-        const examples = issue.examples?.length ? ` For example ${issue.examples.join("; ")}.` : "";
-        // Repeats folded into this line, by name.
-        const also = issue.alsoAt?.length ? ` Also at: ${issue.alsoAt.join("; ")}.` : "";
-        return `render ${place ? `${place} ` : ""}${issue.code} ${issue.message ?? ""}${examples}${also}`.replace(/\s+/g, " ").trim();
-      }),
-      ...(render?.page?.hasMore
-        ? [`${render.issues.length} of ${render.page.total} rendering problems shown; next: smallpen check ${root} --render --offset ${render.page.offset + render.page.limit}${render.page.limit < 100 ? " --limit 100" : ""}`]
-        : []),
-    ].join("\n");
+    const renderLines = renderIssueLines(render, `smallpen check ${root} --render`);
     const counts = `${result.errors} error${result.errors === 1 ? "" : "s"}, ${result.warnings} warning${result.warnings === 1 ? "" : "s"}`;
-    // Which theme options the render used: the defaults unless --theme or
-    // --all-themes says otherwise.
-    const checkedUnder = render?.combinations
-      ? ` under ${render.combinations.length} theme combination${render.combinations.length === 1 ? "" : "s"}`
-      : render?.selection?.themes?.length ? ` under ${render.selection.themes.join(" + ")}${flag(args, "--theme") ? "" : " (defaults; --all-themes checks every combination)"}` : "";
-    const renderCount = render && !render.skipped ? `, ${renderProblems} rendering problem${renderProblems === 1 ? "" : "s"}${checkedUnder}` : "";
+    const renderCount = renderCountText(render, args);
     // With rejected files, the counts are of what was accepted.
     const counted = rejected.length && gate?.summary ? gate.summary : result.summary;
     const scope = `${rejected.length && gate?.summary ? "accepted version: " : ""}${counted.pages} pages (${counted.pageVersions} versions), ${counted.components} components (${counted.variants} variants), ${counted.tokens} Tokens${counted.unusedTokens ? ` (${counted.unusedTokens} not used by any page or component; token list --unused names them)` : ""}`;
@@ -3150,11 +3336,18 @@ async function main(args) {
     printJson(await changesCommand(packagePath, args));
     return;
   }
+  // --draft: a page kept outside the package, drawn for review.
+  let draft;
+  if ((command === "view" || command === "export") && option(args, "--draft") !== undefined) {
+    const prepared = await draftArgs(packagePath, args);
+    if (prepared.stop) return;
+    ({ draft, args } = prepared);
+  }
   if (command === "view") {
     const looked = await lookCommand(packagePath, args);
     // Every read reports the revision it saw, for changes --since.
-    if (looked.revision === undefined) looked.revision = (await openPackage(packagePath)).revision;
-    printJson(looked);
+    if (!draft && looked.revision === undefined) looked.revision = (await openPackage(packagePath)).revision;
+    printJson(withDraft(looked, draft));
     return;
   }
   // --context Density=Compact names an axis and a value; the engines take
@@ -3163,7 +3356,7 @@ async function main(args) {
   // export and validate name their target as view does; the engines below
   // take the IDs those names stand for.
   if (command === "export" && option(args, "--format") === "html") {
-    printJson(await htmlExportCommand(packagePath, args));
+    printJson(withDraft(await htmlExportCommand(packagePath, args), draft));
     return;
   }
   if (command === "export" && args.includes("--canvas"))
@@ -3196,7 +3389,7 @@ async function main(args) {
   if (command === "export" && flag(args, "--evidence")) {
     if (option(args, "--format") !== "png")
       throw new SmallPenError("missing_png_format", "--evidence requires --format png");
-    printJson(await designCommand(packagePath, args));
+    printJson(withDraft(await designCommand(packagePath, args), draft));
     return;
   }
 
@@ -3211,7 +3404,7 @@ async function main(args) {
     );
     if (flag(args, "--design-system")) target.designSystem = true;
     const exported = await designCommand(packagePath, args);
-    printJson(Object.keys(target).length ? { target, ...exported } : exported);
+    printJson(withDraft(Object.keys(target).length ? { target, ...exported } : exported, draft));
     return;
   }
 

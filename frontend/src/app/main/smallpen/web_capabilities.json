@@ -118,6 +118,7 @@
     "points",
     "locked",
     "masked-group",
+    "typography-overrides",
     "mediaRef",
     "name",
     "opacity",

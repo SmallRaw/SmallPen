@@ -25,6 +25,16 @@
 
 (def text-typography-style-attrs (set ctt/text-typography-attrs))
 
+(def ^:private text-override-attr
+  "Text content attrs -> the typography token field a text may set itself."
+  {:font-family     :font-family
+   :font-id         :font-family
+   :font-variant-id :font-family
+   :font-size       :font-size
+   :font-weight     :font-weight
+   :letter-spacing  :letter-spacing
+   :line-height     :line-height})
+
 (defn- generate-unapply-tokens
   "When updating attributes that have a token applied, we must unapply it, because the value
   of the attribute now has been given directly, and does not come from the token.
@@ -34,11 +44,31 @@
         mod-obj-changes (->> (:redo-changes changes)
                              (filter #(= (:type %) :mod-obj)))
 
+        text-diff-attrs
+        (fn [shape]
+          (let [new-shape (get new-objects (:id shape))]
+            (ctt/get-diff-attrs (:content shape) (:content new-shape))))
+
+        ;; Editing a field of a text whose typography token is applied keeps
+        ;; the token: the field becomes the text's own (:typography-overrides)
+        ;; and the rest still follows the token, as CSS lets line-height beat
+        ;; a text style. A typography asset or an attr the overrides cannot
+        ;; hold replaces the whole style, so the token is unapplied as before.
+        text-overrides
+        (fn [shape]
+          (let [attrs  (text-diff-attrs shape)
+                fields (into #{} (keep text-override-attr) attrs)]
+            (when (and (contains? (get shape :applied-tokens) :typography)
+                       (seq fields)
+                       (empty? (set/intersection text-typography-style-attrs attrs))
+                       (every? #(or (text-override-attr %)
+                                    (not (contains? (cto/shape-attr->token-attrs %) :typography)))
+                               attrs))
+              fields)))
+
         text-changed-attrs
         (fn [shape]
-          (let [new-shape (get new-objects (:id shape))
-                attrs     (ctt/get-diff-attrs (:content shape) (:content new-shape))
-
+          (let [attrs     (text-diff-attrs shape)
                 attrs     (cond-> attrs
                             ;; Unapply token when applying typography asset style
                             (seq (set/intersection text-typography-style-attrs attrs))
@@ -61,10 +91,17 @@
                                    (not (zero? changed-item-index))
                                    (= (first (get shape attr))
                                       (first (get (get new-objects shape-id) attr)))))
+                text?       (and (cfh/text-shape? shape) (= attr :content))
+                overrides   (when (and text? (not later-item?)) (text-overrides shape))
                 token-attrs (when-not later-item?
-                              (if (and (cfh/text-shape? shape) (= attr :content))
-                                (text-changed-attrs shape)
-                                (cto/shape-attr->token-attrs attr changed-sub-attr)))]
+                              (cond-> (if text?
+                                        (text-changed-attrs shape)
+                                        (cto/shape-attr->token-attrs attr changed-sub-attr))
+                                (seq overrides) (disj :typography)))
+                changes     (if (seq overrides)
+                              (pcb/update-shapes changes [shape-id]
+                                                 #(update % :typography-overrides (fnil into #{}) overrides))
+                              changes)]
 
             (if (some #(contains? tokens %) token-attrs)
               (pcb/update-shapes changes [shape-id] #(cto/unapply-tokens-from-shape % token-attrs))

@@ -423,13 +423,34 @@ function buildLibrary(tokens, groups, scopeOrder, defaults, issues, idFor) {
 // theme "Mode" / "Dark") become tokens.css names the way gofmt formats code:
 // lowercase, dashes, the type prefix added when missing. Aliases follow the
 // rename; ids stay, so bindings and the identity map are unaffected.
+// Words a name may start with that already say its type: space.sm is
+// --spacing-sm, not --spacing-space-sm. Longest first.
+const TYPE_WORDS = {
+  spacing: ["spacing", "space"],
+  sizing: ["sizing", "size"],
+  "border-radius": ["border-radius", "radius", "rounded"],
+  "stroke-width": ["stroke-width", "border-width", "stroke", "border"],
+  color: ["colors", "color"],
+  typography: ["typography", "type"],
+  "font-family": ["font-family", "fonts", "font"],
+  "font-size": ["font-size", "text"],
+  "font-weight": ["font-weight", "weight"],
+  "letter-spacing": ["letter-spacing", "tracking"],
+  opacity: ["opacity"],
+  shadow: ["shadows", "shadow"],
+  string: ["string"],
+  boolean: ["boolean", "flag"],
+};
+
 export function cssTokenName(name, type) {
   const prefix = TYPE_PREFIX[type];
   if (!prefix) return name;
   if (TOKEN_NAME_PATTERN.test(name) && tokenTypeOfName(name)?.type === type) return name;
-  const slug = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "token";
+  // accentSoft is accent-soft: a capital starts a word, as dashes do.
+  const slug = String(name).replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "token";
   if (slug.startsWith(prefix) && tokenTypeOfName(slug)?.type === type) return slug;
-  return `${prefix}${slug}`;
+  const word = (TYPE_WORDS[type] ?? []).find((candidate) => slug.startsWith(`${candidate}-`) && slug.length > candidate.length + 1);
+  return `${prefix}${word ? slug.slice(word.length + 1) : slug}`;
 }
 
 export function cssThemeName(name) {

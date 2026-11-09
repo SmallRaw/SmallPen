@@ -1634,26 +1634,36 @@
                                      (dissoc dest-tokens' token-attr)
                                      (assoc dest-tokens' token-attr orig-token)))))
                              dest-tokens
-                             token-attrs)]
-    (if (= dest-tokens dest-tokens')
+                             token-attrs)
+        ;; The fields a text sets itself travel with its typography token.
+        dest-overrides  (get dest-shape :typography-overrides)
+        dest-overrides' (if (contains? token-attrs :typography)
+                          (when (contains? dest-tokens' :typography)
+                            (get orig-shape :typography-overrides))
+                          dest-overrides)
+        operations      (fn [tokens overrides]
+                          (cond-> [{:type :set
+                                    :attr :applied-tokens
+                                    :val tokens
+                                    :ignore-touched true}]
+                            (not= dest-overrides dest-overrides')
+                            (conj {:type :set
+                                   :attr :typography-overrides
+                                   :val overrides
+                                   :ignore-touched true})))]
+    (if (and (= dest-tokens dest-tokens') (= dest-overrides dest-overrides'))
       changes
       (-> changes
           (update :redo-changes conj (make-change
                                       container
                                       {:type :mod-obj
                                        :id (:id dest-shape)
-                                       :operations [{:type :set
-                                                     :attr :applied-tokens
-                                                     :val dest-tokens'
-                                                     :ignore-touched true}]}))
+                                       :operations (operations dest-tokens' dest-overrides')}))
           (update :undo-changes conj (make-change
                                       container
                                       {:type :mod-obj
                                        :id (:id dest-shape)
-                                       :operations [{:type :set
-                                                     :attr :applied-tokens
-                                                     :val dest-tokens
-                                                     :ignore-touched true}]}))
+                                       :operations (operations dest-tokens dest-overrides)}))
           (pcb/apply-changes-local)))))
 
 (defn- generate-update-tokens

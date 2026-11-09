@@ -88,52 +88,19 @@ function formatReference() {
     "Elements: <body> page root (desktop 1440x900, mobile 390x844, tablet 834x1194 unless w-/h- set); <div> container; <div data-shape=\"rectangle|ellipse|group|mask\"> (a mask's first child masks the rest and gives its size); <p> text with <span> runs and <br>; <img src>; <svg viewBox><path d></svg> (svg, ellipse, group and mask are page-only); <sp-use component props> a component copy whose children override named parts; <sp-component name props> with one shared element then <sp-variant when class> rules.",
     "Attributes: data-name (unique among siblings), data-text (string Token without --string-), data-visible (boolean Token without --flag-), data-flow and data-canvas on <body>. No style, <style> or <script>.",
     "Prototype: one attribute per trigger: data-click, data-press, data-hover, data-mouse-enter, data-mouse-leave, data-after-delay (boards only). Value: Module/Page, back, overlay:PAGE, toggle-overlay:PAGE, close-overlay[:PAGE] or an https/mailto/tel URL, then options after ;: delay: 1500ms; animation: dissolve|slide in|out left|right|up|down|push left 300ms ease-out [offset]; position: center|top-left|top-center|top-right|bottom-left|bottom-center|bottom-right|manual 20px 40px; relative-to: self (the element; on a copy's part, the copy)|page|an enclosing board or copy's name; close-outside; backdrop; preserve-scroll.",
-    "Sizing: w-[n]/w-<size Token> fixed, w-fit hugs (flex and grid containers, copies, text), w-full fills a flex parent's room or a grid cell (allowed across a row or column; along it the parent must not hug; a hugging parent needs one child that does not fill); min/max apply to a filling axis. A copy without w-/h- is as big as its component. Unlike CSS, items-stretch does not resize children and grid rows do not stretch cards: give them h-full and size the rows (grid-rows-[160px]) or the cards. Without flex or grid, a container places children by left-[x]/top-[y]. Text hugs both axes by default; with a width it wraps and its height follows. Text without type-/font- is Source Sans Pro 14px, the built-in font; any other font needs @font-face in tokens.css and a file in assets/fonts/.",
+    "Sizing and position mean what CSS means: w-[240px] or a size Token is fixed, w-fit hugs (flex and grid containers, copies, text), w-full or flex-1 fills a flex parent's room or a grid cell; min/max apply to a filling axis. Flex and grid stretch a child with no size across them (align-items defaults to stretch) unless the parent hugs that way. A copy without w-/h- is as big as its component. Without flex or grid, and for absolute children, left/top/right/bottom/inset place children in the board: right alone pins the right edge, left with right stretches with the parent. Text hugs until it has a width or is stretched, then wraps; spaces fold as in HTML (whitespace-pre-wrap keeps them). Text without type-/font- is Source Sans Pro 14px; other fonts need @font-face in tokens.css and a file in assets/fonts/.",
     "Classes and Token variables: smallpen help rules classes.",
   ];
 }
 
-// Keyword families written once: items-{start|center|end|stretch}.
-const KEYWORD_FAMILIES = [
-  "mix-blend-", "pin-x-", "pin-y-", "justify-items-", "justify-self-", "justify-", "content-",
-  "items-", "self-", "grid-flow-", "flex-", "border-", "stroke-", "text-", "align-", "viewer-", "overflow-", "flip-",
-];
-
-function compactKeywords(keywords) {
-  const groups = new Map();
-  for (const keyword of keywords) {
-    const family = KEYWORD_FAMILIES.find((prefix) => keyword.startsWith(prefix) && keyword.length > prefix.length);
-    const key = family ?? keyword;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(family ? keyword.slice(family.length) : "");
-  }
-  return [...groups].map(([key, rests]) => (rests.length === 1 && rests[0] === "" ? key : `${key}{${rests.join("|")}}`)).join(" ");
-}
-
-// Side families written once: border-{t|r|b|l}-*, p{x|y|t|r|b|l}-*.
-function compactSides(text) {
-  return text
-    .replace("border-t-* border-r-* border-b-* border-l-*", "border-{t|r|b|l}-*")
-    .replace("rounded-tl-* rounded-tr-* rounded-br-* rounded-bl-*", "rounded-{tl|tr|br|bl}-*")
-    .replace("p-* px-* py-* pt-* pr-* pb-* pl-*", "p-* p{x|y|t|r|b|l}-*")
-    .replace("m-* mx-* my-* mt-* mr-* mb-* ml-*", "m-* m{x|y|t|r|b|l}-*")
-    .replace("min-w-* max-w-* min-h-* max-h-*", "{min|max}-{w|h}-*");
-}
-
 function classReference() {
   const vocabulary = vocabularyReference();
-  const byExample = new Map();
-  for (const { prefix, literal } of vocabulary.valueClasses) {
-    const example = literal ? literal.slice(prefix.length) : "(Token only)";
-    if (!byExample.has(example)) byExample.set(example, []);
-    byExample.get(example).push(`${prefix}*`);
-  }
   return [
-    `Token variables: ${vocabulary.tokenPrefixes.map(({ variable, type }) => `${variable} ${type}`).join("; ")}. Values: px lengths, #hex colors, CSS box-shadow, font shorthand "600 14px/1.4 \"Family\"", quoted strings, true/false, var(--alias).`,
-    `Value classes take a Token name without its type prefix or a bracket literal (spaces are _): ${compactSides([...byExample].map(([example, prefixes]) => `${prefixes.join(" ")} ${example}`).join("; "))}.`,
-    "text-<Token> is a color or font-size Token by its type; border alone is 1px, border-b alone the bottom only. Fills and strokes, top first as in CSS: bg-[url(../assets/a.png)_0.8,linear-gradient(from_0.5_0_to_0.5_1,#000_0%,#fff_100%),var(--color-brand)]; border-[1px_#e5e7eb,2px_dashed_var(--color-brand)_outside] (width, color, optional solid|dashed|dotted|mixed and inside|center|outside). hidden keeps a layer but does not draw it, as the App's eye button: shadow-[0_2px_8px_0_#00000033_hidden], blur-[4px_hidden], a stroke in a list, or border-hidden for every stroke.",
-    "Grid: grid with grid-cols-3 or grid-cols-[240px_1fr_auto_25%], grid-rows-*, grid-flow-row|col, justify-items-*, items-*, justify-*, content-*, gap-*, p-*. Children go in written order to the first free cell; col-start-N row-start-N place one, col-span-N row-span-N span, self-* and justify-self-* align it in its cell.",
-    `Keyword classes: ${compactKeywords(vocabulary.keywords)}.`,
+    "Write Tailwind v4 classes; they mean what Tailwind and CSS mean. A value is one of three kinds. A design decision is a Token named for its role (p-card, bg-surface, rounded-control, type-title): the normal way. A one-off is a bracket literal (p-[13px], bg-[#2563eb]). Tailwind's default scale (p-4 is 16px, rounded-lg 8px, text-sm 14px/20px, font-bold, shadow-md, leading-6) reads as the same raw values, never as Tokens; a package Token of that name wins. check names a raw value that recurs: if the places are one decision, give it a Token.",
+    `Token variables: ${vocabulary.tokenPrefixes.map(({ variable, type }) => `${variable} ${type}`).join("; ")}. Values: px lengths, #hex colors, CSS box-shadow, font shorthand "600 14px/1.4 \"Family\"", quoted strings, true/false, var(--alias). A class names a Token without its type prefix: --color-surface is bg-surface.`,
+    "Beyond CSS, from the App: type-<Token> (a leading-, text-, font- or tracking- class on the same text replaces that field and warns); pin-x-center|scale, pin-y-center|scale; border-inside|center|outside, border-mixed; hidden keeps a layer but does not draw it, shown draws it, and _hidden does so for one shadow, blur or stroke; viewer-hidden; flip-x|y; text-ltr|rtl; fill-*/stroke-* on svg; linear-gradient(from_x_y_to_x_y,…) for points CSS cannot say.",
+    "Fills and strokes, top first as in CSS: bg-[url(../assets/a.png)_0.8,linear-gradient(to_bottom,#000,#fff),var(--color-brand)]; border-[1px_#e5e7eb,2px_dashed_var(--color-brand)_outside] (width, color, optional style and inside|center|outside). Grid: grid-cols-3 or grid-cols-[240px_1fr_auto_25%], children in written order, col-start/col-span/row-start/row-span to place one.",
+    "Not in the App, so named by check: percent sizes (w-1/2), w-auto, Tailwind's color palette and font stacks (use a Token, [#hex] or font-[Family]), text ellipsis (truncate, line-clamp), whitespace-nowrap on text with a width. <!-- smallpen-ignore CODE --> before an element mutes that warning on it.",
   ];
 }
 

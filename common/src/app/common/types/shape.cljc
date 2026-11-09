@@ -231,6 +231,9 @@
    [:grow-type {:optional true}
     [::sm/one-of grow-types]]
    [:applied-tokens {:optional true} cto/schema:applied-tokens]
+   ;; Text attrs this shape sets itself while a typography token is applied:
+   ;; token updates leave them alone, as CSS lets line-height beat a text style.
+   [:typography-overrides {:optional true} cto/schema:typography-overrides]
    [:plugin-data {:optional true} ctpg/schema:plugin-data]
 
    ;; `rotation`, `flip-x` and `flip-y` are fields of the `Shape` record (see
@@ -514,7 +517,7 @@
     :hidden :masked-group :fills :proportion :proportion-lock :constraints-h
     :constraints-v :fixed-scroll :r1 :r2 :r3 :r4 :rotation :opacity :grids :exports
     :strokes :blend-mode :interactions :shadow :blur :background-blur :grow-type :applied-tokens
-    :plugin-data})
+    :typography-overrides :plugin-data})
 
 (def ^:private allowed-shape-geom-attrs #{:x :y :width :height})
 (def ^:private allowed-shape-base-attrs #{:id :name :type :selrect :points :transform

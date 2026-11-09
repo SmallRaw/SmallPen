@@ -166,6 +166,8 @@ export { tokenTypeOfName, vocabularyReference } from "./html-format/vocabulary.m
 export { createLineIndex, parseHtml } from "./html-format/html-parse.mjs";
 export { parseTokensCss } from "./html-format/css-parse.mjs";
 export { tokenCssDeclaration } from "./html-format/tokens-codec.mjs";
+export { lineHeightText } from "./html-format/node-encode.mjs";
+export { figmaPageHtml } from "./figma-paste.mjs";
 // Kept public for their tests.
 export { tokenValueMatchesType } from "./tokens-domain.mjs";
 export { findTokenLibrary, pruneUnresolvableTokens } from "./token-import.mjs";

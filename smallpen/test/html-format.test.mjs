@@ -121,8 +121,8 @@ test("the HTML reader reports structure problems with offsets", () => {
 test("a sample package decodes into a valid package model", async () => {
   const { values, issues, summary } = await decodePackageFiles(sample());
   assert.deepEqual(issues.filter((issue) => issue.severity === "error"), []);
-  // Literals that copy a spacing step say which Token follows it.
-  assert.ok(issues.every((issue) => issue.code === "literal_matches_token"), JSON.stringify(issues));
+  // The pages' 24px margin is written raw on each page: one decision without a name.
+  assert.ok(issues.every((issue) => issue.code === "repeated_raw_value" && issue.severity === "warning"), JSON.stringify(issues));
   assert.deepEqual(summary, { pages: 2, pageVersions: 2, components: 1, variants: 4, tokens: 11 });
   const snapshot = await loadPackageFromValues("sample", values);
   const board = snapshot.entries["pages/Tasks/Board"];
@@ -135,7 +135,9 @@ test("a sample package decodes into a valid package model", async () => {
   assert.deepEqual(root.children.map((id) => presentation.nodes[id].name), ["Content", "Sidebar"]);
   assert.equal(nodeNamed(presentation, "Title")["layout-item-h-sizing"], "fill");
   assert.equal(nodeNamed(presentation, "Title").growType, "auto-height");
-  assert.equal(nodeNamed(presentation, "Logo").growType, "auto-width");
+  // A paragraph in a column without a width stretches across it, as in CSS.
+  assert.equal(nodeNamed(presentation, "Logo").growType, "auto-height");
+  assert.equal(nodeNamed(presentation, "Logo")["layout-item-h-sizing"], "fill");
   assert.equal(nodeNamed(presentation, "Save").text, "保存");
   assert.ok(nodeNamed(presentation, "Save").tokenBindings.visible);
   assert.equal(presentation.prototypeFlows[0].name, "main");
@@ -175,7 +177,7 @@ test("variant rules apply on top of the shared element", async () => {
 
 test("check reports located, actionable issues", async () => {
   const broken = page(`<body class="bg-canvas">
-  <div data-name="Box" class="flex-1 w-full bg-brnd" style="color:red">
+  <div data-name="Box" class="flex-column w-full bg-brnd" style="color:red">
     loose text
   </div>
   <sp-use component="Buton" data-name="X"></sp-use>
@@ -189,7 +191,7 @@ test("check reports located, actionable issues", async () => {
   assert.equal(result.ok, false);
   const byCode = (code) => result.issues.filter((issue) => issue.code === code);
   const unknownClass = byCode("unknown_class")[0];
-  assert.match(unknownClass.message, /flex-1 .*w-full/);
+  assert.match(unknownClass.message, /flex-column .*flex-col/);
   assert.equal(unknownClass.file, "pages/Tasks/Board.html");
   assert.equal(unknownClass.line, 9);
   assert.ok(byCode("unknown_token").some((issue) => issue.message.includes("--color-brnd")));
@@ -352,7 +354,8 @@ test("gradients, per-side borders and blurs read and write exactly", async () =>
   assert.equal(stroke.widthTop, 2);
   assert.equal(stroke.widthBottom, 1);
   const written = encodePackage(snapshot).files.get("pages/Tasks/Board.html");
-  assert.match(written, /bg-\[linear-gradient\(from_0\.5_0_to_0\.5_1,#2563eb_0%,#93c5fd80_100%\)\] blur-\[2px\]/);
+  // A top-to-bottom gradient is written in its CSS form.
+  assert.match(written, /bg-\[linear-gradient\(to_bottom,#2563eb_0%,#93c5fd80_100%\)\] blur-\[2px\]/);
   assert.match(written, /bg-\[radial-gradient\(from_0\.5_0\.5_to_1_1_width_0\.8,#ffffff_0%,#ffffff00_100%\)\] backdrop-blur-\[12px\]/);
   assert.match(written, /h-\[40px\] border-t-\[2px\] border-b border-\[#e5e7eb\]/);
 });

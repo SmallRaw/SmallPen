@@ -61,6 +61,8 @@ const PARAMETERS = {
     "Only Tokens that take values in this theme group (Brand); requires --definitions",
   ),
   page: parameter("--page", "string", "Page name"),
+  draft: parameter("--draft", "string", "A page file kept outside the package (- reads it from standard input), drawn with the package's Tokens and components for review; nothing is written to the package"),
+  draftName: parameter("--draft-name", "string", "The page name of a draft read from standard input; default Draft"),
   by: parameter("--by", "string", "Theme group: one file per option, for example Language"),
   tokenFormat: parameter("--format", "string", "json (nested by name, numbers in px), flat (one key per Token name) or css (custom properties as tokens.css writes them: aliases as var(--name), units kept)", {
     values: ["json", "flat", "css"],
@@ -209,7 +211,8 @@ export const COMMAND_CONTRACTS = {
   ),
   check: command(
     "Check the package's HTML, tokens.css and rules: one line per problem with file:line:column; --render also checks text fit, bounds, overlaps and contrast",
-    ["revert", "file", "render", "allThemes", ...TARGET, ...VIEW, "limit", "offset", "targetTimeout"],
+    ["revert", "file", "render", "allThemes", ...TARGET, ...VIEW, "limit", "offset", "targetTimeout", "draft", "draftName"],
+    { conflicts: { draft: ["revert", "file", "component", "variant"] } },
   ),
   schema: command(
     "Print the JSON shape and parameters of each command and write input",
@@ -262,9 +265,16 @@ export const COMMAND_CONTRACTS = {
       ...VIEW,
       "designSystem",
       "locale",
+      "draft",
+      "draftName",
       ...PAGE,
     ],
-    { conflicts: { designSystem: ["page", "component", "canvas", "token", "allTokens", "allComponents", "allPages"] } },
+    {
+      conflicts: {
+        designSystem: ["page", "component", "canvas", "token", "allTokens", "allComponents", "allPages"],
+        draft: ["page", "component", "variant", "canvas", "token", "allTokens", "allComponents", "allPages", "designSystem"],
+      },
+    },
   ),
   export: command(
     "Export spec, wireframe or PNG; --format html --canvas NAME --output DIR saves an offline review with declared prototype navigation",
@@ -279,10 +289,13 @@ export const COMMAND_CONTRACTS = {
       "output",
       "evidence",
       "base64",
+      "draft",
+      "draftName",
     ],
     {
       conflicts: {
         designSystem: ["page", "component", "canvas"],
+        draft: ["page", "component", "variant", "canvas", "designSystem"],
         canvas: ["page", "component", "element", "variant", "platform"],
       },
       requires: [

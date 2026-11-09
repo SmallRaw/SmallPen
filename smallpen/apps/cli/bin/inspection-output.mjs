@@ -1,5 +1,6 @@
 import {
   appliedTokenFields,
+  lineHeightText,
   listTokenThemes,
   resolveEffectiveToken,
   tokenLibraryOf,
@@ -586,8 +587,10 @@ export function inspectionReport(
     let text;
     if (raw.type === "TEXT") {
       add("text", raw.text, [], "");
+      // A field the text sets over its type Token is not the Token's.
+      const own = new Set(raw["typography-overrides"] ?? []);
       for (const [key, value] of Object.entries(raw.textStyle ?? {}))
-        add(key, value, ["typography"]);
+        add(key, value, own.has(key) ? [] : ["typography"]);
       const measured = metrics.get(node.id);
       text = {
         value: raw.text ?? "",
@@ -876,9 +879,14 @@ function styleLine(fields) {
   const font = ["fontWeight", "fontSize", "lineHeight", "fontFamily"].filter((name) => fields[name]);
   if (font.length) {
     const value = (name) => fields[name]?.value;
-    const shorthand = `${value("fontWeight") ?? 400} ${value("fontSize") ?? 14}px${value("lineHeight") !== undefined ? `/${value("lineHeight")}` : ""} "${value("fontFamily") ?? "Source Sans Pro"}"`;
+    const size = Number(value("fontSize") ?? 14);
+    const lineHeight = value("lineHeight") !== undefined ? `/${lineHeightText(Number(value("lineHeight")), size)}` : "";
+    const shorthand = `${value("fontWeight") ?? 400} ${size}px${lineHeight} "${value("fontFamily") ?? "Source Sans Pro"}"`;
     const tokens = [...new Set(font.map((name) => token(fields[name])).filter(Boolean))];
-    parts.push(`font ${shorthand}${tokens.join("")}`);
+    // Beside a type Token, the fields this text sets itself.
+    const labels = { fontWeight: "weight", fontSize: "size", lineHeight: "line height", fontFamily: "font" };
+    const own = tokens.length ? font.filter((name) => !token(fields[name])).map((name) => labels[name]) : [];
+    parts.push(`font ${shorthand}${tokens.join("")}${own.length ? ` (own ${own.join(", ")})` : ""}`);
   }
   for (const name of ["letterSpacing", "textAlign", "textTransform", "textDecoration"])
     if (fields[name]?.value !== undefined) parts.push(`${name.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`)} ${shown(fields[name])}`);

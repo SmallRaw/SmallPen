@@ -19,6 +19,7 @@ import {
   createBlankPackage,
   createEvidence,
   LocalWorkspaceSession,
+  pasteFigmaClipboard,
   resolveFontResource,
 } from "@smallpen/local-package";
 import { compilePenpotChanges } from "@smallpen/penpot-adapter";
@@ -313,6 +314,23 @@ function writeBinary(response, snapshot, descriptor, kind) {
     "x-content-type-options": "nosniff",
   });
   response.end(body);
+}
+
+// The HTML a Figma copy puts on the clipboard: it can hold megabytes of
+// layers, more than a JSON request may.
+async function readClipboardHtml(request) {
+  const type = String(request.headers["content-type"] ?? "").split(";", 1)[0].trim().toLowerCase();
+  if (type !== "text/html") {
+    throw new SmallPenError("unsupported_media_type", "Send the clipboard as text/html");
+  }
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > MAX_MEDIA_BYTES) throw new SmallPenError("request_too_large", "The clipboard is too large");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function readJson(request) {
@@ -1153,6 +1171,12 @@ export async function serveLocalPackage({
       }
       if (request.method === "POST" && route === "/v1/save") {
         writeJson(response, 200, await workspace.save(locator));
+        return;
+      }
+      if (request.method === "POST" && route === "/v1/figma/paste") {
+        // Figma layers as plain layers for the App to paste: read only, the
+        // App's paste commits them like any other edit.
+        writeJson(response, 200, await pasteFigmaClipboard(locator, await readClipboardHtml(request)));
         return;
       }
       if (request.method === "POST" && route === "/v1/tokens/import") {

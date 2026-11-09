@@ -136,8 +136,8 @@ test("grid classes outside a grid and a taken cell are located errors", async ()
 test("a grid writes back with only the lines the reading rule needs", async () => {
   const home = `<body class="bg-[#ffffff]">
   <div data-name="Grid" class="grid grid-cols-3 gap-[8px] p-[16px] w-[600px] h-[300px]">
-    <div data-name="A" class="w-full h-[40px] bg-[#ff0000]"></div>
-    <div data-name="B" class="w-full h-[40px] col-span-2 bg-[#00ff00]"></div>
+    <div data-name="A" class="h-[40px] bg-[#ff0000]"></div>
+    <div data-name="B" class="h-[40px] col-span-2 bg-[#00ff00]"></div>
     <div data-name="C" class="w-[30px] h-[30px] col-start-3 row-start-3 self-center justify-self-end bg-[#0000ff]"></div>
     <p data-name="D">Auto</p>
   </div>
@@ -275,7 +275,8 @@ test("an App save writes a second fill, a stroke list, a grid and a hover link",
   });
   const page = await readFile(join(path, "pages", "Home.html"), "utf8");
   assert.match(page, /data-hover="overlay:Menu"/);
-  assert.match(page, /class="grid grid-cols-2 w-\[300px\] h-\[200px\] bg-\[#ffffff80,#2563eb\] border-\[1px_#e5e7eb,3px_dotted_#111111_outside\]"/);
+  // The App's grid aligns to the start, which CSS has to be told.
+  assert.match(page, /class="grid grid-cols-2 items-start justify-items-start w-\[300px\] h-\[200px\] bg-\[#ffffff80,#2563eb\] border-\[1px_#e5e7eb,3px_dotted_#111111_outside\]"/);
   assert.doesNotMatch(page, /col-start/, "children in reading order need no lines");
   assert.ok(page.indexOf('data-name="Two"') < page.indexOf('data-name="One"'), "the file lists the grid in reading order");
   const reread = await openPackage(path);

@@ -747,11 +747,17 @@
                                          (merge (meta it)))))
                           (dwu/start-undo-transaction undo-id)
                           (dwsh/update-shapes shape-ids (fn [shape]
-                                                          (cond-> shape
-                                                            attributes-to-remove
-                                                            (update :applied-tokens #(apply (partial dissoc %) attributes-to-remove))
-                                                            :always
-                                                            (update :applied-tokens merge tokenized-attributes)))))
+                                                          (let [shape (cond-> shape
+                                                                        attributes-to-remove
+                                                                        (update :applied-tokens #(apply (partial dissoc %) attributes-to-remove))
+                                                                        :always
+                                                                        (update :applied-tokens merge tokenized-attributes))]
+                                                            ;; A typography token applied again sets every
+                                                            ;; field, and without one nothing is overridden.
+                                                            (cond-> shape
+                                                              (or (contains? tokenized-attributes :typography)
+                                                                  (not (contains? (:applied-tokens shape) :typography)))
+                                                              (dissoc :typography-overrides))))))
                          (when on-update-shape
                            (let [res (on-update-shape resolved-value shape-ids attributes)]
                              ;; Composed updates return observables and need to be executed differently
@@ -796,6 +802,13 @@
                            :on-update-shape update-layout-item-margin})
              (with-meta (meta it))))))))
 
+(defn- drop-orphan-overrides
+  "Without a typography token a text has no overridden fields."
+  [shape]
+  (cond-> shape
+    (not (contains? (:applied-tokens shape) :typography))
+    (dissoc :typography-overrides)))
+
 (defn unapply-token
   "Removes `attributes` that match `token` for `shape-ids`.
 
@@ -809,7 +822,7 @@
          (dwsh/update-shapes
           shape-ids
           (fn [shape]
-            (update shape :applied-tokens remove-token))))))))
+            (drop-orphan-overrides (update shape :applied-tokens remove-token)))))))))
 
 (defn unapply-multiple-tokens
   "Removes `attributes` for `shape-ids` without knowing the token, used when a token is deleted."
@@ -822,7 +835,7 @@
        (dwsh/update-shapes
         shape-ids
         (fn [shape]
-          (update shape :applied-tokens #(when % (apply dissoc % attributes)))))))))
+          (drop-orphan-overrides (update shape :applied-tokens #(when % (apply dissoc % attributes))))))))))
 
 
 (defn toggle-token

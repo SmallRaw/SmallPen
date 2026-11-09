@@ -98,7 +98,9 @@ const OPTIONAL_NODE_FIELDS = new Set([
   "hide-fill-on-export",
   "hide-in-viewer",
   "interactions",
+  "lint-ignore",
   "locked",
+  "typography-overrides",
   "masked-group",
   "mediaRef",
   "opacity",
@@ -1773,11 +1775,22 @@ function validateStrokes(value, path) {
   }
 }
 
+// The fields of a type Token a text may set itself (typography-overrides).
+export const TYPOGRAPHY_OVERRIDE_FIELDS = new Set(["fontFamily", "fontSize", "fontWeight", "letterSpacing", "lineHeight"]);
+
 function validateNodeChange(field, value, nodeId) {
   const path = `${nodeId}.${field}`;
   if (value === null && OPTIONAL_NODE_FIELDS.has(field)) return;
   if (field === "appliedTokens") {
     validateAppliedTokens(value, path);
+  } else if (field === "typography-overrides") {
+    if (!Array.isArray(value) || new Set(value).size !== value.length || !value.every((name) => TYPOGRAPHY_OVERRIDE_FIELDS.has(name))) {
+      fail("invalid_typography_overrides", `${path} must list text style fields a type Token does not set here: ${[...TYPOGRAPHY_OVERRIDE_FIELDS].join(", ")}; ${received(value)}`);
+    }
+  } else if (field === "lint-ignore") {
+    if (!Array.isArray(value) || !value.every((code) => typeof code === "string" && /^[a-z][a-z0-9_]*$/.test(code))) {
+      fail("invalid_node_lint_ignore", `${path} must list warning codes such as repeated_raw_value; ${received(value)}`);
+    }
   } else if (field === "cornerRadius") {
     validateCornerRadius(value, path);
   } else if (field === "fills") {
@@ -2203,8 +2216,10 @@ function validateNodeAttributes(node, nodeId, nodePath) {
     "grids",
     "hide-fill-on-export",
     "hide-in-viewer",
+    "lint-ignore",
     "masked-group",
     "show-content",
+    "typography-overrides",
   ]) {
     if (node[field] !== undefined) {
       validateNodeChange(field, node[field], nodeId);

@@ -568,3 +568,70 @@
 
     ;; ==== Check
     (t/is (= (count applied-tokens-text') 3))))
+(defn- edit-text-content
+  "Changes the text content attrs of `shape-label` the way the text editor does."
+  [file shape-label attrs]
+  (let [page  (thf/current-page file)
+        shape (ths/get-shape file shape-label)]
+    (-> (pcb/empty-changes nil)
+        (pcb/with-page page)
+        (pcb/with-objects (:objects page))
+        (cls/generate-update-shapes [(:id shape)]
+                                    (fn [shape]
+                                      (txt/update-text-content shape txt/is-content-node? d/txt-merge attrs))
+                                    (:objects page)
+                                    {}))))
+
+(t/deftest editing-a-typography-field-overrides-it-instead-of-unapplying
+  (let [;; ==== Setup
+        file   (-> (setup-file)
+                   (ths/update-shape :text1 :applied-tokens {:typography "token-typography"}))
+
+        ;; ==== Action
+        file'  (thf/apply-changes file (edit-text-content file :text1 {:line-height "2"}))
+
+        ;; ==== Get
+        text1' (ths/get-shape file' :text1)]
+
+    ;; ==== Check
+    (t/is (= {:typography "token-typography"} (:applied-tokens text1')))
+    (t/is (= #{:line-height} (:typography-overrides text1')))))
+
+(t/deftest overrides-add-up-and-other-edits-keep-them
+  (let [;; ==== Setup
+        file   (-> (setup-file)
+                   (ths/update-shape :text1 :applied-tokens {:typography "token-typography"})
+                   (ths/update-shape :text1 :typography-overrides #{:line-height}))
+
+        ;; ==== Action
+        file'  (thf/apply-changes file (edit-text-content file :text1 {:font-size "30"}))
+        file'' (thf/apply-changes file' (edit-text-content file' :text1 {:fills (ths/sample-fills-color :fill-color "#fabada")}))
+
+        ;; ==== Get
+        text1' (ths/get-shape file'' :text1)]
+
+    ;; ==== Check
+    (t/is (= {:typography "token-typography"} (:applied-tokens text1')))
+    (t/is (= #{:line-height :font-size} (:typography-overrides text1')))))
+
+(t/deftest without-a-typography-token-an-edit-still-unapplies-the-atomic-token
+  (let [;; ==== Setup
+        file   (-> (setup-file)
+                   (ths/update-shape :text1 :applied-tokens {:font-size "token-font-size"}))
+
+        ;; ==== Action
+        file'  (thf/apply-changes file (edit-text-content file :text1 {:font-size "30"}))
+
+        ;; ==== Get
+        text1' (ths/get-shape file' :text1)]
+
+    ;; ==== Check
+    (t/is (empty? (:applied-tokens text1')))
+    (t/is (nil? (:typography-overrides text1')))))
+
+(t/deftest unapplying-the-typography-token-drops-the-overrides
+  (let [shape (-> {:applied-tokens {:typography "token-typography"}
+                   :typography-overrides #{:line-height}}
+                  (cto/unapply-tokens-from-shape #{:typography}))]
+    (t/is (empty? (:applied-tokens shape)))
+    (t/is (nil? (:typography-overrides shape)))))

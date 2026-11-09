@@ -10730,3 +10730,11 @@ msgstr "Upload folder…"
 #: src/app/main/smallpen/home.cljs
 msgid "smallpen.local.invalid-folder"
 msgstr "Select a Package folder."
+
+#: src/app/main/data/workspace/clipboard.cljs
+msgid "workspace.clipboard.figma-partial"
+msgstr "Pasted from Figma as plain layers. Not carried over: %s"
+
+#: src/app/main/data/workspace/clipboard.cljs
+msgid "workspace.clipboard.figma-failed"
+msgstr "Figma paste failed: %s"

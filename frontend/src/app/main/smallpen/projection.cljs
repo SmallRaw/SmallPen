@@ -731,6 +731,14 @@
                      :width width}])))
           media)))
 
+(def ^:private typography-override-attrs
+  "Text style field names -> the text attrs a typography Token sets."
+  {"fontFamily"    :font-family
+   "fontSize"      :font-size
+   "fontWeight"    :font-weight
+   "letterSpacing" :letter-spacing
+   "lineHeight"    :line-height})
+
 (defn- project-typography-library
   [snapshot typographies]
   (into {}
@@ -1155,7 +1163,7 @@
                 layout-padding-type layout-wrap-type locked masked-group mediaRef name opacity
                 pathData proportionLock shadow sourceNodeId
                 show-content strokes text textBlocks textStyle tokenBindings touched type
-                visible width constraints-h constraints-v]} node
+                typography-overrides visible width constraints-h constraints-v]} node
         shape-id    (node-runtime-id snapshot node-path id)
         component-context
         (or (when componentId
@@ -1416,6 +1424,11 @@
        (or (some? appliedTokens) (some? penpotAppliedTokens) (seq applied-tokens))
        (assoc :applied-tokens applied-tokens)
 
+       ;; The fields this text sets itself; Token updates leave them alone.
+       (seq typography-overrides)
+       (assoc :typography-overrides
+              (into #{} (keep typography-override-attrs) typography-overrides))
+
        ;; A Component Set variant root is also typed COMPONENT but carries no
        ;; componentId; its caller supplies the component wiring instead.
        (and (= type "COMPONENT") (some? component-id))
@@ -1476,6 +1489,25 @@
      :objects (assoc objects uuid/zero
                      (assoc (get-in ctp/empty-page-data [:objects uuid/zero])
                             :shapes [root]))}))
+
+(defn project-fragment
+  "Shapes for layers to paste (Figma paste): canonical nodes whose roots are
+  root-ids, placed from 0,0, with node-ids giving each a fresh App id. The
+  snapshot supplies fonts; the result is ready for a :copied-shapes paste."
+  [snapshot nodes root-ids node-ids]
+  (let [snapshot (assoc-in snapshot [:runtime :renderNodes] node-ids)
+        roots    (filterv #(some? (lookup nodes %)) root-ids)
+        origins  (absolute-origins nodes roots)
+        parents  (parent-index nodes)
+        objects  (into {}
+                       (map (fn [[_ node]]
+                              (let [shape (project-node snapshot {} [:renderNodes]
+                                                        (constantly {}) origins nodes
+                                                        parents (set roots) node)]
+                                [(:id shape) shape])))
+                       nodes)]
+    {:objects  objects
+     :selected (into (d/ordered-set) (map #(node-runtime-id snapshot [:renderNodes] %)) roots)}))
 
 (defn- show-interaction-destinations
   "A nested board an interaction navigates to stays a View mode screen, as

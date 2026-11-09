@@ -14,9 +14,10 @@
 1. 页面和组件文件里只有 class：没有 `style` 属性，没有 `<style>`，没有 `<script>`。
 2. CSS 只出现在 `tokens.css`，只能声明 Token、主题和字体。
 3. SmallPen 专用信息放在 `data-*` 属性或 `sp-*` 自定义元素上，标准 HTML 解析器都能读。
-4. 每样东西只有一种写法。检查器拒绝其他写法，并说明该怎么写。
-5. 名字就是身份，文件里不出现 ID。
-6. 能推导的不存：弹性布局里的位置和尺寸、文字尺寸、ID、画布坐标都在读取时计算。文件只存设计意图。
+4. 像 HTML、CSS、Tailwind v4 的写法，含义就和它们一样；读的时候接受它们的常见写法，写回时每样东西只用一种写法。检查器只拒绝 App 做不到的写法，并说明该怎么写。
+5. 非必要不加新语法。只有 Penpot 有、标准里没有的东西才用自己的写法：`data-*` 属性、`sp-*` 元素、`type-*`、`pin-*-center|scale`、描边位置、`_hidden`。
+6. 名字就是身份，文件里不出现 ID。
+7. 能推导的不存：弹性布局里的位置和尺寸、文字尺寸、ID、画布坐标都在读取时计算。文件只存设计意图。
 
 ## 3. 包结构
 
@@ -108,11 +109,11 @@ product.smallpen/
 | `--string-` | string | `"文字"` | `data-text` |
 | `--flag-` | boolean | `true` 或 `false` | `data-visible` |
 
-- class 名是「class 前缀 + 去掉类型前缀的 Token 名」：`--color-brand` 对应 `bg-brand`，`--spacing-4` 对应 `p-4`。两个 Token 生成同一个 class（如 `--color-sm` 和 `--text-sm` 都生成 `text-sm`）时报错。
+- class 名是「class 前缀 + 去掉类型前缀的 Token 名」：`--color-surface` 对应 `bg-surface`，`--spacing-card` 对应 `p-card`，和 Tailwind v4 的主题变量一样。Token 按用途起名，不按尺码。两个 Token 生成同一个 class（如 `--color-sm` 和 `--text-sm` 都生成 `text-sm`）时报错。
 - 别名用 `var(--另一个 Token)`，类型必须相同。不允许 `calc()` 等其他函数。
 - 长度只用 `px`，`0` 可以不写单位。
 - 颜色的透明度写在 8 位十六进制里（`#2563ebb3`）。App 设的透明度是整数百分比，每个百分比对应唯一的字节，所以读回时还原成那个百分比（`b3` 读作 0.7）。
-- 行高没有单独的 Token 类型（Penpot 没有），写在 typography Token 里，或用 `leading-[1.4]`。
+- 行高没有单独的 Token 类型（Penpot 没有），写在 typography Token 里，或用 `leading-*`（见第 6 节）。
 - `@font-face` 的 `src` 只能指向 `assets/fonts/` 里的一个 TTF、OTF 或 WOFF 文件，每个字重和字形写一条。只用内置的 Source Sans Pro 时不用写。
 
 ## 5. 元素
@@ -146,7 +147,13 @@ product.smallpen/
 
 ## 6. class 词汇表
 
-写法沿用 Tailwind 的习惯，但只认下表，也不依赖 Tailwind 编译器。值有三种：Token（`bg-brand`）、方括号里的字面值（`bg-[#ff0000]`、`w-[240px]`，空格写成 `_`）、固定关键字（`w-full`）。
+写法就是 Tailwind v4，含义和 Tailwind、CSS 一样，不依赖 Tailwind 编译器。值分三种：
+
+- **设计决定**：按用途命名的 Token（`bg-surface`、`p-card`、`rounded-control`、`type-title`）。正常情况都这样写。
+- **一次性的值**：方括号里的字面值（`bg-[#ff0000]`、`w-[240px]`，空格写成 `_`）。
+- **Tailwind 默认刻度**（`p-4` 是 16px，`rounded-lg` 8px，`text-sm` 14px 行高 20px，`font-bold`，`shadow-md`，`leading-6`，`opacity-50`，`border-2`，`bg-white`）：读成和方括号一样的写死的数，不是 Token，不能当设计系统用。包里有同名 Token 时用 Token，和 Tailwind 里主题变量覆盖默认值一样。
+
+同一个写死的值在很多地方出现时，check 给出 `repeated_raw_value` 警告：这些地方如果是同一个设计决定，就给它起个 Token。Tailwind 的色板（`bg-blue-500`）和字体栈（`font-mono`）不内置，颜色和字体用 Token 或字面值。
 
 ### 布局
 
@@ -157,13 +164,16 @@ product.smallpen/
 | `col-start-N` `row-start-N` `col-span-N` `row-span-N` | 网格子元素的位置和跨度。子元素按书写顺序放：写了起始线的放到那里，没写的放进按行顺序第一个放得下的空格；格子已被前面的子元素占了就报 `grid_cell_taken` |
 | `justify-items-*`、`justify-self-*`、`content-*` | 网格里格子内的水平对齐（整体、单个），以及轨道整体的垂直分布；`items-*`、`self-*` 是垂直对齐，`justify-*` 是轨道整体的水平分布 |
 | `flex-wrap` | 换行 |
-| `items-start` `items-center` `items-end` `items-stretch` | 交叉轴对齐。和 CSS 不同，App 里 `items-stretch` 不拉伸子元素，只按 `items-start` 摆放；要拉伸就给子元素写 `h-full`（行）或 `w-full`（列），没写时 check 给出 `stretch_not_in_app` 警告 |
+| `items-start` `items-center` `items-end` `items-stretch` | 交叉轴对齐。和 CSS 一样默认是 `stretch`：交叉方向没写尺寸的子元素被拉满，写了尺寸的按起点摆放；容器在这个方向上随内容时不拉伸。文字只横向拉伸（纵向拉不拉看起来一样），组件副本保持组件大小。App 里新建的布局是靠起点，写回时写 `items-start` |
 | `justify-start` `justify-center` `justify-end` `justify-between` `justify-around` `justify-evenly` | 主轴分布 |
 | `self-start` `self-center` `self-end` `self-stretch` | 单个子元素的对齐 |
 | `gap-*` `p-*` `m-*` 等 | 间距、内边距、外边距 |
-| `absolute` 加 `left-*`、`top-*` | 弹性布局里的子元素不参加排版，按坐标放 |
+| `absolute` | 弹性或网格布局里的子元素不参加排版，按位置放；在没有布局的容器里本来就按位置放 |
+| `flex-1` `grow` | 沿父元素的方向填满，同主轴上的 `w-full`/`h-full`；`shrink-0` `flex-none` 等不起作用（App 里不收缩） |
+| `relative` `block` `inline-block` `inline-flex` | 前三个不起作用（`<div>` 本来就是这样），`inline-flex` 同 `flex` |
 | `z-[n]` | 层级 |
-| `pin-x-left` `pin-x-right` `pin-x-stretch` `pin-x-center` `pin-x-scale`，`pin-y-*` 同理 | 父元素缩放时怎么跟随（Penpot constraints） |
+| `left-*` `top-*` `right-*` `bottom-*` `inset-*` `inset-x-*` `inset-y-*` | 在画板里定位，同时决定父元素缩放时怎么跟随（Penpot constraints），和 CSS 的绝对定位一样：只写 `right` 贴右边，`left` 加 `right` 两边都贴、宽度跟着父元素变（这时不写 `w-*`），`inset-0` 铺满，`-inset-1` 向外 4px。分组里的子元素只用 `left` `top` |
+| `pin-x-center` `pin-x-scale`，`pin-y-*` 同理 | 居中跟随、按比例缩放，CSS 里没有对应写法 |
 
 ### 尺寸
 
@@ -174,15 +184,15 @@ product.smallpen/
 | `w-full` | 填满（fill），只用于弹性或网格布局里的子元素；在主轴上平分剩余空间，在交叉轴上和网格格子里撑满 |
 | `min-w-*` `max-w-*` | 只用于 `w-full` 的元素 |
 
-`h-*` 同理。省略时，弹性容器和文字默认随内容，组件副本和组件一样大，其他元素必须写尺寸。`flex-1`、`w-auto` 和百分比都不接受，改用 `w-full` 或 `w-fit`。
+`h-*` 同理；`size-*` 同时设宽高。长度可以用 Tailwind 刻度（`w-64` 是 256px，`w-md` 是 448px）。省略时：弹性或网格布局在交叉方向上拉满子元素（见上）；其余情况下弹性容器和文字随内容，组件副本和组件一样大，其他元素必须写尺寸。百分比（`w-1/2`）、`w-auto`、`w-screen` 不接受，改用 `w-full` 或 `w-fit`。
 
-等高卡片：CSS 网格默认把一行的卡片拉成一样高，App 不会。随内容的行只按不填满的子元素算高度，所以一行里可以让最高的卡片随内容、其他写 `h-full`；更稳的写法是给行定高（`grid-rows-[160px_160px]`）再让卡片 `h-full`，或者所有卡片用同一个高度。
+等高卡片：和 CSS 一样，卡片不写高度就被拉满格子。但随内容的行只按不填满的子元素算高度，所以网格随内容时要给行定高（`grid-rows-[160px_160px]`），或者让一张卡片随内容、其他拉满，或者所有卡片用同一个高度。
 
 ### 外观
 
 | class | 含义 |
 |---|---|
-| `bg-*` | 填充：颜色，或渐变 `bg-[linear-gradient(from_0.5_0_to_0.5_1,#2563eb_0%,#93c5fd_100%)]`、`bg-[radial-gradient(from_0.5_0.5_to_1_1_width_0.8,…)]`（起点、终点是相对元素的 0–1 坐标，和 Penpot 一致），或图片 `bg-[url(../assets/photo.webp)]`（后面可跟透明度 `_0.8`）|
+| `bg-*` | 填充：颜色；CSS 渐变 `bg-[linear-gradient(to_bottom,#2563eb,#93c5fd)]`、`linear-gradient(135deg,…)`、`to_bottom_right`、`radial-gradient(#fff,#fff0)`（以中心为圆心的椭圆）、`radial-gradient(closest-side,…)`；CSS 写不出的起止点用 `linear-gradient(from_0.3_0_to_0.7_1,…)`、`radial-gradient(from_0.5_0.5_to_1_1_width_0.8,…)`（相对元素的 0–1 坐标，和 Penpot 一致）；或图片 `bg-[url(../assets/photo.webp)]`（后面可跟透明度 `_0.8`）。`bg-transparent` 等于 `bg-none` |
 | `bg-[层,层,…]` | 多层填充，和 CSS `background` 一样最上层写在最前：`bg-[url(../assets/photo.webp)_0.8,linear-gradient(…),var(--color-brand)]`。列表里用 `var(--color-*)` 绑定颜色 Token；`url()` 里的下划线保留原样，文件名里的空格写成 `%20` |
 | `border`、`border-*` | 描边宽度或颜色，按 Token 类型或字面值区分；`border` 等于 `border-[1px]`，`border-0` 是 0 |
 | `border-[描边,描边,…]` | 多条描边，最上面的写在最前：每条写宽度、颜色，可选样式（`solid` `dashed` `dotted` `mixed`）和位置（`inside` `center` `outside`），例如 `border-[1px_#e5e7eb,2px_dashed_var(--color-brand)_outside]` |
@@ -190,10 +200,10 @@ product.smallpen/
 | `border-solid` `border-dashed` `border-dotted` | 描边样式 |
 | `border-inside`（默认）`border-center` `border-outside` | 描边位置 |
 | `border-hidden`、`border-shown` | 保留描边但不画出来，相当于 App 描边旁的眼睛按钮；`border-shown` 用在变体里恢复。描边列表里给单条描边加 `hidden`：`border-[1px_#e5e7eb_hidden,2px_#111111]`；`<svg>` 上写 `stroke-hidden` |
-| `rounded-*` `rounded-tl-*` 等 | 圆角；`rounded-full` 是胶囊或圆形（9999px），有 `--radius-full` Token 时用 Token |
-| `shadow-*` | 阴影；在某一层末尾加 `hidden` 保留但不画：`shadow-[0_2px_8px_0_#00000033_hidden,inset_0_1px_0_0_#ffffff]` |
-| `opacity-*` | 不透明度 |
-| `blur-[4px]` `backdrop-blur-[8px]` | 图层模糊、背景模糊；`blur-[4px_hidden]` 保留但不生效；`blur-none`、`backdrop-blur-none` 去掉 |
+| `rounded-*` `rounded-tl-*` 等 | 圆角；`rounded` 4px，`rounded-lg` 8px 等按 Tailwind；`rounded-full` 是胶囊或圆形（9999px）；有同名 Token 时用 Token |
+| `shadow-*` | 阴影；`shadow` `shadow-md` 等按 Tailwind；在某一层末尾加 `hidden` 保留但不画：`shadow-[0_2px_8px_0_#00000033_hidden,inset_0_1px_0_0_#ffffff]` |
+| `opacity-*` | 不透明度：`opacity-[0.5]` 或 `opacity-50` |
+| `blur-[4px]` `backdrop-blur-[8px]` | 图层模糊、背景模糊（`blur` 8px，`blur-sm` 等按 Tailwind）；`blur-[4px_hidden]` 保留但不生效；`blur-none`、`backdrop-blur-none` 去掉 |
 | `mix-blend-*` | 混合模式 |
 | `rotate-[45deg]` `flip-x` `flip-y` | 旋转、翻转 |
 | `overflow-visible` | 不裁剪子元素（默认裁剪，同 Penpot） |
@@ -204,14 +214,16 @@ product.smallpen/
 
 | class | 含义 |
 |---|---|
-| `type-*` | 字体样式 Token：字体、字号、字重、行高、字距一起设 |
-| `font-*` | 字体或字重 |
-| `text-*` | 字号或颜色；`text-left` `text-center` `text-right` `text-justify` 是对齐 |
-| `leading-*` `tracking-*` | 行高倍数、字距 |
+| `type-*` | 字体样式 Token：字体、字号、字重、行高、字距一起设。同一段文字再写 `leading-*`、`text-[…]`、`font-*`、`tracking-*` 时，那一项用单写的（和书写顺序无关，同 Tailwind），其余仍跟着 Token，并给出 `typography_overridden` 警告 |
+| `font-*` | 字体或字重：`font-[Inter]`、`font-[600]`、`font-semibold` |
+| `text-*` | 字号或颜色；`text-sm` 等按 Tailwind 同时设字号和行高，`text-sm/6` 另写行高；`text-left` `text-center` `text-right` `text-justify` 是对齐 |
+| `leading-*` | 行高，同 CSS：数字是字号的倍数（`leading-[1.5]`），带 `px` 是像素（`leading-[20px]`）；`leading-6` 是 24px，`leading-tight` 等按 Tailwind。App 只存倍数，像素按字号换算 |
+| `tracking-*` | 字距：`tracking-[0.5px]`、`tracking-[0.02em]`、`tracking-wide`；`em` 按字号换算成像素 |
+| `whitespace-normal` `whitespace-pre-wrap` `whitespace-pre` `whitespace-pre-line` `whitespace-nowrap` | 空格和换行，同 CSS |
 | `italic` `uppercase` `lowercase` `capitalize` `underline` `line-through` | 字形、大小写、装饰 |
 | `align-top` `align-middle` `align-bottom` | 文字在框内的垂直位置 |
 
-文字默认宽高都随内容；定宽（`w-[…]` 或 `w-full`）时高度随内容；宽高都固定就是固定文本框。
+文字默认宽高都随内容；定宽（`w-[…]`、`w-full` 或被拉满）时换行、高度随内容；宽高都固定就是固定文本框。空格和换行同 HTML：连续空格合成一个，源码里的换行算空格，`<br>` 才换行；`whitespace-pre-wrap` 保留空格和换行，`whitespace-pre-line` 只保留换行。App 写回时，文字里有会被合并的空格就加上 `whitespace-pre-wrap`。定宽文字一定换行，所以 `whitespace-nowrap` 只用于不定宽的文字；App 没有省略号，`truncate`、`line-clamp-*` 会报错。
 
 ## 7. 组件、变体、实例
 
@@ -309,6 +321,8 @@ product.smallpen/
 2. **规则**：Token、组件、属性、部件、页面、资源是否存在；Token 类型和 class 是否相配；名字是否重复；尺寸和布局是否符合 App 的规则（fill 只在弹性布局里，hug 只用于弹性容器和文字，min/max 只配 fill）。
 3. **渲染**：`--render` 时排版并绘制页面和组件，报文字溢出、越界、重叠和对比度问题。渲染问题只是提示，不让 check 失败。
 
+警告可以像 lint 一样关掉：在元素前一行写 `<!-- smallpen-ignore 代码 -->`（多个代码用空格分开，`-` 和 `_` 都行）。它只作用于紧跟的那个元素自己（文字包括其中的字），不影响子元素；被关掉的地方也不计入 `repeated_raw_value` 的次数。App 写回时保留这行注释。错误不能关。
+
 ### 闸门：接受和回退
 
 AI 直接改文件，可能一次改很多个，`check` 同时是闸门：
@@ -346,7 +360,6 @@ pages/Tasks/Board.html:14:9 error unknown_token bg-brnd：没有 --color-brnd，
 | 规则 | `duplicate_name` | 同级元素、页面或组件重名 |
 | 规则 | `layout_required` | 写了 gap、padding、方向或对齐，却没写 `flex` |
 | 规则 | `layout_not_in_app` | 尺寸组合是 App 不允许的：`w-full` 不在弹性或网格布局里；弹性行随内容宽度时子元素 `w-full`（列同理是 `h-full`）；随内容的方向上所有子元素都填满，这时它没有尺寸；`w-fit` 用在不能随内容的元素上 |
-| 警告 | `stretch_not_in_app` | `items-stretch` 或 `justify-items-stretch` 遇到不填满的子元素，App 不会拉伸它 |
 | 规则 | `invalid_size_limit` | `min-*`、`max-*` 用在不是 `w-full`/`h-full` 的元素上 |
 | 规则 | `size_required` | 不能随内容的元素没写尺寸 |
 | 规则 | `text_style_on_container` `text_outside_p` `empty_text` `invalid_text_size` | 文字类写在容器上、文字没放进 `<p>`、空文字、只给高度不给宽度 |
@@ -356,7 +369,10 @@ pages/Tasks/Board.html:14:9 error unknown_token bg-brnd：没有 --color-brnd，
 | 规则 | `invalid_variant_rule` | `when` 用了不存在的属性或取值 |
 | 规则 | `unknown_link_target` | 跳转目标页面不存在，附最接近的名字；目标页面没有这个平台的版本时跳到它的桌面版，不报错 |
 | 规则 | `missing_asset` `font_not_declared` `unsupported_font_conversion` | 资源和字体的问题 |
-| 警告 | `literal_matches_token` | 颜色、间距、圆角、描边宽度的字面值正好等于某个 Token 的值（在 `:root` 或某个主题选项里），附跟随它的写法；宽高和纯黑纯白不报 |
+| 警告 | `repeated_raw_value` | 同一个写死的值（间距、圆角、颜色、描边宽度、字号、阴影、不透明度；方括号和 Tailwind 刻度算同一个值）出现 3 处以上，每个值一条，附同值的 Token 供参考；值相等不等于意思相同，只在意思一样时改用 |
+| 警告 | `typography_overridden` | 文字上的单写类替换了 `type-*` Token 的某一项 |
+| 规则 | `not_in_app` | App 做不到的 CSS：省略号（`truncate`、`line-clamp-*`）、定宽文字加 `whitespace-nowrap` |
+| 规则 | `conflicting_classes` | 互相矛盾的写法：`left`、`right` 和 `w-*` 同时写（CSS 会丢掉 `right`），或 `right`/`bottom` 和 `pin-*` 同时写 |
 | 警告 | `part_named_by_text` | 变体规则或副本覆盖按文字找到的部件（没写 `data-name` 的 `<p>`），文字一改就找不到 |
 | 警告 | `rule_has_no_effect` | 变体规则改的部件在它适用的每个变体里都隐藏，改动不显示；每个组件合成一条 |
 | 警告 | `missing_theme_value` | 没有 `:root` 值的 Token 在同组某个选项里漏了，这个选项下会显示别的选项的值 |

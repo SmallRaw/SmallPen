@@ -625,10 +625,21 @@
   (let [map-to-apply (generate-attr-map token attributes)]
     (update shape :applied-tokens #(merge % map-to-apply))))
 
+(def typography-override-attrs
+  "Text attrs a shape may set itself while a typography token is applied."
+  #{:font-family :font-size :font-weight :letter-spacing :line-height})
+
+(def schema:typography-overrides
+  [:set {:gen/max 2} (into [:enum] typography-override-attrs)])
+
 (defn unapply-tokens-from-shape
-  "Removes any token applied to the given attributes in the shape."
+  "Removes any token applied to the given attributes in the shape. Without a
+  typography token there is nothing left to override."
   [shape attributes]
-  (update shape :applied-tokens d/without-keys attributes))
+  (let [shape (update shape :applied-tokens d/without-keys attributes)]
+    (cond-> shape
+      (not (contains? (:applied-tokens shape) :typography))
+      (dissoc :typography-overrides))))
 
 (defn unapply-layout-item-tokens
   "Unapplies all layout item related tokens from shape."

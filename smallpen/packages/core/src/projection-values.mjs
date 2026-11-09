@@ -166,7 +166,11 @@ function assign(node, field, value) {
     return;
   }
   if (field === "typography") {
-    node.textStyle = { ...(node.textStyle ?? {}), ...structuredClone(value) };
+    // Fields a single class or an App edit replaced stay this text's own,
+    // as CSS lets leading-* beat a text style; the rest follow the Token.
+    const own = new Set(node["typography-overrides"] ?? []);
+    const style = Object.fromEntries(Object.entries(structuredClone(value)).filter(([key]) => !own.has(key)));
+    node.textStyle = { ...(node.textStyle ?? {}), ...style };
     return;
   }
   if (["fontFamily", "fontSize", "fontWeight"].includes(field)) {
