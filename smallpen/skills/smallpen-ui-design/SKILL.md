@@ -2,7 +2,7 @@
 name: smallpen-ui-design
 description: "Design complete application screens and prototype flows, or reusable UI components, variants and page parts in SmallPen. Compose business content with those definitions into native previews, inspect and maintain the design. Use for application UI design and preview, rather than production code or character/animation materials."
 metadata:
-  cli-version: "0.2.0-alpha.2"
+  cli-version: "0.2.0-alpha.3"
   cli-contract-revision: "6c4b0c221b069575fd47bba0783652e99149d1530eecd7a5e596d5ac48750b08"
 ---
 
@@ -24,7 +24,7 @@ These are tool rules. The scene below defines how to use the tool for this task.
 
 ## CLI rules from source
 
-- CLI version: 0.2.0-alpha.2. Use the installed CLI's help/schema when its version differs.
+- CLI version: 0.2.0-alpha.3. Use the installed CLI's help/schema when its version differs.
 - Create a package with init (index.html and tokens.css), then edit its files: Tokens in tokens.css, components in components/<Name>.html, pages in pages/<Module>/<Page>[.mobile|.tablet].html. Define only what the task needs; a complete Token inventory or component library is not a prerequisite.
 - After every edit run smallpen check PACKAGE: each problem is one line, file:line:column severity code message, with the fix. A passing check is the accepted version; with errors, the changed files that keep the package valid are accepted and the files with errors are rejected; check --revert [--file PATH] puts rejected files back to the accepted version. check --render also draws the pages and components (or the --page/--component named) and reports text overflow, bounds, overlaps and contrast; read its coverage and skipped checks. Look with view by name: --as spec for constraints and sources, wireframe for structure, PNG for appearance. Find pages, components, assets and links by reading the files.
 - Continue after App edits with changes --since REVISION (every read reports a revision), then read the affected files before editing again. export is for retained deliverables, with an offline HTML review optional.
