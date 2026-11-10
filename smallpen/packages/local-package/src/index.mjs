@@ -4,6 +4,7 @@ export {
   reconcilePackageViewState,
 } from "./local-workspace-session.mjs";
 export { openWorkspace, resolveWorkspace } from "./workspace.mjs";
+export { decodeFigmaClipboard, isFigmaClipboard, pasteFigmaClipboard } from "./figma-clipboard.mjs";
 export {
   createEvidence,
   measureProjectionText,
@@ -31,6 +32,7 @@ export {
   filesRevision,
   LazyBlobMap,
   openRevisionSnapshot,
+  overlayDraft,
   packageIdOf,
   packageRevision,
   readPackageFiles,

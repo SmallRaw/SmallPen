@@ -2,6 +2,11 @@
 // OUTPUT: style slots (value plus optional Token) per class, and back
 // POS:    The one class vocabulary shared by check, decode and encode.
 
+import {
+  BLURS, COLORS, CONTAINERS, FONT_WEIGHTS, LEADING, RADIUS, SHADOWS, TEXT_SIZES, TRACKING,
+  isPaletteColor, spacingSteps,
+} from "./tailwind-defaults.mjs";
+
 // CSS variable prefix -> Penpot Token type. Longer prefixes first, so
 // --font-weight-* is not read as a font family.
 const TOKEN_PREFIXES = [
@@ -82,11 +87,17 @@ const PREFIX_UTILITIES = new Map([
   ["h", { types: SIZING, literal: LENGTH, slot: "height" }],
   ["left", { types: [], literal: "signed-length", slot: "x" }],
   ["top", { types: [], literal: "signed-length", slot: "y" }],
+  ["right", { types: [], literal: "signed-length", slot: "right" }],
+  ["bottom", { types: [], literal: "signed-length", slot: "bottom" }],
+  ["inset-x", { types: [], literal: "signed-length", slot: "insetX" }],
+  ["inset-y", { types: [], literal: "signed-length", slot: "insetY" }],
+  ["inset", { types: [], literal: "signed-length", slot: "inset" }],
   ["z", { types: [], literal: "integer", slot: "zIndex" }],
   ["type", { types: ["typography"], literal: undefined, slot: "typography" }],
   ["font", { types: ["font-family", "font-weight"], literal: "font", slot: "font" }],
-  ["leading", { types: [], literal: "number", slot: "lineHeight" }],
-  ["tracking", { types: ["letter-spacing"], literal: "signed-length", slot: "letterSpacing" }],
+  ["leading", { types: [], literal: "line-height", slot: "lineHeight" }],
+  ["tracking", { types: ["letter-spacing"], literal: "letter-spacing", slot: "letterSpacing" }],
+  ["size", { types: SIZING, literal: LENGTH, slot: "size" }],
   ["backdrop-blur", { types: [], literal: "blur", slot: "backgroundBlur" }],
   ["blur", { types: [], literal: "blur", slot: "blur" }],
   ["rotate", { types: [], literal: "angle", slot: "rotation" }],
@@ -110,6 +121,20 @@ const CONTENT = { start: "start", center: "center", end: "end", between: "space-
 
 const KEYWORDS = new Map([
   ["flex", [["layout", "flex"]]],
+  ["inline-flex", [["layout", "flex"]]],
+  // What they mean here already: a <div> is a block and a positioning box.
+  ["block", []],
+  ["inline-block", []],
+  ["relative", []],
+  // flex-1 and grow fill the parent's room along its direction; nothing
+  // shrinks in the App, so the shrink and none forms change nothing.
+  ["flex-1", [["grow", true]]],
+  ["grow", [["grow", true]]],
+  ["grow-0", []],
+  ["flex-none", []],
+  ["flex-initial", []],
+  ["shrink", []],
+  ["shrink-0", []],
   ["grid", [["layout", "grid"]]],
   ["grid-flow-row", [["gridDir", "row"]]],
   ["grid-flow-col", [["gridDir", "column"]]],
@@ -148,6 +173,7 @@ const KEYWORDS = new Map([
   ["viewer-shown", [["viewerHidden", false]]],
   ["flip-x", [["flipX", true]]],
   ["flip-y", [["flipY", true]]],
+  ...["normal", "nowrap", "pre", "pre-wrap", "pre-line", "break-spaces"].map((mode) => [`whitespace-${mode}`, [["whitespace", mode]]]),
   ["italic", [["fontStyle", "italic"]]],
   ["not-italic", [["fontStyle", "normal"]]],
   ["uppercase", [["textTransform", "uppercase"]]],
@@ -213,20 +239,7 @@ const KEYWORDS = new Map([
 
 // Hints for classes people often write that SmallPen does not accept.
 const REWRITES = new Map([
-  ["flex-1", "w-full (or h-full in a column)"],
-  ["grow", "w-full (or h-full in a column)"],
-  ["w-auto", "w-fit"],
-  ["h-auto", "h-fit"],
-  ["w-screen", "w-full"],
-  ["h-screen", "h-full"],
-  ["block", "nothing: a <div> is a container already"],
-  ["relative", "nothing: children of a container without flex are placed by left/top"],
-  ["inline-flex", "flex"],
   ["flex-column", "flex-col"],
-  ["font-bold", "font-[700] or a font-weight Token"],
-  ["font-semibold", "font-[600] or a font-weight Token"],
-  ["font-medium", "font-[500] or a font-weight Token"],
-  ["font-normal", "font-[400] or a font-weight Token"],
 ]);
 
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
@@ -376,9 +389,113 @@ function splitTop(text, separator) {
 // radial-gradient(from 0.5 0.5 to 0.5 1 width 1, #ff0000 0%, #0000ff 100%)
 const GRADIENT = /^(linear|radial)-gradient\(\s*from\s+(-?[\d.]+)\s+(-?[\d.]+)\s+to\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s+width\s+([\d.]+))?\s*,(.+)\)$/;
 
+// CSS forms: linear-gradient(to bottom | 135deg, #000, #fff 80%) and the
+// default radial-gradient(#000, #fff) (an ellipse round the centre to the
+// farthest corner) or radial-gradient(closest-side, …). A side or a right
+// angle maps to box points directly; other angles depend on the box, so
+// they keep cssDirection until seedGeometry knows the size.
+const SIDES = {
+  "to bottom": [0.5, 0, 0.5, 1], "to top": [0.5, 1, 0.5, 0],
+  "to right": [0, 0.5, 1, 0.5], "to left": [1, 0.5, 0, 0.5],
+};
+const RIGHT_ANGLES = { 0: "to top", 90: "to right", 180: "to bottom", 270: "to left" };
+const FARTHEST = Math.SQRT1_2;
+
+function cssStops(parts) {
+  const stops = [];
+  for (const part of parts) {
+    const stop = /^\s*(#[0-9a-fA-F]{3,8})(?:\s+(-?[\d.]+)%)?\s*$/.exec(part);
+    if (!stop || !HEX.test(stop[1])) return undefined;
+    const color = normalizeHex(stop[1]);
+    const offset = stop[2] === undefined ? undefined : Number(stop[2]) / 100;
+    if (offset !== undefined && (offset < 0 || offset > 1)) return undefined;
+    stops.push(color.length === 9
+      ? { color: color.slice(0, 7), offset, opacity: alphaFromByte(Number.parseInt(color.slice(7), 16)) }
+      : { color, offset });
+  }
+  if (stops.length < 2) return undefined;
+  // Stops without a place: the first at 0, the last at 1, the rest evenly
+  // between their placed neighbours, as in CSS.
+  if (stops[0].offset === undefined) stops[0].offset = 0;
+  if (stops.at(-1).offset === undefined) stops.at(-1).offset = 1;
+  for (let index = 1; index < stops.length - 1; index += 1) {
+    if (stops[index].offset !== undefined) continue;
+    let next = index;
+    while (stops[next].offset === undefined) next += 1;
+    const from = stops[index - 1].offset;
+    const step = (stops[next].offset - from) / (next - index + 1);
+    for (let fill = index; fill < next; fill += 1) stops[fill].offset = Math.round((from + step * (fill - index + 1)) * 10000) / 10000;
+  }
+  return stops.map((stop) => (stop.opacity === undefined ? { color: stop.color, offset: stop.offset } : stop));
+}
+
+function parseCssGradient(text) {
+  const match = /^(linear|radial)-gradient\((.*)\)$/.exec(text.trim());
+  if (!match) return undefined;
+  const parts = splitTop(match[2], ",").map((part) => part.trim());
+  if (match[1] === "radial") {
+    let end = 0.5 + FARTHEST;
+    if (parts[0] === "closest-side") {
+      end = 1;
+      parts.shift();
+    } else if (["ellipse", "ellipse farthest-corner", "ellipse at center", "farthest-corner"].includes(parts[0])) parts.shift();
+    const stops = cssStops(parts);
+    return stops && { endX: 0.5, endY: end, gradientWidth: 1, startX: 0.5, startY: 0.5, stops, type: "radial-gradient" };
+  }
+  let direction = "to bottom";
+  let angle;
+  if (/^to\s/.test(parts[0])) direction = parts.shift().replace(/\s+/g, " ");
+  else if (/^-?[\d.]+deg$/.test(parts[0])) {
+    angle = ((Number.parseFloat(parts.shift()) % 360) + 360) % 360;
+    if (RIGHT_ANGLES[angle]) direction = RIGHT_ANGLES[angle];
+    else direction = undefined;
+  }
+  const stops = cssStops(parts);
+  if (!stops) return undefined;
+  const gradient = { gradientWidth: 1, stops, type: "linear-gradient" };
+  if (direction && SIDES[direction]) {
+    [gradient.startX, gradient.startY, gradient.endX, gradient.endY] = SIDES[direction];
+    return gradient;
+  }
+  const corner = direction && /^to (top|bottom) (left|right)$|^to (left|right) (top|bottom)$/.exec(direction);
+  if (direction && !corner) return undefined;
+  gradient.cssDirection = corner
+    ? { vertical: corner[1] ?? corner[4], horizontal: corner[2] ?? corner[3] }
+    : { angle };
+  Object.assign(gradient, cssGradientPoints(gradient.cssDirection, 1, 1));
+  return gradient;
+}
+
+// Box points of a CSS gradient line for a box of this size: through the
+// centre, long enough that the corners reach 0% and 100%.
+export function cssGradientPoints(direction, width, height) {
+  let dx;
+  let dy;
+  if (direction.angle !== undefined) {
+    const radians = (direction.angle * Math.PI) / 180;
+    dx = Math.sin(radians);
+    dy = -Math.cos(radians);
+  } else {
+    // "to bottom right": the 50% line joins the other two corners.
+    dx = (direction.horizontal === "right" ? 1 : -1) * height;
+    dy = (direction.vertical === "bottom" ? 1 : -1) * width;
+    const length = Math.hypot(dx, dy) || 1;
+    dx /= length;
+    dy /= length;
+  }
+  const half = (Math.abs(width * dx) + Math.abs(height * dy)) / 2;
+  const round = (value) => Math.round(value * 10000) / 10000;
+  return {
+    startX: round((width / 2 - dx * half) / (width || 1)),
+    startY: round((height / 2 - dy * half) / (height || 1)),
+    endX: round((width / 2 + dx * half) / (width || 1)),
+    endY: round((height / 2 + dy * half) / (height || 1)),
+  };
+}
+
 export function parseGradient(text) {
   const match = GRADIENT.exec(text.trim());
-  if (!match) return undefined;
+  if (!match) return parseCssGradient(text);
   const stops = [];
   for (const part of match[7].split(",")) {
     const stop = /^\s*(#[0-9a-fA-F]{3,8})\s+(-?[\d.]+)%\s*$/.exec(part);
@@ -410,6 +527,17 @@ export function formatGradient(paint, separator = "_") {
     return `${color}${Math.round(Math.max(0, opacity) * 255).toString(16).padStart(2, "0")}`;
   };
   const kind = paint.type === "radial-gradient" ? "radial" : "linear";
+  const stopList = (paint.stops ?? []).map((stop) => `${alpha(stop)}${separator}${formatNumber(stop.offset * 100)}%`).join(",");
+  // The CSS form where it says the same: a side, or the default ellipse.
+  const near = (left, right) => Math.abs(left - right) < 1e-4;
+  const points = [paint.startX, paint.startY, paint.endX, paint.endY].map(Number);
+  if (kind === "linear") {
+    const side = Object.entries(SIDES).find(([, box]) => box.every((value, index) => near(value, points[index])));
+    if (side) return `linear-gradient(${side[0].replace(" ", separator)},${stopList})`;
+  } else if ((paint.gradientWidth ?? 1) === 1 && near(points[0], 0.5) && near(points[1], 0.5) && near(points[2], 0.5)) {
+    if (near(points[3], 0.5 + FARTHEST)) return `radial-gradient(${stopList})`;
+    if (near(points[3], 1)) return `radial-gradient(closest-side,${stopList})`;
+  }
   const width = paint.gradientWidth !== undefined && paint.gradientWidth !== 1 ? `${separator}width${separator}${formatNumber(paint.gradientWidth)}` : "";
   const head = ["from", formatNumber(paint.startX), formatNumber(paint.startY), "to", formatNumber(paint.endX), formatNumber(paint.endY)].join(separator);
   const stops = (paint.stops ?? []).map((stop) => `${alpha(stop)}${separator}${formatNumber(stop.offset * 100)}%`);
@@ -501,7 +629,9 @@ function parseStrokes(text) {
 
 // Tokens of a type this class takes whose value (in :root or a theme
 // option) is the literal's: a hard-coded copy of a Token value.
-function literalMatches(literal, types, tokens) {
+// Tokens whose value equals a raw value: candidates to name it by, when
+// the places mean the same thing (equal values alone do not say so).
+export function tokensWithValue(literal, types, tokens) {
   const color = typeof literal.color === "string" ? literal.color.toLowerCase() : undefined;
   const length = typeof literal.value === "number" && !literal.layers && !literal.strokes ? literal.value : undefined;
   if (color === undefined && length === undefined) return [];
@@ -604,6 +734,18 @@ function parseLiteral(kind, text) {
     }
     case "number":
       return NUMBER.test(text) && Number(text) > 0 ? { value: Number(text) } : undefined;
+    case "line-height": {
+      // As in CSS: a number is a multiple of the font size, px is px.
+      if (NUMBER.test(text) && Number(text) > 0) return { value: Number(text) };
+      const px = parseLength(text);
+      return px > 0 ? { px } : undefined;
+    }
+    case "letter-spacing": {
+      const em = /^(-?\d+(?:\.\d+)?)em$/.exec(text);
+      if (em) return { em: Number(em[1]) };
+      const value = parseLength(text, { signed: true });
+      return value === undefined ? undefined : { value };
+    }
     case "integer":
       return /^-?\d+$/.test(text) ? { value: Number(text) } : undefined;
     case "angle": {
@@ -678,9 +820,104 @@ const GRID_COUNT = /^grid-(cols|rows)-(\d+)$/;
 const GRID_PLACE = /^(col|row)-(start|span)-(\d+)$/;
 const GRID_TRACKS = /^grid-(cols|rows)-\[(.*)\]$/;
 
+// Slots a Tailwind step, size or name can fill, by kind.
+const STEP_SLOTS = new Set([
+  "padding", "paddingX", "paddingY", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "margin", "marginX", "marginY", "marginTop", "marginRight", "marginBottom", "marginLeft",
+  "gap", "rowGap", "columnGap", "width", "height", "minWidth", "maxWidth", "minHeight", "maxHeight",
+  "x", "y", "right", "bottom", "inset", "insetX", "insetY", "size",
+]);
+const CONTAINER_SLOTS = new Set(["width", "minWidth", "maxWidth"]);
+const RADIUS_SLOTS = new Set(["radius", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft"]);
+const SIDE_WIDTH_SLOTS = new Set(["strokeWidthTop", "strokeWidthRight", "strokeWidthBottom", "strokeWidthLeft"]);
+// -left-4, -inset-1, -tracking-wide: the only values that may be negative.
+const SIGNED_SLOTS = new Set(["x", "y", "right", "bottom", "inset", "insetX", "insetY", "letterSpacing"]);
+const BARE = new Set(["rounded", "shadow", "blur", "backdrop-blur"]);
+
+function raw(slot, payload) {
+  return { slots: [[slot, { ...payload, literal: true }]] };
+}
+
+function failure(message) {
+  return { error: { code: "invalid_literal", message } };
+}
+
+// What Tailwind v4's default theme gives a class no package Token names: a
+// raw value, the same as the bracket form. Undefined when Tailwind has none.
+function tailwindValue(prefix, rest, utility, className) {
+  const slot = utility.slot;
+  if (STEP_SLOTS.has(slot)) {
+    const steps = spacingSteps(rest);
+    if (steps !== undefined) return raw(slot, { value: steps });
+    if (CONTAINER_SLOTS.has(slot) && CONTAINERS[rest] !== undefined) return raw(slot, { value: CONTAINERS[rest] });
+    if (["width", "height", "minWidth", "maxWidth", "minHeight", "maxHeight", "size"].includes(slot)) {
+      const axis = prefix.endsWith("w") ? "w" : "h";
+      if (rest === "auto") return failure(`${className} depends on the parent in CSS; write ${axis}-fit to hug the content or ${axis}-full to fill the room`);
+      if (rest === "screen") return failure(`${className}: write ${axis}-full; the page is the screen`);
+      if (/^\d+\/\d+$/.test(rest)) return failure(`${className}: the App has no percent sizes; share the room with ${axis}-full on each child, or write px`);
+    }
+  }
+  if (RADIUS_SLOTS.has(slot) && RADIUS[rest] !== undefined) return raw(slot, { value: RADIUS[rest] });
+  if (slot === "shadow" && SHADOWS[rest] !== undefined) return raw(slot, { value: parseShadow(SHADOWS[rest]) });
+  if ((slot === "blur" || slot === "backgroundBlur") && BLURS[rest] !== undefined) return raw(slot, { value: BLURS[rest] });
+  if (slot === "font") {
+    if (FONT_WEIGHTS[rest] !== undefined) return raw(slot, { weight: FONT_WEIGHTS[rest] });
+    if (["sans", "serif", "mono"].includes(rest)) {
+      return failure(`${className}: Tailwind's font stacks are not built in; add the font with @font-face in tokens.css and a --font-${rest} Token, or write font-[Family]`);
+    }
+  }
+  if (slot === "text" && TEXT_SIZES[rest]) {
+    const [size, lineHeight] = TEXT_SIZES[rest];
+    return { slots: [["text", { value: size, literal: true }], ["impliedLineHeight", { px: lineHeight, literal: true }]] };
+  }
+  if (["text", "fill", "border", "svgFill", "svgStroke"].includes(slot)) {
+    if (slot === "fill" && rest === "transparent") return { slots: [["fill", null]] };
+    if (COLORS[rest]) return raw(slot, { color: COLORS[rest] });
+    if (isPaletteColor(rest)) return failure(`${className}: Tailwind's color palette is not built in; use a color Token (${prefix}-brand) or ${prefix}-[#hex]`);
+  }
+  if ((slot === "border" || slot === "svgStroke" || SIDE_WIDTH_SLOTS.has(slot)) && /^\d+$/.test(rest)) return raw(slot, { value: Number(rest) });
+  if (slot === "opacity" && /^\d+$/.test(rest) && Number(rest) <= 100) return raw(slot, { value: Number(rest) / 100 });
+  if (slot === "letterSpacing" && TRACKING[rest] !== undefined) return raw(slot, { em: TRACKING[rest] });
+  if (slot === "lineHeight") {
+    if (LEADING[rest] !== undefined) return raw(slot, { value: LEADING[rest] });
+    const steps = spacingSteps(rest);
+    if (steps !== undefined) return raw(slot, { px: steps });
+  }
+  if (slot === "zIndex" && /^\d+$/.test(rest)) return raw(slot, { value: Number(rest) });
+  if (slot === "rotation" && /^\d+(?:\.\d+)?$/.test(rest)) return raw(slot, { value: Number(rest) % 360 });
+  return undefined;
+}
+
 function resolveClassUncached(className, tokens) {
   const keyword = KEYWORDS.get(className);
   if (keyword) return { slots: keyword.map(([slot, value]) => [slot, value]) };
+  if (className.startsWith("-") && className.length > 1) {
+    const positive = resolveClassUncached(className.slice(1), tokens);
+    if (positive.error) return positive;
+    const signed = positive.slots.length > 0 && positive.slots.every(([slot, payload]) =>
+      SIGNED_SLOTS.has(slot) && payload && !payload.token && (typeof payload.value === "number" || typeof payload.em === "number"));
+    if (!signed) return failure(`${className}: only left, top, right, bottom, inset and tracking take a minus`);
+    return {
+      ...positive,
+      slots: positive.slots.map(([slot, payload]) => [slot, payload.em !== undefined ? { ...payload, em: -payload.em } : { ...payload, value: -payload.value }]),
+    };
+  }
+  if (BARE.has(className)) {
+    const fallback = tailwindValue(className, "", PREFIX_UTILITIES.get(className), className);
+    if (fallback) return fallback;
+  }
+  // text-sm/6, text-[14px]/[20px]: a font size and its line height.
+  const pair = /^text-(.+?)\/(.+)$/.exec(className);
+  if (pair) {
+    const size = resolveClassUncached(`text-${pair[1]}`, tokens);
+    if (size.error) return size;
+    if (!size.slots.some(([slot, payload]) => slot === "text" && payload && !payload.color && payload.tokenType !== "color")) {
+      return failure(`${className}: text-SIZE/LEADING takes a font size before the /`);
+    }
+    const leading = resolveClassUncached(`leading-${pair[2]}`, tokens);
+    if (leading.error) return { error: { ...leading.error, message: leading.error.message.replace(`leading-${pair[2]}`, className) } };
+    return { slots: [...size.slots.filter(([slot]) => slot !== "impliedLineHeight"), ...leading.slots] };
+  }
   const count = GRID_COUNT.exec(className);
   if (count) {
     const number = Number(count[2]);
@@ -723,13 +960,7 @@ function resolveClassUncached(className, tokens) {
       }
       const unknown = literalTokens(literal, tokens);
       if (unknown) return { error: { code: "unknown_token", message: `${className}: ${unknown}` } };
-      const same = literalMatches(literal, utility.types, tokens);
-      return {
-        slots: [[utility.slot, { ...literal, literal: true }]],
-        ...(same.length
-          ? { note: { code: "literal_matches_token", message: `${className} is the value of ${same.map(({ name, scope }) => `--${name}${scope === "base" ? "" : ` (${scope})`}`).join(", ")}; ${same.map(({ name }) => `${prefix}-${tokenTypeOfName(name)?.rest ?? name}`).filter((value, index, all) => all.indexOf(value) === index).slice(0, 2).join(" or ")} follows the Token when it changes` } }
-          : {}),
-      };
+      return { slots: [[utility.slot, { ...literal, literal: true }]] };
     }
     const matches = [];
     for (const type of utility.types) {
@@ -747,6 +978,8 @@ function resolveClassUncached(className, tokens) {
         },
       };
     }
+    const fallback = tailwindValue(prefix, rest, utility, className);
+    if (fallback) return fallback;
     // rounded-full is a pill or a circle, as in Tailwind, unless a
     // --radius-full Token says otherwise.
     if (rest === "full" && utility.slot.startsWith("radius")) return { slots: [[utility.slot, { value: 9999, literal: true }]] };
@@ -787,6 +1020,9 @@ function resolveClassUncached(className, tokens) {
       },
     };
   }
+  if (/^(?:truncate|text-ellipsis|overflow-ellipsis|line-clamp-\d+)$/.test(className)) {
+    return { error: { code: "not_in_app", message: `${className}: the App has no text ellipsis; give the text room for its words, or fewer words` } };
+  }
   const rewrite = REWRITES.get(className);
   const near = rewrite ? undefined : suggestion(className, [...KEYWORDS.keys()]);
   return {
@@ -816,6 +1052,8 @@ function literalExample(kind) {
     case "stroke": return "#e5e7eb";
     case "unit": return "0.5";
     case "number": return "1.4";
+    case "line-height": return "1.4";
+    case "letter-spacing": return "0.5px";
     case "integer": return "1";
     case "angle": return "45deg";
     case "shadow": return "0_2px_8px_0_#00000033";
@@ -828,6 +1066,8 @@ function literalExample(kind) {
 function literalHelp(kind, prefix) {
   if (!kind) return `${prefix}- takes a Token name only`;
   if (kind === "blur") return `expected a length such as ${prefix}-[4px], or ${prefix}-[4px_hidden] to keep it but not draw it`;
+  if (kind === "line-height") return `expected a multiple of the font size such as ${prefix}-[1.4], or px such as ${prefix}-[20px]`;
+  if (kind === "letter-spacing") return `expected px such as ${prefix}-[0.5px], or em such as ${prefix}-[0.02em]`;
   if (kind === "shadow") return `expected offsets, blur, spread and a color such as ${prefix}-[0_2px_8px_0_#00000033]; add inset for an inner shadow, hidden to keep a layer but not draw it, and separate layers with ,`;
   return `expected a value such as ${prefix}-[${literalExample(kind)}]`;
 }

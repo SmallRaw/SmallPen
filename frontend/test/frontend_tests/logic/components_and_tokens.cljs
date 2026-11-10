@@ -439,3 +439,60 @@
 
       (tohs/run-store-async
        store step2 events identity))))
+
+(defn- text-attr-values
+  "Every value of `attr` in a text content tree."
+  [content attr]
+  (->> (tree-seq #(seq (:children %)) :children content)
+       (keep attr)
+       (set)))
+
+(t/deftest typography-token-update-keeps-the-fields-a-text-sets-itself
+  (t/async
+    done
+    (let [;; ==== Setup
+          file  (-> (ctht/sample-file-with-tokens
+                     :lib-fn #(-> %
+                                  (ctob/add-set (ctob/make-token-set :id (cthi/new-id! :test-token-set)
+                                                                     :name "test-token-set"))
+                                  (ctob/add-theme (ctob/make-token-theme :id (cthi/new-id! :test-theme)
+                                                                         :name "test-theme"
+                                                                         :sets #{"test-token-set"}))
+                                  (ctob/add-token (cthi/id :test-token-set)
+                                                  (ctob/make-token :id (cthi/new-id! :token-title)
+                                                                   :name "token-title"
+                                                                   :type :typography
+                                                                   :value {:font-size "20" :line-height "1.5"})))
+                     :status-fn #(ctos/set-tokens-status % #{(cthi/id :test-theme)} #{(cthi/id :test-token-set)}))
+                    (ctho/add-text :text1 "Hello")
+                    (cths/update-shape :text1 :applied-tokens {:typography "token-title"})
+                    ;; leading-[2] beside type-title: the line height is the text's own.
+                    (cths/update-shape :text1 :typography-overrides #{:line-height}))
+          store (ths/setup-store file)
+
+          ;; ==== Action
+          events [(dwtl/set-selected-token-set-id (cthi/id :test-token-set))
+                  (dwtl/update-token (cthi/id :token-title)
+                                     {:name "token-title"
+                                      :value {:font-size "30" :line-height "1.8"}})]
+
+          line-heights (text-attr-values (:content (cths/get-shape file :text1)) :line-height)
+
+          step2 (fn [_]
+                  (tohs/run-store-async
+                   store done [(dwtp/propagate-workspace-tokens)]
+                   (fn [new-state]
+                     (let [;; ==== Get
+                           file'   (ths/get-file-from-state new-state)
+                           text1'  (cths/get-shape file' :text1)
+                           content (:content text1')]
+
+                       ;; ==== Check
+                       (t/is (= {:typography "token-title"} (:applied-tokens text1')))
+                       (t/is (= #{:line-height} (:typography-overrides text1')))
+                       (t/is (= #{"30"} (text-attr-values content :font-size)))
+                       (t/is (= line-heights (text-attr-values content :line-height)))
+                       (t/is (not (contains? (text-attr-values content :line-height) "1.8")))))))]
+
+      (tohs/run-store-async
+       store step2 events identity))))

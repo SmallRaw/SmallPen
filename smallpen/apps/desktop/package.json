@@ -1,6 +1,6 @@
 {
   "name": "@smallpen/desktop",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0-alpha.3",
   "private": true,
   "type": "module",
   "bin": {
@@ -18,7 +18,7 @@
     "build:windows": "node scripts/build-electron.mjs"
   },
   "dependencies": {
-    "@smallpen/background": "0.2.0-alpha.1",
-    "@smallpen/web": "0.2.0-alpha.1"
+    "@smallpen/background": "0.2.0-alpha.3",
+    "@smallpen/web": "0.2.0-alpha.3"
   }
 }

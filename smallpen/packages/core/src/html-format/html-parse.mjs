@@ -121,6 +121,7 @@ export function parseHtml(source) {
   let svgDepth = 0;
   let doctype = false;
   let index = 0;
+  let pendingIgnore;
   const length = source.length;
 
   const current = () => stack[stack.length - 1];
@@ -159,6 +160,15 @@ export function parseHtml(source) {
           issue(issues, "html_parse_error", "Comment is not closed with -->", index);
           index = length;
         } else {
+          // <!-- smallpen-ignore code … --> mutes those warnings on the next
+          // element, as a lint comment does on the next line.
+          const body = source.slice(index + 4, end).trim();
+          const ignore = /^smallpen-ignore(?:\s+([\s\S]*))?$/.exec(body);
+          if (ignore) {
+            const codes = (ignore[1] ?? "").split(/[\s,]+/).filter(Boolean).map((code) => code.replace(/-/g, "_"));
+            if (codes.length) pendingIgnore = codes;
+            else issue(issues, "html_parse_error", "smallpen-ignore names the warnings to mute, for example <!-- smallpen-ignore repeated_raw_value -->", index);
+          }
           index = end + 3;
         }
         continue;
@@ -328,7 +338,9 @@ export function parseHtml(source) {
       startEnd: cursor,
       closeOffset: undefined,
       ...(brokenQuote ? { brokenQuote: true } : {}),
+      ...(pendingIgnore ? { ignore: pendingIgnore } : {}),
     };
+    pendingIgnore = undefined;
     // Deeper elements than any design needs are reported once and left out
     // of the tree, so every later walk over it stays within the stack.
     if (stack.length > MAX_DEPTH) {

@@ -48,6 +48,7 @@ import {
 import { batchHistoryPath, HISTORY_CACHE_IDLE_MS } from "./history-cache.mjs";
 import {
   decodeSnapshot,
+  draftOverlay,
   forgetPackage,
   openSnapshot,
   rememberCommittedState,
@@ -461,7 +462,8 @@ export async function openPackage(locator) {
   try {
     await recoverInterruptedCommit(target);
     const snapshot = await openPackageUnlocked(target);
-    await rememberSnapshot(snapshot);
+    // A read with a draft laid over it is not a revision of the package.
+    if (!draftOverlay(target)) await rememberSnapshot(snapshot);
     return snapshot;
   } finally {
     await release();

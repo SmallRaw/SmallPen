@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { retryDownloads } from "./retry-download.mjs";
 import { stagePayload } from "./stage-payload.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -31,6 +32,8 @@ async function main() {
     await import("../tools/node_modules/@electron/packager/dist/index.js");
   const { flipFuses, FuseVersion, FuseV1Options } =
     await import("../tools/node_modules/@electron/fuses/dist/index.js");
+  const { FetchDownloader } =
+    await import("../tools/node_modules/@electron/get/dist/FetchDownloader.js");
   const { version: electronVersion } = JSON.parse(
     await readFile(join(root, "electron.json")),
   );
@@ -85,6 +88,7 @@ async function main() {
     platform,
     arch,
     electronVersion,
+    download: { downloader: retryDownloads(new FetchDownloader()) },
     appVersion: metadata.version,
     appBundleId: "app.smallpen.desktop",
     appCategoryType: "public.app-category.graphics-design",

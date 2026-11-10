@@ -328,12 +328,31 @@ async function snapshotOfState(packagePath, state, textFiles, assets) {
   return snapshot;
 }
 
+// --- Drafts ---------------------------------------------------------------
+
+// A draft is a page kept outside the package for review (view, export or
+// check with --draft). While one is laid over a package, reads in this
+// process see it as one more page file; nothing about it is cached,
+// remembered or written, so the package never holds it.
+const draftOverlays = new Map();
+
+export async function overlayDraft(locator, draft) {
+  const key = await realpath(resolve(locator));
+  draftOverlays.set(key, { path: draft.path, bytes: Buffer.from(draft.bytes) });
+  return key;
+}
+
+export function draftOverlay(packagePath) {
+  return draftOverlays.get(packagePath);
+}
+
 // Opens a package. Unchanged files (same stats) reuse the decoded state
 // from memory; only changed packages are read and decoded again.
 export async function openSnapshot(packagePath, options = {}) {
+  const draft = draftOverlays.get(packagePath);
   const stats = await statPackageFiles(packagePath);
   const signature = statSignature(stats);
-  const cached = !options.identity && processCache.get(packagePath);
+  const cached = !options.identity && !draft && processCache.get(packagePath);
   if (cached && cached.signature === signature) {
     return snapshotOfState(packagePath, cached.state, cached.textFiles, cached.assets);
   }
@@ -344,12 +363,13 @@ export async function openSnapshot(packagePath, options = {}) {
     if (textBytes > MAX_TEXT_BYTES) fail("package_too_large", "Pages, components and tokens hold at most 64 MiB of text");
     textFiles.set(path, await readFile(info.absolute));
   }));
+  if (draft) textFiles.set(draft.path, draft.bytes);
   const sortedText = new Map(sortedEntries(textFiles));
   const packageId = packageIdOf(sortedText);
   const assets = await assetFacts(packagePath, packageId, stats, cached?.assetMemo);
   const assetPaths = new Map([...stats].map(([path, info]) => [path, info.absolute]));
   const { state, snapshot } = await decodeSnapshot(packagePath, sortedText, assets, { identity: options.identity, assetPaths });
-  if (!options.identity) {
+  if (!options.identity && !draft) {
     processCache.set(packagePath, { signature, state, textFiles: sortedText, assets, assetMemo: assets });
   }
   return snapshot;

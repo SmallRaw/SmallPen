@@ -67,6 +67,11 @@
        (fn [acc [k v]]
          (let [resolved-token (get resolved-tokens v)
                resolved-value (get resolved-token :resolved-value)
+               ;; Fields the text sets itself keep their value; the rest of
+               ;; the typography token still applies.
+               resolved-value (if (and (= k :typography) (map? resolved-value))
+                                (apply dissoc resolved-value (:typography-overrides shape))
+                                resolved-value)
                skip? (or
                       (not (get resolved-tokens v))
                       (and filter-existing-values? (= (get shape k) resolved-value)))]

@@ -170,6 +170,7 @@
   (or (contains? sync-attrs attr)
       (= :shape-ref attr)
       (= :applied-tokens attr)
+      (= :typography-overrides attr)
       (= :component-id attr)
       (= :component-file attr)
       (= :component-root attr)))

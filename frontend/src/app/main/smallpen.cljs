@@ -513,6 +513,20 @@
                   nil))
         pending)))
 
+(defn figma-paste
+  "Figma's clipboard HTML as shapes to paste: {:objects :selected :losses}.
+  The Background reads the layers (nothing is written); the App projects
+  them with the Package's fonts and pastes them like copied shapes."
+  [html]
+  (-> (request "/v1/figma/paste" #js {:method "POST"
+                                      :headers #js {"content-type" "text/html"}
+                                      :body html})
+      (.then (fn [{:keys [nodes rootIds nodeIds losses]}]
+               (-> (workspace)
+                   (.then (fn [snapshot]
+                            (assoc (projection/project-fragment snapshot nodes rootIds nodeIds)
+                                   :losses losses))))))))
+
 (defn workspace-snapshot
   "Public handle to the memoized Package workspace snapshot promise
   (DSE-008). Rejects like the internal boot when the Package cannot load."

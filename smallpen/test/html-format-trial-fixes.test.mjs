@@ -50,8 +50,11 @@ test("border-b alone draws the bottom only, as in CSS", async () => {
   const page = await written(home);
   assert.ok(page.includes(home.split("\n").slice(1, -1).join("\n")), page);
 
-  const scale = await decodePackageFiles(files('<body><div data-name="B" class="w-[10px] h-[10px] border-2 border-[#111111]"></div></body>'));
-  assert.match(errors(scale)[0].message, /border-2: no Token --color-2 or --border-2; write border-\[2px\], or a Token: border-thin \(1px\)/);
+  // border-2 is 2px, as in Tailwind: a raw value, not a Token.
+  const scale = await decoded('<body><div data-name="B" class="w-[10px] h-[10px] border-2 border-[#111111]"></div></body>');
+  assert.deepEqual(errors(scale.result), []);
+  assert.equal(scale.byName("B").strokes[0].width, 2);
+  assert.equal(scale.byName("B").tokenBindings?.strokeWidth, undefined);
 });
 
 const BUTTON = `<sp-component name="Button" props="Style: primary | ghost">
@@ -172,16 +175,19 @@ test("fill on a hugging parent's cross axis works as in the App; every child fil
   assert.match(errors(mainAxis)[0].message, /w-full inside a parent that hugs its width/);
 });
 
-test("items-stretch that would not resize a child is a warning", async () => {
-  const { result } = await decoded(`<body class="bg-[#ffffff]">
-  <div data-name="Cards" class="grid grid-cols-2 items-stretch gap-[8px] w-[400px]">
-    <div data-name="A" class="w-full h-[80px] bg-[#eeeeee]"></div>
-    <div data-name="B" class="w-full h-[120px] bg-[#eeeeee]"></div>
+test("items-stretch stretches the children without a height and places the rest, as CSS does", async () => {
+  const { result, byName } = await decoded(`<body class="bg-[#ffffff]">
+  <div data-name="Cards" class="grid grid-cols-3 grid-rows-[120px] items-stretch gap-[8px] w-[400px] h-[120px]">
+    <div data-name="A" class="h-[80px] bg-[#eeeeee]"></div>
+    <div data-name="B" class="h-[120px] bg-[#eeeeee]"></div>
+    <div data-name="C" class="bg-[#eeeeee]"></div>
   </div>
 </body>`);
   assert.deepEqual(errors(result), []);
-  const warning = result.issues.find((issue) => issue.code === "stretch_not_in_app");
-  assert.match(warning?.message ?? "", /items-stretch does not resize children in the App.*h-full/);
+  assert.equal(result.issues.find((issue) => issue.code === "stretch_not_in_app"), undefined);
+  assert.equal(byName("A").height, 80);
+  assert.equal(byName("C")["layout-item-v-sizing"], "fill");
+  assert.equal(byName("C").height, 120);
 });
 
 test("--variant takes the props a file writes, and labels read the same way", () => {
@@ -249,20 +255,14 @@ test("a mobile page links to a page that only has a desktop version", async () =
   assert.deepEqual(errors(result), []);
 });
 
-test("a literal that copies a colour or a scale step names the Token; sizes, white and black do not", async () => {
-  const tokens = ":root {\n  --color-brand: #4f46e5;\n  --color-on-brand: #ffffff;\n  --spacing-4: 16px;\n  --size-card: 120px;\n}\n";
+test("a raw value equal to a Token is not a warning by itself: equal values need not mean the same", async () => {
+  const tokens = ":root {\n  --color-brand: #4f46e5;\n  --spacing-4: 16px;\n}\n";
   const map = files(`<body class="bg-[#ffffff]">
   <div data-name="A" class="flex flex-col gap-[16px] p-[16px] w-[120px] h-[120px] bg-[#4f46e5]"></div>
 </body>`);
   map.set("tokens.css", tokens);
   const { issues } = await decodePackageFiles(map);
-  const notes = issues.filter((issue) => issue.code === "literal_matches_token").map((issue) => issue.message);
-  assert.deepEqual(notes.sort(), [
-    "bg-[#4f46e5] is the value of --color-brand; bg-brand follows the Token when it changes",
-    "gap-[16px] is the value of --spacing-4; gap-4 follows the Token when it changes",
-    "p-[16px] is the value of --spacing-4; p-4 follows the Token when it changes",
-  ]);
-  assert.ok(issues.every((issue) => issue.severity === "warning"));
+  assert.deepEqual(issues, []);
 });
 
 test("rules and overrides that find a text by its words, and rules that change only hidden parts, are named", async () => {
@@ -346,9 +346,14 @@ test("relative-to on a copy's part counts from the copy, names it, and writes ba
   assert.match(errors(wrong)[0].message, /relative-to names Nowhere, which is not a board or copy around this element; use self, page or one of Top/);
 });
 
-test("Tailwind's number scale is explained with the nearest Tokens", async () => {
-  const map = files('<body><div data-name="A" class="flex flex-col px-5 w-[10px] h-[10px]"></div></body>');
-  map.set("tokens.css", ":root {\n  --spacing-4: 16px;\n  --spacing-6: 24px;\n  --spacing-12: 48px;\n}\n");
-  const message = errors(await decodePackageFiles(map))[0].message;
-  assert.match(message, /px-5: no Token --spacing-5; in Tailwind px-5 is 20px: write px-\[20px\], or a Token: px-4 \(16px\), px-6 \(24px\)/);
+test("Tailwind's number scale is a raw value unless a Token has that name", async () => {
+  const map = files('<body><div data-name="A" class="flex flex-col px-5 py-4 w-[10px] h-[10px]"></div></body>');
+  map.set("tokens.css", ":root {\n  --spacing-4: 16px;\n  --spacing-6: 24px;\n}\n");
+  const result = await decodePackageFiles(map);
+  assert.deepEqual(errors(result), []);
+  const node = Object.values(result.values.get("pages/Home").presentations[0].nodes).find((item) => item.name === "A");
+  assert.equal(node["layout-padding"].p2, 20);
+  assert.equal(node["layout-padding"].p1, 16);
+  assert.ok(node.tokenBindings.paddingTop);
+  assert.equal(node.tokenBindings.paddingLeft, undefined);
 });

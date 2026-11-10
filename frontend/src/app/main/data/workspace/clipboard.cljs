@@ -51,6 +51,7 @@
    [app.main.refs :as refs]
    [app.main.repo :as rp]
    [app.main.router :as rt]
+   [app.main.smallpen :as smallpen]
    [app.main.smallpen.edit-policy :as dsep]
    [app.main.store :as st]
    [app.main.streams :as ms]
@@ -280,6 +281,7 @@
 (declare ^:private paste-image)
 (declare ^:private paste-svg-text)
 (declare ^:private paste-shapes)
+(declare ^:private paste-figma)
 
 (defn- v3-html-paste?
   [state]
@@ -296,6 +298,10 @@
   (fn [blob]
     (let [type (.-type blob)]
       (cond
+        (= type "application/x-figma-clipboard")
+        (->> (rx/from (.text blob))
+             (rx/map #(paste-figma % in-viewport?)))
+
         (= type "image/svg+xml")
         (->> (rx/from (.text blob))
              (rx/map paste-svg-text))
@@ -1091,6 +1097,55 @@
 
     :else
     (deref ms/mouse-position)))
+
+(defn- figma-paste-target
+  "The page board Figma layers go into when nothing is selected: the one in
+  the middle of the view, else the first. A SmallPen page has one root, so
+  layers pasted beside the boards would have no page."
+  [state]
+  (let [objects (dsh/lookup-page-objects state)
+        boards  (->> (dm/get-in objects [uuid/zero :shapes])
+                     (map (d/getf objects))
+                     (filter cfh/frame-shape?))
+        vbox    (dm/get-in state [:workspace-local :vbox])
+        center  (when vbox
+                  (gpt/point (+ (:x vbox) (/ (:width vbox) 2))
+                             (+ (:y vbox) (/ (:height vbox) 2))))]
+    (or (when center (d/seek #(grc/contains-point? (:selrect %) center) boards))
+        (first boards))))
+
+(defn- paste-figma
+  "Layers copied in Figma, pasted as plain layers for reference: the
+  Background reads them into SmallPen layers and says what did not come
+  across (components, images, vectors, unknown fonts)."
+  [html in-viewport?]
+  (ptk/reify ::paste-figma
+    ptk/WatchEvent
+    (watch [_ state _]
+      (->> (rx/from (smallpen/figma-paste html))
+           (rx/mapcat
+            (fn [{:keys [objects selected losses]}]
+              (rx/concat
+               (when (empty? (dsh/lookup-selected state))
+                 (when-let [target (figma-paste-target state)]
+                   (rx/of (dws/select-shape (:id target)))))
+               (rx/of (paste-shapes {:type :copied-shapes
+                                     :file-id (:current-file-id state)
+                                     :objects objects
+                                     :selected selected
+                                     :images []
+                                     :in-viewport in-viewport?}))
+               (when (seq losses)
+                 (rx/of (ntf/show {:content (tr "workspace.clipboard.figma-partial"
+                                                (str/join " · " (map :message losses)))
+                                   :type :toast
+                                   :level :info
+                                   :timeout 10000}))))))
+           (rx/catch (fn [cause]
+                       (rx/of (ntf/show {:content (tr "workspace.clipboard.figma-failed" (ex-message cause))
+                                         :type :toast
+                                         :level :error
+                                         :timeout 8000}))))))))
 
 (defn- paste-html-text
   [html]

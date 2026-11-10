@@ -306,6 +306,7 @@
          "textStyle" nil
          "touched" nil
          "type" (:type rectangle)
+         "typography-overrides" (:typography-overrides rectangle)
          "visible" (:hidden rectangle)
          "width" (:width rectangle)
          "x" (:x rectangle)
@@ -771,6 +772,18 @@
              (spts/get-active-theme-paths tokens-lib)))
     (t/is (= {:fill "color.primary" :width "size.card"}
              (:applied-tokens rectangle)))))
+
+(t/deftest project-snapshot-keeps-the-fields-a-text-sets-over-its-typography-token
+  ;; leading-* beside type-* (or an App edit) makes the line height the
+  ;; text's own; Penpot's token updates then leave it alone.
+  (let [objects (-> snapshot
+                    (assoc-in [:entries "screens/roundtrip.json" :presentations 0
+                               :nodes :node_rectangle :typography-overrides]
+                              ["lineHeight" "fontSize"])
+                    (projection/project-snapshot {:file-id file-id :project-id project-id})
+                    (get-in [:file :data :pages-index page-id :objects]))]
+    (t/is (= #{:line-height :font-size}
+             (get-in objects [rectangle-id :typography-overrides])))))
 
 (t/deftest project-snapshot-shows-the-applied-tokens-the-background-computed
   ;; The Background computes applied Tokens from the bindings with core's one

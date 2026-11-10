@@ -11,7 +11,36 @@ import { decodeElement, elementType, readText, seedGeometry, TRIGGER_ATTRIBUTES 
 import { parseInteraction, TRIGGERS } from "./interactions.mjs";
 import { createState, readClasses, textStyleOf, valueOf, visualFields } from "./style-slots.mjs";
 import { decodeTokensCss, resolveTokenValue } from "./tokens-codec.mjs";
-import { suggestion } from "./vocabulary.mjs";
+import { formatShadow, suggestion, tokensWithValue } from "./vocabulary.mjs";
+
+// A raw value that recurs is probably a design decision without a name.
+const RAW_REPEAT = 3;
+const SPACING_SLOTS = new Set([
+  "padding", "paddingX", "paddingY", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "margin", "marginX", "marginY", "marginTop", "marginRight", "marginBottom", "marginLeft",
+  "gap", "rowGap", "columnGap",
+]);
+
+// [what it is, the Token types that could name it, the value] for the raw
+// values worth counting; positions and sizes are this place's own.
+function rawKind(slot, payload) {
+  const number = typeof payload.value === "number" ? payload.value : undefined;
+  if (SPACING_SLOTS.has(slot)) return number ? ["spacing", ["spacing"], number, `${number}px`] : undefined;
+  if (slot.startsWith("radius")) return number ? ["radius", ["border-radius"], number, `${number}px`] : undefined;
+  if (slot.startsWith("strokeWidth")) return number ? ["border width", ["stroke-width"], number, `${number}px`] : undefined;
+  if (slot === "opacity") return number !== undefined && number !== 1 ? ["opacity", ["opacity"], number, String(number)] : undefined;
+  if (slot === "shadow" && Array.isArray(payload.value)) return ["shadow", ["shadow"], payload.value, formatShadow(payload.value)];
+  if (["fill", "text", "border", "svgFill", "svgStroke"].includes(slot)) {
+    if (typeof payload.color === "string") {
+      const color = payload.color.toLowerCase();
+      // A fully transparent colour is the absence of one.
+      return /^#[0-9a-f]{6}00$/.test(color) ? undefined : ["color", ["color"], color, color];
+    }
+    if (slot === "text" && number) return ["font size", ["font-size"], number, `${number}px`];
+    if (slot === "border" && number) return ["border width", ["stroke-width"], number, `${number}px`];
+  }
+  return undefined;
+}
 
 export const PLATFORM_SIZES = {
   desktop: { width: 1440, height: 900 },
@@ -177,7 +206,15 @@ export async function decodePackageFiles(files, options = {}) {
   // A rule shared by many variants is read once per variant; its problem is
   // reported once.
   const reported = new Set();
+  // Warnings muted by <!-- smallpen-ignore … --> on an element.
+  const ignored = [];
+  const isIgnored = (file, code, offset) => ignored.some((range) =>
+    range.file === file && offset >= range.start && offset <= range.end && range.codes.includes(code));
+  // Raw values by kind and value: { kind, value, label, types, places, first }.
+  const rawValues = new Map();
+  const rawSeen = new Set();
   const report = (file, code, message, offset = 0, severity = "error", details) => {
+    if (severity === "warning" && isIgnored(file, code, offset)) return;
     const key = `${file}\0${offset}\0${code}\0${message}`;
     if (reported.has(key)) return;
     reported.add(key);
@@ -486,6 +523,21 @@ export async function decodePackageFiles(files, options = {}) {
       tokenRef,
       issue: (code, message, offset, details) => report(file, code, message, offset, details?.severity ?? "error", details),
       warn: (code, message, offset) => report(file, code, message, offset, "warning"),
+      ignore: (start, end, codes) => ignored.push({ file, start, end, codes }),
+      // A rule shared by variants is read once per variant: count it once.
+      raw: (slot, payload, offset) => {
+        const kind = rawKind(slot, payload);
+        if (!kind || isIgnored(file, "repeated_raw_value", offset)) return;
+        const place = `${file}\0${offset}\0${slot}`;
+        if (rawSeen.has(place)) return;
+        rawSeen.add(place);
+        const [label, types, value, text] = kind;
+        const key = `${label}\0${text}`;
+        if (!rawValues.has(key)) rawValues.set(key, { label, types, value, text, places: 0, files: new Set(), first: { file, offset } });
+        const entry = rawValues.get(key);
+        entry.places += 1;
+        entry.files.add(file);
+      },
       // nodeId gives an element its id (each call a new one); nodeIdOf finds
       // the id an element at that path was given.
       nodeId: (path) => {
@@ -1093,7 +1145,22 @@ export async function decodePackageFiles(files, options = {}) {
   }
   values.set("manifest.json", manifest);
 
-  // Literal values that equal a Token's value are worth binding.
+  // A raw value written in many places is probably one design decision
+  // that wants a name. Equal values do not say the places mean the same,
+  // so Tokens of that value are offered, not prescribed.
+  for (const entry of rawValues.values()) {
+    if (entry.places < RAW_REPEAT) continue;
+    const literal = typeof entry.value === "string" ? { color: entry.value } : typeof entry.value === "number" ? { value: entry.value } : {};
+    const same = tokensWithValue(literal, entry.types, tokenTable).map(({ name }) => `--${name}`);
+    const files = entry.files.size === 1 ? "1 file" : `${entry.files.size} files`;
+    report(
+      entry.first.file,
+      "repeated_raw_value",
+      `${entry.label} ${entry.text} is written raw in ${entry.places} places (${files}); if they are one design decision, name it with a Token and use its class${same.length ? ` (Tokens of this value: ${same.join(", ")}; use one only where it means the same)` : ""}; a value used once may stay raw`,
+      entry.first.offset,
+      "warning",
+    );
+  }
   issues.sort((left, right) =>
     left.file < right.file ? -1 : left.file > right.file ? 1 : left.line - right.line || left.column - right.column,
   );

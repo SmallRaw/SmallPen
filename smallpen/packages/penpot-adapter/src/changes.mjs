@@ -943,6 +943,15 @@ const PENPOT_NULL_FIELDS = new Map([
   ["background-blur", "backgroundBlur"],
 ]);
 
+// Penpot text attributes a type Token sets -> text style field names.
+const TYPOGRAPHY_OVERRIDE_FIELDS = {
+  "font-family": "fontFamily",
+  "font-size": "fontSize",
+  "font-weight": "fontWeight",
+  "letter-spacing": "letterSpacing",
+  "line-height": "lineHeight",
+};
+
 function cornerRadii(value) {
   if (typeof value === "number") return [value, value, value, value];
   if (Array.isArray(value) && value.length === 4) return [...value];
@@ -1212,6 +1221,16 @@ function compileAttribute(operation, attr, value, node, snapshot) {
       );
     }
     operation.changes.mediaRef = compileMediaReference(snapshot, value);
+    return;
+  }
+  if (attr === "typography-overrides") {
+    // The fields of a type Token this text sets itself, in the App's names.
+    if (!Array.isArray(value)) {
+      fail("invalid_typography_overrides", "Penpot typography-overrides must be an array of text attributes");
+    }
+    const fields = [...new Set(value.map(normalizeType).map((name) => TYPOGRAPHY_OVERRIDE_FIELDS[name]).filter(Boolean))].sort();
+    if (fields.length) operation.changes["typography-overrides"] = fields;
+    else if (Object.hasOwn(node, "typography-overrides")) operation.changes["typography-overrides"] = null;
     return;
   }
   if (attr === "touched") {

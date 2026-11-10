@@ -6,6 +6,7 @@
 import { attributeValue } from "./html-parse.mjs";
 import { gridCells, placeGridItems } from "./grid-cells.mjs";
 import { uuidFromKey } from "./ids.mjs";
+import { cssGradientPoints } from "./vocabulary.mjs";
 import {
   createState,
   gridItem,
@@ -70,7 +71,11 @@ export function elementType(element) {
 
 // Text of a <p>: whitespace collapses as in a browser, <br> is a line
 // break. Returns { text, runs } where runs keep <span> styling.
-export function readText(element, ctx) {
+const BREAK = "\u2028";
+
+// whitespace: CSS white-space. normal and nowrap collapse spaces; pre,
+// pre-wrap and break-spaces keep every space and line; pre-line keeps lines.
+export function readText(element, ctx, whitespace = "normal") {
   const runs = [];
   const push = (text, span) => {
     if (!text) return;
@@ -80,26 +85,32 @@ export function readText(element, ctx) {
   };
   for (const child of element.children) {
     if (child.type === "text") push(child.text, undefined);
-    else if (child.tag === "br") push("\n", undefined);
+    else if (child.tag === "br") push(BREAK, undefined);
     else if (child.tag === "span") {
       checkAttributes(child, ctx);
       for (const inner of child.children) {
         if (inner.type === "text") push(inner.text, child);
-        else if (inner.tag === "br") push("\n", child);
+        else if (inner.tag === "br") push(BREAK, child);
         else ctx.issue("unknown_element", `<${inner.tag}> cannot be inside <span>`, inner.offset);
       }
     } else {
       ctx.issue("unknown_element", `<${child.tag}> cannot be inside <p>; use <span> for styled text`, child.offset);
     }
   }
-  // Collapse whitespace across runs, keeping explicit line breaks.
+  if (["pre", "pre-wrap", "break-spaces"].includes(whitespace)) {
+    const kept = runs.map((run) => ({ ...run, text: run.text.replaceAll(BREAK, "\n") }));
+    return { text: kept.map((run) => run.text).join(""), runs: kept };
+  }
+  // As in HTML, a line in the file is a space; <br> breaks the line (and
+  // so does a line in the file under pre-line).
+  const keepLines = whitespace === "pre-line";
   let text = "";
   const collapsed = [];
   let pendingSpace = false;
   for (const run of runs) {
     let out = "";
     for (const char of run.text) {
-      if (char === "\n") {
+      if (char === BREAK || (keepLines && char === "\n")) {
         out += "\n";
         pendingSpace = false;
       } else if (/\s/.test(char) && char !== " ") {
@@ -226,13 +237,17 @@ export function decodeElement(element, ctx, parent, path, name) {
   ctx.elementIds?.set(element, id);
   // A text without data-name is named by its words (see nameChildren).
   if (type === "TEXT" && attributeValue(element, "data-name") === undefined) ctx.namedByText?.add(id);
+  // <!-- smallpen-ignore … --> before the element mutes those warnings on
+  // its own tag (a text: on its words too), not on its children.
+  if (element.ignore) ctx.ignore?.(element.offset, type === "TEXT" ? element.end : element.startEnd, element.ignore);
   const sources = [{ value: attributeValue(element, "class") ?? "", offset: classOffset(element) }];
   for (const extra of ctx.extraClasses?.get(element) ?? []) sources.push(extra);
   const state = readClasses(createState(), sources, ctx.tokenTable, (code, message, offset = element.offset, details) =>
     ctx.issue(code, message, offset, details),
-  );
+  (slot, payload, offset) => ctx.raw?.(slot, payload, offset));
 
   const node = { children: [], id, name, type: nodeType };
+  if (element.ignore) node["lint-ignore"] = [...element.ignore];
   ctx.currentNodeId = id;
   ctx.currentElement = element;
   const bindings = {};
@@ -265,8 +280,10 @@ export function decodeElement(element, ctx, parent, path, name) {
   merge(layoutFields(state, ctx));
   const inLayout = Boolean(parent?.flex || parent?.grid);
   if (inLayout) merge(itemFields(state, ctx, { grid: Boolean(parent?.grid) }));
-  else if (state.absolute || Object.keys(state.margin).length || state.alignSelf) {
-    ctx.issue("layout_not_in_app", "absolute, margins and self-* apply inside a flex or grid parent", element.offset);
+  // Outside flex and grid every child is placed by left/top already, so
+  // absolute there changes nothing, as in CSS inside a positioned box.
+  else if (Object.keys(state.margin).length || state.alignSelf) {
+    ctx.issue("layout_not_in_app", "Margins and self-* apply inside a flex or grid parent", element.offset);
   }
   const placesCell = state.columnStart || state.rowStart || state.columnSpan || state.rowSpan || state.justifySelf;
   if (placesCell && !parent?.grid) {
@@ -280,9 +297,15 @@ export function decodeElement(element, ctx, parent, path, name) {
   if (type === "TEXT") {
     // A variant rule's words or data-text replace the shared element's.
     const override = ctx.textOverrides?.get(element);
-    textInfo = override ?? readText(element, ctx);
+    textInfo = override ?? readText(element, ctx, state.text.whitespace);
     const style = textStyleOf(state, ctx, bindings);
     if (Object.keys(style).length) node.textStyle = style;
+    // Fields written beside a type Token are this text's own (see textStyleOf).
+    if (bindings.typography) {
+      const own = ["fontFamily", "fontSize", "fontWeight", "letterSpacing", "lineHeight"]
+        .filter((field) => state.text[field] || (field === "lineHeight" && state.text.impliedLineHeight));
+      if (own.length) node["typography-overrides"] = own;
+    }
     const tokenText = override ? override.tokenText : attributeValue(element, "data-text");
     if (tokenText !== undefined) {
       const name = `string-${tokenText}`;
@@ -320,6 +343,44 @@ export function decodeElement(element, ctx, parent, path, name) {
     canHug,
     isMask: shape === "mask",
   };
+  // flex-1 and grow fill the parent's room along its direction.
+  if (state.grow) {
+    if (!parent?.flex) ctx.issue("layout_not_in_app", "flex-1 and grow fill a flex parent's room; this parent has no flex", element.offset);
+    else state[parent.row ? "width" : "height"] = { mode: "fill" };
+  }
+  // As in CSS, flex and grid stretch a child that has no size across them
+  // (align-items and justify-items default to stretch). Text keeps its
+  // height, which looks the same; a copy keeps its component's size; and a
+  // parent that takes its size from its children stretches nothing.
+  if (inLayout && !state.absolute && type !== "INSTANCE" && shape !== "mask") {
+    const axes = parent.grid
+      ? [["width", parent.justifyItems, state.justifySelf], ["height", parent.alignItems, state.alignSelf]]
+      : [[parent.row ? "height" : "width", parent.alignItems, state.alignSelf]];
+    for (const [axis, items, self] of axes) {
+      if (state[axis] !== undefined || (type === "TEXT" && axis === "height")) continue;
+      if ((self ?? items) !== "stretch" || parent[`${axis}Mode`] === "auto") continue;
+      state[axis] = { mode: "fill" };
+    }
+  }
+  // right and bottom measure from the parent board's far side, as for an
+  // absolute child in CSS: right alone pins the right edge; left and right
+  // together stretch it, its width following the parent.
+  const anchor = {};
+  for (const [axis, start, end, label, pin] of [["width", "x", "right", "w", "pinX"], ["height", "y", "bottom", "h", "pinY"]]) {
+    if (state[end] === undefined) continue;
+    if (isRoot || (inLayout && !state.absolute)) {
+      ctx.issue("layout_not_in_app", `${end}-* places children of a container without flex or grid, or absolute children`, element.offset);
+    } else if (parent?.group) {
+      ctx.issue("layout_not_in_app", `${end}-* measures from a board's far side; inside a group place children with left/top`, element.offset);
+    } else if (state[pin]) {
+      ctx.issue("conflicting_classes", `${end}-* already says how this element follows its parent; drop pin-${axis === "width" ? "x" : "y"}-*`, element.offset);
+    } else if (state[start] !== undefined && state[axis] !== undefined) {
+      ctx.issue("conflicting_classes", `${axis === "width" ? "left" : "top"}, ${end} and ${label}-* together: CSS drops ${end}; leave out ${label}-* to stretch with the parent, or drop ${end}`, element.offset);
+    } else {
+      anchor[axis] = { mode: state[start] !== undefined ? "both" : "end", start: state[start]?.value ?? 0, end: state[end].value };
+      if (state[start] !== undefined) state[axis] = { value: 0, literal: true };
+    }
+  }
   let width;
   let height;
   if (type === "TEXT") {
@@ -330,6 +391,9 @@ export function decodeElement(element, ctx, parent, path, name) {
     if (!hasWidth && hasHeight) {
       ctx.issue("invalid_text_size", "Give text a width before a fixed height", element.offset);
       height = { mode: "auto" };
+    }
+    if (hasWidth && state.text.whitespace === "nowrap") {
+      ctx.issue("not_in_app", "whitespace-nowrap with a width: the App wraps text that has a width; leave out the width to keep it on one line", element.offset);
     }
     node.growType = width.mode === "auto" ? "auto-width" : height.mode === "auto" ? "auto-height" : "fixed";
     if (inLayout || isRoot) {
@@ -369,7 +433,11 @@ export function decodeElement(element, ctx, parent, path, name) {
   if (!placed && !isRoot && (state.x || state.y)) {
     ctx.issue("layout_not_in_app", "left/top place children of a container without flex or grid, or absolute children", element.offset);
   }
-  ctx.sizing.set(id, { width: width.mode, height: height.mode });
+  if (anchor.width || anchor.height) {
+    if (anchor.width) node["constraints-h"] = anchor.width.mode === "both" ? "leftright" : "right";
+    if (anchor.height) node["constraints-v"] = anchor.height.mode === "both" ? "topbottom" : "bottom";
+    ctx.sizing.set(id, { width: width.mode, height: height.mode, anchor: { ...anchor, parentId: parent.id } });
+  } else ctx.sizing.set(id, { width: width.mode, height: height.mode });
 
   // Type-specific content.
   if (type === "IMAGE") {
@@ -437,7 +505,7 @@ export function decodeElement(element, ctx, parent, path, name) {
       const childId = decodeElement(
         child.element,
         ctx,
-        { flex: isFlex, grid: isGrid, row: isFlex && String(node["layout-flex-dir"]).startsWith("row"), id, widthMode: width.mode, heightMode: height.mode },
+        { flex: isFlex, grid: isGrid, group: type === "GROUP", row: isFlex && String(node["layout-flex-dir"]).startsWith("row"), id, widthMode: width.mode, heightMode: height.mode, alignItems: node["layout-align-items"], justifyItems: node["layout-justify-items"] },
         [...path, child.name],
         child.name,
       );
@@ -466,8 +534,8 @@ export function decodeElement(element, ctx, parent, path, name) {
 
 // What CSS does on a cross axis that Penpot does not: a hugging row is as
 // tall as its children that do not fill it, so when every child fills, it
-// has no height; and items-stretch only places children (as items-start),
-// it does not resize them.
+// has no height. (A child without a size is stretched by the reader, as
+// in CSS; one with a size is placed at the start, as in CSS too.)
 function crossAxisFill(node, ids, { width, height, isGrid }, ctx, element) {
   const children = ids.map((id) => ctx.nodes[id]).filter((child) => child && child["layout-item-absolute"] !== true);
   if (children.length === 0) return;
@@ -484,17 +552,6 @@ function crossAxisFill(node, ids, { width, height, isGrid }, ctx, element) {
       ctx.issue("layout_not_in_app", `Every child has ${label}-full in a grid that hugs its ${axis}: an auto ${axis === "width" ? "column" : "row"} is as wide as its children that do not fill it, so it has none. For equal cards size the tracks, for example ${lines}, or give the cards one ${axis}`, element.offset);
     } else {
       ctx.issue("layout_not_in_app", `Every child has ${label}-full in a ${row ? "row" : "column"} that hugs its ${axis}, so it has no ${axis}; give one child a ${axis} or the parent a ${axis}`, element.offset);
-    }
-  }
-  // items-stretch: the cross axis (a grid's rows), justify-items-stretch: a
-  // grid's columns.
-  const stretched = [];
-  if (node["layout-align-items"] === "stretch") stretched.push(["items-stretch", isGrid || row ? "height" : "width"]);
-  if (isGrid && node["layout-justify-items"] === "stretch") stretched.push(["justify-items-stretch", "width"]);
-  for (const [name, axis] of stretched) {
-    const label = axis === "width" ? "w" : "h";
-    if (children.some((child) => !fills(child, axis))) {
-      ctx.warn?.("stretch_not_in_app", `${name} does not resize children in the App, it places them like ${name.replace("stretch", "start")}; give the children ${label}-full to fill the ${isGrid ? "cell" : axis === "height" ? "row" : "column"}`, element.offset);
     }
   }
 }
@@ -720,6 +777,38 @@ export function seedGeometry(nodes, rootId, sizing, instanceSize) {
     for (const child of node.children ?? []) fill(child);
   };
   fill(rootId);
+  // right/bottom anchors, once every parent has its size.
+  for (const [id, entry] of sizing) {
+    const anchor = entry?.anchor;
+    const node = nodes[id];
+    const parent = anchor && nodes[anchor.parentId];
+    if (!node || !parent) continue;
+    for (const [axis, start] of [["width", "x"], ["height", "y"]]) {
+      const side = anchor[axis];
+      if (!side) continue;
+      if (side.mode === "both") {
+        node[start] = side.start;
+        node[axis] = Math.max(0, (parent[axis] ?? 0) - side.start - side.end);
+        // Text that wraps to the width it now has.
+        if (axis === "width" && node.type === "TEXT" && node.growType === "auto-height") {
+          const style = node.textStyle ?? {};
+          const size = style.fontSize ?? 14;
+          const wrapped = String(node.text ?? "").split("\n").reduce((total, line) => total + Math.max(1, Math.ceil(estimateWidth(line, size) / Math.max(1, node.width))), 0);
+          node.height = Math.ceil(wrapped * (style.lineHeight ?? 1.2) * size);
+        }
+      } else {
+        node[start] = (parent[axis] ?? 0) - (node[axis] ?? 0) - side.end;
+      }
+    }
+  }
+  // CSS gradient angles and corners, now that every box has its size.
+  for (const node of Object.values(nodes)) {
+    for (const paint of node.fills ?? []) {
+      if (!paint?.cssDirection) continue;
+      Object.assign(paint, cssGradientPoints(paint.cssDirection, node.width ?? 0, node.height ?? 0));
+      delete paint.cssDirection;
+    }
+  }
 }
 
 const sum = (values) => values.reduce((total, value) => total + value, 0);

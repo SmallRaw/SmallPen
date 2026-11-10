@@ -30,7 +30,6 @@ const NOTE_GAP = 24;
 const PAGE_FILL = "#f8fafc";
 const BRAND = "#4f46e5";
 const CARD_STROKE = "#e5e7eb";
-const CARD_FILL = "#ffffff";
 const PAD = 40;
 const CARD_GAP = 32;
 const CARD_PAD = 24;
@@ -1227,7 +1226,9 @@ function familyCard(builder, title, summary, items, innerWidth) {
     width,
     draw(x, y) {
       const annotationGroup = builder.transparentComponents ? `component-note-${x}-${y}` : undefined;
-      const ids = builder.transparentComponents ? [] : [builder.rect(x, y, width, height, CARD_FILL, {
+      // An outline only: a card fill would hide the edges of components
+      // drawn in the same color.
+      const ids = builder.transparentComponents ? [] : [builder.rect(x, y, width, height, null, {
         cornerRadius: 12,
         name: `Component card · ${title ?? ""}`,
         strokes: [{ alignment: "inner", color: CARD_STROKE, type: "solid", width: 1 }],

@@ -83,6 +83,16 @@ function applySlot(state, slot, payload, report) {
       break;
     case "typography": state.text.typography = payload; break;
     case "lineHeight": state.text.lineHeight = payload; break;
+    // text-sm brings a line height; a leading class wins over it whatever
+    // the order, as in Tailwind.
+    case "impliedLineHeight": state.text.impliedLineHeight = payload; break;
+    case "whitespace": state.text.whitespace = payload; break;
+    case "size": state.width = payload; state.height = payload; break;
+    case "right": state.right = payload; break;
+    case "bottom": state.bottom = payload; break;
+    case "inset": state.x = payload; state.y = payload; state.right = payload; state.bottom = payload; break;
+    case "insetX": state.x = payload; state.right = payload; break;
+    case "insetY": state.y = payload; state.bottom = payload; break;
     case "letterSpacing": state.text.letterSpacing = payload; break;
     case "textAlign":
     case "fontStyle":
@@ -102,8 +112,9 @@ function applySlot(state, slot, payload, report) {
 }
 
 // Reads every class of a class attribute (plus inherited sources such as
-// variant rules) into the state. sources: [{ value, offset }].
-export function readClasses(state, sources, tokens, report) {
+// variant rules) into the state. sources: [{ value, offset }]. onRaw hears
+// each raw value (a bracket literal or a Tailwind default) and its slot.
+export function readClasses(state, sources, tokens, report, onRaw) {
   for (const source of sources) {
     if (!source?.value) continue;
     for (const { name, start } of splitClasses(source.value)) {
@@ -115,8 +126,8 @@ export function readClasses(state, sources, tokens, report) {
       }
       for (const [slot, payload] of result.slots) {
         applySlot(state, slot, payload, (code, message) => report(code, message, offset));
+        if (payload?.literal) onRaw?.(slot, payload, offset);
       }
-      if (result.note) report(result.note.code, result.note.message, offset, { severity: "warning" });
     }
   }
   return state;
@@ -275,6 +286,9 @@ const TEXT_FIELD_BINDINGS = {
   letterSpacing: "letterSpacing",
 };
 
+export const DEFAULT_FONT_SIZE = 14;
+const round4 = (value) => Math.round(value * 10000) / 10000;
+
 export function textStyleOf(state, ctx, bindings) {
   const style = {};
   const text = state.text;
@@ -289,10 +303,33 @@ export function textStyleOf(state, ctx, bindings) {
   }
   for (const field of ["fontFamily", "fontSize", "fontWeight", "letterSpacing", "lineHeight"]) {
     if (!text[field]) continue;
+    if (text[field].px !== undefined || text[field].em !== undefined) continue;
     const resolved = valueOf(text[field], ctx, TEXT_FIELD_BINDINGS[field]);
     style[field] = resolved.value;
     if (resolved.binding) bindings[resolved.binding[0]] = resolved.binding[1];
   }
+  // A single-field class beats the same field of a type-* Token, in any
+  // order, as Tailwind's leading-* beats text-sm; the rest still follows
+  // the Token. Worth a look, so a warning a comment can mute.
+  if (text.typography) {
+    const labels = { fontFamily: "font (font-*)", fontSize: "font size (text-*)", fontWeight: "weight (font-*)", lineHeight: "line height (leading-*)", letterSpacing: "letter spacing (tracking-*)" };
+    const overridden = Object.keys(labels).filter((field) => text[field] || (field === "lineHeight" && text.impliedLineHeight));
+    if (overridden.length) {
+      const name = `type-${String(text.typography.token).replace(/^type-/, "")}`;
+      ctx.warn?.(
+        "typography_overridden",
+        `${overridden.map((field) => labels[field]).join(", ")} replaces ${name}'s; the rest still follows ${name}. If that is meant, put <!-- smallpen-ignore typography_overridden --> before the element; if this text is another style, give it its own type Token`,
+        ctx.currentElement?.offset ?? 0,
+      );
+    }
+  }
+  // px line heights and em letter spacing follow the final font size; the
+  // App keeps a line height as a multiple and letter spacing in px.
+  const size = style.fontSize ?? DEFAULT_FONT_SIZE;
+  const lineHeight = text.lineHeight ?? text.impliedLineHeight;
+  if (lineHeight?.px !== undefined) style.lineHeight = round4(lineHeight.px / size);
+  else if (!text.lineHeight && lineHeight) style.lineHeight = lineHeight.value;
+  if (text.letterSpacing?.em !== undefined) style.letterSpacing = round4(text.letterSpacing.em * size);
   for (const field of ["textAlign", "fontStyle", "textTransform", "textDecoration", "verticalAlign", "textDirection"]) {
     if (text[field] !== undefined) style[field] = text[field];
   }
@@ -322,9 +359,11 @@ export function layoutFields(state, ctx) {
     fields["layout-grid-dir"] = dir;
     fields["layout-grid-columns"] = structuredClone(state.gridColumns ?? (dir === "row" ? [{ type: "flex", value: 1 }] : []));
     fields["layout-grid-rows"] = structuredClone(state.gridRows ?? (dir === "row" ? [] : [{ type: "flex", value: 1 }]));
-    if (state.justifyItems) fields["layout-justify-items"] = state.justifyItems;
+    // As in CSS, grid items stretch across their cell unless told.
+    fields["layout-justify-items"] = state.justifyItems ?? "stretch";
   }
-  if (state.alignItems) fields["layout-align-items"] = state.alignItems;
+  // As in CSS, align-items is stretch unless a class says otherwise.
+  fields["layout-align-items"] = state.alignItems ?? "stretch";
   if (state.justify) fields["layout-justify-content"] = state.justify;
   if (state.alignContent) fields["layout-align-content"] = state.alignContent;
   if (state.rowGap || state.columnGap) {

@@ -9311,3 +9311,11 @@ msgstr "上传文件夹…"
 #: src/app/main/smallpen/home.cljs
 msgid "smallpen.local.invalid-folder"
 msgstr "请选择 Package 文件夹。"
+
+#: src/app/main/data/workspace/clipboard.cljs
+msgid "workspace.clipboard.figma-partial"
+msgstr "已从 Figma 粘贴为普通图层。没转过来的：%s"
+
+#: src/app/main/data/workspace/clipboard.cljs
+msgid "workspace.clipboard.figma-failed"
+msgstr "Figma 粘贴失败：%s"

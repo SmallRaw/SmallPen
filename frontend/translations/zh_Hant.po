@@ -10008,3 +10008,11 @@ msgstr "上傳資料夾…"
 #: src/app/main/smallpen/home.cljs
 msgid "smallpen.local.invalid-folder"
 msgstr "請選擇 Package 資料夾。"
+
+#: src/app/main/data/workspace/clipboard.cljs
+msgid "workspace.clipboard.figma-partial"
+msgstr "已從 Figma 貼上為一般圖層。沒轉過來的：%s"
+
+#: src/app/main/data/workspace/clipboard.cljs
+msgid "workspace.clipboard.figma-failed"
+msgstr "Figma 貼上失敗：%s"

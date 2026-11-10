@@ -1,6 +1,7 @@
 import { access, cp, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { prepareRenderer } from "../../../scripts/prepare-renderer.mjs";
+import { copyFrontend } from "../../../scripts/copy-frontend.mjs";
 import { copyRuntimeDependencies } from "../../../scripts/copy-runtime-dependencies.mjs";
 
 export async function stagePayload(smallpenRoot, resources, frontendRoot) {
@@ -35,7 +36,5 @@ export async function stagePayload(smallpenRoot, resources, frontendRoot) {
     { recursive: true },
   );
   await copyRuntimeDependencies(smallpenRoot, appRoot);
-  await cp(frontendRoot, join(resources, "frontend", "resources", "public"), {
-    recursive: true,
-  });
+  await copyFrontend(frontendRoot, resources);
 }

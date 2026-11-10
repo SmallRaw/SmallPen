@@ -8,7 +8,13 @@
  */
 const maxParseableSize = 16 * 1024 * 1024;
 
+// Figma's own HTML (its "(figmeta)" markers carry the layers): read as
+// layers whatever the HTML paste setting says.
+const figmaType = "application/x-figma-clipboard";
+const figmaPattern = /\(figmeta\)[\s\S]*\(figma\)/;
+
 const allowedTypes = [
+  figmaType,
   "image/webp",
   "image/png",
   "image/jpeg",
@@ -19,6 +25,7 @@ const allowedTypes = [
 ];
 
 const exclusiveTypes = [
+  figmaType,
   "application/transit+json",
   "text/html",
   "text/plain"
@@ -110,13 +117,8 @@ function filterAllowedItems(options) {
    * @returns {boolean}
    */
   function filter(item) {
-    if (
-      (!("allowHTMLPaste" in options) || !options["allowHTMLPaste"]) &&
-        item.type === "text/html"
-    ) {
-      return false;
-    }
-    return allowedTypes.includes(item.type);
+    // HTML is read first: Figma's is kept even when HTML paste is off.
+    return item.type === "text/html" || allowedTypes.includes(item.type);
   };
 
   return filter;
@@ -168,6 +170,10 @@ export async function fromNavigator(options) {
   const items = await clipboard.read();
   const result = await Promise.all(
     Array.from(items).map(async (item) => {
+      if (Array.from(item.types).includes("text/html")) {
+        const html = await (await item.getType("text/html")).text();
+        if (figmaPattern.test(html)) return new Blob([html], { type: figmaType });
+      }
       const itemAllowedTypes = Array.from(item.types)
         .filter(filterAllowedTypes(options))
         .sort(sortTypes);
@@ -218,6 +224,10 @@ export async function fromDataTransfer(dataTransfer, options) {
             item.getAsString((text) => {
               if (type === "text/plain") {
                 return resolve(parseText(text, options));
+              } else if (type === "text/html" && figmaPattern.test(text)) {
+                return resolve(new Blob([text], { type: figmaType }));
+              } else if (type === "text/html" && !options["allowHTMLPaste"]) {
+                return resolve(null);
               } else {
                 return resolve(new Blob([text], { type }));
               }

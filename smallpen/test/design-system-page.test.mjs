@@ -559,6 +559,7 @@ test("columns grow slowly with content, and many samples widen a card instead of
   const page = buildDesignSystemPage({ componentSamples: wide }, {}, { locale: "en" });
   const shell = Object.values(page.nodes).find((node) => node.name === "Component card · Card");
   assert.ok(shell.height <= shell.width, "a card with many samples spans columns");
+  assert.deepEqual(shell.fills, [], "a card has no fill to hide component edges");
 });
 
 test("a real Package's page shows every Cell and renders with the CLI renderer", async () => {
