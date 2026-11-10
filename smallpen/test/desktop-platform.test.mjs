@@ -46,7 +46,7 @@ test(
     t.after(() => rm(root, { recursive: true, force: true }));
     const frontend = join(root, "frontend");
     await mkdir(join(frontend, "js"), { recursive: true });
-    for (const file of ["index.html", "js/main.js", "js/main-workspace.js"])
+    for (const file of ["index.html", "js/main.js", "js/main-workspace.js", "js/main.js.map"])
       await writeFile(
         join(frontend, file),
         file.endsWith("html") ? "<!doctype html><title>SmallPen</title>" : "",
@@ -56,6 +56,11 @@ test(
       fileURLToPath(new URL("../", import.meta.url)),
       resources,
       frontend,
+    );
+    await access(join(resources, "frontend/resources/public/js/main.js"));
+    await assert.rejects(
+      access(join(resources, "frontend/resources/public/js/main.js.map")),
+      "source maps stay out of the Desktop payload",
     );
     await access(
       join(resources, "app/node_modules/@smallpen/local-package/assets/fonts"),

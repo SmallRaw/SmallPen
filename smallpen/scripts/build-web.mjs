@@ -16,6 +16,7 @@ import {
 import { dirname, join, parse, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareRenderer } from "./prepare-renderer.mjs";
+import { copyFrontend } from "./copy-frontend.mjs";
 import { copyRuntimeDependencies } from "./copy-runtime-dependencies.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -82,10 +83,7 @@ export async function buildWeb({
       dependencies[name] = JSON.parse(
         await readFile(join(candidate, "node_modules", name, "package.json")),
       ).version;
-    await cp(frontendRoot, join(candidate, "frontend", "resources", "public"), {
-      recursive: true,
-      dereference: true,
-    });
+    await copyFrontend(frontendRoot, candidate);
     await cp(resolve(root, "../LICENSE"), join(candidate, "LICENSE"));
     const metadata = JSON.parse(
       await readFile(join(root, "apps/web/package.json")),
