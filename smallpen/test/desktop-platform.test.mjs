@@ -15,6 +15,47 @@ import { once } from "node:events";
 import test from "node:test";
 import { parseHostArguments } from "../apps/desktop/src/arguments.mjs";
 import { stagePayload } from "../apps/desktop/scripts/stage-payload.mjs";
+import { retryDownloads } from "../apps/desktop/scripts/retry-download.mjs";
+
+test("Electron downloads retry server and network errors, not a 404", async () => {
+  const failing = (...errors) => {
+    const downloader = {
+      calls: 0,
+      async download(url, target) {
+        const error = errors[downloader.calls++];
+        if (error) throw error;
+        return `${url} -> ${target}`;
+      },
+    };
+    return downloader;
+  };
+  const http = (status) =>
+    Object.assign(new Error(`Response code ${status}`), {
+      response: { status },
+    });
+  const quick = { delayMs: 0, log() {} };
+
+  const flaky = failing(http(504), new TypeError("fetch failed"));
+  assert.equal(
+    await retryDownloads(flaky, quick).download("zip", "file"),
+    "zip -> file",
+  );
+  assert.equal(flaky.calls, 3);
+
+  const missing = failing(http(404));
+  await assert.rejects(
+    retryDownloads(missing, quick).download("zip", "file"),
+    /404/,
+  );
+  assert.equal(missing.calls, 1, "a missing file is not retried");
+
+  const down = failing(http(503), http(503), http(503), http(503), http(503));
+  await assert.rejects(
+    retryDownloads(down, quick).download("zip", "file"),
+    /503/,
+  );
+  assert.equal(down.calls, 4, "the build gives up after four tries");
+});
 
 test("host options never become a package path", () => {
   assert.deepEqual(
