@@ -133,8 +133,8 @@ import("../app/apps/web/bin/smallpen-web.mjs").catch(function (error) {
 
 Requires Node.js 24 or newer.
 
-Run \`npx @smallpen/web@alpha\` to open the browser editor.
-Run \`npx @smallpen/web@alpha ./project.smallpen\` to open a local package.
+Run \`npx @smallpen/web\` to open the browser editor.
+Run \`npx @smallpen/web ./project.smallpen\` to open a local package.
 
 The local service opens and saves the original folder. Select folders in
 the editor; no browser file permission or upload is needed. Ctrl+C stops

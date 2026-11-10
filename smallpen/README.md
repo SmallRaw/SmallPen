@@ -46,9 +46,9 @@ editor and local file service; it does not install the AI CLI or Electron.
 Requires Node.js 24 or newer. After publication:
 
 ```sh
-npx @smallpen/web@alpha
+npx @smallpen/web
 # Or open a package directly:
-npx @smallpen/web@alpha ./project.smallpen
+npx @smallpen/web ./project.smallpen
 ```
 
 The service opens your default browser. **Open Package** browses folders
@@ -258,12 +258,12 @@ the exact tested tarballs in dependency order. Stable versions use `latest`;
 prerelease versions must match `alpha`, `beta` or `rc`.
 
 ```sh
-# Alpha installs are explicit; they do not replace the stable latest tag.
-npm install -g smallpen@alpha
+# The stable version (latest tag):
+npm install -g smallpen
 smallpen --help
 
-# Once a stable version is published:
-npm install -g smallpen
+# Alpha installs are explicit; they do not replace the stable latest tag.
+npm install -g smallpen@alpha
 ```
 
 If npm publication stops partway, rerun the failed job within artifact

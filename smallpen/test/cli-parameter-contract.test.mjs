@@ -142,7 +142,13 @@ test("schema names stay exact while ordinary CLI help/version flags are supporte
     (await run(["view", "/missing.smallpen", "-h"])).stdout,
     /SmallPen view/,
   );
-  assert.match((await run(["--version"])).stdout, /alpha/);
+  const { version: cliVersion } = JSON.parse(
+    await readFile(join(here, "../apps/cli/package.json"), "utf8"),
+  );
+  assert.equal(
+    (await run(["--version"])).stdout,
+    `@smallpen/cli ${cliVersion}\n`,
+  );
   const globalVersion = (await run(["--version", "--json"])).value;
   assert.equal(typeof globalVersion.version, "string");
   const version = (await run(["version"])).value;

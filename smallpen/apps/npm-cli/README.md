@@ -8,7 +8,7 @@ what people changed in the App. Replies are JSON for agents.
 Requires Node.js 24 or newer.
 
 ```sh
-npm install -g smallpen@alpha
+npm install -g smallpen
 smallpen --help
 smallpen init ./workspace --json
 # edit the HTML files, then:
