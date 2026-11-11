@@ -1,4 +1,5 @@
-// This picker owns its dialog. File access and writes stay on the local service.
+// File access and writes stay on the local service; the page only asks it to
+// choose a package.
 async function request(route, body) {
   const response = await fetch(route, {
     method: "POST",
@@ -34,14 +35,37 @@ dialog.smallpen-local-picker::backdrop{background:#0008}
 .smallpen-local-picker .status{min-block-size:24px;overflow-wrap:anywhere;margin-block:12px 0}
 `;
 
-export function choosePackage(action) {
+function language() {
+  return document.documentElement.lang || navigator.language || "en";
+}
+
+let choosing = false;
+
+// The service shows the system's Open or Save dialog and opens the result.
+// Systems without such a dialog fall back to the folder list below.
+export async function choosePackage(action) {
   if (!["open", "create"].includes(action))
-    return Promise.reject(new Error("Unknown file action."));
-  const chinese = (
-    document.documentElement.lang ||
-    navigator.language ||
-    "en"
-  ).startsWith("zh");
+    throw new Error("Unknown file action.");
+  if (choosing) return null;
+  choosing = true;
+  try {
+    const response = await fetch("/local/choose-package", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, locale: language() }),
+    });
+    if (response.status === 501) return await chooseInPage(action);
+    const value = await response.json();
+    if (!response.ok)
+      throw new Error(value.error?.message || "Cannot open this package.");
+    return value.cancelled ? null : value;
+  } finally {
+    choosing = false;
+  }
+}
+
+function chooseInPage(action) {
+  const chinese = language().startsWith("zh");
   const words = chinese
     ? {
         open: "打开设计包",

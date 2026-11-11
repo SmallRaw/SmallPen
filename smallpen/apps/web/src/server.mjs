@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { listDirectories } from "./directories.mjs";
+import { chooseWithSystemDialog } from "./system-dialog.mjs";
 
 import {
   compressBuffer,
@@ -588,6 +589,7 @@ function workspaceFileId(value, origin) {
 
 export async function servePenpotFrontend({
   backendUrl: backendValue,
+  chooseSystemPath = chooseWithSystemDialog,
   desktop = false,
   directoryRoot = process.cwd(),
   localFiles = false,
@@ -631,6 +633,7 @@ export async function servePenpotFrontend({
   }
   let origin;
   let selectedPort;
+  let systemDialogOpen = false;
   const server = createServer(async (request, response) => {
     try {
       if (!allowedHost(request.headers.host, selectedPort)) {
@@ -667,6 +670,81 @@ export async function servePenpotFrontend({
             error.message,
           );
         }
+        return;
+      }
+      if (
+        localFiles &&
+        request.method === "POST" &&
+        url.pathname === "/local/choose-package"
+      ) {
+        const params = await readJson(request);
+        const action = params.action;
+        if (action !== "open" && action !== "create") {
+          writeError(response, 422, "invalid_action", "Unknown file action.");
+          return;
+        }
+        const chinese = String(params.locale ?? "").startsWith("zh");
+        if (systemDialogOpen) {
+          writeError(
+            response,
+            409,
+            "system_dialog_open",
+            chinese ? "文件窗口已经打开。" : "A file dialog is already open.",
+          );
+          return;
+        }
+        // A closed tab or a stopped host closes this response; the dialog
+        // must not stay on screen for a page that can no longer use it.
+        const abort = new AbortController();
+        response.once("close", () => {
+          if (!response.writableFinished) abort.abort();
+        });
+        let chosen;
+        systemDialogOpen = true;
+        try {
+          chosen = await chooseSystemPath(action, {
+            chinese,
+            directory: directoryRoot,
+            signal: abort.signal,
+          });
+        } catch (error) {
+          if (abort.signal.aborted) return;
+          throw error;
+        } finally {
+          systemDialogOpen = false;
+        }
+        if (abort.signal.aborted) return;
+        if (chosen === undefined) {
+          writeError(
+            response,
+            501,
+            "system_dialog_unavailable",
+            "This system has no file dialog for the local service.",
+          );
+          return;
+        }
+        if (chosen === null) {
+          writeJson(response, 200, { cancelled: true });
+          return;
+        }
+        let locator = chosen;
+        if (action === "open" && !/\.smallpen$/i.test(locator)) {
+          writeError(
+            response,
+            422,
+            "not_a_package",
+            chinese
+              ? "请选择 .smallpen 文件夹。"
+              : "Select a .smallpen folder.",
+          );
+          return;
+        }
+        if (action === "create" && !/\.smallpen$/i.test(locator))
+          locator += ".smallpen";
+        const snapshot = await (
+          action === "open" ? openPackage : createPackage
+        )(backendUrl, locator);
+        writeJson(response, 201, { url: workspaceUrl(origin, snapshot) });
         return;
       }
       if (

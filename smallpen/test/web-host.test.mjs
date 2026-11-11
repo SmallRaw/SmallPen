@@ -6,6 +6,7 @@ import {
   readFile,
   realpath,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,7 +15,7 @@ import test from "node:test";
 import { startWebHost } from "../apps/web/src/host.mjs";
 import { seedLegacyIds } from "./helpers/named.mjs";
 
-async function start(t, packageSelected = false) {
+async function start(t, packageSelected = false, chooseSystemPath) {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "smallpen-web-host-")),
   );
@@ -39,6 +40,7 @@ async function start(t, packageSelected = false) {
     directoryRoot: root,
     frontendRoot,
     ...(packageSelected ? { packagePath } : {}),
+    ...(chooseSystemPath ? { chooseSystemPath } : {}),
   });
   t.after(() => host.close());
   return { host, root, packagePath };
@@ -153,4 +155,107 @@ test("a package argument opens the selected original directly", async (t) => {
   const { host, packagePath } = await start(t, true);
   assert.equal(new URL(host.url).searchParams.get("screen"), "workspace");
   assert.equal(host.packagePath, packagePath);
+});
+
+test("the system dialog opens and creates packages by their real path", async (t) => {
+  const calls = [];
+  let next;
+  const { host, root, packagePath } = await start(
+    t,
+    false,
+    async (action, { chinese, directory }) => {
+      calls.push({ action, chinese, directory });
+      return next;
+    },
+  );
+  const choose = (action, locale = "en") =>
+    post(host, "/local/choose-package", { action, locale });
+
+  next = packagePath;
+  const opened = await choose("open", "zh-CN");
+  assert.equal(opened.status, 201);
+  const url = new URL((await opened.json()).url);
+  assert.equal(url.searchParams.get("screen"), "workspace");
+  assert.deepEqual(calls[0], {
+    action: "open",
+    chinese: true,
+    directory: root,
+  });
+
+  next = join(root, "Fresh");
+  const created = await choose("create");
+  assert.equal(created.status, 201);
+  assert.ok((await stat(join(root, "Fresh.smallpen"))).isDirectory());
+
+  next = null;
+  const cancelled = await choose("open");
+  assert.equal(cancelled.status, 200);
+  assert.deepEqual(await cancelled.json(), { cancelled: true });
+
+  next = join(root, "Folder");
+  const plain = await choose("open", "zh-CN");
+  assert.equal(plain.status, 422);
+  assert.deepEqual((await plain.json()).error, {
+    code: "not_a_package",
+    message: "请选择 .smallpen 文件夹。",
+  });
+
+  next = undefined;
+  const unavailable = await choose("open");
+  assert.equal(unavailable.status, 501);
+  assert.equal(
+    (await unavailable.json()).error.code,
+    "system_dialog_unavailable",
+  );
+});
+
+test("the system dialog refuses bad requests, a second dialog and closed pages", async (t) => {
+  let started;
+  let finish;
+  let aborted;
+  const { host } = await start(t, false, (_action, { signal }) => {
+    started();
+    return new Promise((resolve) => {
+      finish = resolve;
+      signal.addEventListener("abort", () => {
+        aborted();
+        resolve(null);
+      });
+    });
+  });
+  const route = "/local/choose-package";
+  assert.equal((await post(host, route, { action: "delete" })).status, 422);
+  assert.equal(
+    (await post(host, route, { action: "open" }, "https://example.com")).status,
+    403,
+  );
+
+  let opening = new Promise((resolve) => (started = resolve));
+  const first = post(host, route, { action: "open" });
+  await opening;
+  const second = await post(host, route, { action: "create" });
+  assert.equal(second.status, 409);
+  assert.equal((await second.json()).error.code, "system_dialog_open");
+  finish(null);
+  assert.equal((await first).status, 200);
+
+  // Closing the page closes the dialog it asked for.
+  opening = new Promise((resolve) => (started = resolve));
+  const closed = new Promise((resolve) => (aborted = resolve));
+  const controller = new AbortController();
+  const request = fetch(new URL(route, host.origin), {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: host.origin },
+    body: JSON.stringify({ action: "open" }),
+    signal: controller.signal,
+  }).catch((error) => error.name);
+  await opening;
+  controller.abort();
+  assert.equal(await request, "AbortError");
+  await closed;
+  opening = new Promise((resolve) => (started = resolve));
+  const again = post(host, route, { action: "open" });
+  await opening;
+  finish(null);
+  assert.equal((await again).status, 200);
 });

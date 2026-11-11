@@ -8,6 +8,7 @@ import { servePenpotFrontend } from "./server.mjs";
 export async function startWebHost({
   applicationStatePath = defaultApplicationStatePath(),
   backgroundPort = 0,
+  chooseSystemPath,
   desktop = false,
   directoryRoot = process.cwd(),
   frontendRoot,
@@ -24,6 +25,7 @@ export async function startWebHost({
   try {
     const web = await servePenpotFrontend({
       backendUrl: background.url,
+      ...(chooseSystemPath ? { chooseSystemPath } : {}),
       desktop,
       directoryRoot,
       localFiles: !desktop,

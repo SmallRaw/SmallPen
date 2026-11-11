@@ -136,9 +136,10 @@ Requires Node.js 24 or newer.
 Run \`npx @smallpen/web\` to open the browser editor.
 Run \`npx @smallpen/web ./project.smallpen\` to open a local package.
 
-The local service opens and saves the original folder. Select folders in
-the editor; no browser file permission or upload is needed. Ctrl+C stops
-the service. Use \`--no-open\` to start without launching a browser.
+The local service opens and saves the original folder. Open and New show
+the system's file dialog on macOS and a folder list elsewhere; no browser
+file permission or upload is needed. Ctrl+C stops the service. Use
+\`--no-open\` to start without launching a browser.
 
 This package includes the editor and local runtime. AI CLI and Electron
 are separate products.

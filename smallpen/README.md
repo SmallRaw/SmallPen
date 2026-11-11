@@ -34,7 +34,7 @@ Those upstream Penpot features remain unchanged outside the SmallPen profile.
 - `packages/penpot-adapter/` maps supported completed Penpot changes to typed SmallPen Operations.
 - `apps/cli/` is the complete public Agent surface and never starts Web or Background.
 - `apps/background/` exposes session-scoped local HTTP services used by the Penpot adapter.
-- `apps/web/` starts the shared local services, serves the compiled frontend, proxies Google Fonts, and provides local directory browsing. Desktop uses the same host with its native file dialogs. The editor stays in the frontend.
+- `apps/web/` starts the shared local services, serves the compiled frontend, proxies Google Fonts, and shows the system's Open and Save dialogs on macOS (other systems get a folder list in the page). Desktop uses the same host with Electron's file dialogs. The editor stays in the frontend.
 - Web and Background bind to loopback only. They answer only `127.0.0.1`, `localhost`, or `[::1]` Host headers with their own port (`forbidden_host` otherwise), which blocks DNS rebinding. Web accepts only loopback origins on its own port; Background grants CORS to plain-HTTP loopback origins (`forbidden_origin` otherwise).
 - These checks stop web pages, not local programs. There is no per-launch token: any process or other user on the same machine can read the Background URL from the Web index page and act as you. Run SmallPen only on a single-user machine.
 - `frontend/src/app/main/smallpen*` is the bounded CLJS integration. Unsupported Penpot reads and writes fail explicitly rather than pretending to persist.
